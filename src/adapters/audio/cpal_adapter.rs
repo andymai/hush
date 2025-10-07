@@ -12,7 +12,7 @@ use std::sync::Arc;
 /// Wrapper that makes AudioCapture Send + Sync (unsafe but necessary for trait bounds)
 /// SAFETY: We ensure single-threaded access through Arc<Mutex<>> and only use
 /// this in contexts where the audio stream operations happen on the same thread.
-struct ThreadSafeAudioCapture(AudioCapture);
+pub struct ThreadSafeAudioCapture(AudioCapture);
 
 // SAFETY: We use Arc<Mutex<>> to ensure only one thread can access at a time
 unsafe impl Send for ThreadSafeAudioCapture {}

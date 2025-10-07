@@ -1,4 +1,3 @@
-use ratatui::{prelude::*, widgets::*};
 
 pub struct AudioDeviceSelector;
 

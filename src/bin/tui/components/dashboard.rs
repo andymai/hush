@@ -1,9 +1,8 @@
-use crate::tui::simple_app::{SimpleApp as App, AppMode, FocusedWidget, LogLevel};
+use crate::tui::simple_app::{SimpleApp as App, AppMode, LogLevel};
 use crate::tui::components::ComponentHelpers;
 use ratatui::{
     prelude::*,
     widgets::*,
-    symbols::border,
 };
 use std::sync::atomic::Ordering;
 
@@ -262,7 +261,7 @@ impl Dashboard {
         Self::render_quick_actions(f, app, control_chunks[1]);
     }
 
-    fn render_navigation_shortcuts(f: &mut Frame, app: &App, area: Rect) {
+    fn render_navigation_shortcuts(f: &mut Frame, _app: &App, area: Rect) {
         let shortcuts = vec![
             Line::from(vec![
                 Span::styled("1", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
@@ -332,7 +331,7 @@ impl Dashboard {
         f.render_widget(quick_actions, area);
     }
 
-    fn render_footer(f: &mut Frame, app: &App, area: Rect) {
+    fn render_footer(f: &mut Frame, _app: &App, area: Rect) {
         let footer_text = vec![
             Span::raw("Hush TUI v0.1.0 | "),
             Span::styled("ESC", Style::default().fg(Color::Yellow)),

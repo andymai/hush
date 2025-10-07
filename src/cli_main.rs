@@ -1,6 +1,5 @@
 // CLI module for unified command structure
 use clap::{Parser, Subcommand};
-use anyhow::Result;
 use std::path::PathBuf;
 
 #[derive(Parser)]

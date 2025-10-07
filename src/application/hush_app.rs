@@ -403,7 +403,7 @@ impl HushApp {
     }
 
     /// Show desktop notification
-    fn show_notification(&self, title: &str, message: &str, _urgency: NotificationUrgency) {
+    fn show_notification(&self, title: &str, message: &str, urgency: NotificationUrgency) {
         #[cfg(feature = "notifications")]
         {
             use notify_rust::{Notification, Urgency};
