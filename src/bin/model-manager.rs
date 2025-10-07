@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use hush::transcription::models::{ModelManager, ModelSize};
 use std::path::PathBuf;
-use tracing::{info, warn};
+use tracing::info;
 use tracing_subscriber;
 
 #[derive(Parser)]

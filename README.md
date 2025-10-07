@@ -1,369 +1,154 @@
 # 🤫 Hush - Voice-to-Text for Linux Developers
 
-> **Fast, accurate, and private voice-to-text transcription for Linux developers**
+> **Fast, accurate, and private voice-to-text transcription with universal app compatibility**
 
 Hush is a production-ready voice-to-text application built specifically for Linux developers. It uses OpenAI's Whisper models locally for accurate transcription without sending your voice data to any external services.
 
-## ✨ Features
+## ✨ Key Features
 
 - 🎤 **Local Voice Transcription** - Uses Whisper models locally, no cloud dependencies
-- ⌨️ **Multiple Input Modes** - Global hotkeys, manual mode, or one-shot recordings
-- 🖥️ **Desktop Integration** - Native GNOME integration with custom keyboard shortcuts
-- 🚀 **High Performance** - Optimized for development workflows
+- ⌨️ **Universal Text Insertion** - Works with **ALL applications** including VMs, password fields, games
 - 🔒 **Privacy First** - All processing happens locally on your machine
-- 📱 **Desktop Notifications** - Visual feedback for recording and transcription status
-- 🎯 **Smart Text Insertion** - Automatically inserts transcribed text at cursor position
-- 🔧 **Multiple Model Sizes** - From tiny (39MB) to large (1.5GB) Whisper models
+- 🎯 **Hardware-Level Integration** - Linux UInput support for maximum compatibility
+- 📱 **Smart Setup Tools** - Built-in diagnostics and setup assistance
+- 🔧 **Multiple Model Sizes** - From tiny (39MB) to large (2.9GB) Whisper models
 
 ## 🚀 Quick Start
 
-### Installation
+### 1. Setup UInput (Recommended)
+For universal compatibility with all applications:
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd hush
+# Check if setup is needed
+cargo run --bin hush -- diagnose-uinput
 
-# Run the installation script
-./install.sh
+# Get setup instructions  
+cargo run --bin hush -- setup-uinput
 ```
 
-The installer will:
-- Build Hush in release mode
-- Install the binary to `~/.local/bin/hush`
-- Set up desktop integration
-- Download a basic Whisper model
-- Create default configuration
-
-### Basic Usage
-
-After installation, you have several options:
-
-#### Option 1: GNOME Keyboard Shortcut (Recommended)
-1. Open **Settings → Keyboard → Keyboard Shortcuts**
-2. Click **Custom Shortcuts** and add a new shortcut
-3. **Name:** `Hush Voice-to-Text`
-4. **Command:** `hush one-shot --duration 10`
-5. **Shortcut:** `Ctrl+Shift+Space`
-
-Now press `Ctrl+Shift+Space` anywhere to record for 10 seconds!
-
-#### Option 2: Manual Mode (No Hotkeys)
+Quick setup (most systems):
 ```bash
-hush manual
-# Press Enter to start recording
-# Press Enter again to stop and transcribe
-# Type 'q' to quit
+sudo usermod -a -G input $USER
+sudo modprobe uinput
+echo 'uinput' | sudo tee /etc/modules-load.d/uinput.conf
+# Log out and log back in
 ```
 
-#### Option 3: One-Shot Mode
+### 2. Download a Model
 ```bash
-hush one-shot --duration 5  # Record for 5 seconds
-hush one-shot --print-only  # Print to stdout instead of inserting
+cargo run --bin simple-model-manager download base
 ```
 
-## 📋 All Commands
-
+### 3. Test Voice-to-Text
 ```bash
-hush --help                    # Show all options
-hush daemon                    # Run with global hotkeys (if supported)
-hush manual                    # Manual recording mode
-hush one-shot [OPTIONS]       # Single recording mode
-hush status                    # Show system status
-hush install                   # Install desktop integration
-hush uninstall                # Remove desktop integration
+# Test text insertion first
+cargo run --bin test-text-insertion-simple
 
-# Options
---no-notifications            # Disable desktop notifications
--c, --config <CONFIG>         # Use custom configuration file
--v, --verbose                 # Increase logging verbosity
--vv                           # Even more verbose
+# Test complete voice-to-text
+cargo run --bin test-voice-to-text
 ```
 
-## 🔧 Configuration
+## 📋 Available Applications
 
-Hush uses a TOML configuration file located at `~/.config/hush/config.toml`:
+### Text Insertion Testing
+- `test-text-insertion-simple` - Test text insertion without voice
+- `test-working-uinput` - Comprehensive UInput keyboard testing
+- `test-text-insertion` - Full text insertion test suite
 
-```toml
-[audio]
-sample_rate = 16000
-channels = 1
-buffer_size = 1024
-device = null  # Use default audio device
+### Voice-to-Text Testing  
+- `test-voice-to-text` - Complete voice-to-text pipeline test
+- `test-simple-whisper` - Whisper transcription testing
 
-[transcription]
-model_path = "models/whisper-tiny.bin"
-model_size = "tiny"
-language = "en"
-use_cuda = false
-beam_size = 5
-no_speech_threshold = 0.6
+### Model Management
+- `simple-model-manager` - Download and manage Whisper models
 
-[hotkey]
-enabled = true
-combination = "Ctrl+Shift+Space"
+### Utilities
+- `test-audio` - Audio capture testing
+- `test-cpal-devices` - List available audio devices
 
-[feedback]
-audio_enabled = true
-start_sound = "assets/sounds/start.wav"
-stop_sound = "assets/sounds/stop.wav"
-error_sound = "assets/sounds/error.wav"
-```
+## 🎯 Universal App Compatibility
 
-## 📊 Model Management
+With UInput integration, Hush works with:
 
-Hush supports multiple Whisper model sizes:
+✅ **All Desktop Apps** - Text editors, IDEs, browsers, chat apps  
+✅ **Password Fields** - KeePass, password managers, login forms  
+✅ **Virtual Machines** - VMware, VirtualBox, QEMU guests  
+✅ **Games & Fullscreen** - Any application, including anti-cheat protected  
+✅ **Terminal Applications** - SSH sessions, vim, nano, tmux  
+✅ **Secure Contexts** - Lock screens, sudo prompts, elevated apps  
+✅ **Cross-Platform** - Works on X11, Wayland, and console applications  
 
-| Model | Size | Speed | Accuracy | Best For |
-|-------|------|-------|----------|----------|
-| tiny  | 39MB | Fastest | Basic | Quick notes, commands |
-| small | 244MB | Fast | Good | General transcription |
-| medium | 769MB | Medium | Better | Professional use |
-| large | 1550MB | Slower | Best | High-accuracy needs |
+## 📊 Model Sizes
 
-### Download Models
-
-```bash
-# Download specific model
-./scripts/download-models.sh tiny
-./scripts/download-models.sh small
-./scripts/download-models.sh medium
-
-# List available models
-./target/debug/simple-model-manager list
-
-# Show cache info
-./target/debug/simple-model-manager info
-```
+| Model  | Size     | Speed | Accuracy | Use Case |
+|--------|----------|-------|----------|----------|
+| Tiny   | ~39 MB   | Fastest | Basic | Quick testing, commands |
+| Base   | ~142 MB  | Fast | Good | General use, recommended |
+| Small  | ~466 MB  | Medium | Better | Higher accuracy needs |
+| Medium | ~1.5 GB  | Slower | High | Professional use |
+| Large  | ~2.9 GB  | Slowest | Highest | Maximum accuracy |
 
 ## 🛠️ Troubleshooting
 
-### Global Hotkeys Don't Work
-
-This is common on GNOME due to security restrictions. Solutions:
-
-1. **Use GNOME Custom Shortcuts** (Recommended)
-   - Follow the GNOME integration steps above
-   - This works reliably on all GNOME systems
-
-2. **Use Manual Mode**
-   ```bash
-   hush manual
-   ```
-
-3. **Check Permissions**
-   ```bash
-   hush status -v  # Show detailed system info
-   ```
-
-### Audio Issues
-
+### Text Insertion Not Working?
 ```bash
-hush status  # Check audio device status
+# Quick diagnosis
+cargo run --bin hush -- diagnose-uinput
 
-# List available audio devices
-arecord -l
-
-# Test audio recording
-arecord -d 3 -f cd test.wav && aplay test.wav
+# Quick fix (temporary)
+sudo modprobe uinput && sudo chmod 666 /dev/uinput
 ```
 
-### Build Issues
-
+### Audio Issues?
 ```bash
-# Install required dependencies
-sudo apt install libasound2-dev pkg-config
+# Test audio devices
+cargo run --bin test-cpal-devices
 
-# Check build environment
-./scripts/build.sh --bin hush-mvp
+# Test audio capture
+cargo run --bin test-audio
 ```
 
-### Common Error Messages
+### Need Models?
+```bash
+# List downloaded models
+cargo run --bin simple-model-manager list
 
-- **"BadAccess" X11 Error**: Use GNOME shortcuts or manual mode
-- **"No audio device"**: Check `arecord -l` and audio system
-- **"Model not found"**: Run `./scripts/download-models.sh tiny`
-- **"CUDA not available"**: Normal for most systems, falls back to CPU
+# Download base model (recommended)
+cargo run --bin simple-model-manager download base
+```
+
+## 📚 Documentation
+
+- **[UInput Setup Guide](docs/uinput-setup.md)** - Complete setup instructions
+- **[Quick Reference](docs/uinput-quick-reference.md)** - Quick commands
+- **[Testing Guide](TESTING_VOICE_TO_TEXT.md)** - How to test voice-to-text
+- **[UInput Integration](UINPUT_INTEGRATION.md)** - Technical details
 
 ## 🏗️ Development
 
-### Building from Source
-
+### Quick Test
 ```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Install system dependencies
-sudo apt install libasound2-dev pkg-config
-
-# Clone and build
-git clone <repository-url>
+# Clone and test immediately
+git clone <repo-url>
 cd hush
-./scripts/build.sh --bin hush-mvp
-
-# Run tests (hardware-free!)
-cargo test
-
-# Run benchmarks
-cargo bench
-
-# Run integration tests (requires hardware)
-cargo test --test integration_hardware_tests -- --ignored
+cargo run --bin test-text-insertion-simple
 ```
 
-### Architecture (v0.2.0)
-
-Hush v0.2.0 features a **trait-based architecture** for:
-- ✅ **Hardware-free testing** - Run full test suite without microphone/GPU
-- ✅ **Platform independence** - Easy path to Wayland/Windows/macOS support
-- ✅ **Runtime component swapping** - Choose backends dynamically
-- ✅ **Dependency injection** - Testable, maintainable, extensible
-
-**Key Components**:
-- `AudioSource` - Audio capture abstraction (CPAL adapter + mocks)
-- `Transcriber` - Speech-to-text abstraction (Whisper adapter + mocks)
-- `TextOutput` - Text insertion abstraction (X11 adapter + mocks)
-- `InputTrigger` - Input event abstraction (Hotkey adapter + mocks)
-
-**Documentation**:
-- 📖 **[Architecture Guide](docs/ARCHITECTURE.md)** - Complete architecture overview
-- 📖 **[Migration Guide](docs/MIGRATION_GUIDE.md)** - Upgrade from v0.1.0 to v0.2.0
-- 📖 **[ADRs](docs/architecture/adrs/)** - Architecture Decision Records
-- 📖 **[Phase Reports](docs/architecture/)** - Detailed refactoring documentation
-
-### Project Structure
-
-```
-hush/
-├── src/
-│   ├── main_mvp.rs          # Production CLI (v0.1.0 - legacy)
-│   ├── bin/
-│   │   └── hush-new.rs      # New trait-based binary (v0.2.0)
-│   ├── core/                # NEW: Trait abstractions
-│   │   ├── traits.rs        # AudioSource, Transcriber, TextOutput, InputTrigger
-│   │   ├── error.rs         # Structured error handling
-│   │   ├── state.rs         # Centralized state machine
-│   │   └── mocks.rs         # Mock implementations for testing
-│   ├── adapters/            # NEW: Adapters for existing components
-│   │   ├── audio/           # CpalAudioAdapter
-│   │   ├── transcription/   # WhisperAdapter
-│   │   ├── text/            # X11TextAdapter
-│   │   └── hotkey/          # HotkeyTriggerAdapter
-│   ├── application/         # NEW: Application layer
-│   │   ├── hush_app.rs      # HushApp with dependency injection
-│   │   └── builder.rs       # HushAppBuilder (fluent API)
-│   ├── audio/               # Legacy audio capture
-│   ├── transcription/       # Legacy Whisper integration
-│   ├── text/                # Legacy text insertion
-│   ├── hotkey/              # Legacy hotkey management
-│   └── config/              # Configuration management
-├── tests/
-│   ├── application_tests.rs          # NEW: 15 unit tests (hardware-free)
-│   ├── architecture_poc_test.rs      # NEW: 12 POC tests
-│   └── integration_hardware_tests.rs # NEW: 5 integration tests (hardware)
-├── benches/
-│   └── architecture_benchmarks.rs    # NEW: Performance benchmarks
-├── docs/
-│   ├── ARCHITECTURE.md               # NEW: Complete architecture guide
-│   ├── MIGRATION_GUIDE.md            # NEW: v0.1.0 → v0.2.0 migration
-│   └── architecture/
-│       ├── adrs/                     # Architecture Decision Records
-│       ├── DEPENDENCY_ANALYSIS.md    # Coupling analysis
-│       ├── TRAIT_DESIGN.md           # Trait specifications
-│       └── PHASE*.md                 # Refactoring phase reports
-├── scripts/
-│   ├── build.sh             # Build script with PKG_CONFIG_PATH fixes
-│   └── download-models.sh   # Model management script
-├── config/
-│   └── default.toml         # Default configuration
-└── models/                  # Downloaded Whisper models
-```
-
-### Testing Philosophy
-
-**Unit Tests** (hardware-free, 27 tests):
+### Full Setup
 ```bash
-cargo test  # Runs without microphone, GPU, X11, or models!
+# Install dependencies
+sudo apt install libasound2-dev pkg-config xclip
+
+# Set up UInput
+cargo run --bin hush -- setup-uinput
+
+# Download a model  
+cargo run --bin simple-model-manager download base
+
+# Test everything
+cargo run --bin test-voice-to-text
 ```
-
-**Integration Tests** (real hardware, 5 suites):
-```bash
-cargo test --test integration_hardware_tests -- --ignored
-```
-
-**Benchmarks** (performance validation):
-```bash
-cargo bench
-```
-
-### Extending Hush
-
-**Example: Add OpenAI Transcription Backend**
-
-```rust
-use hush::core::traits::{Transcriber, AudioBuffer, TranscriptionResult};
-use async_trait::async_trait;
-
-pub struct OpenAITranscriber {
-    api_key: String,
-}
-
-#[async_trait]
-impl Transcriber for OpenAITranscriber {
-    async fn transcribe(&self, audio: &AudioBuffer) -> Result<TranscriptionResult> {
-        // Call OpenAI Whisper API
-    }
-
-    fn info(&self) -> TranscriberInfo {
-        TranscriberInfo {
-            name: "OpenAI Whisper API".to_string(),
-            // ...
-        }
-    }
-}
-
-// Use it immediately!
-let app = HushAppBuilder::new()
-    .with_transcriber(Box::new(OpenAITranscriber::new(api_key)))
-    .build()?;
-```
-
-See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#extensibility)** for more examples.
-
-## 📈 Performance Tips
-
-- **Use tiny model** for fast responses (development commands)
-- **Use small/medium** for general transcription
-- **Use large model** only when accuracy is critical
-- **Enable CUDA** if you have compatible GPU (requires additional setup)
-- **Adjust beam_size** in config (1=fastest, 20=most accurate)
-
-## 🔒 Privacy & Security
-
-- **No cloud dependencies** - All processing is local
-- **No data collection** - Your voice never leaves your machine
-- **Open source** - Audit the code yourself
-- **Local models** - Whisper models stored and run locally
-
-## 📝 License
-
-[To be determined - specify your license here]
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📞 Support
-
-- **Check system status**: `hush status -v`
-- **View logs**: Run with `-v` or `-vv` flags
-- **Report issues**: [Create an issue on GitHub]
-- **Documentation**: This README and `hush --help`
 
 ---
 
-**Happy transcribing! 🎙️✨**
+**Ready to try voice-to-text that works everywhere?** Start with `cargo run --bin test-text-insertion-simple`!

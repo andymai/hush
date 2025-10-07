@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use anyhow::Result;
 use hush::config::settings::Config;
 
@@ -7,6 +7,9 @@ use hush::config::settings::Config;
 #[command(about = "🤫 Hush - Voice-to-Text for Linux Developers")]
 #[command(version = "0.1.0")]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+    
     /// Use CLI mode instead of TUI
     #[arg(long)]
     no_tui: bool,
@@ -16,6 +19,14 @@ struct Cli {
     verbose: u8,
 }
 
+#[derive(Subcommand)]
+enum Commands {
+    /// Show UInput setup guide for optimal text insertion
+    SetupUinput,
+    /// Diagnose UInput setup issues and get specific solutions
+    DiagnoseUinput,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -23,12 +34,29 @@ async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt::init();
     
+    // Handle subcommands first
+    if let Some(command) = cli.command {
+        return handle_subcommand(command).await;
+    }
+    
     if cli.no_tui {
         // Run legacy CLI mode for testing/fallback
         run_cli_mode().await
     } else {
         // Run TUI mode (default)
         run_tui_mode().await
+    }
+}
+
+async fn handle_subcommand(command: Commands) -> Result<()> {
+    match command {
+        Commands::SetupUinput => {
+            hush::text::print_uinput_setup_guidance();
+            Ok(())
+        }
+        Commands::DiagnoseUinput => {
+            hush::text::diagnose_uinput_issues()
+        }
     }
 }
 

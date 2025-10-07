@@ -3,7 +3,7 @@ use crate::Result;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tracing::{info, warn, error};
+use tracing::info;
 
 /// Available Whisper models
 #[derive(Debug, Clone)]

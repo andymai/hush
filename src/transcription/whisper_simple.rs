@@ -3,8 +3,8 @@
 
 use crate::Result;
 use std::path::Path;
-use tracing::{info, warn, error};
-use whisper_rs::{WhisperContext, WhisperContextParameters, FullParams, SamplingStrategy, WhisperState};
+use tracing::{info, warn};
+use whisper_rs::{WhisperContext, WhisperContextParameters, FullParams, SamplingStrategy};
 
 #[derive(Debug, Clone)]
 pub struct SimpleTranscriptionResult {

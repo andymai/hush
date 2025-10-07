@@ -1,7 +1,7 @@
 use crate::Result;
 use global_hotkey::{GlobalHotKeyManager, hotkey::{HotKey, Code, Modifiers}};
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
@@ -18,6 +18,7 @@ pub struct HotkeyManager {
     hotkey: HotKey,
     combination: String,
     running: Arc<AtomicBool>,
+    start_signal: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl HotkeyManager {
@@ -42,20 +43,24 @@ impl HotkeyManager {
         
         let (tx, rx) = mpsc::channel();
         
+        let start_signal = Arc::new((Mutex::new(false), Condvar::new()));
+        
         let hotkey_manager = HotkeyManager {
             manager: Arc::new(manager),
             hotkey,
             combination: combination.to_string(),
-            running: Arc::new(AtomicBool::new(false)),
+            running: Arc::new(AtomicBool::new(false)), // Start as false, will be set by start_listening
+            start_signal: start_signal.clone(),
         };
         
         // Start the event loop in a separate thread
         let manager_clone = hotkey_manager.manager.clone();
         let running_clone = hotkey_manager.running.clone();
         let combination_clone = combination.to_string();
+        let start_signal_clone = start_signal.clone();
         
         thread::spawn(move || {
-            Self::event_loop(manager_clone, running_clone, combination_clone, tx);
+            Self::event_loop(manager_clone, running_clone, combination_clone, start_signal_clone, tx);
         });
         
         Ok((hotkey_manager, rx))
@@ -64,19 +69,29 @@ impl HotkeyManager {
     pub fn start_listening(&self) -> Result<()> {
         info!("Starting hotkey listener for '{}'", self.combination);
         
-        if self.running.load(Ordering::Relaxed) {
-            warn!("Hotkey listener is already running");
-            return Ok(());
-        }
-        
+        // Set the running flag to true
         self.running.store(true, Ordering::Relaxed);
-        info!("Hotkey listener started successfully");
+        
+        // Signal the waiting thread to start
+        let (lock, cvar) = &*self.start_signal;
+        let mut started = lock.lock().unwrap();
+        *started = true;
+        cvar.notify_one();
+        
+        info!("Hotkey listener started successfully (signaled thread)");
         Ok(())
     }
     
     pub fn stop_listening(&self) -> Result<()> {
         info!("Stopping hotkey listener for '{}'", self.combination);
         self.running.store(false, Ordering::Relaxed);
+        
+        // If the thread is still waiting for start signal, wake it up so it can exit
+        let (lock, cvar) = &*self.start_signal;
+        let mut started = lock.lock().unwrap();
+        *started = true; // Set to true so the waiting thread wakes up
+        cvar.notify_one();
+        
         Ok(())
     }
     
@@ -179,17 +194,29 @@ impl HotkeyManager {
         _manager: Arc<GlobalHotKeyManager>,
         running: Arc<AtomicBool>,
         combination: String,
+        start_signal: Arc<(Mutex<bool>, Condvar)>,
         tx: mpsc::Sender<HotkeyEvent>,
     ) {
         info!("Starting hotkey event loop for '{}'", combination);
         
+        // Wait for the start signal from start_listening()
+        let (lock, cvar) = &*start_signal;
+        let mut started = lock.lock().unwrap();
+        while !*started {
+            info!("Event loop waiting for start signal for '{}'", combination);
+            started = cvar.wait(started).unwrap();
+        }
+        info!("Event loop received start signal for '{}'", combination);
+        
         // Get the global receiver for hotkey events
         let receiver = global_hotkey::GlobalHotKeyEvent::receiver();
+        info!("Got global hotkey receiver for '{}'", combination);
         
         // Create a simple event loop that checks for hotkey events
         loop {
-            if !running.load(Ordering::Relaxed) {
-                info!("Hotkey event loop stopping for '{}'", combination);
+            let is_running = running.load(Ordering::Relaxed);
+            if !is_running {
+                info!("Hotkey event loop stopping for '{}' (running = {})", combination, is_running);
                 break;
             }
             
@@ -224,8 +251,13 @@ impl HotkeyManager {
 impl Drop for HotkeyManager {
     fn drop(&mut self) {
         info!("Dropping hotkey manager for '{}'", self.combination);
-        self.running.store(false, Ordering::Relaxed);
         
+        // Stop the listening thread
+        if let Err(e) = self.stop_listening() {
+            warn!("Failed to stop hotkey listener during drop: {:?}", e);
+        }
+        
+        // Unregister the hotkey
         if let Err(e) = self.manager.unregister(self.hotkey) {
             warn!("Failed to unregister hotkey '{}': {:?}", self.combination, e);
         } else {
