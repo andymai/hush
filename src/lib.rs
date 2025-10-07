@@ -23,6 +23,9 @@ pub mod tui;
 pub mod cli_main;
 pub mod cli;
 
+// Logging system
+pub mod logging;
+
 // Re-export main types for convenience (legacy)
 pub use audio::{AudioCapture, AudioFeedback};
 pub use config::{Config, ConfigWatcher};

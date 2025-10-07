@@ -1,11 +1,12 @@
 use crate::Result;
+use crate::logging::{RequestContext, transcription as logging};
 use candle_core::{Device, Tensor};
 use candle_transformers::models::whisper::{self as m, Config};
 use candle_nn::VarBuilder;
 use hf_hub::api::tokio::Api;
 use std::path::Path;
 use tokenizers::Tokenizer;
-use tracing::{info, warn, error};
+use tracing::{info, warn, debug};
 use serde_json;
 // For PyTorch model loading
 use whisper_rs::{WhisperContext, WhisperContextParameters, FullParams, SamplingStrategy};
@@ -31,7 +32,18 @@ pub struct WhisperTranscriber {
 
 impl WhisperTranscriber {
     pub async fn new(model_path: &Path, use_cuda: bool) -> Result<Self> {
-        info!("Initializing Whisper transcriber (CUDA: {})", use_cuda);
+        let ctx = RequestContext::new("whisper_transcriber_init")
+            .with_metadata("model_path", &model_path.display().to_string())
+            .with_metadata("cuda_requested", &use_cuda.to_string());
+        
+        logging::log_model_loading(&model_path.display().to_string(), use_cuda);
+        
+        info!(
+            request_id = %ctx.request_id,
+            model_path = %model_path.display(),
+            cuda_requested = %use_cuda,
+            "🧠 Initializing Whisper transcriber"
+        );
         
         // Determine device first
         let device = if use_cuda {
@@ -105,9 +117,20 @@ impl WhisperTranscriber {
     
     pub fn transcribe(&self, audio_data: &[f32]) -> Result<String> {
         // Legacy sync method for compatibility
-        let rt = tokio::runtime::Runtime::new()?;
-        let result = rt.block_on(self.transcribe_with_sample_rate(audio_data, 16000))?;
-        Ok(result.text)
+        // Check if we're already in a Tokio runtime
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                // We're in an async context, use the current runtime
+                let result = handle.block_on(self.transcribe_with_sample_rate(audio_data, 16000))?;
+                Ok(result.text)
+            },
+            Err(_) => {
+                // No current runtime, create one
+                let rt = tokio::runtime::Runtime::new()?;
+                let result = rt.block_on(self.transcribe_with_sample_rate(audio_data, 16000))?;
+                Ok(result.text)
+            }
+        }
     }
     
     pub async fn transcribe_async(&self, audio_data: &[f32], sample_rate: u32) -> Result<TranscriptionResult> {
@@ -116,9 +139,16 @@ impl WhisperTranscriber {
     
     async fn transcribe_with_sample_rate(&self, audio_data: &[f32], sample_rate: u32) -> Result<TranscriptionResult> {
         let start_time = std::time::Instant::now();
-        info!("Transcribing {} samples of audio at {}Hz", audio_data.len(), sample_rate);
+        let ctx = RequestContext::new("whisper_transcription")
+            .with_metadata("samples", &audio_data.len().to_string())
+            .with_metadata("sample_rate", &sample_rate.to_string())
+            .with_metadata("simulated", &self.simulated_mode.to_string());
         
         if audio_data.is_empty() {
+            warn!(
+                request_id = %ctx.request_id,
+                "Empty audio data provided for transcription"
+            );
             return Ok(TranscriptionResult {
                 text: String::new(),
                 confidence: 0.0,
@@ -127,30 +157,66 @@ impl WhisperTranscriber {
         }
         
         let duration = audio_data.len() as f32 / sample_rate as f32;
-        info!("Audio duration: {:.2} seconds", duration);
+        
+        logging::log_transcription_started(&ctx, duration, sample_rate);
+        
+        debug!(
+            request_id = %ctx.request_id,
+            samples = %audio_data.len(),
+            sample_rate = %sample_rate,
+            duration_sec = %duration,
+            simulated = %self.simulated_mode,
+            "🎤 Processing audio for transcription"
+        );
         
         // Use real model if available, otherwise fall back to simulation
         let (text, confidence) = if self.simulated_mode {
-            warn!("Using simulated transcription - real model not available");
+            warn!(
+                request_id = %ctx.request_id,
+                "🧪 Using simulated transcription - real model not available"
+            );
             self.simulate_transcription_fallback(audio_data, duration)
         } else {
             match self.transcribe_real(audio_data, sample_rate).await {
-                Ok((text, conf)) => (text, conf),
+                Ok((text, conf)) => {
+                    debug!(
+                        request_id = %ctx.request_id,
+                        text_length = %text.len(),
+                        confidence = %conf,
+                        "Real transcription completed successfully"
+                    );
+                    (text, conf)
+                },
                 Err(e) => {
-                    error!("Real transcription failed: {}, falling back to simulation", e);
+                    logging::log_transcription_error(&ctx, &e);
+                    
+                    warn!(
+                        request_id = %ctx.request_id,
+                        error = %e,
+                        "⚠️ Real transcription failed, falling back to simulation"
+                    );
                     self.simulate_transcription_fallback(audio_data, duration)
                 }
             }
         };
         
+        let processing_time = start_time.elapsed();
         let result = TranscriptionResult {
             text: text.clone(),
             confidence,
-            processing_time: start_time.elapsed(),
+            processing_time,
         };
         
-        info!("Transcription result: '{}' (confidence: {:.2}, took: {}ms)", 
-              text, confidence, result.processing_time.as_millis());
+        logging::log_transcription_completed(&ctx, &text, confidence);
+        
+        info!(
+            request_id = %ctx.request_id,
+            text_length = %text.len(),
+            confidence = %confidence,
+            processing_time_ms = %processing_time.as_millis(),
+            text_preview = %if text.len() > 50 { format!("{}...", &text[..50]) } else { text.clone() },
+            "✅ Transcription completed successfully"
+        );
         
         Ok(result)
     }
@@ -200,11 +266,16 @@ impl WhisperTranscriber {
     async fn load_local_model(model_path: &Path, model_size: &str, device: &Device) -> Result<(m::model::Whisper, Tokenizer, Config)> {
         info!("Loading local PyTorch Whisper model: {}", model_size);
         
+        // Determine if we should use CUDA based on the device
+        let use_cuda = matches!(device, Device::Cuda(_));
+        info!("GPU acceleration: {}", use_cuda);
+        
         // Try to load using whisper-rs which supports PyTorch models
         info!("Attempting to load PyTorch model using whisper-rs backend");
         
-        // Load the model using whisper-rs
-        let params = WhisperContextParameters::default();
+        // Load the model using whisper-rs with GPU acceleration
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(use_cuda);
         let ctx = WhisperContext::new_with_params(model_path.to_str().unwrap(), params);
         let _whisper_ctx = match ctx {
             Ok(context) => {
@@ -246,8 +317,13 @@ impl WhisperTranscriber {
         
         let model_path_str = model_path.to_str()
             .ok_or_else(|| anyhow::anyhow!("Invalid model path"))?;
+        
+        // Enable GPU acceleration by default for this function
+        // TODO: Make this configurable based on caller preference
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(true);
+        info!("GPU acceleration enabled for PyTorch model loading");
             
-        let params = WhisperContextParameters::default();
         let context = WhisperContext::new_with_params(model_path_str, params)
             .map_err(|e| anyhow::anyhow!("Failed to create WhisperContext: {}", e))?;
             
@@ -267,9 +343,6 @@ impl WhisperTranscriber {
             audio_data.to_vec()
         };
         
-        // whisper-rs actually expects f32 samples, not i16
-        // No conversion needed
-        
         // Set up transcription parameters
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_language(Some("en"));
@@ -281,41 +354,42 @@ impl WhisperTranscriber {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         
-        // Run transcription
         info!("Starting whisper-rs transcription of {} samples", resampled_audio.len());
         
-        // Note: whisper-rs full() method is synchronous, so we run it in a blocking task
-        // We need to move ctx into the closure, but we can't because it's borrowed
-        // Instead, we'll run the transcription synchronously
-        
+        // Create a state outside the blocking task
         let mut state = ctx.create_state()
             .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
         
-        state.full(params, &resampled_audio)
-            .map_err(|e| anyhow::anyhow!("Transcription failed: {}", e))?;
-        
-        // Extract text from all segments
-        let num_segments = state.full_n_segments(); // Returns i32, not Result
-        let mut full_text = String::new();
-        
-        for i in 0..num_segments {
-            if let Some(segment) = state.get_segment(i) {
-                if let Ok(segment_text) = segment.to_str() {
-                    if !full_text.is_empty() {
-                        full_text.push(' ');
+        // Run the synchronous transcription in a blocking task to avoid blocking the async runtime
+        let transcription_result = tokio::task::spawn_blocking(move || {
+            // Run transcription (this is the synchronous operation)
+            state.full(params, &resampled_audio)
+                .map_err(|e| anyhow::anyhow!("Transcription failed: {}", e))?;
+            
+            // Extract text from all segments
+            let num_segments = state.full_n_segments(); // Returns i32, not Result
+            let mut full_text = String::new();
+            
+            for i in 0..num_segments {
+                if let Some(segment) = state.get_segment(i) {
+                    if let Ok(segment_text) = segment.to_str() {
+                        if !full_text.is_empty() {
+                            full_text.push(' ');
+                        }
+                        full_text.push_str(segment_text);
                     }
-                    full_text.push_str(segment_text);
                 }
             }
-        }
+            
+            Ok::<String, anyhow::Error>(full_text.trim().to_string())
+        }).await
+            .map_err(|e| anyhow::anyhow!("Task join error: {}", e))??;
         
-        // Clean up the text
-        let cleaned_text = full_text.trim().to_string();
         let confidence = 0.85; // whisper-rs doesn't provide confidence scores easily
         
-        info!("whisper-rs transcription completed: '{}'", cleaned_text);
+        info!("whisper-rs transcription completed: '{}'", transcription_result);
         
-        Ok((cleaned_text, confidence))
+        Ok((transcription_result, confidence))
     }
     
     /// Load model from HuggingFace Hub

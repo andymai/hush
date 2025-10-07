@@ -1,7 +1,8 @@
 use anyhow::Result;
 use crate::cli::{Commands, SetupCommands, TestCommands, ModelCommands};
+use crate::logging::RequestContext;
 use std::path::PathBuf;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 
 // Import Hush components
 use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config, hotkey, tui};
@@ -20,14 +21,46 @@ impl CommandDispatcher {
     }
 
     pub async fn dispatch(&self, command: Commands) -> Result<()> {
-        match command {
+        let command_name = match &command {
+            Commands::Start { .. } => "start",
+            Commands::Record { .. } => "record", 
+            Commands::Manual { .. } => "manual",
+            Commands::Setup { .. } => "setup",
+            Commands::Test { .. } => "test",
+            Commands::Models { .. } => "models",
+            Commands::Status { .. } => "status",
+            Commands::Install { .. } => "install",
+            Commands::Uninstall { .. } => "uninstall",
+        };
+        
+        let ctx = RequestContext::new(&format!("command_{}", command_name))
+            .with_metadata("command", command_name);
+        
+        info!(
+            request_id = %ctx.request_id,
+            command = %command_name,
+            "🚀 Executing command"
+        );
+        
+        let result = match command {
             Commands::Start { daemon, elevated, cli } => {
                 self.handle_start(daemon, elevated, cli).await
             }
             Commands::Record { duration, print_only, save_audio } => {
+                debug!(
+                    request_id = %ctx.request_id,
+                    duration = %duration,
+                    print_only = %print_only,
+                    "Record command parameters"
+                );
                 self.handle_record(duration, print_only, save_audio).await
             }
             Commands::Manual { count } => {
+                debug!(
+                    request_id = %ctx.request_id,
+                    count = %count,
+                    "Manual command parameters"
+                );
                 self.handle_manual(count).await
             }
             Commands::Setup { setup_command } => {
@@ -40,6 +73,13 @@ impl CommandDispatcher {
                 self.handle_models(model_command).await
             }
             Commands::Status { config, devices, full } => {
+                debug!(
+                    request_id = %ctx.request_id,
+                    config = %config,
+                    devices = %devices,
+                    full = %full,
+                    "Status command parameters"
+                );
                 self.handle_status(config, devices, full).await
             }
             Commands::Install { autostart, desktop, system } => {
@@ -48,7 +88,29 @@ impl CommandDispatcher {
             Commands::Uninstall { autostart, desktop, system } => {
                 self.handle_uninstall(autostart, desktop, system).await
             }
+        };
+        
+        match &result {
+            Ok(()) => {
+                info!(
+                    request_id = %ctx.request_id,
+                    command = %command_name,
+                    elapsed_ms = %ctx.elapsed().as_millis(),
+                    "✅ Command completed successfully"
+                );
+            }
+            Err(e) => {
+                error!(
+                    request_id = %ctx.request_id,
+                    command = %command_name,
+                    elapsed_ms = %ctx.elapsed().as_millis(),
+                    error = %e,
+                    "❌ Command failed"
+                );
+            }
         }
+        
+        result
     }
 
     async fn handle_start(&self, _daemon: bool, _elevated: bool, cli: bool) -> Result<()> {
@@ -101,16 +163,16 @@ impl CommandDispatcher {
             println!("🗣️ Transcribing...");
             let transcriber = WhisperTranscriber::new(&config.transcription.model_path, config.transcription.use_cuda).await?;
             
-            match transcriber.transcribe(&audio_data) {
-                Ok(text) => {
-                    println!("✅ Transcription: '{}'", text);
+            match transcriber.transcribe_async(&audio_data, config.audio.sample_rate).await {
+                Ok(result) => {
+                    println!("✅ Transcription: '{}'", result.text);
                     
                     // Insert text
                     let mut text_inserter = TextInserter::new()?;
                     println!("⌨️ Inserting text (3 second delay)...");
                     tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
                     
-                    match text_inserter.insert_text(&text) {
+                    match text_inserter.insert_text(&result.text) {
                         Ok(()) => println!("✅ Text inserted successfully"),
                         Err(e) => println!("❌ Text insertion failed: {}", e),
                     }
@@ -481,11 +543,12 @@ async fn test_transcription_system(file: Option<PathBuf>, all_models: bool, timi
                 if timing {
                     let start = std::time::Instant::now();
                     let test_audio = vec![0.1f32; 48000]; // 3s of test data
-                    match transcriber.transcribe(&test_audio) {
-                        Ok(text) => {
+                    match transcriber.transcribe_async(&test_audio, 16000).await {
+                        Ok(result) => {
                             let elapsed = start.elapsed();
                             println!("✅ Test transcription completed in {:?}", elapsed);
-                            println!("   Result: '{}'", text);
+                            println!("   Result: '{}'", result.text);
+                            println!("   Confidence: {:.2}", result.confidence);
                         }
                         Err(e) => println!("❌ Transcription failed: {}", e),
                     }
@@ -615,15 +678,15 @@ async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()> {
         println!("✅ Recording stopped ({} samples)", audio_data.len());
         
         println!("🗣️ Transcribing...");
-        match transcriber.transcribe(&audio_data) {
-            Ok(text) => {
-                println!("✅ Transcription: '{}'", text);
+        match transcriber.transcribe_async(&audio_data, config.audio.sample_rate).await {
+            Ok(result) => {
+                println!("✅ Transcription: '{}'", result.text);
                 
                 if let Some(ref mut inserter) = text_inserter {
                     println!("⌨️ Inserting text (3 second delay)...");
                     tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
                     
-                    match inserter.insert_text(&text) {
+                    match inserter.insert_text(&result.text) {
                         Ok(()) => println!("✅ Text inserted successfully"),
                         Err(e) => println!("❌ Text insertion failed: {}", e),
                     }
