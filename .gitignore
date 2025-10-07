@@ -16,10 +16,40 @@ Thumbs.db
 # Logs
 *.log
 
-# Models and large files
+# AI Models and large files
+# Whisper model files
 *.bin
 *.model
 *.ggml
+*.gguf
+*.safetensors
+
+# PyTorch model files
+*.pt
+*.pth
+*.pkl
+*.pickle
+
+# ONNX model files
+*.onnx
+
+# TensorFlow model files
+*.pb
+*.tflite
+
+# Hugging Face model files
+pytorch_model.bin
+tensorflow_model.h5
+model.safetensors
+config.json
+tokenizer.json
+vocab.txt
+merges.txt
+
+# Model directories
+models/
+!models/.gitkeep
+!models/README.md
 
 # Audio files (except placeholders)
 assets/sounds/*.wav
