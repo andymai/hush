@@ -193,3 +193,26 @@ impl ModelDownloader {
         result
     }
 }
+
+/// Convenience function for CLI usage - download a model by name
+pub async fn download_model_by_name(model_size: &str, _force: bool) -> Result<()> {
+    let model = match model_size.to_lowercase().as_str() {
+        "tiny" => WhisperModel::Tiny,
+        "base" => WhisperModel::Base,
+        "small" => WhisperModel::Small,
+        "medium" => WhisperModel::Medium,
+        "large" => WhisperModel::Large,
+        _ => return Err(anyhow::anyhow!("Unknown model size: {}. Available: tiny, base, small, medium, large", model_size)),
+    };
+    
+    // Use default cache directory
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("hush")
+        .join("models");
+    
+    let downloader = ModelDownloader::new(cache_dir);
+    downloader.ensure_model(&model).await?;
+    
+    Ok(())
+}

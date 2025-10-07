@@ -16,6 +16,13 @@ pub mod wakeword;
 // TUI module
 pub mod tui;
 
+// System tray integration (temporarily disabled due to compilation issues)
+// pub mod tray;
+
+// CLI module (new unified command system)
+pub mod cli_main;
+pub mod cli;
+
 // Re-export main types for convenience (legacy)
 pub use audio::{AudioCapture, AudioFeedback};
 pub use config::{Config, ConfigWatcher};
