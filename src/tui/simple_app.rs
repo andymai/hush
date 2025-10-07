@@ -381,20 +381,20 @@ impl SimpleApp {
                             
                             // Extract transcriber to avoid borrow checker issues
                             let transcription_result = if let Some(ref transcriber) = self.transcriber {
-                                transcriber.transcribe(&audio_data)
+                                transcriber.transcribe_async(&audio_data, self.config.audio.sample_rate).await
                             } else {
                                 return Ok(()); // Should not happen due to is_some() check above
                             };
                             
                             match transcription_result {
-                                Ok(text) => {
+                                Ok(result) => {
                                     self.last_transcription = format!("({:.1}s): {}", 
-                                                                     duration.as_secs_f32(), text);
-                                    self.add_log(LogLevel::Info, format!("Transcribed: {}", text));
+                                                                     duration.as_secs_f32(), result.text);
+                                    self.add_log(LogLevel::Info, format!("Transcribed: {}", result.text));
                                     
                                     // Insert text if text inserter is available
                                     if let Some(ref mut text_inserter) = self.text_inserter {
-                                        match text_inserter.insert_text(&text) {
+                                        match text_inserter.insert_text(&result.text) {
                                             Ok(()) => {
                                                 self.add_log(LogLevel::Info, "Text inserted successfully".to_string());
                                             }

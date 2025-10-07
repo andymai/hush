@@ -59,8 +59,11 @@ impl SimpleWhisperTranscriber {
         
         info!("Loading Whisper model from {:?}", self.model_path);
         
-        // Create whisper context
-        let ctx_params = WhisperContextParameters::default();
+        // Create whisper context with GPU acceleration if available
+        let mut ctx_params = WhisperContextParameters::default();
+        ctx_params.use_gpu(true); // Enable GPU acceleration
+        info!("GPU acceleration enabled for Whisper context");
+        
         let context = WhisperContext::new_with_params(
             self.model_path.to_string_lossy().as_ref(),
             ctx_params,
@@ -145,6 +148,6 @@ impl SimpleWhisperTranscriber {
     }
     
     pub fn get_device_info(&self) -> String {
-        "whisper.cpp (CPU)".to_string()
+        "whisper.cpp (GPU-accelerated)".to_string()
     }
 }

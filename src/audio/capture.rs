@@ -1,9 +1,10 @@
 use crate::Result;
+use crate::logging::{RequestContext, audio as logging};
 use cpal::{Device, Host, Stream, StreamConfig, SampleRate};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use parking_lot::Mutex;
 use std::sync::Arc;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug, trace};
 
 pub struct AudioCapture {
     device: Device,
@@ -16,31 +17,75 @@ pub struct AudioCapture {
 
 impl AudioCapture {
     pub fn new(device_name: Option<&str>) -> Result<Self> {
-        info!("Initializing audio capture system");
+        let ctx = RequestContext::new("audio_capture_init")
+            .with_metadata("device_requested", device_name.unwrap_or("default"));
+        
+        info!(
+            request_id = %ctx.request_id,
+            device_name = ?device_name,
+            "🎤 Initializing audio capture system"
+        );
         
         // Get the default host (will use PipeWire/JACK on Linux)
         let host = cpal::default_host();
-        info!("Audio host: {}", host.id().name());
+        let host_name = host.id().name();
+        debug!(
+            request_id = %ctx.request_id,
+            host_name = %host_name,
+            "Audio host selected"
+        );
         
         // Select audio device
         let device = match device_name {
             Some(name) => {
-                info!("Looking for specific device: {}", name);
-                Self::find_device_by_name(&host, name)?
+                debug!(
+                    request_id = %ctx.request_id,
+                    device_name = %name,
+                    "Looking for specific device"
+                );
+                Self::find_device_by_name(&host, name).map_err(|e| {
+                    error!(
+                        request_id = %ctx.request_id,
+                        device_name = %name,
+                        error = %e,
+                        "Failed to find requested device"
+                    );
+                    e
+                })?
             },
             None => {
-                info!("Using default input device");
+                debug!(
+                    request_id = %ctx.request_id,
+                    "Using default input device"
+                );
                 match host.default_input_device() {
                     Some(device) => device,
                     None => {
-                        warn!("No default input device available, trying alternatives");
-                        Self::find_working_input_device(&host)?
+                        warn!(
+                            request_id = %ctx.request_id,
+                            "No default input device available, trying alternatives"
+                        );
+                        Self::find_working_input_device(&host).map_err(|e| {
+                            error!(
+                                request_id = %ctx.request_id,
+                                error = %e,
+                                "No working input device found"
+                            );
+                            e
+                        })?
                     }
                 }
             }
         };
         
-        info!("Selected audio device: {}", device.name().unwrap_or("Unknown".to_string()));
+        let device_name_str = device.name().unwrap_or("Unknown".to_string());
+        logging::log_device_initialization(&device_name_str, 16000, 1);
+        
+        info!(
+            request_id = %ctx.request_id,
+            device_name = %device_name_str,
+            "✅ Audio device selected successfully"
+        );
         
         // Get supported input config, with fallback to working device
         let (device, _supported_config) = match device.default_input_config() {
@@ -108,20 +153,37 @@ impl AudioCapture {
     }
     
     pub fn start_recording(&mut self) -> Result<()> {
-        info!("Starting audio recording (simulated: {})", self.simulated_mode);
+        let ctx = RequestContext::new("audio_recording")
+            .with_metadata("simulated", &self.simulated_mode.to_string())
+            .with_metadata("device", &self.get_device_name());
+        
+        logging::log_recording_started(&ctx, &self.get_device_name());
         
         if self.stream.is_some() {
-            warn!("Recording already in progress");
+            warn!(
+                request_id = %ctx.request_id,
+                "Recording already in progress, ignoring start request"
+            );
             return Ok(());
         }
         
-        // Clear the buffer
+        // Clear the buffer and mark as recording
+        let buffer_len_before = self.buffer.lock().len();
         self.buffer.lock().clear();
         *self.is_recording.lock() = true;
         
+        debug!(
+            request_id = %ctx.request_id,
+            buffer_cleared_samples = %buffer_len_before,
+            "Audio buffer cleared and recording flag set"
+        );
+        
         // Handle simulated mode for testing
         if self.simulated_mode {
-            info!("Using simulated audio recording for testing");
+            info!(
+                request_id = %ctx.request_id,
+                "🧪 Using simulated audio recording for testing"
+            );
             return Ok(());
         }
         
@@ -153,7 +215,15 @@ impl AudioCapture {
     }
     
     pub fn stop_recording(&mut self) -> Result<Vec<f32>> {
-        info!("Stopping audio recording (simulated: {})", self.simulated_mode);
+        let ctx = RequestContext::new("audio_recording_stop")
+            .with_metadata("simulated", &self.simulated_mode.to_string())
+            .with_metadata("device", &self.get_device_name());
+        
+        debug!(
+            request_id = %ctx.request_id,
+            simulated = %self.simulated_mode,
+            "🛑 Stopping audio recording"
+        );
         
         *self.is_recording.lock() = false;
         
@@ -162,25 +232,62 @@ impl AudioCapture {
             // Generate 3 seconds of simulated audio data (silence for now)
             let duration_samples = (3.0 * self.config.sample_rate.0 as f32) as usize;
             let simulated_data = vec![0.0f32; duration_samples];
-            info!("Generated {} samples of simulated audio", simulated_data.len());
+            
+            info!(
+                request_id = %ctx.request_id,
+                samples_generated = %simulated_data.len(),
+                duration_sec = %3.0,
+                "🧪 Generated simulated audio data"
+            );
+            
+            logging::log_recording_stopped(&ctx, simulated_data.len(), 3.0);
             return Ok(simulated_data);
         }
         
+        // Stop the actual audio stream
         if let Some(stream) = self.stream.take() {
-            stream.pause()
-                .map_err(|e| anyhow::anyhow!("Failed to stop audio stream: {}", e))?;
+            if let Err(e) = stream.pause() {
+                error!(
+                    request_id = %ctx.request_id,
+                    error = %e,
+                    "Failed to stop audio stream cleanly"
+                );
+                return Err(anyhow::anyhow!("Failed to stop audio stream: {}", e));
+            }
+            
+            debug!(
+                request_id = %ctx.request_id,
+                "Audio stream stopped successfully"
+            );
         }
         
+        // Extract recorded data from buffer
         let recorded_data = {
             let mut buffer = self.buffer.lock();
             let data = buffer.clone();
+            let buffer_size = buffer.len();
             buffer.clear();
+            
+            trace!(
+                request_id = %ctx.request_id,
+                buffer_size = %buffer_size,
+                "Audio buffer extracted and cleared"
+            );
+            
             data
         };
         
-        info!("Recording stopped. Captured {} samples ({:.2}s)", 
-              recorded_data.len(), 
-              recorded_data.len() as f32 / self.config.sample_rate.0 as f32);
+        let duration_sec = recorded_data.len() as f32 / self.config.sample_rate.0 as f32;
+        
+        logging::log_recording_stopped(&ctx, recorded_data.len(), duration_sec);
+        
+        info!(
+            request_id = %ctx.request_id,
+            samples = %recorded_data.len(),
+            duration_sec = %duration_sec,
+            sample_rate = %self.config.sample_rate.0,
+            "✅ Audio recording completed successfully"
+        );
         
         Ok(recorded_data)
     }
