@@ -8,6 +8,8 @@ use crate::core::types::{SampleRate, Channels, BufferSize};
 use crate::config::settings::{TranscriptionConfig, HotkeyConfig};
 use async_trait::async_trait;
 use std::time::Duration;
+use tokio::sync::mpsc;
+use std::time::SystemTime;
 
 // ============================================================================
 // Audio Abstraction
@@ -211,4 +213,131 @@ pub trait ConfigProvider: Send + Sync {
     fn audio_config(&self) -> AudioConfig;
     fn transcription_config(&self) -> &TranscriptionConfig;
     fn hotkey_config(&self) -> &HotkeyConfig;
+}
+
+// ============================================================================
+// System Tray Abstraction
+// ============================================================================
+
+/// Transcription entry for history storage
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TranscriptionEntry {
+    pub id: String,
+    pub timestamp: SystemTime,
+    pub text: String,
+    pub confidence: f32,
+    pub duration: Duration,
+}
+
+/// System tray icon state
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayIconState {
+    Idle,
+    Recording,
+    Processing,
+    Error,
+}
+
+/// System tray menu item
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrayMenuItem {
+    Show,
+    Hide,
+    Settings,
+    ClearHistory,
+    StartRecording,
+    StopRecording,
+    About,
+    Quit,
+}
+
+/// System tray events
+#[derive(Debug, Clone)]
+pub enum TrayEvent {
+    MenuClicked(TrayMenuItem),
+    HistoryItemSelected(String), // entry id
+    SettingsRequested,
+    QuitRequested,
+}
+
+/// Menu transcription item
+#[derive(Debug, Clone)]
+pub struct MenuTranscriptionItem {
+    pub id: String,
+    pub text: String,
+    pub preview: String, // truncated text for display
+}
+
+/// System tray menu structure
+#[derive(Debug, Clone)]
+pub struct TrayMenu {
+    pub recent_transcriptions: Vec<MenuTranscriptionItem>,
+    pub recording_state: bool,
+}
+
+/// System tray interface
+#[async_trait]
+pub trait SystemTray: Send + Sync {
+    /// Show the system tray icon
+    async fn show(&mut self) -> Result<()>;
+    
+    /// Hide the system tray icon
+    async fn hide(&mut self) -> Result<()>;
+    
+    /// Set the tray icon state
+    fn set_icon(&mut self, state: TrayIconState);
+    
+    /// Set the tooltip text
+    fn set_tooltip(&mut self, text: &str);
+    
+    /// Update the context menu
+    fn update_menu(&mut self, menu: TrayMenu);
+    
+    /// Get event receiver for tray interactions
+    fn event_receiver(&self) -> &mpsc::UnboundedReceiver<TrayEvent>;
+}
+
+/// Transcription history storage
+#[async_trait]
+pub trait HistoryStore: Send + Sync {
+    /// Add a new transcription entry
+    async fn add_entry(&mut self, entry: TranscriptionEntry) -> Result<()>;
+    
+    /// Get recent transcription entries (newest first)
+    async fn get_recent(&self, limit: usize) -> Result<Vec<TranscriptionEntry>>;
+    
+    /// Clear all history
+    async fn clear(&mut self) -> Result<()>;
+    
+    /// Get total number of stored entries
+    fn len(&self) -> usize;
+    
+    /// Check if history is empty
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Notification urgency level
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+/// Desktop notification provider
+#[async_trait]
+pub trait NotificationProvider: Send + Sync {
+    /// Show a notification for completed transcription
+    async fn show_transcription(&self, result: &TranscriptionResult) -> Result<()>;
+    
+    /// Show a general status notification
+    async fn show_status(&self, message: &str, level: NotificationLevel) -> Result<()>;
+    
+    /// Check if notifications are enabled
+    fn is_enabled(&self) -> bool;
+    
+    /// Enable or disable notifications
+    fn set_enabled(&mut self, enabled: bool);
 }

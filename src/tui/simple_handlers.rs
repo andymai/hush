@@ -129,9 +129,9 @@ async fn handle_key_event(app: &mut App, key: KeyEvent) -> anyhow::Result<()> {
             modifiers: KeyModifiers::NONE,
             ..
         } if !app.show_help_overlay => {
-            app.toggle_recording()?;
+            app.toggle_recording().await?;
             return Ok(());
-        }
+        },
         
         _ => {}
     }
@@ -223,7 +223,20 @@ async fn handle_audio_device_keys(app: &mut App, key: KeyEvent) -> anyhow::Resul
             // Apply audio device selection
             let selected_index = app.selected_audio_device_index;
             if let Some(device_name) = app.available_audio_devices.get(selected_index) {
-                app.add_log(LogLevel::Info, format!("Audio device changed to: {}", device_name));
+                // Update config with new device
+                app.config.audio.device = Some(device_name.clone());
+                
+                // Reinitialize audio capture with new device
+                match crate::AudioCapture::new(Some(device_name)) {
+                    Ok(new_capture) => {
+                        app.audio_capture = Some(new_capture);
+                        app.add_log(LogLevel::Info, format!("Audio device changed to: {}", device_name));
+                    }
+                    Err(e) => {
+                        app.add_log(LogLevel::Error, format!("Failed to switch to device '{}': {}", device_name, e));
+                    }
+                }
+                
                 app.update_system_status();
             }
             app.navigate_back();
@@ -249,9 +262,19 @@ async fn handle_model_selection_keys(app: &mut App, key: KeyEvent) -> anyhow::Re
             // Apply model selection
             if let Some(model) = app.available_models.get(app.selected_model_index) {
                 if model.is_available {
+                    // Update config with new model
+                    app.config.transcription.model_path = model.path.clone();
+                    
+                    // Clear existing transcriber to force reinitialization with new model
+                    app.transcriber = None;
+                    
                     app.add_log(LogLevel::Info, format!("Model changed to: {} ({})", model.name, model.size));
+                    app.add_log(LogLevel::Info, "Transcriber will be reinitialized on next recording".to_string());
+                    
+                    // Update system status
+                    app.update_system_status();
                 } else {
-                    app.add_log(LogLevel::Warn, format!("Model {} is not available", model.name));
+                    app.add_log(LogLevel::Warn, format!("Model {} is not available - download it first", model.name));
                 }
             }
             app.navigate_back();
@@ -298,7 +321,7 @@ async fn handle_hotkey_config_keys(app: &mut App, key: KeyEvent) -> anyhow::Resu
 async fn handle_recording_keys(app: &mut App, key: KeyEvent) -> anyhow::Result<()> {
     match key.code {
         KeyCode::Char('r') | KeyCode::Enter => {
-            app.toggle_recording()?;
+            app.toggle_recording().await?;
         }
         _ => {}
     }

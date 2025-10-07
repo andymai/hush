@@ -50,6 +50,10 @@ tui-input = "0.10"
 # System notifications
 notify-rust = "4.10"
 
+# System tray integration
+ksni = "0.2"
+arboard = "3.0"
+
 # Application directories (XDG)
 dirs = "5.0"
 
@@ -145,3 +149,11 @@ path = "src/bin/test-working-uinput.rs"
 [[bin]]
 name = "test-cpal-devices"
 path = "src/bin/test-cpal-devices.rs"
+
+[[bin]]
+name = "hush-unified"
+path = "src/main_new.rs"
+
+[[bin]]
+name = "hush-tray"
+path = "src/bin/hush-tray.rs"
