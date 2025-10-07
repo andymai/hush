@@ -3,7 +3,7 @@ pub mod ui;
 pub mod simple_handlers;
 pub mod components;
 
-pub use simple_app::{SimpleApp as App, AppMode, AppScreen};
+pub use simple_app::{SimpleApp as App};
 pub use simple_handlers::handle_events;
 
 use anyhow::Result;

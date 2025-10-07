@@ -24,9 +24,9 @@ pub struct WhisperTranscriber {
     config: Option<Config>,
     // Alternative: whisper-rs context for PyTorch models
     whisper_context: Option<WhisperContext>,
-    model_path: std::path::PathBuf,
+    _model_path: std::path::PathBuf,
     simulated_mode: bool,
-    mel_filters: Option<Vec<f32>>,
+    _mel_filters: Option<Vec<f32>>,
 }
 
 impl WhisperTranscriber {
@@ -97,9 +97,9 @@ impl WhisperTranscriber {
             tokenizer,
             config,
             whisper_context,
-            model_path: model_path.to_path_buf(),
+            _model_path: model_path.to_path_buf(),
             simulated_mode,
-            mel_filters,
+            _mel_filters: mel_filters,
         })
     }
     
@@ -206,7 +206,7 @@ impl WhisperTranscriber {
         // Load the model using whisper-rs
         let params = WhisperContextParameters::default();
         let ctx = WhisperContext::new_with_params(model_path.to_str().unwrap(), params);
-        let whisper_ctx = match ctx {
+        let _whisper_ctx = match ctx {
             Ok(context) => {
                 info!("✅ Successfully loaded PyTorch model with whisper-rs");
                 context
@@ -219,17 +219,17 @@ impl WhisperTranscriber {
         // For now, we still need to create compatible candle structures
         // This is a bridge approach - we'll use whisper-rs for actual inference
         // but return candle structures for compatibility with existing code
-        let config = Self::create_default_config(model_size);
+        let _config = Self::create_default_config(model_size);
         info!("Using default config for {} model", model_size);
         
         // Create a basic tokenizer
-        let tokenizer = Self::create_basic_tokenizer_for_pytorch()?;
+        let _tokenizer = Self::create_basic_tokenizer_for_pytorch()?;
         info!("Using basic tokenizer for PyTorch model");
         
         // Create a dummy candle model since we'll use whisper-rs for inference
         // This is a workaround until we fully migrate to one approach
         let dummy_weights = std::collections::HashMap::new();
-        let vb = VarBuilder::from_tensors(dummy_weights, candle_core::DType::F32, device);
+        let _vb = VarBuilder::from_tensors(dummy_weights, candle_core::DType::F32, device);
         
         // We can't actually create a real candle model without proper weights
         // So for PyTorch models, we'll need to modify the transcription logic
@@ -495,12 +495,6 @@ impl WhisperTranscriber {
         }
     }
     
-    /// Create a basic tokenizer for local model loading
-    fn create_basic_tokenizer() -> Result<Tokenizer> {
-        // This is a placeholder - for real implementation, we'd need the actual tokenizer
-        // For now, create a minimal tokenizer that can at least handle basic operations
-        Err(anyhow::anyhow!("Basic tokenizer creation not implemented - need actual Whisper tokenizer from HuggingFace"))
-    }
     
     /// Create a basic tokenizer specifically for PyTorch models
     fn create_basic_tokenizer_for_pytorch() -> Result<Tokenizer> {
@@ -581,14 +575,6 @@ impl WhisperTranscriber {
         Ok(spectrogram)
     }
     
-    fn clean_transcription_text(&self, text: &str) -> String {
-        // Remove special tokens and clean up the transcription
-        text.replace("<|startoftranscript|>", "")
-            .replace("<|endoftext|>", "")
-            .replace("<|notimestamps|>", "")
-            .trim()
-            .to_string()
-    }
     
     /// Fallback simulation method (renamed from simulate_transcription)
     fn simulate_transcription_fallback(&self, audio_data: &[f32], duration: f32) -> (String, f32) {

@@ -99,6 +99,14 @@ opt-level = 0
 debug = true
 
 [[bin]]
+name = "hush"
+path = "src/main.rs"
+
+[[bin]]
+name = "hush-mvp"
+path = "src/main_mvp.rs"
+
+[[bin]]
 name = "model-manager"
 path = "src/bin/model-manager.rs"
 
@@ -117,6 +125,14 @@ path = "src/bin/test-audio.rs"
 [[bin]]
 name = "test-text-insertion"
 path = "src/bin/test-text-insertion.rs"
+
+[[bin]]
+name = "hush-new"
+path = "src/bin/hush-new.rs"
+
+[[bin]]
+name = "hush-tui-demo"
+path = "src/bin/hush-tui-demo.rs"
 
 [[bin]]
 name = "test-simple-whisper"
@@ -139,6 +155,6 @@ name = "test-cpal-devices"
 path = "src/bin/test-cpal-devices.rs"
 
 [[bin]]
-name = "hush"
-path = "src/main.rs"
+name = "hush-unified"
+path = "src/main_new.rs"
 

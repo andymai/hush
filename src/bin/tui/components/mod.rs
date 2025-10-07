@@ -8,13 +8,6 @@ pub mod recording_interface;
 pub mod config_editor;
 
 pub use dashboard::Dashboard;
-pub use mode_selector::ModeSelector;
-pub use audio_device_selector::AudioDeviceSelector;
-pub use model_selector::ModelSelector;
-pub use config_file_selector::ConfigFileSelector;
-pub use hotkey_configurator::HotkeyConfigurator;
-pub use recording_interface::RecordingInterface;
-pub use config_editor::ConfigEditor;
 
 use ratatui::{prelude::*, widgets::*};
 
@@ -45,10 +38,4 @@ impl ComponentHelpers {
         }
     }
 
-    /// Create a help text widget
-    pub fn help_text(text: &str) -> Paragraph {
-        Paragraph::new(text)
-            .style(Style::default().fg(Color::Gray))
-            .alignment(Alignment::Center)
-    }
 }

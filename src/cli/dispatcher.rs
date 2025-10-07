@@ -4,18 +4,18 @@ use std::path::PathBuf;
 use tracing::{info, warn, error};
 
 // Import Hush components
-use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config, hotkey, text, model_downloader, tui};
+use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config, hotkey, tui};
 
 pub struct CommandDispatcher {
-    config_path: Option<PathBuf>,
-    notifications_enabled: bool,
+    _config_path: Option<PathBuf>,
+    _notifications_enabled: bool,
 }
 
 impl CommandDispatcher {
     pub fn new(config_path: Option<PathBuf>, notifications_enabled: bool) -> Self {
         Self {
-            config_path,
-            notifications_enabled,
+            _config_path: config_path,
+            _notifications_enabled: notifications_enabled,
         }
     }
 
@@ -51,7 +51,7 @@ impl CommandDispatcher {
         }
     }
 
-    async fn handle_start(&self, daemon: bool, elevated: bool, cli: bool) -> Result<()> {
+    async fn handle_start(&self, _daemon: bool, _elevated: bool, cli: bool) -> Result<()> {
         info!("🚀 Starting Hush voice-to-text");
 
         if cli {
@@ -215,7 +215,7 @@ impl CommandDispatcher {
         }
     }
 
-    async fn handle_status(&self, config: bool, devices: bool, full: bool) -> Result<()> {
+    async fn handle_status(&self, _config: bool, _devices: bool, full: bool) -> Result<()> {
         println!("🤫 Hush System Status");
         println!();
         
