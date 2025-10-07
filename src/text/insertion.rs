@@ -1,4 +1,5 @@
 use crate::Result;
+use crate::text::uinput_keyboard::{UinputKeyboard, check_uinput_availability};
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{ConnectionExt, Window, AtomEnum};
 use x11rb::rust_connection::RustConnection;
@@ -8,6 +9,7 @@ use std::time::Duration;
 use tracing::{info, warn, debug};
 
 pub struct TextInserter {
+    uinput_keyboard: Option<UinputKeyboard>,
     enigo: Enigo,
     x11_conn: RustConnection,
     screen_num: usize,
@@ -25,6 +27,7 @@ pub struct WindowInfo {
 
 #[derive(Debug)]
 pub enum InsertionMethod {
+    Uinput,
     Direct,
     Clipboard,
     Fallback,
@@ -34,20 +37,44 @@ impl TextInserter {
     pub fn new() -> Result<Self> {
         info!("Initializing text insertion system");
         
+        // Try to initialize uinput keyboard (primary method)
+        let uinput_keyboard = match UinputKeyboard::new() {
+            Ok(kb) => {
+                if kb.is_ready() {
+                    info!("  Uinput keyboard: ready (primary method)");
+                    Some(kb)
+                } else {
+                    warn!("  Uinput keyboard: not ready - will use fallback");
+                    None
+                }
+            }
+            Err(e) => {
+                warn!("  Uinput keyboard: failed to initialize - {}", e);
+                None
+            }
+        };
+        
         // Initialize X11 connection
         let (x11_conn, screen_num) = x11rb::connect(None)
             .map_err(|e| anyhow::anyhow!("Failed to connect to X11 server: {:?}", e))?;
         
-        // Initialize Enigo for keyboard simulation
+        // Initialize Enigo for keyboard simulation (fallback method)
         let enigo = Enigo::new(&enigo::Settings::default())
             .map_err(|e| anyhow::anyhow!("Failed to initialize keyboard controller: {:?}", e))?;
         
         info!("Text insertion system initialized successfully");
         info!("  X11 connection: established");
         info!("  Screen number: {}", screen_num);
-        info!("  Keyboard controller: ready");
+        info!("  Enigo controller: ready (fallback method)");
+        
+        if uinput_keyboard.is_some() {
+            info!("  Primary method: uinput (kernel-level)");
+        } else {
+            info!("  Primary method: enigo (X11 simulation)");
+        }
         
         Ok(TextInserter {
+            uinput_keyboard,
             enigo,
             x11_conn,
             screen_num,
@@ -68,6 +95,7 @@ impl TextInserter {
         debug!("Using insertion method: {:?}", method);
         
         match method {
+            InsertionMethod::Uinput => self.insert_uinput(text),
             InsertionMethod::Direct => self.insert_direct(text),
             InsertionMethod::Clipboard => self.insert_via_clipboard(text),
             InsertionMethod::Fallback => self.insert_with_fallback(text),
@@ -119,25 +147,42 @@ impl TextInserter {
     }
     
     fn choose_insertion_method(&self, text: &str, window: &WindowInfo) -> InsertionMethod {
-        // Check if text contains special characters that might be problematic
-        let has_special_chars = text.chars().any(|c| {
-            !c.is_ascii_alphanumeric() && !c.is_ascii_whitespace() && !".,!?-_()[]{}:;\"'".contains(c)
-        });
-        
-        // Check text length - very long text might be better via clipboard
-        let is_long_text = text.len() > 1000;
-        
-        // Check for known applications that work better with clipboard
-        let prefers_clipboard = self.window_prefers_clipboard(&window.class);
-        
-        if has_special_chars || is_long_text || prefers_clipboard {
-            if self.clipboard_fallback {
-                InsertionMethod::Clipboard
+        // If uinput is available, use it as the primary method for all cases
+        // except when application specifically prefers clipboard
+        if self.uinput_keyboard.is_some() {
+            // Check for applications that strongly prefer clipboard
+            let strongly_prefers_clipboard = self.window_strongly_prefers_clipboard(&window.class);
+            
+            // Check text length - extremely long text might still be better via clipboard
+            let is_extremely_long = text.len() > 5000;
+            
+            if strongly_prefers_clipboard || is_extremely_long {
+                if self.clipboard_fallback {
+                    InsertionMethod::Clipboard
+                } else {
+                    InsertionMethod::Uinput  // Still prefer uinput over enigo
+                }
             } else {
-                InsertionMethod::Fallback
+                InsertionMethod::Uinput
             }
         } else {
-            InsertionMethod::Direct
+            // Fallback to original logic when uinput is not available
+            let has_special_chars = text.chars().any(|c| {
+                !c.is_ascii_alphanumeric() && !c.is_ascii_whitespace() && !".,!?-_()[]{}:;\"'".contains(c)
+            });
+            
+            let is_long_text = text.len() > 1000;
+            let prefers_clipboard = self.window_prefers_clipboard(&window.class);
+            
+            if has_special_chars || is_long_text || prefers_clipboard {
+                if self.clipboard_fallback {
+                    InsertionMethod::Clipboard
+                } else {
+                    InsertionMethod::Fallback
+                }
+            } else {
+                InsertionMethod::Direct
+            }
         }
     }
     
@@ -153,6 +198,37 @@ impl TextInserter {
         ];
         
         clipboard_preferred.iter().any(|&app| class_lower.contains(app))
+    }
+    
+    fn window_strongly_prefers_clipboard(&self, window_class: &str) -> bool {
+        let class_lower = window_class.to_lowercase();
+        
+        // Applications that strongly prefer clipboard even over uinput
+        // (very few applications should be in this list)
+        let strongly_preferred: &[&str] = &[
+            // Add applications here that have issues with uinput
+            // For now, keeping this minimal as uinput should work universally
+        ];
+        
+        strongly_preferred.iter().any(|&app| class_lower.contains(app))
+    }
+    
+    fn insert_uinput(&mut self, text: &str) -> Result<()> {
+        debug!("Inserting text via uinput (kernel-level)");
+        
+        if let Some(uinput) = &mut self.uinput_keyboard {
+            // Set the typing delay to match our configured delay
+            uinput.set_typing_delay(self.typing_delay_ms);
+            
+            // Use uinput to type the text
+            uinput.type_text(text)
+                .map_err(|e| anyhow::anyhow!("Uinput typing failed: {}", e))?;
+            
+            info!("Text inserted via uinput ({} characters)", text.len());
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Uinput keyboard not available"))
+        }
     }
     
     fn insert_direct(&mut self, text: &str) -> Result<()> {
@@ -218,7 +294,22 @@ impl TextInserter {
     fn insert_with_fallback(&mut self, text: &str) -> Result<()> {
         warn!("Using fallback insertion method");
         
-        // Try direct insertion first, fallback to clipboard if it fails
+        // Priority order: uinput -> direct (enigo) -> clipboard -> fail
+        
+        // Try uinput first if available
+        if self.uinput_keyboard.is_some() {
+            match self.insert_uinput(text) {
+                Ok(_) => {
+                    info!("Fallback: uinput insertion succeeded");
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!("Uinput insertion failed: {:?}", e);
+                }
+            }
+        }
+        
+        // Try direct (enigo) insertion next
         match self.insert_direct(text) {
             Ok(_) => {
                 info!("Fallback: direct insertion succeeded");
@@ -321,6 +412,17 @@ impl Drop for TextInserter {
 pub fn check_dependencies() -> Result<()> {
     use std::process::Command;
     
+    // Check for uinput availability (primary insertion method)
+    match check_uinput_availability() {
+        Ok(_) => info!("✅ UInput available - using optimal text insertion method"),
+        Err(e) => {
+            warn!("❌ UInput not available - {}", e);
+            warn!("⚠️  Some applications (VMs, password fields) may not work optimally");
+            warn!("📖 Run 'hush setup-uinput' for detailed setup instructions");
+            info!("Will fallback to X11 simulation and clipboard methods");
+        }
+    }
+    
     // Check for xclip (required for clipboard operations)
     match Command::new("xclip").arg("-version").output() {
         Ok(_) => debug!("xclip is available"),
@@ -336,5 +438,109 @@ pub fn check_dependencies() -> Result<()> {
     }
     
     info!("Text insertion dependencies check completed");
+    Ok(())
+}
+
+/// Provides detailed guidance for setting up uinput permissions
+pub fn print_uinput_setup_guidance() {
+    println!("\n🔧 UInput Setup Guide for Hush Voice-to-Text");
+    println!("═══════════════════════════════════════════════");
+    println!();
+    
+    println!("UInput provides the best text insertion experience, working universally");
+    println!("across all applications, including VMs and secure password fields.\n");
+    
+    println!("📋 Quick Setup (choose one method):\n");
+    
+    println!("Method 1 - Add user to input group (RECOMMENDED):");
+    println!("  sudo usermod -a -G input $USER");
+    println!("  sudo modprobe uinput");
+    println!("  echo 'uinput' | sudo tee /etc/modules-load.d/uinput.conf");
+    println!("  # Then log out and log back in\n");
+    
+    println!("Method 2 - Temporary fix (until reboot):");
+    println!("  sudo modprobe uinput");
+    println!("  sudo chmod 666 /dev/uinput\n");
+    
+    println!("Method 3 - Persistent udev rule:");
+    println!("  sudo tee /etc/udev/rules.d/99-uinput.rules << 'EOF'");
+    println!("  SUBSYSTEM==\"misc\", KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0664\", TAG+=\"uaccess\"");
+    println!("  EOF");
+    println!("  sudo udevadm control --reload-rules && sudo udevadm trigger");
+    println!("  sudo modprobe uinput\n");
+    
+    println!("🔍 Verification:");
+    println!("  groups | grep input     # Should show 'input' in your groups");
+    println!("  ls -la /dev/uinput      # Should show read/write access");
+    println!("  lsmod | grep uinput     # Should show uinput module loaded\n");
+    
+    println!("ℹ️  Note: Hush will work without uinput using fallback methods,");
+    println!("   but uinput provides the best compatibility and reliability.\n");
+    
+    println!("📖 For detailed setup instructions and troubleshooting:");
+    println!("   See docs/uinput-setup.md or docs/uinput-quick-reference.md\n");
+}
+
+/// Analyzes the current uinput setup and provides specific guidance
+pub fn diagnose_uinput_issues() -> Result<()> {
+    use std::path::Path;
+    use std::process::Command;
+    
+    println!("\n🔍 Diagnosing UInput Setup");
+    println!("═════════════════════════");
+    
+    // Check if /dev/uinput exists
+    if !Path::new("/dev/uinput").exists() {
+        println!("❌ /dev/uinput not found");
+        println!("   Solution: sudo modprobe uinput\n");
+        return Ok(());
+    } else {
+        println!("✅ /dev/uinput exists");
+    }
+    
+    // Check if uinput module is loaded
+    match Command::new("lsmod").output() {
+        Ok(output) => {
+            if String::from_utf8_lossy(&output.stdout).contains("uinput") {
+                println!("✅ uinput module is loaded");
+            } else {
+                println!("⚠️  uinput module not found in lsmod");
+                println!("   This might be built into the kernel (which is fine)");
+            }
+        }
+        Err(_) => println!("⚠️  Could not check loaded modules (lsmod unavailable)"),
+    }
+    
+    // Check permissions
+    match std::fs::OpenOptions::new().write(true).open("/dev/uinput") {
+        Ok(_) => println!("✅ Can write to /dev/uinput"),
+        Err(e) => {
+            println!("❌ Cannot write to /dev/uinput: {}", e);
+            
+            // Check current user groups
+            if let Ok(output) = Command::new("groups").output() {
+                let groups = String::from_utf8_lossy(&output.stdout);
+                if groups.contains("input") {
+                    println!("   You are in the 'input' group, but still can't write.");
+                    println!("   Try logging out and logging back in.");
+                } else {
+                    println!("   You are not in the 'input' group.");
+                    println!("   Solution: sudo usermod -a -G input $USER");
+                    println!("   Then log out and log back in.");
+                }
+            }
+            
+            // Check file permissions
+            if let Ok(output) = Command::new("ls").args(["-la", "/dev/uinput"]).output() {
+                println!("   Current permissions: {}", String::from_utf8_lossy(&output.stdout).trim());
+                println!("   Should be: crw-rw---- 1 root input ...");
+            }
+        }
+    }
+    
+    println!("\n💡 Quick fixes:");
+    println!("   Temporary:  sudo chmod 666 /dev/uinput");
+    println!("   Permanent:  sudo usermod -a -G input $USER (then logout/login)");
+    
     Ok(())
 }

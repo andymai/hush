@@ -15,9 +15,9 @@ hound = "3.5"
 rodio = { version = "0.17", default-features = false, features = ["wav"] }
 
 # Whisper integration (using candle for pure Rust)
-candle-core = { version = "0.8" }
-candle-nn = { version = "0.8" }
-candle-transformers = { version = "0.8" }
+candle-core = { version = "0.8", features = ["cuda"] }
+candle-nn = { version = "0.8", features = ["cuda"] }
+candle-transformers = { version = "0.8", features = ["cuda"] }
 tokenizers = "0.19"
 hf-hub = { version = "0.3", features = ["tokio"] }
 byteorder = "1.5"
@@ -29,6 +29,9 @@ whisper-rs = { version = "0.15", features = ["tracing_backend"] }
 # System integration
 x11rb = "0.13"
 enigo = "0.2"
+libc = "0.2"
+# Kernel-level keyboard emulation
+input-linux = "0.7"
 
 # Hotkey management
 global-hotkey = "0.6"
@@ -134,3 +137,11 @@ path = "src/bin/test-voice-to-text.rs"
 [[bin]]
 name = "test-text-insertion-simple"
 path = "src/bin/test-text-insertion-simple.rs"
+
+[[bin]]
+name = "test-working-uinput"
+path = "src/bin/test-working-uinput.rs"
+
+[[bin]]
+name = "test-cpal-devices"
+path = "src/bin/test-cpal-devices.rs"

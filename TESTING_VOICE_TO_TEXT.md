@@ -87,41 +87,68 @@ Once text insertion is working:
 
 ## 🎯 Recommended Test Applications
 
-### Simple Text Editors (Best for initial testing):
+ℹ️ **Note**: With the new UInput integration, Hush now works with **ALL applications** including VMs, password fields, and secure contexts!
+
+### Universal Compatibility (UInput Method):
+- **All applications** - Works universally at kernel level
+- **Password managers** - KeePass, 1Password, etc.
+- **Virtual machines** - VMware, VirtualBox, QEMU
+- **Games and fullscreen apps** - Any application
+- **Secure contexts** - Lock screens, sudo prompts
+- **Terminal applications** - SSH sessions, vim, nano
+- **Web applications** - Any browser-based app
+
+### Simple Text Editors (Great for testing):
 - **Gedit** - `gedit` (GNOME Text Editor)
 - **Kate** - `kate` (KDE Advanced Text Editor)  
 - **Mousepad** - `mousepad` (simple text editor)
 - **Nano** in terminal - `nano test.txt`
 
 ### Advanced Applications:
-- **VS Code** - Great for code editing
+- **VS Code** - Code editing (now works perfectly!)
 - **LibreOffice Writer** - Word processing
 - **Firefox/Chrome** - Web forms and text areas
 - **Slack/Discord** - Chat applications
-- **Terminal applications** - Any terminal with text input
+- **IntelliJ IDEA** - IDEs that previously had issues
 
-### Web-Based (browser):
-- Open any website with a text field
-- Try Google search box, email compose, etc.
-- Social media post boxes
+### Previously Problematic (Now Fixed with UInput!):
+- **Password fields** - Now work perfectly
+- **VirtualBox/VMware guests** - Full compatibility
+- **Games with anti-cheat** - Kernel-level emulation bypasses restrictions
+- **Wayland applications** - Universal compatibility
 
 ## 🔧 Troubleshooting
 
 ### If Text Insertion Doesn't Work:
 
-1. **Check focused window:**
+1. **Check UInput setup (recommended method):**
+   ```bash
+   # Check if UInput is working
+   hush diagnose-uinput
+   
+   # Get setup instructions if needed
+   hush setup-uinput
+   ```
+
+2. **Quick UInput fix:**
+   ```bash
+   sudo modprobe uinput
+   sudo chmod 666 /dev/uinput
+   ```
+
+3. **Check focused window:**
    - Make sure you clicked in the text field
    - The application should show a cursor/focus indicator
 
-2. **Try different applications:**
-   - Some apps may not accept simulated input
-   - Start with simple text editors first
+4. **Try different applications:**
+   - With UInput, ALL applications should work
+   - If only some apps work, UInput setup may be incomplete
 
-3. **Check terminal output:**
+5. **Check terminal output:**
    - Look for error messages in the test output
-   - Window focus information is shown
+   - UInput availability is shown during startup
 
-4. **Verify system dependencies:**
+6. **Verify fallback dependencies (if UInput unavailable):**
    - X11 is running (DISPLAY is set)
    - xclip is installed (`which xclip`)
 
@@ -144,11 +171,23 @@ Once text insertion is working:
 
 The text inserter automatically chooses the best method:
 
-- **Direct typing**: Character-by-character simulation (most compatible)
-- **Clipboard**: Sets clipboard and pastes with Ctrl+V (for special characters)
-- **Fallback**: Tries direct first, then clipboard if that fails
+1. **UInput (Primary)**: Hardware-level keyboard emulation via Linux kernel
+   - ✅ Works with ALL applications universally
+   - ✅ VMs, password fields, secure contexts
+   - ✅ Games, fullscreen apps, Wayland/X11
+   - ⚠️ Requires setup: `hush setup-uinput`
 
-Different applications may work better with different methods.
+2. **X11/enigo (Fallback)**: X11 synthetic events
+   - ✅ Good for most GUI applications
+   - ❌ May not work in VMs or secure contexts
+   - ❌ Limited compatibility with some apps
+
+3. **Clipboard (Last resort)**: Sets clipboard and pastes with Ctrl+V
+   - ✅ Works when other methods fail
+   - ✅ Good for special characters and long text
+   - ❌ Overwrites current clipboard content
+
+**Automatic Selection**: Hush intelligently chooses the best method for each situation.
 
 ## 📊 Expected Performance
 

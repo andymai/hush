@@ -281,7 +281,7 @@ fn render_recording_interface(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(controls, chunks[2]);
 }
 
-fn render_config_editor(f: &mut Frame, app: &App, area: Rect) {
+fn render_config_editor(f: &mut Frame, _app: &App, area: Rect) {
     let block = Block::default()
         .title("Configuration Editor")
         .borders(Borders::ALL)
@@ -302,7 +302,7 @@ fn render_config_editor(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-fn render_help(f: &mut Frame, app: &App, area: Rect) {
+fn render_help(f: &mut Frame, _app: &App, area: Rect) {
     let help_text = vec![
         Line::from(Span::styled("Hush TUI Help", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
         Line::from(""),

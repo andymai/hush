@@ -5,7 +5,6 @@
 
 use crate::core::traits::{AudioSource, Transcriber, TextOutput, InputTrigger, TriggerEvent};
 use crate::core::state::{AppState, StateMachine};
-use crate::core::error::HushError;
 use crate::Result;
 use std::time::Instant;
 use tracing::{info, warn, error};
@@ -404,7 +403,7 @@ impl HushApp {
     }
 
     /// Show desktop notification
-    fn show_notification(&self, title: &str, message: &str, urgency: NotificationUrgency) {
+    fn show_notification(&self, title: &str, message: &str, _urgency: NotificationUrgency) {
         #[cfg(feature = "notifications")]
         {
             use notify_rust::{Notification, Urgency};

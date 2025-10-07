@@ -1,5 +1,5 @@
 use crate::Result;
-use candle_core::{Device, Tensor, IndexOp};
+use candle_core::{Device, Tensor};
 use candle_transformers::models::whisper::{self as m, Config};
 use candle_nn::VarBuilder;
 use hf_hub::api::tokio::Api;
@@ -7,6 +7,8 @@ use std::path::Path;
 use tokenizers::Tokenizer;
 use tracing::{info, warn, error};
 use serde_json;
+// For PyTorch model loading
+use whisper_rs::{WhisperContext, WhisperContextParameters, FullParams, SamplingStrategy};
 
 #[derive(Debug, Clone)]
 pub struct TranscriptionResult {
@@ -20,6 +22,8 @@ pub struct WhisperTranscriber {
     model: Option<std::sync::Mutex<m::model::Whisper>>,
     tokenizer: Option<Tokenizer>,
     config: Option<Config>,
+    // Alternative: whisper-rs context for PyTorch models
+    whisper_context: Option<WhisperContext>,
     model_path: std::path::PathBuf,
     simulated_mode: bool,
     mel_filters: Option<Vec<f32>>,
@@ -46,19 +50,37 @@ impl WhisperTranscriber {
             Device::Cpu
         };
         
-        // Try to load real model
-        let (model, tokenizer, config, simulated_mode) = match Self::load_model(model_path, &device).await {
-            Ok((model, tokenizer, config)) => {
-                info!("✅ Real Whisper model loaded successfully");
-                (Some(std::sync::Mutex::new(model)), Some(tokenizer), Some(config), false)
-            },
-            Err(e) => {
-                warn!("Failed to load real Whisper model: {}", e);
-                warn!("Falling back to simulation mode for development/testing");
-                info!("To use real transcription, ensure model files are available at: {:?}", model_path);
-                (None, None, None, true)
-            }
-        };
+        // Try to load real model - first try whisper-rs for PyTorch models
+        let (model, tokenizer, config, whisper_context, simulated_mode) = 
+            if model_path.exists() && model_path.extension().and_then(|s| s.to_str()) == Some("bin") {
+                // Try whisper-rs for .bin files (PyTorch format)
+                info!("Detected PyTorch .bin file, attempting to load with whisper-rs");
+                match Self::load_pytorch_model(model_path).await {
+                    Ok(ctx) => {
+                        info!("✅ PyTorch Whisper model loaded successfully with whisper-rs");
+                        (None, None, None, Some(ctx), false)
+                    },
+                    Err(e) => {
+                        warn!("Failed to load PyTorch model with whisper-rs: {}", e);
+                        warn!("Falling back to simulation mode");
+                        (None, None, None, None, true)
+                    }
+                }
+            } else {
+                // Try candle for safetensors/other formats
+                match Self::load_model(model_path, &device).await {
+                    Ok((model, tokenizer, config)) => {
+                        info!("✅ Real Whisper model loaded successfully with candle");
+                        (Some(std::sync::Mutex::new(model)), Some(tokenizer), Some(config), None, false)
+                    },
+                    Err(e) => {
+                        warn!("Failed to load model with candle: {}", e);
+                        warn!("Falling back to simulation mode for development/testing");
+                        info!("To use real transcription, ensure model files are available at: {:?}", model_path);
+                        (None, None, None, None, true)
+                    }
+                }
+            };
         
         // Initialize mel-spectrogram filters
         let mel_filters = if !simulated_mode {
@@ -74,6 +96,7 @@ impl WhisperTranscriber {
             model,
             tokenizer,
             config,
+            whisper_context,
             model_path: model_path.to_path_buf(),
             simulated_mode,
             mel_filters,
@@ -175,27 +198,124 @@ impl WhisperTranscriber {
     
     /// Load model from local .bin file
     async fn load_local_model(model_path: &Path, model_size: &str, device: &Device) -> Result<(m::model::Whisper, Tokenizer, Config)> {
-        info!("Loading local Whisper model: {}", model_size);
+        info!("Loading local PyTorch Whisper model: {}", model_size);
         
-        // For now, we'll use a default config based on model size since we don't have config.json locally
+        // Try to load using whisper-rs which supports PyTorch models
+        info!("Attempting to load PyTorch model using whisper-rs backend");
+        
+        // Load the model using whisper-rs
+        let params = WhisperContextParameters::default();
+        let ctx = WhisperContext::new_with_params(model_path.to_str().unwrap(), params);
+        let whisper_ctx = match ctx {
+            Ok(context) => {
+                info!("✅ Successfully loaded PyTorch model with whisper-rs");
+                context
+            },
+            Err(e) => {
+                return Err(anyhow::anyhow!("Failed to load PyTorch model with whisper-rs: {}", e));
+            }
+        };
+        
+        // For now, we still need to create compatible candle structures
+        // This is a bridge approach - we'll use whisper-rs for actual inference
+        // but return candle structures for compatibility with existing code
         let config = Self::create_default_config(model_size);
         info!("Using default config for {} model", model_size);
         
-        // Create a basic tokenizer (simplified - in production you'd want the real tokenizer)
-        let tokenizer = Self::create_basic_tokenizer()?;
-        info!("Using basic tokenizer");
+        // Create a basic tokenizer
+        let tokenizer = Self::create_basic_tokenizer_for_pytorch()?;
+        info!("Using basic tokenizer for PyTorch model");
         
-        // For PyTorch .bin files, we need proper conversion
-        // For now, return an error indicating this needs implementation
+        // Create a dummy candle model since we'll use whisper-rs for inference
+        // This is a workaround until we fully migrate to one approach
+        let dummy_weights = std::collections::HashMap::new();
+        let vb = VarBuilder::from_tensors(dummy_weights, candle_core::DType::F32, device);
+        
+        // We can't actually create a real candle model without proper weights
+        // So for PyTorch models, we'll need to modify the transcription logic
         return Err(anyhow::anyhow!(
-            "Local PyTorch .bin model loading not yet fully implemented. \
-             The models in your models/ folder are in PyTorch format. \
-             To use real Whisper transcription, we need to either: \
-             1) Implement PyTorch model loading, or \
-             2) Convert these models to safetensors format, or \
-             3) Download safetensors models from HuggingFace. \
-             For now, using simulation mode."
+            "PyTorch model loaded with whisper-rs, but candle integration needs refactoring. \
+             The model file was successfully loaded, but we need to update the transcription pipeline \
+             to use whisper-rs directly instead of candle."
         ));
+    }
+    
+    /// Load PyTorch model using whisper-rs
+    async fn load_pytorch_model(model_path: &Path) -> Result<WhisperContext> {
+        info!("Loading PyTorch model with whisper-rs: {:?}", model_path);
+        
+        let model_path_str = model_path.to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid model path"))?;
+            
+        let params = WhisperContextParameters::default();
+        let context = WhisperContext::new_with_params(model_path_str, params)
+            .map_err(|e| anyhow::anyhow!("Failed to create WhisperContext: {}", e))?;
+            
+        info!("✅ Successfully loaded PyTorch model with whisper-rs");
+        Ok(context)
+    }
+    
+    /// Transcribe using whisper-rs for PyTorch models
+    async fn transcribe_with_whisper_rs(&self, ctx: &WhisperContext, audio_data: &[f32], sample_rate: u32) -> Result<(String, f32)> {
+        info!("Running transcription with whisper-rs backend");
+        
+        // Resample to 16kHz if needed (Whisper expects 16kHz)
+        let resampled_audio = if sample_rate != 16000 {
+            warn!("Resampling audio from {}Hz to 16kHz for whisper-rs", sample_rate);
+            self.resample_audio(audio_data, sample_rate, 16000)?
+        } else {
+            audio_data.to_vec()
+        };
+        
+        // whisper-rs actually expects f32 samples, not i16
+        // No conversion needed
+        
+        // Set up transcription parameters
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        params.set_language(Some("en"));
+        params.set_translate(false);
+        params.set_no_context(true);
+        params.set_single_segment(false);
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+        
+        // Run transcription
+        info!("Starting whisper-rs transcription of {} samples", resampled_audio.len());
+        
+        // Note: whisper-rs full() method is synchronous, so we run it in a blocking task
+        // We need to move ctx into the closure, but we can't because it's borrowed
+        // Instead, we'll run the transcription synchronously
+        
+        let mut state = ctx.create_state()
+            .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
+        
+        state.full(params, &resampled_audio)
+            .map_err(|e| anyhow::anyhow!("Transcription failed: {}", e))?;
+        
+        // Extract text from all segments
+        let num_segments = state.full_n_segments(); // Returns i32, not Result
+        let mut full_text = String::new();
+        
+        for i in 0..num_segments {
+            if let Some(segment) = state.get_segment(i) {
+                if let Ok(segment_text) = segment.to_str() {
+                    if !full_text.is_empty() {
+                        full_text.push(' ');
+                    }
+                    full_text.push_str(segment_text);
+                }
+            }
+        }
+        
+        // Clean up the text
+        let cleaned_text = full_text.trim().to_string();
+        let confidence = 0.85; // whisper-rs doesn't provide confidence scores easily
+        
+        info!("whisper-rs transcription completed: '{}'", cleaned_text);
+        
+        Ok((cleaned_text, confidence))
     }
     
     /// Load model from HuggingFace Hub
@@ -248,6 +368,13 @@ impl WhisperTranscriber {
     
     /// Perform real transcription using the loaded Whisper model
     async fn transcribe_real(&self, audio_data: &[f32], sample_rate: u32) -> Result<(String, f32)> {
+        // Check which model backend we're using
+        if let Some(whisper_ctx) = &self.whisper_context {
+            // Use whisper-rs for PyTorch models
+            return self.transcribe_with_whisper_rs(whisper_ctx, audio_data, sample_rate).await;
+        }
+        
+        // Fall back to candle for other model formats
         let model_mutex = self.model.as_ref().ok_or_else(|| anyhow::anyhow!("Model not loaded"))?;
         let _tokenizer = self.tokenizer.as_ref().ok_or_else(|| anyhow::anyhow!("Tokenizer not loaded"))?;
         let _config = self.config.as_ref().ok_or_else(|| anyhow::anyhow!("Config not loaded"))?;
@@ -373,6 +500,14 @@ impl WhisperTranscriber {
         // This is a placeholder - for real implementation, we'd need the actual tokenizer
         // For now, create a minimal tokenizer that can at least handle basic operations
         Err(anyhow::anyhow!("Basic tokenizer creation not implemented - need actual Whisper tokenizer from HuggingFace"))
+    }
+    
+    /// Create a basic tokenizer specifically for PyTorch models
+    fn create_basic_tokenizer_for_pytorch() -> Result<Tokenizer> {
+        // For PyTorch models loaded with whisper-rs, we don't actually need
+        // a separate tokenizer since whisper-rs handles tokenization internally
+        // This is just a placeholder to satisfy the interface
+        Err(anyhow::anyhow!("PyTorch model tokenization handled by whisper-rs internally"))
     }
     
     /// Audio preprocessing methods
