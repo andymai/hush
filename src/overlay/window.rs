@@ -71,7 +71,7 @@ impl EguiOverlay for OverlayApp {
             OverlayState::Recording { .. } => Duration::from_millis(50), // 20 FPS for smooth waveform animation
             OverlayState::Idle if self.config.show_button_when_idle => Duration::from_secs(1), // 1 FPS when showing idle button
             OverlayState::Idle => Duration::from_secs(5), // Very slow when completely hidden
-            _ => Duration::from_millis(500), // 2 FPS for static states (processing/editing/success/error)
+            _ => Duration::from_millis(500), // 2 FPS for static states (processing/success/error)
         };
         egui_context.request_repaint_after(repaint_interval);
     }
