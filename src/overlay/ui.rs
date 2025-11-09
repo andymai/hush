@@ -8,6 +8,13 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
     // Configure the style based on theme
     apply_theme(ctx, config.theme);
 
+    // Dynamic sizing based on state
+    let (width, height) = match state {
+        OverlayState::Idle => (10.0, 20.0),  // Tiny idle state
+        OverlayState::Recording { .. } => (80.0, 20.0),  // Expand when recording
+        _ => (80.0, 20.0),  // Other states use recording size
+    };
+
     // Get screen dimensions and calculate default position
     let screen_rect = ctx.screen_rect();
     let (default_x, default_y) = config.get_window_position(screen_rect.width(), screen_rect.height());
@@ -23,8 +30,8 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
             let frame = create_frame(config);
 
             frame.show(ui, |ui| {
-                ui.set_width(config.width);
-                ui.set_height(config.height);
+                ui.set_width(width);
+                ui.set_height(height);
 
                 // Render based on state
                 match state {
@@ -90,66 +97,42 @@ fn create_frame(config: &OverlayConfig) -> Frame {
     Frame::none()
         .fill(bg_color)
         .stroke(Stroke::NONE)  // No border
-        .rounding(25.0)  // Perfect pill shape (height/2)
-        .inner_margin(8.0)  // Less padding for compact look
+        .rounding(10.0)  // Perfect pill shape (height/2 = 20/2)
+        .inner_margin(4.0)  // Minimal padding for tiny size
         .shadow(egui::epaint::Shadow {
-            extrusion: 6.0,
-            color: Color32::from_black_alpha(120),
+            extrusion: 4.0,
+            color: Color32::from_black_alpha(100),
         })
 }
 
 fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayAction {
     let mut action = OverlayAction::None;
 
-    // Minimal horizontal line indicating idle state
-    ui.vertical_centered(|ui| {
-        ui.add_space(16.0);
+    // Empty idle state - just a tiny black pill (10x20)
+    // Make the entire area clickable
+    let response = ui.allocate_response(
+        ui.available_size(),
+        Sense::click()
+    );
 
-        // Draw a horizontal line
-        ui.horizontal(|ui| {
-            ui.add_space(20.0);
-
-            let line_width = 160.0;  // Proportional to smaller size
-            let line_height = 2.0;  // Thinner, more delicate
-            let line_color = Color32::WHITE;  // White on black background
-
-            // Make the line clickable
-            let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(line_width, line_height),
-                Sense::click()
-            );
-
-            // Draw rounded horizontal line
-            ui.painter().rect_filled(
-                rect,
-                1.0, // rounded corners
-                line_color
-            );
-
-            if response.clicked() {
-                action = OverlayAction::StartRecording;
-            }
-
-            ui.add_space(20.0);
-        });
-
-        ui.add_space(16.0);
-    });
+    if response.clicked() {
+        action = OverlayAction::StartRecording;
+    }
 
     action
 }
 
 fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _config: &OverlayConfig) {
-    // Wispr Flow-style waveform animation responding to voice
+    // Tiny waveform animation (80x20)
     ui.vertical_centered(|ui| {
-        ui.add_space(6.0);
+        ui.add_space(2.0);
 
         // Draw animated waveform bars that respond to audio amplitude
         ui.horizontal(|ui| {
-            ui.add_space(15.0);
+            ui.add_space(6.0);
 
-            let num_bars = 15; // Adjusted for smaller size
-            let bar_spacing = 2.5;
+            let num_bars = 10; // Fewer bars for tiny size
+            let bar_spacing = 1.5;
 
             // Create bars that respond to amplitude with slight variation
             for i in 0..num_bars {
@@ -158,12 +141,12 @@ fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _con
                 let time_factor = ((duration * 10.0 + phase).sin() + 1.0) / 2.0;
 
                 // Base height on amplitude, with time factor for smooth animation
-                let base_height = 4.0; // Minimum height
-                let max_height = 30.0; // Maximum height (scaled for smaller overlay)
+                let base_height = 2.0; // Minimum height
+                let max_height = 12.0; // Maximum height (scaled for 20px height)
                 let height = base_height + (amplitude * time_factor * max_height);
 
                 let bar_color = Color32::WHITE;  // White bars on black background
-                let bar_width = 2.5;  // Thinner bars
+                let bar_width = 2.0;  // Thin bars
 
                 let (rect, _) = ui.allocate_exact_size(
                     egui::vec2(bar_width, height),
@@ -172,79 +155,79 @@ fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _con
 
                 ui.painter().rect_filled(
                     rect,
-                    1.25, // rounded corners
+                    1.0, // rounded corners
                     bar_color
                 );
 
                 ui.add_space(bar_spacing);
             }
 
-            ui.add_space(15.0);
+            ui.add_space(6.0);
         });
 
-        ui.add_space(6.0);
+        ui.add_space(2.0);
     });
 }
 
 fn render_processing_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig) {
-    // Minimal processing indicator
+    // Minimal processing indicator for tiny size
     ui.vertical_centered(|ui| {
-        ui.add_space(15.0);
+        ui.add_space(1.0);
 
-        // Simple spinner
+        // Simple spinner - small for 20px height
         let spinner = RichText::new("⟳")
-            .size(28.0)
+            .size(14.0)
             .color(Color32::WHITE);
         ui.label(spinner);
 
-        ui.add_space(15.0);
+        ui.add_space(1.0);
     });
 }
 
 fn render_editing_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig) {
-    // Minimal AI polishing indicator
+    // Minimal AI polishing indicator for tiny size
     ui.vertical_centered(|ui| {
-        ui.add_space(15.0);
+        ui.add_space(1.0);
 
-        // Just sparkles icon
+        // Just sparkles icon - small
         let icon = RichText::new("✨")
-            .size(28.0)
+            .size(14.0)
             .color(Color32::WHITE);  // White on black
         ui.label(icon);
 
-        ui.add_space(15.0);
+        ui.add_space(1.0);
     });
 }
 
 fn render_success_state(ui: &mut egui::Ui, _text: &str, _config: &OverlayConfig) {
-    // Minimal success indicator
+    // Minimal success indicator for tiny size
     ui.vertical_centered(|ui| {
-        ui.add_space(15.0);
+        ui.add_space(1.0);
 
-        // Just a checkmark
+        // Just a checkmark - small
         let checkmark = RichText::new("✓")
-            .size(32.0)
+            .size(14.0)
             .color(Color32::WHITE)  // White on black
             .strong();
         ui.label(checkmark);
 
-        ui.add_space(15.0);
+        ui.add_space(1.0);
     });
 }
 
 fn render_error_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig) {
-    // Minimal error indicator
+    // Minimal error indicator for tiny size
     ui.vertical_centered(|ui| {
-        ui.add_space(15.0);
+        ui.add_space(1.0);
 
-        // Just an X or warning icon
+        // Just an X - small
         let error_icon = RichText::new("✗")
-            .size(32.0)
+            .size(14.0)
             .color(Color32::WHITE)  // White on black
             .strong();
         ui.label(error_icon);
 
-        ui.add_space(15.0);
+        ui.add_space(1.0);
     });
 }
 
