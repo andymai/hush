@@ -20,11 +20,15 @@ impl EguiOverlay for OverlayApp {
         _default_gfx_backend: &mut ThreeDBackend,
         glfw_backend: &mut GlfwBackend,
     ) {
-        // Get current state
-        let current_state = self.state.lock().unwrap().clone();
+        // Single lock for reading state and checking auto-hide condition
+        let (current_state, should_transition_to_idle) = {
+            let state = self.state.lock().unwrap();
+            let should_hide = state.should_hide();
+            (state.clone(), should_hide)
+        };
 
-        // Check if we should auto-hide
-        if current_state.should_hide() {
+        // Update state if needed (separate lock to minimize contention)
+        if should_transition_to_idle {
             debug!("Auto-hiding overlay");
             *self.state.lock().unwrap() = OverlayState::Idle;
         }
@@ -51,8 +55,14 @@ impl EguiOverlay for OverlayApp {
             OverlayAction::None => {}
         }
 
-        // Request repaint for animations
-        egui_context.request_repaint_after(Duration::from_millis(100));
+        // Adaptive repaint rate based on state for better performance
+        let repaint_interval = match &current_state {
+            OverlayState::Recording { .. } => Duration::from_millis(50), // 20 FPS for smooth waveform animation
+            OverlayState::Idle if self.config.show_button_when_idle => Duration::from_secs(1), // 1 FPS when showing idle button
+            OverlayState::Idle => Duration::from_secs(5), // Very slow when completely hidden
+            _ => Duration::from_millis(500), // 2 FPS for static states (processing/editing/success/error)
+        };
+        egui_context.request_repaint_after(repaint_interval);
     }
 }
 
