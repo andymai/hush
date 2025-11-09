@@ -169,8 +169,8 @@ pub enum OverlayTheme {
 impl Default for OverlayConfig {
     fn default() -> Self {
         Self {
-            width: 280.0,  // Wider pill shape
-            height: 70.0,  // Pill height
+            width: 200.0,  // Smaller, more compact
+            height: 50.0,  // Much shorter for sleeker look
             position: OverlayPosition::BottomCenter,
             opacity: 1.0,  // Fully opaque for clean look
             auto_hide_duration: Duration::from_secs(2),
