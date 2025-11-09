@@ -15,10 +15,6 @@ pub enum OverlayState {
     Processing {
         message: String,
     },
-    /// Editing - polishing the transcribed text with LLM
-    Editing {
-        message: String,
-    },
     /// Success - text was inserted successfully
     Success {
         text: String,
@@ -78,13 +74,6 @@ impl OverlayState {
         }
     }
 
-    /// Transition to editing state
-    pub fn editing(message: impl Into<String>) -> Self {
-        Self::Editing {
-            message: message.into(),
-        }
-    }
-
     /// Transition to success state with auto-hide
     pub fn success(text: impl Into<String>, auto_hide_after: Duration) -> Self {
         Self::Success {
@@ -124,11 +113,6 @@ impl OverlayState {
     /// Check if state is processing
     pub fn is_processing(&self) -> bool {
         matches!(self, Self::Processing { .. })
-    }
-
-    /// Check if state is editing
-    pub fn is_editing(&self) -> bool {
-        matches!(self, Self::Editing { .. })
     }
 }
 

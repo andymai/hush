@@ -462,7 +462,7 @@ impl CommandDispatcher {
                         let processed_text = if exec_result.should_process {
                             if let Some(ref processor) = text_processor_clone {
                                 info!("🔄 Processing text...");
-                                *state_handle_clone2.lock() = OverlayState::editing("Polishing text");
+                                // Keep current state (likely Recording) while processing
 
                                 match result_runtime.block_on(processor.process(&command_text)) {
                                     Ok(polished) => {

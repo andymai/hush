@@ -64,9 +64,6 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
                     OverlayState::Processing { message } => {
                         render_processing_state(ui, message, config);
                     }
-                    OverlayState::Editing { message } => {
-                        render_editing_state(ui, message, config);
-                    }
                     OverlayState::Success { text, .. } => {
                         render_success_state(ui, text, config);
                     }
@@ -201,20 +198,6 @@ fn render_processing_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayC
         ui.add_space(4.0);
 
         let text = RichText::new("processing...")
-            .size(10.0)
-            .color(Color32::WHITE);
-        ui.label(text);
-
-        ui.add_space(4.0);
-    });
-}
-
-fn render_editing_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig) {
-    // Minimal AI polishing indicator
-    ui.vertical_centered(|ui| {
-        ui.add_space(4.0);
-
-        let text = RichText::new("polishing...")
             .size(10.0)
             .color(Color32::WHITE);
         ui.label(text);
