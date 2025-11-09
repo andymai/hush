@@ -150,9 +150,10 @@ fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _con
     // Waveform animation - draw bars directly using painter for performance
     // Creates an animated waveform visualization that responds to audio amplitude
 
-    // Calculate total waveform width
-    let total_width = (WAVEFORM_NUM_BARS as f32 * WAVEFORM_BAR_WIDTH)
+    // Pre-calculated constants for performance
+    const TOTAL_WIDTH: f32 = (WAVEFORM_NUM_BARS as f32 * WAVEFORM_BAR_WIDTH)
         + ((WAVEFORM_NUM_BARS - 1) as f32 * WAVEFORM_BAR_SPACING);
+    const ROUNDING: f32 = WAVEFORM_BAR_WIDTH / 2.0;
 
     // Get the rect we can draw in
     let available_rect = ui.available_rect_before_wrap();
@@ -160,7 +161,8 @@ fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _con
     let available_height = available_rect.height();
 
     // Calculate starting position (centered)
-    let start_x = available_rect.left() + (available_width - total_width) / 2.0;
+    let start_x = available_rect.left() + (available_width - TOTAL_WIDTH) / 2.0;
+    let center_y = available_rect.center().y;
 
     // Draw each bar directly using the painter
     let painter = ui.painter();
@@ -179,14 +181,14 @@ fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _con
 
         // Calculate bar position (horizontally spaced, vertically centered)
         let x = start_x + (i as f32 * (WAVEFORM_BAR_WIDTH + WAVEFORM_BAR_SPACING));
-        let y = available_rect.top() + (available_height - height) / 2.0;
+        let y = center_y - height * 0.5;
 
         // Draw the bar with rounded ends (pill-shaped) for visual consistency with overlay
         let bar_rect = egui::Rect::from_min_size(
             egui::pos2(x, y),
             egui::vec2(WAVEFORM_BAR_WIDTH, height)
         );
-        painter.rect_filled(bar_rect, WAVEFORM_BAR_WIDTH / 2.0, Color32::WHITE);
+        painter.rect_filled(bar_rect, ROUNDING, Color32::WHITE);
     }
 
     // Allocate the space we used

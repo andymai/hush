@@ -1,11 +1,22 @@
 use anyhow::Result;
 use egui_overlay::{EguiOverlay, egui_window_glfw_passthrough::GlfwBackend, egui_render_three_d::ThreeDBackend};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::Duration;
 use tracing::{debug, info, warn};
+use once_cell::sync::Lazy;
 
 use super::state::{OverlayState, OverlayConfig};
 use super::ui::{render_overlay, OverlayAction};
+
+// Cache primary monitor info for faster overlay startup
+// Monitors rarely change during application runtime
+static PRIMARY_MONITOR_INFO: Lazy<([u32; 2], [i32; 2])> = Lazy::new(|| {
+    get_primary_monitor_info().unwrap_or_else(|| {
+        warn!("Failed to detect primary monitor, using fallback 1920x1080 at (0, 0)");
+        ([1920, 1080], [0, 0])
+    })
+});
 
 /// Internal struct that implements the EguiOverlay trait
 struct OverlayApp {
@@ -22,7 +33,7 @@ impl EguiOverlay for OverlayApp {
     ) {
         // Single lock for reading state and checking auto-hide condition
         let (current_state, should_transition_to_idle) = {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock();
             let should_hide = state.should_hide();
             (state.clone(), should_hide)
         };
@@ -30,7 +41,7 @@ impl EguiOverlay for OverlayApp {
         // Update state if needed (separate lock to minimize contention)
         if should_transition_to_idle {
             debug!("Auto-hiding overlay");
-            *self.state.lock().unwrap() = OverlayState::Idle;
+            *self.state.lock() = OverlayState::Idle;
         }
 
         // Render the UI
@@ -46,7 +57,7 @@ impl EguiOverlay for OverlayApp {
         match action {
             OverlayAction::StartRecording => {
                 info!("User clicked to start recording");
-                *self.state.lock().unwrap() = OverlayState::start_recording();
+                *self.state.lock() = OverlayState::start_recording();
             }
             OverlayAction::Settings => {
                 info!("User opened settings");
@@ -90,9 +101,7 @@ impl OverlayWindow {
     /// Update the overlay state
     pub fn set_state(&self, new_state: OverlayState) {
         debug!("Overlay state transition: {:?}", new_state);
-        if let Ok(mut state) = self.state.lock() {
-            *state = new_state;
-        }
+        *self.state.lock() = new_state;
     }
 
     /// Run the overlay window (blocking)
@@ -118,11 +127,8 @@ impl OverlayWindow {
 fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
     use egui_overlay::egui_window_glfw_passthrough::{GlfwBackend, GlfwConfig, glfw};
 
-    // Get primary monitor size and position
-    let (monitor_size, monitor_pos) = get_primary_monitor_info().unwrap_or_else(|| {
-        warn!("Failed to detect primary monitor, using fallback 1920x1080 at (0, 0)");
-        ([1920, 1080], [0, 0])
-    });
+    // Get cached primary monitor size and position
+    let (monitor_size, monitor_pos) = *PRIMARY_MONITOR_INFO;
     info!("Creating fullscreen overlay window: {}x{} at ({}, {})",
         monitor_size[0], monitor_size[1], monitor_pos[0], monitor_pos[1]);
 

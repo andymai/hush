@@ -45,7 +45,7 @@ impl OverlayState {
         }
     }
 
-    /// Update recording amplitude
+    /// Update recording amplitude (immutable - creates new state)
     pub fn with_amplitude(self, new_amplitude: f32) -> Self {
         match self {
             Self::Recording { start_time, .. } => Self::Recording {
@@ -53,6 +53,13 @@ impl OverlayState {
                 amplitude: new_amplitude.clamp(0.0, 1.0),
             },
             _ => self,
+        }
+    }
+
+    /// Update recording amplitude in-place (more efficient - avoids clone)
+    pub fn update_amplitude(&mut self, new_amplitude: f32) {
+        if let Self::Recording { amplitude, .. } = self {
+            *amplitude = new_amplitude.clamp(0.0, 1.0);
         }
     }
 
