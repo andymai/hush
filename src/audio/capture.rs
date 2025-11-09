@@ -4,6 +4,7 @@ use cpal::{Device, Host, Stream, StreamConfig, SampleRate};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use parking_lot::Mutex;
 use std::sync::Arc;
+use std::sync::mpsc;
 use tracing::{info, warn, error, debug, trace};
 
 pub struct AudioCapture {
@@ -13,6 +14,22 @@ pub struct AudioCapture {
     buffer: Arc<Mutex<Vec<f32>>>,
     is_recording: Arc<Mutex<bool>>,
     simulated_mode: bool,
+    amplitude_tx: Option<mpsc::Sender<f32>>,
+}
+
+/// Calculate RMS (Root Mean Square) amplitude from audio samples
+/// Returns a value between 0.0 and 1.0
+fn calculate_rms_amplitude(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+
+    let sum_squares: f32 = samples.iter().map(|&s| s * s).sum();
+    let rms = (sum_squares / samples.len() as f32).sqrt();
+
+    // Normalize to 0.0-1.0 range (assuming typical speech is around 0.1-0.3 RMS)
+    // Apply a multiplier and clamp to get good visual response
+    (rms * 3.0).min(1.0)
 }
 
 impl AudioCapture {
@@ -120,6 +137,7 @@ impl AudioCapture {
                             buffer: Arc::new(Mutex::new(Vec::new())),
                             is_recording: Arc::new(Mutex::new(false)),
                             simulated_mode: true,
+                            amplitude_tx: None,
                         });
                     }
                 }
@@ -141,7 +159,7 @@ impl AudioCapture {
         
         let buffer = Arc::new(Mutex::new(Vec::new()));
         let is_recording = Arc::new(Mutex::new(false));
-        
+
         Ok(AudioCapture {
             device,
             config,
@@ -149,6 +167,7 @@ impl AudioCapture {
             buffer,
             is_recording,
             simulated_mode: false,
+            amplitude_tx: None,
         })
     }
     
@@ -189,13 +208,20 @@ impl AudioCapture {
         
         let buffer_clone = Arc::clone(&self.buffer);
         let is_recording_clone = Arc::clone(&self.is_recording);
-        
+        let amplitude_tx_clone = self.amplitude_tx.clone();
+
         // Build the input stream
         let stream = self.device.build_input_stream(
             &self.config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
                 if *is_recording_clone.lock() {
                     buffer_clone.lock().extend_from_slice(data);
+
+                    // Calculate and send amplitude for waveform visualization
+                    if let Some(ref tx) = amplitude_tx_clone {
+                        let amplitude = calculate_rms_amplitude(data);
+                        let _ = tx.send(amplitude); // Ignore send errors (non-blocking)
+                    }
                 }
             },
             |err| {
@@ -298,6 +324,14 @@ impl AudioCapture {
     
     pub fn get_device_name(&self) -> String {
         self.device.name().unwrap_or("Unknown Device".to_string())
+    }
+
+    /// Enable amplitude monitoring and return the receiver channel
+    /// Call this before start_recording() to receive amplitude updates
+    pub fn enable_amplitude_monitoring(&mut self) -> mpsc::Receiver<f32> {
+        let (tx, rx) = mpsc::channel();
+        self.amplitude_tx = Some(tx);
+        rx
     }
     
     fn find_device_by_name(host: &Host, name: &str) -> Result<Device> {
