@@ -245,9 +245,14 @@ impl CommandDispatcher {
             "light" => EditingMode::Light,
             "medium" => EditingMode::Medium,
             "aggressive" => EditingMode::Aggressive,
-            _ => {
-                warn!("Unknown editing mode '{}', using Medium", editing_mode_str);
-                EditingMode::Medium
+            unknown => {
+                error!("Invalid editing mode: '{}'", unknown);
+                println!("❌ Invalid editing mode: '{}'", unknown);
+                println!("Valid options: light, medium, aggressive");
+                return Err(anyhow::anyhow!(
+                    "Invalid editing mode '{}'. Valid options: light, medium, aggressive",
+                    unknown
+                ));
             }
         };
 
