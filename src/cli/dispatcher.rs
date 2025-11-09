@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use tracing::{info, warn, error, debug};
 
 // Import Hush components
-use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config, hotkey, tui};
+use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config, hotkey};
 
 pub struct CommandDispatcher {
     _config_path: Option<PathBuf>,
@@ -121,14 +121,17 @@ impl CommandDispatcher {
             info!("Starting CLI/hotkey mode...");
             println!("🚧 Direct hotkey mode not yet implemented in new CLI system.");
             println!("Please use one of these alternatives:");
-            println!("  • ./hush start           - Use TUI interface (default)");
             println!("  • cargo run --bin hush-mvp daemon  - Use original daemon mode");
             println!("  • ./hush record          - Single recording mode");
             Ok(())
         } else {
-            // Use the TUI interface (default behavior)
-            info!("Starting TUI interface...");
-            tui::run_tui().await
+            // TUI has been removed
+            println!("❌ TUI interface has been removed from this project.");
+            println!("Please use one of these alternatives:");
+            println!("  • ./hush start --cli      - Start with CLI/hotkey mode");
+            println!("  • ./hush record           - Single recording mode");
+            println!("  • ./hush manual           - Manual recording mode");
+            Ok(())
         }
     }
 

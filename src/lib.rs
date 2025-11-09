@@ -13,9 +13,6 @@ pub mod text;
 pub mod transcription;
 pub mod wakeword;
 
-// TUI module
-pub mod tui;
-
 // Overlay module (Wispr Flow-style floating window)
 pub mod overlay;
 
