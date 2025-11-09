@@ -11,10 +11,10 @@ Hush is a production-ready voice-to-text application built specifically for Linu
 - ⌨️ **Universal Text Insertion** - Works with **ALL applications** including VMs, password fields, games
 - 🔒 **Privacy First** - All processing happens locally on your machine
 - 🎯 **Hardware-Level Integration** - Linux UInput support for maximum compatibility
-- 🖥️ **Modern CLI Interface** - Comprehensive command-line interface with TUI support
+- 🖥️ **Modern CLI Interface** - Comprehensive command-line interface
 - 📊 **Advanced Logging** - Structured logging with performance metrics and request tracing
 - 🔧 **Multiple Model Sizes** - From tiny (75MB) to large (2.9GB) Whisper models
-- ⚡ **Multiple Modes** - Interactive TUI, single recording, hotkey support
+- ⚡ **Multiple Modes** - Single recording, manual mode, hotkey support
 
 ## 🚀 Quick Start
 
@@ -73,17 +73,16 @@ For universal compatibility with all applications:
 
 ## 🎮 Usage Modes
 
-### 🎤 Start Voice-to-Text
+### 🎤 Voice-to-Text Modes
 ```bash
-# Interactive TUI mode (recommended)
-./hush start
-
-# CLI/hotkey mode 
+# CLI/hotkey mode (work in progress)
 ./hush start --cli
 
-# Background daemon mode
+# Background daemon mode (work in progress)
 ./hush start --daemon
 ```
+
+**Note:** Direct start modes are under development. Use recording modes below for immediate use.
 
 ### 🎧 Quick Recording
 ```bash
@@ -360,7 +359,7 @@ sudo apt install libasound2-dev pkg-config
 **Latest features:**
 - 🚀 **CUDA GPU Acceleration** - Up to 10x faster transcription
 - 📊 **Structured Logging** - Advanced debugging and performance monitoring
-- 🖥️ **Modern CLI** - Comprehensive command interface with TUI support
+- 🖥️ **Modern CLI** - Comprehensive command-line interface
 - ⚡ **Real-time Processing** - GPU-accelerated real-time transcription
 - 🔧 **Automated Setup** - One-command UInput configuration
 
