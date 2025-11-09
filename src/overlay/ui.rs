@@ -91,223 +91,130 @@ fn create_frame(config: &OverlayConfig) -> Frame {
         })
 }
 
-fn render_idle_state(ui: &mut egui::Ui, config: &OverlayConfig) -> OverlayAction {
+fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayAction {
     let mut action = OverlayAction::None;
 
+    // Minimal Wispr Flow-style idle button
     ui.vertical_centered(|ui| {
-        ui.add_space(5.0);
+        ui.add_space(12.0);
 
-        // Microphone icon and title
-        let title = RichText::new("🎤 Hush")
-            .size(18.0)
-            .strong();
-        ui.label(title);
+        // Just a simple microphone icon, no text
+        let icon = RichText::new("🎤")
+            .size(32.0);
 
-        ui.add_space(8.0);
-
-        // Instruction text
-        let instruction = RichText::new("Click or use hotkey")
-            .size(12.0)
-            .color(get_text_color(config.theme, 0.7));
-        ui.label(instruction);
-
-        ui.add_space(5.0);
-
-        // Clickable button area
-        let button_response = ui.add(
-            egui::Label::new(
-                RichText::new("Ctrl+Win+V")
-                    .size(11.0)
-                    .color(get_text_color(config.theme, 0.5))
-            )
-            .sense(Sense::click())
+        // Make the entire area clickable
+        let response = ui.add(
+            egui::Label::new(icon)
+                .sense(Sense::click())
         );
 
-        if button_response.clicked() {
+        if response.clicked() {
             action = OverlayAction::StartRecording;
         }
 
-        ui.add_space(5.0);
+        ui.add_space(12.0);
     });
 
     action
 }
 
-fn render_recording_state(ui: &mut egui::Ui, duration: f32, config: &OverlayConfig) {
+fn render_recording_state(ui: &mut egui::Ui, duration: f32, _config: &OverlayConfig) {
+    // Wispr Flow-style waveform animation
     ui.vertical_centered(|ui| {
         ui.add_space(8.0);
 
-        // Recording indicator
-        let recording_text = RichText::new("🔴 Recording")
-            .size(16.0)
-            .color(Color32::from_rgb(220, 50, 50))
-            .strong();
-        ui.label(recording_text);
+        // Draw animated waveform bars
+        ui.horizontal(|ui| {
+            ui.add_space(10.0);
 
-        ui.add_space(10.0);
+            // Create 5 animated bars that pulse with different frequencies
+            for i in 0..5 {
+                let frequency = 2.0 + (i as f32 * 0.5);
+                let phase = i as f32 * 0.3;
+                let height = 20.0 + (((duration * frequency + phase).sin() + 1.0) * 15.0);
 
-        // Simple progress bar representation (we'll enhance this later)
-        let progress = (duration * 2.0).sin().abs(); // Pulsing effect
-        ui.add(egui::ProgressBar::new(progress).show_percentage());
+                let bar_color = Color32::from_rgb(100, 150, 255);
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(6.0, height),
+                    Sense::hover()
+                );
+
+                ui.painter().rect_filled(
+                    rect,
+                    3.0, // rounded corners
+                    bar_color
+                );
+
+                ui.add_space(4.0);
+            }
+
+            ui.add_space(10.0);
+        });
 
         ui.add_space(8.0);
-
-        // Duration
-        let duration_text = RichText::new(format!("{:.1}s", duration))
-            .size(14.0)
-            .color(get_text_color(config.theme, 0.8));
-        ui.label(duration_text);
-
-        ui.add_space(5.0);
-
-        // Instruction
-        let instruction = RichText::new("Release to transcribe")
-            .size(11.0)
-            .color(get_text_color(config.theme, 0.6));
-        ui.label(instruction);
-
-        ui.add_space(5.0);
     });
 }
 
-fn render_processing_state(ui: &mut egui::Ui, message: &str, config: &OverlayConfig) {
+fn render_processing_state(ui: &mut egui::Ui, _message: &str, config: &OverlayConfig) {
+    // Minimal processing indicator
     ui.vertical_centered(|ui| {
         ui.add_space(15.0);
 
-        // Spinner icon (we'll use a simple rotating character)
+        // Simple spinner
         let spinner = RichText::new("⟳")
-            .size(24.0)
+            .size(28.0)
             .color(get_accent_color(config.theme));
         ui.label(spinner);
 
-        ui.add_space(10.0);
-
-        // Processing message
-        let msg = RichText::new(message)
-            .size(14.0)
-            .color(get_text_color(config.theme, 0.9));
-        ui.label(msg);
-
         ui.add_space(15.0);
     });
 }
 
-fn render_editing_state(ui: &mut egui::Ui, message: &str, config: &OverlayConfig) {
+fn render_editing_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig) {
+    // Minimal AI polishing indicator
     ui.vertical_centered(|ui| {
         ui.add_space(15.0);
 
-        // Editing icon (sparkles for AI polishing)
+        // Just sparkles icon
         let icon = RichText::new("✨")
-            .size(24.0)
+            .size(28.0)
             .color(Color32::from_rgb(255, 200, 100));
         ui.label(icon);
 
-        ui.add_space(10.0);
-
-        // Editing message
-        let msg = RichText::new(message)
-            .size(14.0)
-            .color(get_text_color(config.theme, 0.9));
-        ui.label(msg);
-
-        ui.add_space(5.0);
-
-        // Subtitle
-        let subtitle = RichText::new("AI Polishing...")
-            .size(11.0)
-            .color(get_text_color(config.theme, 0.6))
-            .italics();
-        ui.label(subtitle);
-
         ui.add_space(15.0);
     });
 }
 
-fn render_success_state(ui: &mut egui::Ui, text: &str, config: &OverlayConfig) {
+fn render_success_state(ui: &mut egui::Ui, _text: &str, _config: &OverlayConfig) {
+    // Minimal success indicator
     ui.vertical_centered(|ui| {
-        ui.add_space(10.0);
+        ui.add_space(15.0);
 
-        // Success checkmark
+        // Just a checkmark
         let checkmark = RichText::new("✓")
-            .size(28.0)
+            .size(32.0)
             .color(Color32::from_rgb(50, 200, 50))
             .strong();
         ui.label(checkmark);
 
-        ui.add_space(8.0);
-
-        // Success message
-        let success_text = RichText::new("Text Inserted")
-            .size(14.0)
-            .color(get_text_color(config.theme, 0.9));
-        ui.label(success_text);
-
-        ui.add_space(5.0);
-
-        // Show preview of inserted text (truncated)
-        let preview = if text.len() > 40 {
-            format!("\"{}...\"", &text[..40])
-        } else {
-            format!("\"{}\"", text)
-        };
-
-        let preview_text = RichText::new(preview)
-            .size(11.0)
-            .color(get_text_color(config.theme, 0.6))
-            .italics();
-        ui.label(preview_text);
-
-        ui.add_space(10.0);
+        ui.add_space(15.0);
     });
 }
 
-fn render_error_state(ui: &mut egui::Ui, message: &str, config: &OverlayConfig) {
+fn render_error_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig) {
+    // Minimal error indicator
     ui.vertical_centered(|ui| {
-        ui.add_space(10.0);
+        ui.add_space(15.0);
 
-        // Error icon
-        let error_icon = RichText::new("⚠")
-            .size(28.0)
+        // Just an X or warning icon
+        let error_icon = RichText::new("✗")
+            .size(32.0)
             .color(Color32::from_rgb(220, 50, 50))
             .strong();
         ui.label(error_icon);
 
-        ui.add_space(8.0);
-
-        // Error title
-        let error_title = RichText::new("Error")
-            .size(14.0)
-            .color(Color32::from_rgb(220, 50, 50))
-            .strong();
-        ui.label(error_title);
-
-        ui.add_space(5.0);
-
-        // Error message
-        let error_text = RichText::new(message)
-            .size(11.0)
-            .color(get_text_color(config.theme, 0.8));
-        ui.label(error_text);
-
-        ui.add_space(10.0);
+        ui.add_space(15.0);
     });
-}
-
-fn get_text_color(theme: OverlayTheme, alpha: f32) -> Color32 {
-    match theme {
-        OverlayTheme::Dark => Color32::from_rgba_unmultiplied(
-            255,
-            255,
-            255,
-            (alpha * 255.0) as u8,
-        ),
-        OverlayTheme::Light => Color32::from_rgba_unmultiplied(
-            20,
-            20,
-            20,
-            (alpha * 255.0) as u8,
-        ),
-    }
 }
 
 fn get_accent_color(theme: OverlayTheme) -> Color32 {
