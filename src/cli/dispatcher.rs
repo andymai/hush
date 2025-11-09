@@ -367,14 +367,10 @@ impl CommandDispatcher {
         let insertion_history = Arc::new(Mutex::new(InsertionHistory::new()));
         info!("✅ Voice command system initialized");
 
-        // Create overlay
+        // Create overlay with new tiny design
         let overlay = OverlayWindowBuilder::new()
-            .width(320.0)
-            .height(120.0)
-            .position(OverlayPosition::BottomRight)
-            .opacity(0.95)
             .show_button_when_idle(!no_button)
-            .build();
+            .build();  // Uses defaults: 10x20 idle, 80x20 recording, BottomCenter
 
         let state_handle = overlay.state();
 
