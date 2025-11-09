@@ -277,6 +277,7 @@ impl CommandDispatcher {
 
         // Initialize audio capture (main thread - !Send)
         let mut audio_capture = AudioCapture::new(None)?;
+        let amplitude_rx = Arc::new(Mutex::new(audio_capture.enable_amplitude_monitoring()));
         info!("✅ Audio capture initialized: {}", audio_capture.get_device_name());
 
         // Initialize transcriber
@@ -541,6 +542,36 @@ impl CommandDispatcher {
                         let _ = transcription_tx.send(TranscriptionResult::Error(
                             "Failed to start recording".to_string()
                         ));
+                    } else {
+                        // Start polling amplitude updates
+                        let state_handle_amp = state_handle.clone();
+                        let amplitude_rx_clone = amplitude_rx.clone();
+
+                        // Continuously poll for amplitude updates in a non-blocking way
+                        // This will run until we receive StopRecording
+                        std::thread::spawn(move || {
+                            loop {
+                                let amp_result = amplitude_rx_clone.lock().unwrap().try_recv();
+                                match amp_result {
+                                    Ok(amplitude) => {
+                                        // Update overlay state with current amplitude
+                                        let mut state = state_handle_amp.lock().unwrap();
+                                        if state.is_recording() {
+                                            *state = state.clone().with_amplitude(amplitude);
+                                        } else {
+                                            break; // Stop when no longer recording
+                                        }
+                                    }
+                                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                                        // No new amplitude data, sleep briefly
+                                        std::thread::sleep(std::time::Duration::from_millis(16)); // ~60fps
+                                    }
+                                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                                        break; // Channel closed, stop polling
+                                    }
+                                }
+                            }
+                        });
                     }
                 }
                 AudioCommand::StopRecording => {
