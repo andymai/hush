@@ -169,8 +169,8 @@ pub enum OverlayTheme {
 impl Default for OverlayConfig {
     fn default() -> Self {
         Self {
-            width: 80.0,  // Tiny when recording
-            height: 20.0, // Very compact
+            width: 80.0,  // Recording width
+            height: 24.0, // Recording height (idle is 60x4, recording is 80x24)
             position: OverlayPosition::BottomCenter,
             opacity: 1.0,  // Fully opaque for clean look
             auto_hide_duration: Duration::from_secs(2),

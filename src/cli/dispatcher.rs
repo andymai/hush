@@ -385,8 +385,8 @@ impl CommandDispatcher {
                         let _ = audio_cmd_tx_clone.send(AudioCommand::StartRecording);
                     }
                     Ok(HotkeyEvent::Released) => {
-                        *state_handle_clone.lock().unwrap() =
-                            OverlayState::processing("Transcribing audio...");
+                        // Stop recording - state transitions handled by result handler thread
+                        // Visual state remains in Recording until transcription completes
                         let _ = audio_cmd_tx_clone.send(AudioCommand::StopRecording);
                     }
                     Err(_) => break,
@@ -429,10 +429,7 @@ impl CommandDispatcher {
 
                                     match inserter.lock().unwrap().undo_last_insertion(last_entry.char_count) {
                                         Ok(_) => {
-                                            *state_handle_clone2.lock().unwrap() = OverlayState::success(
-                                                "Undo successful",
-                                                std::time::Duration::from_secs(2)
-                                            );
+                                            *state_handle_clone2.lock().unwrap() = OverlayState::idle();
                                         }
                                         Err(e) => {
                                             error!("Undo failed: {}", e);
@@ -506,10 +503,7 @@ impl CommandDispatcher {
                             processed_text
                         };
 
-                        *state_handle_clone2.lock().unwrap() = OverlayState::success(
-                            &display_text,
-                            std::time::Duration::from_secs(4)
-                        );
+                        *state_handle_clone2.lock().unwrap() = OverlayState::idle();
                     }
                     TranscriptionResult::Error(error_msg) => {
                         error!("❌ Transcription failed: {}", error_msg);
