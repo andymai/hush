@@ -13,10 +13,16 @@
 mod filler_words;
 mod llm;
 mod config;
+mod commands;
+mod executor;
+mod history;
 
-pub use config::{ProcessingConfig, EditingMode};
+pub use config::{ProcessingConfig, EditingMode, LlmProvider};
 pub use filler_words::FillerWordRemover;
 pub use llm::LlmProcessor;
+pub use commands::{VoiceCommand, ParsedCommand, CommandParser};
+pub use executor::{CommandExecutor, ExecutionResult};
+pub use history::{InsertionHistory, HistoryEntry};
 
 use anyhow::Result;
 use tracing::{debug, info};
@@ -35,20 +41,24 @@ impl TextProcessor {
 
         let filler_remover = FillerWordRemover::new();
 
-        let llm_processor = if config.use_llm {
-            match LlmProcessor::new(&config.llm_model_path) {
-                Ok(processor) => {
-                    info!("✅ LLM processor initialized");
-                    Some(processor)
-                }
-                Err(e) => {
-                    info!("⚠️  LLM processor not available: {}", e);
-                    info!("Will use rule-based processing only");
-                    None
+        let llm_processor = match &config.llm_provider {
+            LlmProvider::None => {
+                info!("LLM processing disabled - using rule-based only");
+                None
+            }
+            provider => {
+                match LlmProcessor::new(provider.clone(), config.max_tokens, config.temperature) {
+                    Ok(processor) => {
+                        info!("✅ LLM processor initialized");
+                        Some(processor)
+                    }
+                    Err(e) => {
+                        info!("⚠️  LLM processor not available: {}", e);
+                        info!("Will use rule-based processing only");
+                        None
+                    }
                 }
             }
-        } else {
-            None
         };
 
         Ok(Self {
@@ -68,12 +78,8 @@ impl TextProcessor {
 
         // Stage 2: LLM polishing (optional, slower but higher quality)
         let polished = if let Some(ref llm) = self.llm_processor {
-            if self.config.use_llm {
-                debug!("Applying LLM polishing...");
-                llm.polish(&cleaned, self.config.mode).await?
-            } else {
-                cleaned
-            }
+            debug!("Applying LLM polishing...");
+            llm.polish(&cleaned, self.config.mode).await?
         } else {
             cleaned
         };

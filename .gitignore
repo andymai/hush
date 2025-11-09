@@ -58,3 +58,8 @@ assets/sounds/*.wav
 # Config files with secrets
 config/local.toml
 /hush
+.env
+# API keys and secrets
+.env
+.env.*
+!.env.example

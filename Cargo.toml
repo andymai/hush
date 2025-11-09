@@ -33,8 +33,8 @@ whisper-rs = { version = "0.15", features = ["tracing_backend", "cuda"] }
 # Text processing
 regex = "1.10"  # Pattern matching for filler words
 
-# LLM integration (optional, for future enhancement)
-# llama-cpp-2 = "0.1"  # Disabled until API is stabilized
+# LLM integration for text polishing
+dotenvy = "0.15"  # Environment variable loading
 
 # System integration
 x11rb = "0.13"

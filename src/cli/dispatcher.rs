@@ -8,7 +8,7 @@ use tracing::{info, warn, error, debug};
 use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config, hotkey};
 use crate::overlay::{OverlayWindowBuilder, OverlayState, OverlayPosition};
 use crate::transcription::SimpleWhisperTranscriber;
-use crate::text_processing::{TextProcessor, ProcessingConfig, EditingMode};
+use crate::text_processing::{TextProcessor, ProcessingConfig, EditingMode, LlmProvider, CommandParser, CommandExecutor, InsertionHistory};
 use crate::hotkey::{HotkeyManager, HotkeyEvent};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -300,16 +300,32 @@ impl CommandDispatcher {
             }
         };
 
+        // Load environment variables from .env file
+        let _ = dotenvy::dotenv();
+
         // Initialize text processor
         let text_processor = if !no_processing {
-            let llm_model_path = dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".hush/models/llama-7b-chat.gguf");
+            // Configure LLM provider from environment
+            let llm_provider = if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
+                if !api_key.is_empty() {
+                    info!("Using Anthropic Claude API for text polishing");
+                    LlmProvider::Anthropic {
+                        api_key: Some(api_key),
+                        model: "claude-3-haiku-20240307".to_string(),
+                    }
+                } else {
+                    LlmProvider::None
+                }
+            } else {
+                info!("No ANTHROPIC_API_KEY found, using rule-based processing only");
+                LlmProvider::None
+            };
 
             let processing_config = ProcessingConfig {
                 mode: editing_mode,
-                use_llm: llm_model_path.exists(),
-                llm_model_path,
+                llm_provider,
+                max_tokens: 200,
+                temperature: 0.3,
             };
 
             match TextProcessor::new(processing_config) {
@@ -343,6 +359,12 @@ impl CommandDispatcher {
                 None
             }
         };
+
+        // Initialize voice command components
+        let command_parser = Arc::new(CommandParser::new());
+        let command_executor = Arc::new(CommandExecutor::new());
+        let insertion_history = Arc::new(Mutex::new(InsertionHistory::new()));
+        info!("✅ Voice command system initialized");
 
         // Create overlay
         let overlay = OverlayWindowBuilder::new()
@@ -379,6 +401,9 @@ impl CommandDispatcher {
         let state_handle_clone2 = state_handle.clone();
         let text_inserter_clone = text_inserter.clone();
         let text_processor_clone = text_processor.clone();
+        let command_parser_clone = command_parser.clone();
+        let command_executor_clone = command_executor.clone();
+        let insertion_history_clone = insertion_history.clone();
         let result_thread = thread::spawn(move || {
             let result_runtime = tokio::runtime::Runtime::new().expect("Failed to create runtime");
 
@@ -387,29 +412,94 @@ impl CommandDispatcher {
                     TranscriptionResult::Success(raw_text) => {
                         info!("✅ Transcription successful: '{}'", raw_text);
 
-                        // Process text
-                        let processed_text = if let Some(ref processor) = text_processor_clone {
-                            info!("🔄 Processing text...");
-                            *state_handle_clone2.lock().unwrap() = OverlayState::editing("Polishing text");
+                        // Parse for voice commands
+                        let parsed = command_parser_clone.parse(&raw_text);
 
-                            match result_runtime.block_on(processor.process(&raw_text)) {
-                                Ok(polished) => {
-                                    info!("✨ Text polished: '{}'", polished);
-                                    polished
-                                }
-                                Err(e) => {
-                                    warn!("Text processing failed: {}, using raw text", e);
-                                    raw_text
+                        // Execute commands
+                        let exec_result = command_executor_clone.execute(&parsed);
+
+                        // Handle undo request
+                        if exec_result.undo_requested {
+                            info!("🔙 Undo requested");
+
+                            if let Some(ref inserter) = text_inserter_clone {
+                                let mut history = insertion_history_clone.lock().unwrap();
+
+                                if let Some(last_entry) = history.pop_last() {
+                                    info!("Undoing last insertion: '{}' ({} chars)",
+                                          if last_entry.text.len() > 50 { &last_entry.text[..50] } else { &last_entry.text },
+                                          last_entry.char_count);
+
+                                    match inserter.lock().unwrap().undo_last_insertion(last_entry.char_count) {
+                                        Ok(_) => {
+                                            *state_handle_clone2.lock().unwrap() = OverlayState::success(
+                                                "Undo successful",
+                                                std::time::Duration::from_secs(2)
+                                            );
+                                        }
+                                        Err(e) => {
+                                            error!("Undo failed: {}", e);
+                                            *state_handle_clone2.lock().unwrap() = OverlayState::error(
+                                                "Undo failed",
+                                                std::time::Duration::from_secs(3)
+                                            );
+                                        }
+                                    }
+                                } else {
+                                    warn!("No recent insertion to undo");
+                                    *state_handle_clone2.lock().unwrap() = OverlayState::error(
+                                        "Nothing to undo",
+                                        std::time::Duration::from_secs(2)
+                                    );
                                 }
                             }
+                            continue;
+                        }
+
+                        // If no text to insert, skip
+                        if exec_result.text.is_none() {
+                            continue;
+                        }
+
+                        let command_text = exec_result.text.unwrap();
+
+                        // Process text (if enabled and should_process is true)
+                        let processed_text = if exec_result.should_process {
+                            if let Some(ref processor) = text_processor_clone {
+                                info!("🔄 Processing text...");
+                                *state_handle_clone2.lock().unwrap() = OverlayState::editing("Polishing text");
+
+                                match result_runtime.block_on(processor.process(&command_text)) {
+                                    Ok(polished) => {
+                                        info!("✨ Text polished: '{}'", polished);
+                                        polished
+                                    }
+                                    Err(e) => {
+                                        warn!("Text processing failed: {}, using command text", e);
+                                        command_text
+                                    }
+                                }
+                            } else {
+                                command_text
+                            }
                         } else {
-                            raw_text
+                            // Commands already formatted the text, skip processing
+                            command_text
                         };
 
                         // Insert text
                         if let Some(ref inserter) = text_inserter_clone {
                             thread::sleep(std::time::Duration::from_millis(200));
-                            let _ = inserter.lock().unwrap().insert_text(&processed_text);
+
+                            match inserter.lock().unwrap().insert_text(&processed_text) {
+                                Ok(_) => {
+                                    // Record in history for undo
+                                    insertion_history_clone.lock().unwrap().record(processed_text.clone());
+                                }
+                                Err(e) => {
+                                    error!("Text insertion failed: {}", e);
+                                }
+                            }
                         }
 
                         // Update overlay
