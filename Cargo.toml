@@ -30,6 +30,12 @@ safetensors = "0.4"
 # Alternative whisper implementation
 whisper-rs = { version = "0.15", features = ["tracing_backend", "cuda"] }
 
+# Text processing
+regex = "1.10"  # Pattern matching for filler words
+
+# LLM integration (optional, for future enhancement)
+# llama-cpp-2 = "0.1"  # Disabled until API is stabilized
+
 # System integration
 x11rb = "0.13"
 enigo = "0.2"
@@ -50,6 +56,10 @@ clap = { version = "4.0", features = ["derive", "color", "help", "usage"] }
 ratatui = "0.28"
 crossterm = { version = "0.28", features = ["event-stream"] }
 tui-input = "0.10"
+
+# Overlay GUI dependencies
+egui = "0.23"  # Must match egui_overlay 0.5 dependency
+egui_overlay = "0.5"
 
 # System notifications
 notify-rust = "4.10"
@@ -102,6 +112,12 @@ panic = "abort"
 opt-level = 0
 debug = true
 
+# Main application
+[[bin]]
+name = "hush"
+path = "src/main.rs"
+
+# Model management utilities
 [[bin]]
 name = "model-manager"
 path = "src/bin/model-manager.rs"
@@ -110,39 +126,16 @@ path = "src/bin/model-manager.rs"
 name = "simple-model-manager"
 path = "src/bin/simple-model-manager.rs"
 
+# Integration tests
 [[bin]]
-name = "test-transcription"
-path = "src/bin/test-transcription.rs"
+name = "test-overlay"
+path = "src/bin/test-overlay.rs"
 
 [[bin]]
-name = "test-audio"
-path = "src/bin/test-audio.rs"
+name = "test-full-integration"
+path = "src/bin/test-full-integration.rs"
 
 [[bin]]
-name = "test-text-insertion"
-path = "src/bin/test-text-insertion.rs"
-
-[[bin]]
-name = "test-simple-whisper"
-path = "src/bin/test-simple-whisper.rs"
-
-[[bin]]
-name = "test-voice-to-text"
-path = "src/bin/test-voice-to-text.rs"
-
-[[bin]]
-name = "test-text-insertion-simple"
-path = "src/bin/test-text-insertion-simple.rs"
-
-[[bin]]
-name = "test-working-uinput"
-path = "src/bin/test-working-uinput.rs"
-
-[[bin]]
-name = "test-cpal-devices"
-path = "src/bin/test-cpal-devices.rs"
-
-[[bin]]
-name = "hush"
-path = "src/main.rs"
+name = "test-intelligent-editing"
+path = "src/bin/test-intelligent-editing.rs"
 

@@ -16,6 +16,12 @@ pub mod wakeword;
 // TUI module
 pub mod tui;
 
+// Overlay module (Wispr Flow-style floating window)
+pub mod overlay;
+
+// Text processing module (intelligent auto-editing)
+pub mod text_processing;
+
 // System tray integration (temporarily disabled due to compilation issues)
 // pub mod tray;
 
