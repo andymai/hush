@@ -169,10 +169,10 @@ pub enum OverlayTheme {
 impl Default for OverlayConfig {
     fn default() -> Self {
         Self {
-            width: 120.0,  // Wide enough for waveform animation
-            height: 60.0,  // Minimal height like Wispr Flow
+            width: 280.0,  // Wider pill shape
+            height: 70.0,  // Pill height
             position: OverlayPosition::BottomCenter,
-            opacity: 0.95,
+            opacity: 1.0,  // Fully opaque for clean look
             auto_hide_duration: Duration::from_secs(2),
             show_button_when_idle: true,
             theme: OverlayTheme::Dark,
