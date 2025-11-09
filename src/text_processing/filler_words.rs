@@ -32,8 +32,21 @@ static SPACE_BEFORE_PUNCTUATION: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\s+([,.!?;:])").unwrap()
 });
 
-static REPEATED_PUNCTUATION: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"([,.!?])\1+").unwrap()
+// Multiple patterns for repeated punctuation (Rust regex doesn't support backreferences)
+static REPEATED_PERIODS: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"\.{2,}").unwrap()
+});
+
+static REPEATED_COMMAS: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r",{2,}").unwrap()
+});
+
+static REPEATED_EXCLAMATION: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"!{2,}").unwrap()
+});
+
+static REPEATED_QUESTION: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"\?{2,}").unwrap()
 });
 
 pub struct FillerWordRemover {
@@ -83,8 +96,11 @@ impl FillerWordRemover {
         // Fix punctuation spacing
         result = SPACE_BEFORE_PUNCTUATION.replace_all(&result, "$1").to_string();
 
-        // Remove repeated punctuation
-        result = REPEATED_PUNCTUATION.replace_all(&result, "$1").to_string();
+        // Remove repeated punctuation (each type separately)
+        result = REPEATED_PERIODS.replace_all(&result, ".").to_string();
+        result = REPEATED_COMMAS.replace_all(&result, ",").to_string();
+        result = REPEATED_EXCLAMATION.replace_all(&result, "!").to_string();
+        result = REPEATED_QUESTION.replace_all(&result, "?").to_string();
 
         // Capitalize first letter
         result = Self::capitalize_first(&result);
