@@ -533,28 +533,45 @@ impl CommandDispatcher {
                             "Failed to start recording".to_string()
                         ));
                     } else {
-                        // Start polling amplitude updates
+                        // Start polling amplitude updates with batching for performance
                         let state_handle_amp = state_handle.clone();
                         let amplitude_rx_clone = amplitude_rx.clone();
 
-                        // Continuously poll for amplitude updates in a non-blocking way
-                        // This will run until we receive StopRecording
+                        // Batch amplitude updates to match overlay repaint rate (20 FPS during recording)
+                        // This reduces mutex contention and provides smoother averaged values
                         std::thread::spawn(move || {
+                            let mut amplitude_buffer = Vec::with_capacity(10);
+                            let update_interval = std::time::Duration::from_millis(50); // 20 Hz, matches recording repaint
+                            let mut last_update = std::time::Instant::now();
+
                             loop {
                                 let amp_result = amplitude_rx_clone.lock().unwrap().try_recv();
                                 match amp_result {
                                     Ok(amplitude) => {
-                                        // Update overlay state with current amplitude
-                                        let mut state = state_handle_amp.lock().unwrap();
-                                        if state.is_recording() {
-                                            *state = state.clone().with_amplitude(amplitude);
-                                        } else {
-                                            break; // Stop when no longer recording
+                                        amplitude_buffer.push(amplitude);
+
+                                        // Update state every 50ms with averaged amplitude
+                                        if last_update.elapsed() >= update_interval {
+                                            let avg_amplitude = if !amplitude_buffer.is_empty() {
+                                                amplitude_buffer.iter().sum::<f32>() / amplitude_buffer.len() as f32
+                                            } else {
+                                                0.0
+                                            };
+
+                                            let mut state = state_handle_amp.lock().unwrap();
+                                            if state.is_recording() {
+                                                *state = state.clone().with_amplitude(avg_amplitude);
+                                            } else {
+                                                break; // Stop when no longer recording
+                                            }
+
+                                            amplitude_buffer.clear();
+                                            last_update = std::time::Instant::now();
                                         }
                                     }
                                     Err(std::sync::mpsc::TryRecvError::Empty) => {
                                         // No new amplitude data, sleep briefly
-                                        std::thread::sleep(std::time::Duration::from_millis(16)); // ~60fps
+                                        std::thread::sleep(std::time::Duration::from_millis(10));
                                     }
                                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                                         break; // Channel closed, stop polling
