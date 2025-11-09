@@ -1,6 +1,24 @@
 use egui::{Context, Frame, Stroke, Color32, RichText, Sense};
 use super::state::{OverlayState, OverlayConfig, OverlayTheme};
 
+// Overlay dimensions
+const IDLE_WIDTH: f32 = 60.0;
+const IDLE_HEIGHT: f32 = 4.0;
+const RECORDING_WIDTH: f32 = 80.0;
+const RECORDING_HEIGHT: f32 = 24.0;
+
+// Theme colors - alpha values
+const BG_ALPHA_DARK: u8 = 200;  // ~78% opacity
+const BG_ALPHA_LIGHT: u8 = 200;
+const BORDER_ALPHA: u8 = 60;    // ~23% opacity
+
+// Waveform animation parameters
+const WAVEFORM_NUM_BARS: usize = 12;
+const WAVEFORM_BAR_SPACING: f32 = 1.0;
+const WAVEFORM_BAR_WIDTH: f32 = 2.5;
+const WAVEFORM_BASE_HEIGHT: f32 = 3.0;
+const WAVEFORM_MAX_HEIGHT: f32 = 16.0;
+
 /// Render the overlay UI based on current state
 pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfig) -> OverlayAction {
     let mut action = OverlayAction::None;
@@ -10,9 +28,9 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
 
     // Dynamic sizing based on state
     let (width, height) = match state {
-        OverlayState::Idle => (10.0, 20.0),  // Tiny idle state
-        OverlayState::Recording { .. } => (80.0, 20.0),  // Expand when recording
-        _ => (80.0, 20.0),  // Other states use recording size
+        OverlayState::Idle => (IDLE_WIDTH, IDLE_HEIGHT),  // Very short pill when inactive
+        OverlayState::Recording { .. } => (RECORDING_WIDTH, RECORDING_HEIGHT),  // Expand taller when recording
+        _ => (RECORDING_WIDTH, RECORDING_HEIGHT),  // Other states use recording size
     };
 
     // Get screen dimensions and calculate default position
@@ -27,7 +45,7 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
         .interactable(true)
         .show(ctx, |ui| {
             // Create a frame with rounded corners and shadow
-            let frame = create_frame(config);
+            let frame = create_frame(config, height);
 
             frame.show(ui, |ui| {
                 ui.set_width(width);
@@ -88,17 +106,23 @@ fn apply_theme(ctx: &Context, theme: OverlayTheme) {
     ctx.set_style(style);
 }
 
-fn create_frame(config: &OverlayConfig) -> Frame {
-    let bg_color = match config.theme {
-        OverlayTheme::Dark => Color32::BLACK,  // Pure black background
-        OverlayTheme::Light => Color32::WHITE,
+fn create_frame(config: &OverlayConfig, height: f32) -> Frame {
+    let (bg_color, border_color) = match config.theme {
+        OverlayTheme::Dark => (
+            Color32::from_black_alpha(BG_ALPHA_DARK),
+            Color32::from_white_alpha(BORDER_ALPHA),
+        ),
+        OverlayTheme::Light => (
+            Color32::from_white_alpha(BG_ALPHA_LIGHT),
+            Color32::from_black_alpha(BORDER_ALPHA),
+        ),
     };
 
     Frame::none()
         .fill(bg_color)
-        .stroke(Stroke::NONE)  // No border
-        .rounding(10.0)  // Perfect pill shape (height/2 = 20/2)
-        .inner_margin(4.0)  // Minimal padding for tiny size
+        .stroke(Stroke::new(1.0, border_color))  // 1px subtle border
+        .rounding(height / 2.0)  // Perfect pill shape (height/2)
+        .inner_margin(0.0)  // No padding - keep it tight
         .shadow(egui::epaint::Shadow {
             extrusion: 4.0,
             color: Color32::from_black_alpha(100),
@@ -123,111 +147,105 @@ fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayActio
 }
 
 fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _config: &OverlayConfig) {
-    // Tiny waveform animation (80x20)
-    ui.vertical_centered(|ui| {
-        ui.add_space(2.0);
+    // Waveform animation - draw bars directly using painter for performance
+    // Creates an animated waveform visualization that responds to audio amplitude
 
-        // Draw animated waveform bars that respond to audio amplitude
-        ui.horizontal(|ui| {
-            ui.add_space(6.0);
+    // Calculate total waveform width
+    let total_width = (WAVEFORM_NUM_BARS as f32 * WAVEFORM_BAR_WIDTH)
+        + ((WAVEFORM_NUM_BARS - 1) as f32 * WAVEFORM_BAR_SPACING);
 
-            let num_bars = 10; // Fewer bars for tiny size
-            let bar_spacing = 1.5;
+    // Get the rect we can draw in
+    let available_rect = ui.available_rect_before_wrap();
+    let available_width = available_rect.width();
+    let available_height = available_rect.height();
 
-            // Create bars that respond to amplitude with slight variation
-            for i in 0..num_bars {
-                // Each bar has a slight phase offset for visual variety
-                let phase = i as f32 * 0.15;
-                let time_factor = ((duration * 10.0 + phase).sin() + 1.0) / 2.0;
+    // Calculate starting position (centered)
+    let start_x = available_rect.left() + (available_width - total_width) / 2.0;
 
-                // Base height on amplitude, with time factor for smooth animation
-                let base_height = 2.0; // Minimum height
-                let max_height = 12.0; // Maximum height (scaled for 20px height)
-                let height = base_height + (amplitude * time_factor * max_height);
+    // Draw each bar directly using the painter
+    let painter = ui.painter();
+    for i in 0..WAVEFORM_NUM_BARS {
+        // Each bar has a phase offset for visual variety - creates a wave effect
+        // The phase shifts the sine wave for each bar, making them animate at slightly different times
+        let phase = i as f32 * 0.2;
 
-                let bar_color = Color32::WHITE;  // White bars on black background
-                let bar_width = 2.0;  // Thin bars
+        // time_factor creates the animation: sin wave normalized to 0.0-1.0 range
+        // Multiplied by 10.0 to speed up the animation
+        let time_factor = ((duration * 10.0 + phase).sin() + 1.0) / 2.0;
 
-                let (rect, _) = ui.allocate_exact_size(
-                    egui::vec2(bar_width, height),
-                    Sense::hover()
-                );
+        // Calculate bar height: base height + (amplitude × animation × max height)
+        // This makes bars grow with both audio amplitude AND time-based animation
+        let height = WAVEFORM_BASE_HEIGHT + (amplitude * time_factor * WAVEFORM_MAX_HEIGHT);
 
-                ui.painter().rect_filled(
-                    rect,
-                    1.0, // rounded corners
-                    bar_color
-                );
+        // Calculate bar position (horizontally spaced, vertically centered)
+        let x = start_x + (i as f32 * (WAVEFORM_BAR_WIDTH + WAVEFORM_BAR_SPACING));
+        let y = available_rect.top() + (available_height - height) / 2.0;
 
-                ui.add_space(bar_spacing);
-            }
+        // Draw the bar with rounded ends (pill-shaped) for visual consistency with overlay
+        let bar_rect = egui::Rect::from_min_size(
+            egui::pos2(x, y),
+            egui::vec2(WAVEFORM_BAR_WIDTH, height)
+        );
+        painter.rect_filled(bar_rect, WAVEFORM_BAR_WIDTH / 2.0, Color32::WHITE);
+    }
 
-            ui.add_space(6.0);
-        });
-
-        ui.add_space(2.0);
-    });
+    // Allocate the space we used
+    ui.allocate_rect(available_rect, Sense::hover());
 }
 
 fn render_processing_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig) {
-    // Minimal processing indicator for tiny size
+    // Minimal processing indicator
     ui.vertical_centered(|ui| {
-        ui.add_space(1.0);
+        ui.add_space(4.0);
 
-        // Simple spinner - small for 20px height
-        let spinner = RichText::new("⟳")
-            .size(14.0)
+        let text = RichText::new("processing...")
+            .size(10.0)
             .color(Color32::WHITE);
-        ui.label(spinner);
+        ui.label(text);
 
-        ui.add_space(1.0);
+        ui.add_space(4.0);
     });
 }
 
 fn render_editing_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig) {
-    // Minimal AI polishing indicator for tiny size
+    // Minimal AI polishing indicator
     ui.vertical_centered(|ui| {
-        ui.add_space(1.0);
+        ui.add_space(4.0);
 
-        // Just sparkles icon - small
-        let icon = RichText::new("✨")
-            .size(14.0)
-            .color(Color32::WHITE);  // White on black
-        ui.label(icon);
+        let text = RichText::new("polishing...")
+            .size(10.0)
+            .color(Color32::WHITE);
+        ui.label(text);
 
-        ui.add_space(1.0);
+        ui.add_space(4.0);
     });
 }
 
 fn render_success_state(ui: &mut egui::Ui, _text: &str, _config: &OverlayConfig) {
-    // Minimal success indicator for tiny size
+    // Minimal success indicator
     ui.vertical_centered(|ui| {
-        ui.add_space(1.0);
+        ui.add_space(4.0);
 
-        // Just a checkmark - small
-        let checkmark = RichText::new("✓")
-            .size(14.0)
-            .color(Color32::WHITE)  // White on black
-            .strong();
-        ui.label(checkmark);
+        let text = RichText::new("done")
+            .size(10.0)
+            .color(Color32::WHITE);
+        ui.label(text);
 
-        ui.add_space(1.0);
+        ui.add_space(4.0);
     });
 }
 
 fn render_error_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig) {
-    // Minimal error indicator for tiny size
+    // Minimal error indicator
     ui.vertical_centered(|ui| {
-        ui.add_space(1.0);
+        ui.add_space(4.0);
 
-        // Just an X - small
-        let error_icon = RichText::new("✗")
-            .size(14.0)
-            .color(Color32::WHITE)  // White on black
-            .strong();
-        ui.label(error_icon);
+        let text = RichText::new("error")
+            .size(10.0)
+            .color(Color32::WHITE);
+        ui.label(text);
 
-        ui.add_space(1.0);
+        ui.add_space(4.0);
     });
 }
 
