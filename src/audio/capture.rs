@@ -27,9 +27,9 @@ fn calculate_rms_amplitude(samples: &[f32]) -> f32 {
     let sum_squares: f32 = samples.iter().map(|&s| s * s).sum();
     let rms = (sum_squares / samples.len() as f32).sqrt();
 
-    // Normalize to 0.0-1.0 range (assuming typical speech is around 0.1-0.3 RMS)
-    // Apply a multiplier and clamp to get good visual response
-    (rms * 3.0).min(1.0)
+    // Normalize to 0.0-1.0 range with exaggeration for better visual feedback
+    // Higher multiplier = more exaggerated response to voice
+    (rms * 8.0).min(1.0)
 }
 
 impl AudioCapture {

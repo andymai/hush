@@ -80,14 +80,14 @@ fn apply_theme(ctx: &Context, theme: OverlayTheme) {
 
 fn create_frame(config: &OverlayConfig) -> Frame {
     let bg_color = match config.theme {
-        OverlayTheme::Dark => Color32::from_rgba_unmultiplied(20, 20, 20, (config.opacity * 255.0) as u8),
-        OverlayTheme::Light => Color32::from_rgba_unmultiplied(240, 240, 240, (config.opacity * 255.0) as u8),
+        OverlayTheme::Dark => Color32::BLACK,  // Pure black background
+        OverlayTheme::Light => Color32::WHITE,
     };
 
     Frame::none()
         .fill(bg_color)
-        .stroke(Stroke::new(1.0, Color32::from_gray(60)))
-        .rounding(10.0)
+        .stroke(Stroke::none())  // No border
+        .rounding(35.0)  // Very rounded for pill shape (height/2)
         .inner_margin(12.0)
         .shadow(egui::epaint::Shadow {
             extrusion: 4.0,
@@ -100,15 +100,15 @@ fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayActio
 
     // Minimal horizontal line indicating idle state
     ui.vertical_centered(|ui| {
-        ui.add_space(20.0);
+        ui.add_space(23.0);
 
         // Draw a horizontal line
         ui.horizontal(|ui| {
-            ui.add_space(20.0);
+            ui.add_space(30.0);
 
-            let line_width = 80.0;
-            let line_height = 4.0;
-            let line_color = Color32::from_rgb(100, 150, 255);
+            let line_width = 220.0;  // Wider for pill shape
+            let line_height = 3.0;
+            let line_color = Color32::WHITE;  // White on black background
 
             // Make the line clickable
             let (rect, response) = ui.allocate_exact_size(
@@ -119,7 +119,7 @@ fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayActio
             // Draw rounded horizontal line
             ui.painter().rect_filled(
                 rect,
-                2.0, // rounded corners
+                1.5, // rounded corners
                 line_color
             );
 
@@ -127,10 +127,10 @@ fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayActio
                 action = OverlayAction::StartRecording;
             }
 
-            ui.add_space(20.0);
+            ui.add_space(30.0);
         });
 
-        ui.add_space(20.0);
+        ui.add_space(23.0);
     });
 
     action
@@ -139,46 +139,51 @@ fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayActio
 fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _config: &OverlayConfig) {
     // Wispr Flow-style waveform animation responding to voice
     ui.vertical_centered(|ui| {
-        ui.add_space(8.0);
+        ui.add_space(10.0);
 
         // Draw animated waveform bars that respond to audio amplitude
         ui.horizontal(|ui| {
-            ui.add_space(10.0);
+            ui.add_space(20.0);
 
-            // Create 5 bars that respond to amplitude with slight variation
-            for i in 0..5 {
+            let num_bars = 18; // More bars for wider pill shape
+            let bar_spacing = 3.0;
+
+            // Create bars that respond to amplitude with slight variation
+            for i in 0..num_bars {
                 // Each bar has a slight phase offset for visual variety
-                let phase = i as f32 * 0.2;
-                let time_factor = ((duration * 8.0 + phase).sin() + 1.0) / 2.0;
+                let phase = i as f32 * 0.15;
+                let time_factor = ((duration * 10.0 + phase).sin() + 1.0) / 2.0;
 
                 // Base height on amplitude, with time factor for smooth animation
-                let base_height = 8.0; // Minimum height
-                let max_height = 40.0; // Maximum height
+                let base_height = 6.0; // Minimum height
+                let max_height = 45.0; // Maximum height
                 let height = base_height + (amplitude * time_factor * max_height);
 
-                let bar_color = Color32::from_rgb(100, 150, 255);
+                let bar_color = Color32::WHITE;  // White bars on black background
+                let bar_width = 3.0;
+
                 let (rect, _) = ui.allocate_exact_size(
-                    egui::vec2(6.0, height),
+                    egui::vec2(bar_width, height),
                     Sense::hover()
                 );
 
                 ui.painter().rect_filled(
                     rect,
-                    3.0, // rounded corners
+                    1.5, // rounded corners
                     bar_color
                 );
 
-                ui.add_space(4.0);
+                ui.add_space(bar_spacing);
             }
 
-            ui.add_space(10.0);
+            ui.add_space(20.0);
         });
 
-        ui.add_space(8.0);
+        ui.add_space(10.0);
     });
 }
 
-fn render_processing_state(ui: &mut egui::Ui, _message: &str, config: &OverlayConfig) {
+fn render_processing_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig) {
     // Minimal processing indicator
     ui.vertical_centered(|ui| {
         ui.add_space(15.0);
@@ -186,7 +191,7 @@ fn render_processing_state(ui: &mut egui::Ui, _message: &str, config: &OverlayCo
         // Simple spinner
         let spinner = RichText::new("⟳")
             .size(28.0)
-            .color(get_accent_color(config.theme));
+            .color(Color32::WHITE);
         ui.label(spinner);
 
         ui.add_space(15.0);
@@ -201,7 +206,7 @@ fn render_editing_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConf
         // Just sparkles icon
         let icon = RichText::new("✨")
             .size(28.0)
-            .color(Color32::from_rgb(255, 200, 100));
+            .color(Color32::WHITE);  // White on black
         ui.label(icon);
 
         ui.add_space(15.0);
@@ -216,7 +221,7 @@ fn render_success_state(ui: &mut egui::Ui, _text: &str, _config: &OverlayConfig)
         // Just a checkmark
         let checkmark = RichText::new("✓")
             .size(32.0)
-            .color(Color32::from_rgb(50, 200, 50))
+            .color(Color32::WHITE)  // White on black
             .strong();
         ui.label(checkmark);
 
@@ -232,7 +237,7 @@ fn render_error_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig
         // Just an X or warning icon
         let error_icon = RichText::new("✗")
             .size(32.0)
-            .color(Color32::from_rgb(220, 50, 50))
+            .color(Color32::WHITE)  // White on black
             .strong();
         ui.label(error_icon);
 
@@ -240,9 +245,3 @@ fn render_error_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig
     });
 }
 
-fn get_accent_color(theme: OverlayTheme) -> Color32 {
-    match theme {
-        OverlayTheme::Dark => Color32::from_rgb(100, 150, 255),
-        OverlayTheme::Light => Color32::from_rgb(50, 100, 200),
-    }
-}
