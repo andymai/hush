@@ -1,5 +1,4 @@
-// Simple version of lib.rs that only includes the TUI module for demonstration
-pub mod tui;
+// Simple version of lib.rs - TUI has been removed
 
 // Common result type
 pub type Result<T> = anyhow::Result<T>;

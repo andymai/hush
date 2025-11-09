@@ -52,11 +52,6 @@ toml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 clap = { version = "4.0", features = ["derive", "color", "help", "usage"] }
 
-# TUI dependencies
-ratatui = "0.28"
-crossterm = { version = "0.28", features = ["event-stream"] }
-tui-input = "0.10"
-
 # Overlay GUI dependencies
 egui = "0.23"  # Must match egui_overlay 0.5 dependency
 egui_overlay = "0.5"
