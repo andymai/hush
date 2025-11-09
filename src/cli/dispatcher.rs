@@ -6,6 +6,12 @@ use tracing::{info, warn, error, debug};
 
 // Import Hush components
 use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config, hotkey};
+use crate::overlay::{OverlayWindowBuilder, OverlayState, OverlayPosition};
+use crate::transcription::SimpleWhisperTranscriber;
+use crate::text_processing::{TextProcessor, ProcessingConfig, EditingMode};
+use crate::hotkey::{HotkeyManager, HotkeyEvent};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
 
 pub struct CommandDispatcher {
     _config_path: Option<PathBuf>,
@@ -23,8 +29,9 @@ impl CommandDispatcher {
     pub async fn dispatch(&self, command: Commands) -> Result<()> {
         let command_name = match &command {
             Commands::Start { .. } => "start",
-            Commands::Record { .. } => "record", 
+            Commands::Record { .. } => "record",
             Commands::Manual { .. } => "manual",
+            Commands::Listen { .. } => "listen",
             Commands::Setup { .. } => "setup",
             Commands::Test { .. } => "test",
             Commands::Models { .. } => "models",
@@ -62,6 +69,16 @@ impl CommandDispatcher {
                     "Manual command parameters"
                 );
                 self.handle_manual(count).await
+            }
+            Commands::Listen { editing_mode, no_processing, no_button } => {
+                debug!(
+                    request_id = %ctx.request_id,
+                    editing_mode = %editing_mode,
+                    no_processing = %no_processing,
+                    no_button = %no_button,
+                    "Listen command parameters"
+                );
+                self.handle_listen(editing_mode.clone(), no_processing, no_button).await
             }
             Commands::Setup { setup_command } => {
                 self.handle_setup(setup_command).await
@@ -201,12 +218,288 @@ impl CommandDispatcher {
             if count > 1 {
                 println!("\n📹 Recording {}/{}", i, count);
             }
-            
+
             // Use the record handler for each iteration
             self.handle_record(30, false, None).await?;
         }
 
         println!("✅ All recordings completed!");
+        Ok(())
+    }
+
+    async fn handle_listen(&self, editing_mode_str: String, no_processing: bool, no_button: bool) -> Result<()> {
+        info!("🎧 Starting intelligent listening mode");
+        info!("   Editing mode: {}", editing_mode_str);
+        info!("   Text processing: {}", !no_processing);
+        info!("   Show button: {}", !no_button);
+
+        println!("🎤 Hush Intelligent Listening Mode");
+        println!("═══════════════════════════════════════════════════════");
+        println!("Press Ctrl+Alt+V to start recording");
+        println!("Release to transcribe and insert text");
+        println!("Press Ctrl+C to quit");
+        println!("═══════════════════════════════════════════════════════\n");
+
+        // Parse editing mode
+        let editing_mode = match editing_mode_str.to_lowercase().as_str() {
+            "light" => EditingMode::Light,
+            "medium" => EditingMode::Medium,
+            "aggressive" => EditingMode::Aggressive,
+            _ => {
+                warn!("Unknown editing mode '{}', using Medium", editing_mode_str);
+                EditingMode::Medium
+            }
+        };
+
+        // Communication channels
+        enum AudioCommand {
+            StartRecording,
+            StopRecording,
+        }
+
+        enum TranscriptionResult {
+            Success(String),
+            Error(String),
+        }
+
+        let (audio_cmd_tx, audio_cmd_rx) = mpsc::channel::<AudioCommand>();
+        let (transcription_tx, transcription_rx) = mpsc::channel::<TranscriptionResult>();
+
+        // Create hotkey manager
+        let (hotkey_manager, hotkey_rx) = HotkeyManager::new("Ctrl+Alt+V")?;
+        hotkey_manager.start_listening()?;
+        info!("✅ Hotkey 'Ctrl+Alt+V' registered");
+
+        // Initialize audio capture (main thread - !Send)
+        let mut audio_capture = AudioCapture::new(None)?;
+        info!("✅ Audio capture initialized: {}", audio_capture.get_device_name());
+
+        // Initialize transcriber
+        let model_path = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".hush/models/ggml-base.en.bin");
+
+        let transcriber = match SimpleWhisperTranscriber::new(&model_path).await {
+            Ok(t) => {
+                if t.is_ready() {
+                    info!("✅ Whisper transcriber ready (GPU-accelerated)");
+                } else {
+                    warn!("⚠️  Whisper model not loaded - will use simulation");
+                }
+                Some(t)
+            }
+            Err(e) => {
+                warn!("Failed to initialize transcriber: {}", e);
+                warn!("Will use simulated transcription");
+                None
+            }
+        };
+
+        // Initialize text processor
+        let text_processor = if !no_processing {
+            let llm_model_path = dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".hush/models/llama-7b-chat.gguf");
+
+            let processing_config = ProcessingConfig {
+                mode: editing_mode,
+                use_llm: llm_model_path.exists(),
+                llm_model_path,
+            };
+
+            match TextProcessor::new(processing_config) {
+                Ok(processor) => {
+                    if processor.is_llm_ready() {
+                        info!("✅ Text processor initialized with LLM");
+                    } else {
+                        info!("✅ Text processor initialized (rule-based only)");
+                    }
+                    Some(Arc::new(processor))
+                }
+                Err(e) => {
+                    warn!("Failed to initialize text processor: {}", e);
+                    None
+                }
+            }
+        } else {
+            info!("ℹ️  Text processing disabled");
+            None
+        };
+
+        // Initialize text inserter
+        let text_inserter = match TextInserter::new() {
+            Ok(inserter) => {
+                info!("✅ Text inserter initialized");
+                Some(Arc::new(Mutex::new(inserter)))
+            }
+            Err(e) => {
+                warn!("Failed to initialize text inserter: {}", e);
+                warn!("Transcribed text will only be shown in overlay");
+                None
+            }
+        };
+
+        // Create overlay
+        let overlay = OverlayWindowBuilder::new()
+            .width(320.0)
+            .height(120.0)
+            .position(OverlayPosition::BottomRight)
+            .opacity(0.95)
+            .show_button_when_idle(!no_button)
+            .build();
+
+        let state_handle = overlay.state();
+
+        // Hotkey handler thread
+        let audio_cmd_tx_clone = audio_cmd_tx.clone();
+        let state_handle_clone = state_handle.clone();
+        let hotkey_thread = thread::spawn(move || {
+            loop {
+                match hotkey_rx.recv() {
+                    Ok(HotkeyEvent::Pressed) => {
+                        *state_handle_clone.lock().unwrap() = OverlayState::start_recording();
+                        let _ = audio_cmd_tx_clone.send(AudioCommand::StartRecording);
+                    }
+                    Ok(HotkeyEvent::Released) => {
+                        *state_handle_clone.lock().unwrap() =
+                            OverlayState::processing("Transcribing audio...");
+                        let _ = audio_cmd_tx_clone.send(AudioCommand::StopRecording);
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // Result handler thread
+        let state_handle_clone2 = state_handle.clone();
+        let text_inserter_clone = text_inserter.clone();
+        let text_processor_clone = text_processor.clone();
+        let result_thread = thread::spawn(move || {
+            let result_runtime = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+
+            while let Ok(result) = transcription_rx.recv() {
+                match result {
+                    TranscriptionResult::Success(raw_text) => {
+                        info!("✅ Transcription successful: '{}'", raw_text);
+
+                        // Process text
+                        let processed_text = if let Some(ref processor) = text_processor_clone {
+                            info!("🔄 Processing text...");
+                            *state_handle_clone2.lock().unwrap() = OverlayState::editing("Polishing text");
+
+                            match result_runtime.block_on(processor.process(&raw_text)) {
+                                Ok(polished) => {
+                                    info!("✨ Text polished: '{}'", polished);
+                                    polished
+                                }
+                                Err(e) => {
+                                    warn!("Text processing failed: {}, using raw text", e);
+                                    raw_text
+                                }
+                            }
+                        } else {
+                            raw_text
+                        };
+
+                        // Insert text
+                        if let Some(ref inserter) = text_inserter_clone {
+                            thread::sleep(std::time::Duration::from_millis(200));
+                            let _ = inserter.lock().unwrap().insert_text(&processed_text);
+                        }
+
+                        // Update overlay
+                        let display_text = if processed_text.len() > 50 {
+                            format!("{}...", &processed_text[..47])
+                        } else {
+                            processed_text
+                        };
+
+                        *state_handle_clone2.lock().unwrap() = OverlayState::success(
+                            &display_text,
+                            std::time::Duration::from_secs(4)
+                        );
+                    }
+                    TranscriptionResult::Error(error_msg) => {
+                        error!("❌ Transcription failed: {}", error_msg);
+                        *state_handle_clone2.lock().unwrap() = OverlayState::error(
+                            &error_msg,
+                            std::time::Duration::from_secs(4)
+                        );
+                    }
+                }
+            }
+        });
+
+        // Overlay thread
+        let overlay_thread = thread::spawn(move || {
+            let _ = overlay.run();
+        });
+
+        // Main thread: audio handling
+        info!("🚀 Audio handler ready");
+
+        while let Ok(command) = audio_cmd_rx.recv() {
+            match command {
+                AudioCommand::StartRecording => {
+                    if let Err(e) = audio_capture.start_recording() {
+                        error!("Failed to start recording: {}", e);
+                        let _ = transcription_tx.send(TranscriptionResult::Error(
+                            "Failed to start recording".to_string()
+                        ));
+                    }
+                }
+                AudioCommand::StopRecording => {
+                    let audio_data = match audio_capture.stop_recording() {
+                        Ok(data) => data,
+                        Err(e) => {
+                            error!("Failed to stop recording: {}", e);
+                            let _ = transcription_tx.send(TranscriptionResult::Error(
+                                "Failed to stop recording".to_string()
+                            ));
+                            continue;
+                        }
+                    };
+
+                    if audio_data.is_empty() {
+                        let _ = transcription_tx.send(TranscriptionResult::Error(
+                            "No audio recorded".to_string()
+                        ));
+                        continue;
+                    }
+
+                    // Transcribe
+                    let transcription_result = if let Some(ref t) = transcriber {
+                        if t.is_ready() {
+                            match t.transcribe(&audio_data).await {
+                                Ok(result) => TranscriptionResult::Success(result.text),
+                                Err(_) => TranscriptionResult::Error("Transcription failed".to_string())
+                            }
+                        } else {
+                            let duration = audio_data.len() as f32 / 16000.0;
+                            TranscriptionResult::Success(
+                                format!("um well uh I mean this is like simulated text you know ({:.1}s)", duration)
+                            )
+                        }
+                    } else {
+                        let duration = audio_data.len() as f32 / 16000.0;
+                        TranscriptionResult::Success(
+                            format!("Simulated transcription ({:.1}s of audio)", duration)
+                        )
+                    };
+
+                    let _ = transcription_tx.send(transcription_result);
+                }
+            }
+        }
+
+        // Cleanup
+        drop(hotkey_manager);
+        drop(audio_cmd_tx);
+        let _ = hotkey_thread.join();
+        let _ = result_thread.join();
+        let _ = overlay_thread.join();
+
+        info!("Listen mode ended");
         Ok(())
     }
 
