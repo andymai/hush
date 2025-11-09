@@ -1,6 +1,35 @@
 /// Configuration for text processing
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+
+/// LLM provider for text polishing
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LlmProvider {
+    /// Anthropic Claude API
+    Anthropic {
+        /// API key (read from env var if None)
+        api_key: Option<String>,
+        /// Model to use (default: claude-3-haiku-20240307)
+        model: String,
+    },
+    /// OpenAI GPT API
+    OpenAI {
+        /// API key (read from env var if None)
+        api_key: Option<String>,
+        /// Model to use (default: gpt-4o-mini)
+        model: String,
+    },
+    /// No LLM - rule-based only
+    None,
+}
+
+impl Default for LlmProvider {
+    fn default() -> Self {
+        Self::Anthropic {
+            api_key: None,
+            model: "claude-3-haiku-20240307".to_string(),
+        }
+    }
+}
 
 /// Processing mode determining aggressiveness of editing
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,21 +56,23 @@ pub struct ProcessingConfig {
     /// Editing aggressiveness level
     pub mode: EditingMode,
 
-    /// Whether to use LLM for polishing (slower but higher quality)
-    pub use_llm: bool,
+    /// LLM provider for text polishing
+    pub llm_provider: LlmProvider,
 
-    /// Path to LLM model file (GGUF format)
-    pub llm_model_path: PathBuf,
+    /// Maximum tokens for LLM response
+    pub max_tokens: u32,
+
+    /// Temperature for LLM generation (0.0-1.0, lower = more conservative)
+    pub temperature: f32,
 }
 
 impl Default for ProcessingConfig {
     fn default() -> Self {
         Self {
             mode: EditingMode::Medium,
-            use_llm: true,
-            llm_model_path: dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".hush/models/llm-model.gguf"),
+            llm_provider: LlmProvider::default(),
+            max_tokens: 200,
+            temperature: 0.3,
         }
     }
 }
@@ -51,8 +82,8 @@ impl ProcessingConfig {
     pub fn light() -> Self {
         Self {
             mode: EditingMode::Light,
-            use_llm: false,
-            llm_model_path: Default::default(),
+            llm_provider: LlmProvider::None,
+            ..Default::default()
         }
     }
 
@@ -60,7 +91,6 @@ impl ProcessingConfig {
     pub fn medium() -> Self {
         Self {
             mode: EditingMode::Medium,
-            use_llm: true,
             ..Default::default()
         }
     }
@@ -69,8 +99,19 @@ impl ProcessingConfig {
     pub fn aggressive() -> Self {
         Self {
             mode: EditingMode::Aggressive,
-            use_llm: true,
             ..Default::default()
         }
+    }
+
+    /// Create config with specific LLM provider
+    pub fn with_llm(mut self, provider: LlmProvider) -> Self {
+        self.llm_provider = provider;
+        self
+    }
+
+    /// Disable LLM processing
+    pub fn without_llm(mut self) -> Self {
+        self.llm_provider = LlmProvider::None;
+        self
     }
 }

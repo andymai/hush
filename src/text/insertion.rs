@@ -326,7 +326,50 @@ impl TextInserter {
             }
         }
     }
-    
+
+    /// Undo last insertion by sending backspace keys
+    pub fn undo_last_insertion(&mut self, char_count: usize) -> Result<()> {
+        info!("Undoing last insertion ({} characters)", char_count);
+
+        // Use uinput if available for more reliable backspace
+        if let Some(uinput) = &mut self.uinput_keyboard {
+            use crate::text::uinput_keyboard::UinputKeyboard;
+
+            // Send backspace keys to delete the characters
+            for i in 0..char_count {
+                if i > 0 && i % 100 == 0 {
+                    debug!("Deleted {} characters so far", i);
+                }
+
+                // Send backspace key
+                uinput.send_backspace()?;
+
+                // Small delay between backspaces for reliability
+                thread::sleep(Duration::from_millis(self.typing_delay_ms));
+            }
+
+            info!("Undo complete via uinput");
+            Ok(())
+        } else {
+            // Fallback to enigo for backspace
+            debug!("Using enigo for undo (fallback)");
+
+            for i in 0..char_count {
+                if i > 0 && i % 100 == 0 {
+                    debug!("Deleted {} characters so far", i);
+                }
+
+                self.enigo.key(Key::Backspace, Direction::Click)
+                    .map_err(|e| anyhow::anyhow!("Failed to send backspace: {:?}", e))?;
+
+                thread::sleep(Duration::from_millis(self.typing_delay_ms));
+            }
+
+            info!("Undo complete via enigo");
+            Ok(())
+        }
+    }
+
     fn set_clipboard_text(&self, text: &str) -> Result<()> {
         use std::process::Command;
         

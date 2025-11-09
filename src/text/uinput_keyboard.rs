@@ -85,7 +85,16 @@ impl UinputKeyboard {
         info!("✅ Text typed successfully via uinput ({} characters)", text.len());
         Ok(())
     }
-    
+
+    /// Send a backspace keystroke
+    pub fn send_backspace(&mut self) -> Result<()> {
+        if !self.ready {
+            return Err(anyhow::anyhow!("Uinput keyboard not ready"));
+        }
+
+        self.send_key(Key::Backspace, false)
+    }
+
     pub fn get_device_info(&self) -> String {
         if self.ready {
             "Linux uinput (kernel-level)".to_string()
