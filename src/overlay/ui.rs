@@ -8,13 +8,16 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
     // Configure the style based on theme
     apply_theme(ctx, config.theme);
 
-    // Get screen dimensions and calculate position
+    // Get screen dimensions and calculate default position
     let screen_rect = ctx.screen_rect();
-    let (x, y) = config.get_window_position(screen_rect.width(), screen_rect.height());
+    let (default_x, default_y) = config.get_window_position(screen_rect.width(), screen_rect.height());
 
-    // Create a window that covers the overlay area
+    // Create a draggable overlay area
+    // The area will remember its position between frames
     egui::Area::new(egui::Id::new("hush_overlay"))
-        .fixed_pos([x, y])
+        .default_pos([default_x, default_y])
+        .movable(true)  // Enable dragging
+        .interactable(true)
         .show(ctx, |ui| {
             // Create a frame with rounded corners and shadow
             let frame = create_frame(config);
@@ -47,7 +50,7 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
                     }
                 }
             });
-        });
+        }).inner;
 
     action
 }
@@ -86,7 +89,7 @@ fn create_frame(config: &OverlayConfig) -> Frame {
 
     Frame::none()
         .fill(bg_color)
-        .stroke(Stroke::none())  // No border
+        .stroke(Stroke::NONE)  // No border
         .rounding(35.0)  // Very rounded for pill shape (height/2)
         .inner_margin(12.0)
         .shadow(egui::epaint::Shadow {
