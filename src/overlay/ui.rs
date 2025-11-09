@@ -90,11 +90,11 @@ fn create_frame(config: &OverlayConfig) -> Frame {
     Frame::none()
         .fill(bg_color)
         .stroke(Stroke::NONE)  // No border
-        .rounding(35.0)  // Very rounded for pill shape (height/2)
-        .inner_margin(12.0)
+        .rounding(25.0)  // Perfect pill shape (height/2)
+        .inner_margin(8.0)  // Less padding for compact look
         .shadow(egui::epaint::Shadow {
-            extrusion: 4.0,
-            color: Color32::from_black_alpha(100),
+            extrusion: 6.0,
+            color: Color32::from_black_alpha(120),
         })
 }
 
@@ -103,14 +103,14 @@ fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayActio
 
     // Minimal horizontal line indicating idle state
     ui.vertical_centered(|ui| {
-        ui.add_space(23.0);
+        ui.add_space(16.0);
 
         // Draw a horizontal line
         ui.horizontal(|ui| {
-            ui.add_space(30.0);
+            ui.add_space(20.0);
 
-            let line_width = 220.0;  // Wider for pill shape
-            let line_height = 3.0;
+            let line_width = 160.0;  // Proportional to smaller size
+            let line_height = 2.0;  // Thinner, more delicate
             let line_color = Color32::WHITE;  // White on black background
 
             // Make the line clickable
@@ -122,7 +122,7 @@ fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayActio
             // Draw rounded horizontal line
             ui.painter().rect_filled(
                 rect,
-                1.5, // rounded corners
+                1.0, // rounded corners
                 line_color
             );
 
@@ -130,10 +130,10 @@ fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayActio
                 action = OverlayAction::StartRecording;
             }
 
-            ui.add_space(30.0);
+            ui.add_space(20.0);
         });
 
-        ui.add_space(23.0);
+        ui.add_space(16.0);
     });
 
     action
@@ -142,14 +142,14 @@ fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayActio
 fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _config: &OverlayConfig) {
     // Wispr Flow-style waveform animation responding to voice
     ui.vertical_centered(|ui| {
-        ui.add_space(10.0);
+        ui.add_space(6.0);
 
         // Draw animated waveform bars that respond to audio amplitude
         ui.horizontal(|ui| {
-            ui.add_space(20.0);
+            ui.add_space(15.0);
 
-            let num_bars = 18; // More bars for wider pill shape
-            let bar_spacing = 3.0;
+            let num_bars = 15; // Adjusted for smaller size
+            let bar_spacing = 2.5;
 
             // Create bars that respond to amplitude with slight variation
             for i in 0..num_bars {
@@ -158,12 +158,12 @@ fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _con
                 let time_factor = ((duration * 10.0 + phase).sin() + 1.0) / 2.0;
 
                 // Base height on amplitude, with time factor for smooth animation
-                let base_height = 6.0; // Minimum height
-                let max_height = 45.0; // Maximum height
+                let base_height = 4.0; // Minimum height
+                let max_height = 30.0; // Maximum height (scaled for smaller overlay)
                 let height = base_height + (amplitude * time_factor * max_height);
 
                 let bar_color = Color32::WHITE;  // White bars on black background
-                let bar_width = 3.0;
+                let bar_width = 2.5;  // Thinner bars
 
                 let (rect, _) = ui.allocate_exact_size(
                     egui::vec2(bar_width, height),
@@ -172,17 +172,17 @@ fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _con
 
                 ui.painter().rect_filled(
                     rect,
-                    1.5, // rounded corners
+                    1.25, // rounded corners
                     bar_color
                 );
 
                 ui.add_space(bar_spacing);
             }
 
-            ui.add_space(20.0);
+            ui.add_space(15.0);
         });
 
-        ui.add_space(10.0);
+        ui.add_space(6.0);
     });
 }
 
