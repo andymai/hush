@@ -10,7 +10,8 @@ use crate::overlay::{OverlayWindowBuilder, OverlayState, OverlayPosition};
 use crate::transcription::SimpleWhisperTranscriber;
 use crate::text_processing::{TextProcessor, ProcessingConfig, EditingMode, LlmProvider, CommandParser, CommandExecutor, InsertionHistory};
 use crate::hotkey::{HotkeyManager, HotkeyEvent};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
+use parking_lot::Mutex;
 use std::thread;
 
 pub struct CommandDispatcher {
@@ -381,7 +382,7 @@ impl CommandDispatcher {
             loop {
                 match hotkey_rx.recv() {
                     Ok(HotkeyEvent::Pressed) => {
-                        *state_handle_clone.lock().unwrap() = OverlayState::start_recording();
+                        *state_handle_clone.lock() = OverlayState::start_recording();
                         let _ = audio_cmd_tx_clone.send(AudioCommand::StartRecording);
                     }
                     Ok(HotkeyEvent::Released) => {
@@ -420,20 +421,20 @@ impl CommandDispatcher {
                             info!("🔙 Undo requested");
 
                             if let Some(ref inserter) = text_inserter_clone {
-                                let mut history = insertion_history_clone.lock().unwrap();
+                                let mut history = insertion_history_clone.lock();
 
                                 if let Some(last_entry) = history.pop_last() {
                                     info!("Undoing last insertion: '{}' ({} chars)",
                                           if last_entry.text.len() > 50 { &last_entry.text[..50] } else { &last_entry.text },
                                           last_entry.char_count);
 
-                                    match inserter.lock().unwrap().undo_last_insertion(last_entry.char_count) {
+                                    match inserter.lock().undo_last_insertion(last_entry.char_count) {
                                         Ok(_) => {
-                                            *state_handle_clone2.lock().unwrap() = OverlayState::idle();
+                                            *state_handle_clone2.lock() = OverlayState::idle();
                                         }
                                         Err(e) => {
                                             error!("Undo failed: {}", e);
-                                            *state_handle_clone2.lock().unwrap() = OverlayState::error(
+                                            *state_handle_clone2.lock() = OverlayState::error(
                                                 "Undo failed",
                                                 std::time::Duration::from_secs(3)
                                             );
@@ -441,7 +442,7 @@ impl CommandDispatcher {
                                     }
                                 } else {
                                     warn!("No recent insertion to undo");
-                                    *state_handle_clone2.lock().unwrap() = OverlayState::error(
+                                    *state_handle_clone2.lock() = OverlayState::error(
                                         "Nothing to undo",
                                         std::time::Duration::from_secs(2)
                                     );
@@ -461,7 +462,7 @@ impl CommandDispatcher {
                         let processed_text = if exec_result.should_process {
                             if let Some(ref processor) = text_processor_clone {
                                 info!("🔄 Processing text...");
-                                *state_handle_clone2.lock().unwrap() = OverlayState::editing("Polishing text");
+                                *state_handle_clone2.lock() = OverlayState::editing("Polishing text");
 
                                 match result_runtime.block_on(processor.process(&command_text)) {
                                     Ok(polished) => {
@@ -485,10 +486,10 @@ impl CommandDispatcher {
                         if let Some(ref inserter) = text_inserter_clone {
                             thread::sleep(std::time::Duration::from_millis(200));
 
-                            match inserter.lock().unwrap().insert_text(&processed_text) {
+                            match inserter.lock().insert_text(&processed_text) {
                                 Ok(_) => {
                                     // Record in history for undo
-                                    insertion_history_clone.lock().unwrap().record(processed_text.clone());
+                                    insertion_history_clone.lock().record(processed_text.clone());
                                 }
                                 Err(e) => {
                                     error!("Text insertion failed: {}", e);
@@ -503,11 +504,11 @@ impl CommandDispatcher {
                             processed_text
                         };
 
-                        *state_handle_clone2.lock().unwrap() = OverlayState::idle();
+                        *state_handle_clone2.lock() = OverlayState::idle();
                     }
                     TranscriptionResult::Error(error_msg) => {
                         error!("❌ Transcription failed: {}", error_msg);
-                        *state_handle_clone2.lock().unwrap() = OverlayState::error(
+                        *state_handle_clone2.lock() = OverlayState::error(
                             &error_msg,
                             std::time::Duration::from_secs(4)
                         );
@@ -545,7 +546,7 @@ impl CommandDispatcher {
                             let mut last_update = std::time::Instant::now();
 
                             loop {
-                                let amp_result = amplitude_rx_clone.lock().unwrap().try_recv();
+                                let amp_result = amplitude_rx_clone.lock().try_recv();
                                 match amp_result {
                                     Ok(amplitude) => {
                                         amplitude_buffer.push(amplitude);
@@ -558,9 +559,9 @@ impl CommandDispatcher {
                                                 0.0
                                             };
 
-                                            let mut state = state_handle_amp.lock().unwrap();
+                                            let mut state = state_handle_amp.lock();
                                             if state.is_recording() {
-                                                *state = state.clone().with_amplitude(avg_amplitude);
+                                                state.update_amplitude(avg_amplitude);
                                             } else {
                                                 break; // Stop when no longer recording
                                             }

@@ -7,6 +7,12 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use tracing::{info, warn, error, debug, trace};
 
+// Pre-allocate audio buffer for typical recording durations
+// This prevents reallocations during recording
+const MAX_RECORDING_SECONDS: usize = 60; // 1 minute max
+const SAMPLES_PER_SECOND: usize = 16000; // 16kHz sample rate
+const PREALLOCATED_SAMPLES: usize = MAX_RECORDING_SECONDS * SAMPLES_PER_SECOND;
+
 pub struct AudioCapture {
     device: Device,
     config: StreamConfig,
@@ -134,7 +140,7 @@ impl AudioCapture {
                                 buffer_size: cpal::BufferSize::Fixed(1024),
                             },
                             stream: None,
-                            buffer: Arc::new(Mutex::new(Vec::new())),
+                            buffer: Arc::new(Mutex::new(Vec::with_capacity(PREALLOCATED_SAMPLES))),
                             is_recording: Arc::new(Mutex::new(false)),
                             simulated_mode: true,
                             amplitude_tx: None,
@@ -143,21 +149,22 @@ impl AudioCapture {
                 }
             }
         };
-        
+
         // Create our desired config (16kHz mono for Whisper)
         let config = StreamConfig {
             channels: 1, // Mono for speech recognition
             sample_rate: SampleRate(16000), // Optimal for Whisper
             buffer_size: cpal::BufferSize::Fixed(1024),
         };
-        
+
         // Verify the device supports our desired config
         if !Self::is_config_supported(&device, &config) {
             warn!("Desired config not supported, falling back to default");
             // Fall back to supported config but convert to our needs
         }
-        
-        let buffer = Arc::new(Mutex::new(Vec::new()));
+
+        // Pre-allocate buffer to avoid reallocations during recording
+        let buffer = Arc::new(Mutex::new(Vec::with_capacity(PREALLOCATED_SAMPLES)));
         let is_recording = Arc::new(Mutex::new(false));
 
         Ok(AudioCapture {
