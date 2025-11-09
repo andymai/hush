@@ -16,7 +16,7 @@ use hush::hotkey::{HotkeyManager, HotkeyEvent};
 use hush::overlay::{OverlayWindowBuilder, OverlayState, OverlayPosition};
 use hush::transcription::SimpleWhisperTranscriber;
 use hush::text::TextInserter;
-use hush::text_processing::{TextProcessor, ProcessingConfig, EditingMode};
+use hush::text_processing::{TextProcessor, ProcessingConfig, EditingMode, LlmProvider};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -103,15 +103,12 @@ fn main() {
         }
     });
 
-    // Initialize text processor
-    let llm_model_path = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".hush/models/llama-7b-chat.gguf");
-
+    // Initialize text processor with LLM provider
     let processing_config = ProcessingConfig {
         mode: EditingMode::Medium,
-        use_llm: llm_model_path.exists(),
-        llm_model_path: llm_model_path.clone(),
+        llm_provider: LlmProvider::None,  // No LLM for this test
+        max_tokens: 200,
+        temperature: 0.3,
     };
 
     let text_processor = match TextProcessor::new(processing_config.clone()) {
@@ -120,8 +117,6 @@ fn main() {
                 info!("✅ Text processor initialized with LLM");
             } else {
                 info!("✅ Text processor initialized (rule-based only)");
-                warn!("⚠️  LLM model not found at: {}", llm_model_path.display());
-                warn!("    Download a GGUF model to enable AI polishing");
             }
             Some(Arc::new(processor))
         }

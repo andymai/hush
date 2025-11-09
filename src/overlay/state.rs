@@ -142,6 +142,7 @@ pub enum OverlayPosition {
     TopRight,
     BottomLeft,
     BottomRight,
+    BottomCenter,
     Center,
 }
 
@@ -154,9 +155,9 @@ pub enum OverlayTheme {
 impl Default for OverlayConfig {
     fn default() -> Self {
         Self {
-            width: 300.0,
-            height: 100.0,
-            position: OverlayPosition::BottomRight,
+            width: 120.0,  // Wide enough for waveform animation
+            height: 60.0,  // Minimal height like Wispr Flow
+            position: OverlayPosition::BottomCenter,
             opacity: 0.95,
             auto_hide_duration: Duration::from_secs(2),
             show_button_when_idle: true,
@@ -176,6 +177,9 @@ impl OverlayConfig {
             OverlayPosition::BottomLeft => (padding, screen_height - self.height - padding),
             OverlayPosition::BottomRight => {
                 (screen_width - self.width - padding, screen_height - self.height - padding)
+            }
+            OverlayPosition::BottomCenter => {
+                ((screen_width - self.width) / 2.0, screen_height - self.height - padding)
             }
             OverlayPosition::Center => {
                 ((screen_width - self.width) / 2.0, (screen_height - self.height) / 2.0)
