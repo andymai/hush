@@ -64,6 +64,21 @@ pub enum Commands {
         count: u32,
     },
 
+    /// Start intelligent listening mode with overlay (Wispr Flow-style)
+    Listen {
+        /// Editing mode for text processing
+        #[arg(short, long, default_value = "medium")]
+        editing_mode: String,
+
+        /// Disable text processing (use raw transcription)
+        #[arg(long)]
+        no_processing: bool,
+
+        /// Hide overlay button when idle
+        #[arg(long)]
+        no_button: bool,
+    },
+
     /// Setup and configuration commands
     Setup {
         #[command(subcommand)]
