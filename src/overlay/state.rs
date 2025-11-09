@@ -8,6 +8,8 @@ pub enum OverlayState {
     /// Recording audio - capturing voice input
     Recording {
         start_time: Instant,
+        /// Current audio amplitude (0.0 to 1.0)
+        amplitude: f32,
     },
     /// Processing - transcribing the audio
     Processing {
@@ -39,13 +41,25 @@ impl OverlayState {
     pub fn start_recording() -> Self {
         Self::Recording {
             start_time: Instant::now(),
+            amplitude: 0.0,
+        }
+    }
+
+    /// Update recording amplitude
+    pub fn with_amplitude(self, new_amplitude: f32) -> Self {
+        match self {
+            Self::Recording { start_time, .. } => Self::Recording {
+                start_time,
+                amplitude: new_amplitude.clamp(0.0, 1.0),
+            },
+            _ => self,
         }
     }
 
     /// Get recording duration if in recording state
     pub fn recording_duration(&self) -> Option<Duration> {
         match self {
-            Self::Recording { start_time } => Some(start_time.elapsed()),
+            Self::Recording { start_time, .. } => Some(start_time.elapsed()),
             _ => None,
         }
     }

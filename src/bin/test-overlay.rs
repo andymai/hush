@@ -4,7 +4,7 @@
 ///
 /// Usage: cargo run --bin test-overlay
 
-use hush::overlay::{OverlayWindowBuilder, OverlayState, OverlayPosition};
+use hush::overlay::{OverlayWindowBuilder, OverlayState};
 use std::thread;
 use std::time::Duration;
 use tracing::{info, Level};
@@ -18,29 +18,30 @@ fn main() {
 
     info!("Starting overlay test");
 
-    // Create the overlay window
+    // Create the overlay window with new minimal defaults
     let overlay = OverlayWindowBuilder::new()
-        .width(300.0)
-        .height(100.0)
-        .position(OverlayPosition::BottomRight)
-        .opacity(0.95)
-        .show_button_when_idle(true)
-        .build();
+        .build(); // Use defaults: 120x60, BottomCenter
 
     // Get a handle to update the state
     let state_handle = overlay.state();
 
-    // Spawn a thread to cycle through states
+    // Spawn a thread to cycle through states and simulate amplitude
     let test_thread = thread::spawn(move || {
         info!("Test thread started - will cycle through states");
 
-        // Wait a bit to see idle state
+        // Wait a bit to see idle state (horizontal line)
         thread::sleep(Duration::from_secs(3));
-        info!("Transitioning to: Recording");
+        info!("Transitioning to: Recording with simulated amplitude");
 
-        // Recording state
-        *state_handle.lock().unwrap() = OverlayState::start_recording();
-        thread::sleep(Duration::from_secs(5));
+        // Recording state with amplitude animation
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(5) {
+            let t = start.elapsed().as_secs_f32();
+            // Simulate varying amplitude (like someone speaking)
+            let amplitude = ((t * 2.0).sin() * 0.5 + 0.5) * 0.8; // 0.0 to 0.8
+            *state_handle.lock().unwrap() = OverlayState::start_recording().with_amplitude(amplitude);
+            thread::sleep(Duration::from_millis(50)); // Update 20 times per second
+        }
         info!("Transitioning to: Processing");
 
         // Processing state
@@ -68,10 +69,16 @@ fn main() {
         *state_handle.lock().unwrap() = OverlayState::Idle;
         thread::sleep(Duration::from_secs(3));
 
-        // Recording again
-        info!("Second recording cycle");
-        *state_handle.lock().unwrap() = OverlayState::start_recording();
-        thread::sleep(Duration::from_secs(3));
+        // Recording again with different amplitude pattern
+        info!("Second recording cycle with faster speech simulation");
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(3) {
+            let t = start.elapsed().as_secs_f32();
+            // Faster, more variable amplitude (excited speech)
+            let amplitude = ((t * 5.0).sin().abs() * 0.9).max(0.2); // 0.2 to 0.9
+            *state_handle.lock().unwrap() = OverlayState::start_recording().with_amplitude(amplitude);
+            thread::sleep(Duration::from_millis(50));
+        }
 
         *state_handle.lock().unwrap() = OverlayState::processing("Transcribing...");
         thread::sleep(Duration::from_secs(2));

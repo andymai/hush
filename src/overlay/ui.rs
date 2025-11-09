@@ -8,9 +8,13 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
     // Configure the style based on theme
     apply_theme(ctx, config.theme);
 
+    // Get screen dimensions and calculate position
+    let screen_rect = ctx.screen_rect();
+    let (x, y) = config.get_window_position(screen_rect.width(), screen_rect.height());
+
     // Create a window that covers the overlay area
     egui::Area::new(egui::Id::new("hush_overlay"))
-        .fixed_pos([0.0, 0.0])
+        .fixed_pos([x, y])
         .show(ctx, |ui| {
             // Create a frame with rounded corners and shadow
             let frame = create_frame(config);
@@ -26,8 +30,8 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
                             action = render_idle_state(ui, config);
                         }
                     }
-                    OverlayState::Recording { start_time } => {
-                        render_recording_state(ui, start_time.elapsed().as_secs_f32(), config);
+                    OverlayState::Recording { start_time, amplitude } => {
+                        render_recording_state(ui, start_time.elapsed().as_secs_f32(), *amplitude, config);
                     }
                     OverlayState::Processing { message } => {
                         render_processing_state(ui, message, config);
@@ -94,44 +98,63 @@ fn create_frame(config: &OverlayConfig) -> Frame {
 fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayAction {
     let mut action = OverlayAction::None;
 
-    // Minimal Wispr Flow-style idle button
+    // Minimal horizontal line indicating idle state
     ui.vertical_centered(|ui| {
-        ui.add_space(12.0);
+        ui.add_space(20.0);
 
-        // Just a simple microphone icon, no text
-        let icon = RichText::new("🎤")
-            .size(32.0);
+        // Draw a horizontal line
+        ui.horizontal(|ui| {
+            ui.add_space(20.0);
 
-        // Make the entire area clickable
-        let response = ui.add(
-            egui::Label::new(icon)
-                .sense(Sense::click())
-        );
+            let line_width = 80.0;
+            let line_height = 4.0;
+            let line_color = Color32::from_rgb(100, 150, 255);
 
-        if response.clicked() {
-            action = OverlayAction::StartRecording;
-        }
+            // Make the line clickable
+            let (rect, response) = ui.allocate_exact_size(
+                egui::vec2(line_width, line_height),
+                Sense::click()
+            );
 
-        ui.add_space(12.0);
+            // Draw rounded horizontal line
+            ui.painter().rect_filled(
+                rect,
+                2.0, // rounded corners
+                line_color
+            );
+
+            if response.clicked() {
+                action = OverlayAction::StartRecording;
+            }
+
+            ui.add_space(20.0);
+        });
+
+        ui.add_space(20.0);
     });
 
     action
 }
 
-fn render_recording_state(ui: &mut egui::Ui, duration: f32, _config: &OverlayConfig) {
-    // Wispr Flow-style waveform animation
+fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _config: &OverlayConfig) {
+    // Wispr Flow-style waveform animation responding to voice
     ui.vertical_centered(|ui| {
         ui.add_space(8.0);
 
-        // Draw animated waveform bars
+        // Draw animated waveform bars that respond to audio amplitude
         ui.horizontal(|ui| {
             ui.add_space(10.0);
 
-            // Create 5 animated bars that pulse with different frequencies
+            // Create 5 bars that respond to amplitude with slight variation
             for i in 0..5 {
-                let frequency = 2.0 + (i as f32 * 0.5);
-                let phase = i as f32 * 0.3;
-                let height = 20.0 + (((duration * frequency + phase).sin() + 1.0) * 15.0);
+                // Each bar has a slight phase offset for visual variety
+                let phase = i as f32 * 0.2;
+                let time_factor = ((duration * 8.0 + phase).sin() + 1.0) / 2.0;
+
+                // Base height on amplitude, with time factor for smooth animation
+                let base_height = 8.0; // Minimum height
+                let max_height = 40.0; // Maximum height
+                let height = base_height + (amplitude * time_factor * max_height);
 
                 let bar_color = Color32::from_rgb(100, 150, 255);
                 let (rect, _) = ui.allocate_exact_size(
