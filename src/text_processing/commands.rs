@@ -115,14 +115,15 @@ impl CommandParser {
         debug!("Parsing text for voice commands: '{}'", text);
 
         let mut segments = Vec::new();
-        let mut remaining = text.to_lowercase();
+        // Use lowercase for pattern matching but preserve original for extraction
+        let lowercase = text.to_lowercase();
         let mut last_end = 0;
 
-        // Find all command matches
+        // Find all command matches in lowercase version
         let mut matches: Vec<(usize, usize, VoiceCommand)> = Vec::new();
 
         for (pattern, command) in COMMAND_PATTERNS.iter() {
-            for mat in pattern.find_iter(&remaining) {
+            for mat in pattern.find_iter(&lowercase) {
                 matches.push((mat.start(), mat.end(), command.clone()));
             }
         }
@@ -130,11 +131,11 @@ impl CommandParser {
         // Sort matches by position
         matches.sort_by_key(|(start, _, _)| *start);
 
-        // Split text into segments
+        // Split text into segments using original case
         for (start, end, command) in matches {
-            // Add text before this command
+            // Add text before this command (preserve original case)
             if start > last_end {
-                let text_segment = remaining[last_end..start].trim();
+                let text_segment = text[last_end..start].trim();
                 if !text_segment.is_empty() {
                     segments.push(VoiceCommand::Text(text_segment.to_string()));
                 }
@@ -145,9 +146,9 @@ impl CommandParser {
             last_end = end;
         }
 
-        // Add remaining text
-        if last_end < remaining.len() {
-            let text_segment = remaining[last_end..].trim();
+        // Add remaining text (preserve original case)
+        if last_end < text.len() {
+            let text_segment = text[last_end..].trim();
             if !text_segment.is_empty() {
                 segments.push(VoiceCommand::Text(text_segment.to_string()));
             }
@@ -240,5 +241,22 @@ mod tests {
 
         assert!(result.is_text_only());
         assert_eq!(result.get_text(), "hello new paragraph world");
+    }
+
+    #[test]
+    fn test_preserves_case() {
+        let parser = CommandParser::new();
+        let result = parser.parse("Hello World new paragraph This Is A Test");
+
+        assert!(result.has_commands());
+        // Should preserve original case
+        match &result.segments[0] {
+            VoiceCommand::Text(text) => assert_eq!(text, "Hello World"),
+            _ => panic!("Expected text segment"),
+        }
+        match &result.segments[2] {
+            VoiceCommand::Text(text) => assert_eq!(text, "This Is A Test"),
+            _ => panic!("Expected text segment"),
+        }
     }
 }
