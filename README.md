@@ -1,8 +1,8 @@
 # 🤫 Hush - Voice-to-Text for Linux Developers
 
-> **Fast, accurate, and private voice-to-text transcription with GPU acceleration and universal app compatibility**
+> **Fast, accurate, and private voice-to-text with GPU acceleration, intelligent text processing, and universal app compatibility**
 
-Hush is a production-ready voice-to-text application built specifically for Linux developers. It uses OpenAI's Whisper models locally with CUDA GPU acceleration for fast, accurate transcription without sending your voice data to any external services.
+Hush is a production-ready voice-to-text application built specifically for Linux developers. It uses OpenAI's Whisper models locally with CUDA GPU acceleration for fast, accurate transcription, and features intelligent text processing with automatic filler word removal and optional LLM polishing. All processing happens locally (except optional LLM), ensuring your voice data never leaves your machine.
 
 ## ✨ Key Features
 
@@ -11,10 +11,13 @@ Hush is a production-ready voice-to-text application built specifically for Linu
 - ⌨️ **Universal Text Insertion** - Works with **ALL applications** including VMs, password fields, games
 - 🔒 **Privacy First** - All processing happens locally on your machine
 - 🎯 **Hardware-Level Integration** - Linux UInput support for maximum compatibility
-- 🖥️ **Modern CLI Interface** - Comprehensive command-line interface
+- 🖥️ **Intelligent Listening Mode** - Wispr Flow-style overlay with push-to-talk hotkey
+- 🎨 **Visual Feedback** - Floating overlay with real-time amplitude monitoring
+- ✨ **Intelligent Text Processing** - Automatic filler word removal and LLM-based polishing
+- 🗣️ **Voice Commands** - "undo", "new paragraph", "new line", and more
 - 📊 **Advanced Logging** - Structured logging with performance metrics and request tracing
 - 🔧 **Multiple Model Sizes** - From tiny (75MB) to large (2.9GB) Whisper models
-- ⚡ **Multiple Modes** - Single recording, manual mode, hotkey support
+- ⚡ **Multiple Modes** - Intelligent listening, single recording, manual mode
 
 ## 🚀 Quick Start
 
@@ -71,18 +74,45 @@ For universal compatibility with all applications:
 ./hush test pipeline
 ```
 
-## 🎮 Usage Modes
-
-### 🎤 Voice-to-Text Modes
+### 5. Start Using Hush 🎉
 ```bash
-# CLI/hotkey mode (work in progress)
-./hush start --cli
+# Start intelligent listening mode (recommended)
+./hush listen
 
-# Background daemon mode (work in progress)
-./hush start --daemon
+# Or do a quick single recording
+./hush record --duration 10
+
+# Or use manual mode for multiple recordings
+./hush manual
 ```
 
-**Note:** Direct start modes are under development. Use recording modes below for immediate use.
+**Pro tip:** Hold `Ctrl+Alt+V` in listen mode to record, release to transcribe and insert!
+
+## 🎮 Usage Modes
+
+### 🎧 Intelligent Listening Mode (Recommended)
+Wispr Flow-style push-to-talk with intelligent text processing:
+```bash
+# Start intelligent listening mode with overlay
+./hush listen
+
+# With custom editing mode (light, medium, aggressive)
+./hush listen --editing-mode aggressive
+
+# Disable text processing (raw transcription only)
+./hush listen --no-processing
+
+# Hide overlay button when idle
+./hush listen --no-button
+```
+
+**Features:**
+- 🎯 **Push-to-talk**: Hold `Ctrl+Alt+V` to record, release to transcribe
+- 🎨 **Visual overlay**: Floating window with real-time amplitude feedback
+- ✨ **Smart processing**: Automatic filler word removal (um, uh, like, etc.)
+- 🤖 **LLM polishing**: Optional Claude API integration for professional text
+- 🗣️ **Voice commands**: Say "undo", "new paragraph", "new line", "cap that", etc.
+- 📝 **Undo support**: Say "undo" to remove the last insertion
 
 ### 🎧 Quick Recording
 ```bash
@@ -103,6 +133,46 @@ For universal compatibility with all applications:
 
 # Multiple recordings
 ./hush manual --count 3
+```
+
+## ⚙️ Configuration
+
+### 🤖 Optional LLM Integration
+Enable intelligent text polishing with Claude API (optional):
+
+```bash
+# Create .env file in project directory
+echo "ANTHROPIC_API_KEY=your_api_key_here" > .env
+
+# Then use listen mode - it will automatically detect and use the API
+./hush listen
+```
+
+**Text Processing Modes:**
+- **Light**: Minimal editing, preserves your natural speech
+- **Medium** (default): Balanced - removes filler words, light polishing
+- **Aggressive**: Heavy editing for professional, formal text
+
+**Note:** LLM integration is completely optional. Without an API key, Hush uses fast rule-based processing.
+
+### 🗣️ Voice Commands Reference
+
+Say these commands during or after transcription:
+
+| Command | Aliases | Effect |
+|---------|---------|--------|
+| `new paragraph` | `next paragraph` | Insert double newline |
+| `new line` | `next line` | Insert single newline |
+| `undo` | `undo that` | Remove last text insertion |
+| `delete that` | `scratch that` | Remove last text insertion |
+| `cap that` | `capitalize that` | Capitalize preceding text |
+| `all caps` | `upper case` | Convert preceding text to UPPERCASE |
+
+**Example:** Say "Hello world new paragraph this is a test" to insert:
+```
+Hello world
+
+this is a test
 ```
 
 ### ⚙️ System Management
@@ -236,6 +306,21 @@ tail -f ~/.local/share/hush/logs/*.log
 
 ## 🆆 Advanced Features
 
+### 🎨 Overlay UI
+
+The intelligent listening mode includes a floating overlay window:
+
+**Visual States:**
+- **Idle**: Tiny button (10×20px) at bottom-center (optional, use `--no-button` to hide)
+- **Recording**: Expanded bar (80×20px) with real-time amplitude visualization
+- **Processing**: Processing indicator while transcribing
+- **Success/Error**: Brief feedback message before returning to idle
+
+**Customization:**
+- Position: Bottom-center by default
+- Auto-hide: Success/error messages automatically fade
+- Minimal: Designed to stay out of your way
+
 ### 📊 Comprehensive Logging
 ```bash
 # Enable different logging levels
@@ -357,20 +442,31 @@ sudo apt install libasound2-dev pkg-config
 ## 🎆 What's New
 
 **Latest features:**
+- 🎧 **Intelligent Listening Mode** - Wispr Flow-style overlay with push-to-talk (Ctrl+Alt+V)
+- 🎨 **Visual Overlay** - Floating window with real-time amplitude feedback
+- ✨ **Smart Text Processing** - Automatic filler word removal and LLM polishing
+- 🗣️ **Voice Commands** - Undo, formatting, and text manipulation via voice
+- 📝 **Undo Support** - Remove last insertion with "undo" command
+- 🤖 **LLM Integration** - Optional Claude API for professional text polishing
 - 🚀 **CUDA GPU Acceleration** - Up to 10x faster transcription
 - 📊 **Structured Logging** - Advanced debugging and performance monitoring
-- 🖥️ **Modern CLI** - Comprehensive command-line interface
-- ⚡ **Real-time Processing** - GPU-accelerated real-time transcription
 - 🔧 **Automated Setup** - One-command UInput configuration
 
 ---
 
-**Ready to experience lightning-fast voice-to-text?** 
+**Ready to experience intelligent voice-to-text?**
 
 ```bash
+# Build and setup
 make build
 ./hush models download base
-./hush record --duration 10
+./hush setup uinput --quick
+
+# Optional: Add Claude API for text polishing
+echo "ANTHROPIC_API_KEY=your_key" > .env
+
+# Start intelligent listening mode
+./hush listen
 ```
 
-✨ **Works everywhere. Processes locally. Accelerated by GPU.**
+✨ **Works everywhere. Processes intelligently. Accelerated by GPU.**
