@@ -30,6 +30,7 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
     let (width, height) = match state {
         OverlayState::Idle => (IDLE_WIDTH, IDLE_HEIGHT),  // Very short pill when inactive
         OverlayState::Recording { .. } => (RECORDING_WIDTH, RECORDING_HEIGHT),  // Expand taller when recording
+        OverlayState::Settings => (220.0, 140.0),  // Larger panel for settings
         _ => (RECORDING_WIDTH, RECORDING_HEIGHT),  // Other states use recording size
     };
 
@@ -70,6 +71,9 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
                     OverlayState::Error { message, .. } => {
                         render_error_state(ui, message, config);
                     }
+                    OverlayState::Settings => {
+                        action = render_settings_state(ui, config);
+                    }
                 }
             });
         }).inner;
@@ -82,8 +86,9 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
 pub enum OverlayAction {
     None,
     StartRecording,
-    #[allow(dead_code)]
     Settings,
+    CloseSettings,
+    ToggleTheme,
 }
 
 fn apply_theme(ctx: &Context, theme: OverlayTheme) {
@@ -232,5 +237,95 @@ fn render_error_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig
 
         ui.add_space(4.0);
     });
+}
+
+fn render_settings_state(ui: &mut egui::Ui, config: &OverlayConfig) -> OverlayAction {
+    let mut action = OverlayAction::None;
+
+    ui.vertical(|ui| {
+        ui.add_space(8.0);
+
+        // Title
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            let title = RichText::new("Hush Settings")
+                .size(12.0)
+                .strong()
+                .color(Color32::WHITE);
+            ui.label(title);
+        });
+
+        ui.add_space(8.0);
+
+        // Theme toggle
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            let label = RichText::new("Theme:")
+                .size(10.0)
+                .color(Color32::GRAY);
+            ui.label(label);
+
+            ui.add_space(4.0);
+
+            let theme_text = match config.theme {
+                OverlayTheme::Dark => "Dark",
+                OverlayTheme::Light => "Light",
+            };
+
+            if ui.button(RichText::new(theme_text).size(10.0).color(Color32::WHITE)).clicked() {
+                action = OverlayAction::ToggleTheme;
+            }
+        });
+
+        ui.add_space(6.0);
+
+        // Hotkey info
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            let label = RichText::new("Hotkey:")
+                .size(10.0)
+                .color(Color32::GRAY);
+            ui.label(label);
+
+            ui.add_space(4.0);
+
+            let hotkey_text = RichText::new("Ctrl+Alt+V")
+                .size(10.0)
+                .color(Color32::WHITE);
+            ui.label(hotkey_text);
+        });
+
+        ui.add_space(6.0);
+
+        // Editing mode info (read-only for now, would need config plumbing to change)
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            let label = RichText::new("Text Processing:")
+                .size(10.0)
+                .color(Color32::GRAY);
+            ui.label(label);
+
+            ui.add_space(4.0);
+
+            let mode_text = RichText::new("Medium")
+                .size(10.0)
+                .color(Color32::WHITE);
+            ui.label(mode_text);
+        });
+
+        ui.add_space(8.0);
+
+        // Close button
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            if ui.button(RichText::new("Close").size(10.0).color(Color32::WHITE)).clicked() {
+                action = OverlayAction::CloseSettings;
+            }
+        });
+
+        ui.add_space(8.0);
+    });
+
+    action
 }
 
