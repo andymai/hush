@@ -25,6 +25,8 @@ pub enum OverlayState {
         message: String,
         show_until: Instant,
     },
+    /// Settings panel
+    Settings,
 }
 
 impl OverlayState {
@@ -113,6 +115,16 @@ impl OverlayState {
     /// Check if state is processing
     pub fn is_processing(&self) -> bool {
         matches!(self, Self::Processing { .. })
+    }
+
+    /// Check if state is showing settings
+    pub fn is_settings(&self) -> bool {
+        matches!(self, Self::Settings)
+    }
+
+    /// Create a settings state
+    pub fn settings() -> Self {
+        Self::Settings
     }
 }
 
