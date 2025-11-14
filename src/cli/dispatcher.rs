@@ -1,8 +1,9 @@
-use anyhow::Result;
+use anyhow::{Result, Context as AnyhowContext};
 use crate::cli::{Commands, SetupCommands, TestCommands, ModelCommands};
 use crate::logging::RequestContext;
 use std::path::PathBuf;
 use tracing::{info, warn, error, debug};
+use std::{env, fs};
 
 // Import Hush components
 use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config, hotkey};
@@ -1378,45 +1379,242 @@ async fn show_device_status() -> Result<()> {
     Ok(())
 }
 
-// Installation functions  
+// Installation functions
 async fn install_autostart() -> Result<()> {
-    println!("Installing autostart entry...");
-    // TODO: Implement autostart installation
-    println!("🚧 Autostart installation not yet implemented");
+    println!("📥 Installing autostart entry...");
+
+    // Get XDG autostart directory
+    let config_home = env::var("XDG_CONFIG_HOME")
+        .unwrap_or_else(|_| format!("{}/.config", env::var("HOME").unwrap()));
+    let autostart_dir = PathBuf::from(config_home).join("autostart");
+
+    // Create autostart directory if it doesn't exist
+    fs::create_dir_all(&autostart_dir)
+        .with_context(|| format!("Failed to create autostart directory: {}", autostart_dir.display()))?;
+
+    let autostart_file = autostart_dir.join("hush.desktop");
+
+    // Get current executable path
+    let exe_path = env::current_exe()
+        .with_context(|| "Failed to determine executable path")?;
+
+    // Create autostart desktop entry
+    let desktop_content = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name=Hush Voice-to-Text\n\
+         Comment=Fast, accurate voice-to-text for Linux developers\n\
+         Exec={} listen\n\
+         Icon=audio-input-microphone\n\
+         Terminal=false\n\
+         Categories=Utility;Accessibility;\n\
+         X-GNOME-Autostart-enabled=true\n",
+        exe_path.display()
+    );
+
+    fs::write(&autostart_file, desktop_content)
+        .with_context(|| format!("Failed to write autostart file: {}", autostart_file.display()))?;
+
+    println!("   ✅ Autostart entry installed: {}", autostart_file.display());
+    println!("   ℹ️  Hush will start in listen mode on login");
     Ok(())
 }
 
 async fn install_desktop_entry() -> Result<()> {
-    println!("Installing desktop entry...");
-    // TODO: Implement desktop entry installation
-    println!("🚧 Desktop entry installation not yet implemented");
+    println!("📥 Installing desktop entry...");
+
+    // Get XDG data directory
+    let data_home = env::var("XDG_DATA_HOME")
+        .unwrap_or_else(|_| format!("{}/.local/share", env::var("HOME").unwrap()));
+    let applications_dir = PathBuf::from(data_home).join("applications");
+
+    // Create applications directory if it doesn't exist
+    fs::create_dir_all(&applications_dir)
+        .with_context(|| format!("Failed to create applications directory: {}", applications_dir.display()))?;
+
+    let desktop_file = applications_dir.join("hush.desktop");
+
+    // Get current executable path
+    let exe_path = env::current_exe()
+        .with_context(|| "Failed to determine executable path")?;
+
+    // Create desktop entry
+    let desktop_content = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name=Hush Voice-to-Text\n\
+         GenericName=Voice-to-Text\n\
+         Comment=Fast, accurate voice-to-text with GPU acceleration\n\
+         Exec={} listen\n\
+         Icon=audio-input-microphone\n\
+         Terminal=false\n\
+         Categories=Utility;Accessibility;AudioVideo;\n\
+         Keywords=voice;speech;dictation;transcription;whisper;\n\
+         StartupNotify=false\n\
+         Actions=Record;Listen;Status;\n\
+         \n\
+         [Desktop Action Record]\n\
+         Name=Quick Record\n\
+         Exec={} record --duration 10\n\
+         \n\
+         [Desktop Action Listen]\n\
+         Name=Start Listening Mode\n\
+         Exec={} listen\n\
+         \n\
+         [Desktop Action Status]\n\
+         Name=Check Status\n\
+         Exec={} status --full\n",
+        exe_path.display(),
+        exe_path.display(),
+        exe_path.display(),
+        exe_path.display()
+    );
+
+    fs::write(&desktop_file, desktop_content)
+        .with_context(|| format!("Failed to write desktop file: {}", desktop_file.display()))?;
+
+    println!("   ✅ Desktop entry installed: {}", desktop_file.display());
+    println!("   ℹ️  Hush should now appear in your application menu");
+
+    // Try to update desktop database
+    if let Ok(output) = std::process::Command::new("update-desktop-database")
+        .arg(&applications_dir)
+        .output()
+    {
+        if output.status.success() {
+            println!("   ✅ Desktop database updated");
+        }
+    }
+
     Ok(())
 }
 
 async fn install_system_wide() -> Result<()> {
-    println!("Installing system-wide...");
-    // TODO: Implement system-wide installation
-    println!("🚧 System-wide installation not yet implemented");
+    println!("📥 Installing system-wide...");
+
+    // Get current executable path
+    let exe_path = env::current_exe()
+        .with_context(|| "Failed to determine executable path")?;
+
+    let target_path = PathBuf::from("/usr/local/bin/hush");
+
+    // Check if we need sudo
+    if target_path.exists() {
+        println!("   ⚠️  {} already exists", target_path.display());
+        print!("   Continue and overwrite? [y/N] ");
+        use std::io::{self, Write};
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("   ❌ Installation cancelled");
+            return Ok(());
+        }
+    }
+
+    println!("   ℹ️  This operation requires sudo privileges");
+    println!("   Running: sudo cp {} {}", exe_path.display(), target_path.display());
+
+    let status = std::process::Command::new("sudo")
+        .arg("cp")
+        .arg(&exe_path)
+        .arg(&target_path)
+        .status()
+        .with_context(|| "Failed to execute sudo cp command")?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to copy executable to {}", target_path.display());
+    }
+
+    // Make it executable
+    let status = std::process::Command::new("sudo")
+        .arg("chmod")
+        .arg("+x")
+        .arg(&target_path)
+        .status()
+        .with_context(|| "Failed to execute sudo chmod command")?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to make {} executable", target_path.display());
+    }
+
+    println!("   ✅ System-wide installation complete: {}", target_path.display());
+    println!("   ℹ️  You can now run 'hush' from anywhere");
     Ok(())
 }
 
 async fn remove_autostart() -> Result<()> {
-    println!("Removing autostart entry...");
-    // TODO: Implement autostart removal
-    println!("🚧 Autostart removal not yet implemented");
+    println!("🗑️  Removing autostart entry...");
+
+    let config_home = env::var("XDG_CONFIG_HOME")
+        .unwrap_or_else(|_| format!("{}/.config", env::var("HOME").unwrap()));
+    let autostart_file = PathBuf::from(config_home).join("autostart").join("hush.desktop");
+
+    if autostart_file.exists() {
+        fs::remove_file(&autostart_file)
+            .with_context(|| format!("Failed to remove autostart file: {}", autostart_file.display()))?;
+        println!("   ✅ Autostart entry removed: {}", autostart_file.display());
+    } else {
+        println!("   ℹ️  No autostart entry found");
+    }
+
     Ok(())
 }
 
 async fn remove_desktop_entry() -> Result<()> {
-    println!("Removing desktop entry...");
-    // TODO: Implement desktop entry removal
-    println!("🚧 Desktop entry removal not yet implemented");
+    println!("🗑️  Removing desktop entry...");
+
+    let data_home = env::var("XDG_DATA_HOME")
+        .unwrap_or_else(|_| format!("{}/.local/share", env::var("HOME").unwrap()));
+    let desktop_file = PathBuf::from(&data_home).join("applications").join("hush.desktop");
+
+    if desktop_file.exists() {
+        fs::remove_file(&desktop_file)
+            .with_context(|| format!("Failed to remove desktop file: {}", desktop_file.display()))?;
+        println!("   ✅ Desktop entry removed: {}", desktop_file.display());
+
+        // Try to update desktop database
+        let applications_dir = PathBuf::from(&data_home).join("applications");
+        if let Ok(output) = std::process::Command::new("update-desktop-database")
+            .arg(&applications_dir)
+            .output()
+        {
+            if output.status.success() {
+                println!("   ✅ Desktop database updated");
+            }
+        }
+    } else {
+        println!("   ℹ️  No desktop entry found");
+    }
+
     Ok(())
 }
 
 async fn remove_system_wide() -> Result<()> {
-    println!("Removing system-wide installation...");
-    // TODO: Implement system-wide removal
-    println!("🚧 System-wide removal not yet implemented");
+    println!("🗑️  Removing system-wide installation...");
+
+    let target_path = PathBuf::from("/usr/local/bin/hush");
+
+    if !target_path.exists() {
+        println!("   ℹ️  No system-wide installation found");
+        return Ok(());
+    }
+
+    println!("   ℹ️  This operation requires sudo privileges");
+    println!("   Running: sudo rm {}", target_path.display());
+
+    let status = std::process::Command::new("sudo")
+        .arg("rm")
+        .arg(&target_path)
+        .status()
+        .with_context(|| "Failed to execute sudo rm command")?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to remove {}", target_path.display());
+    }
+
+    println!("   ✅ System-wide installation removed: {}", target_path.display());
     Ok(())
 }

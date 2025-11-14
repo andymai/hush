@@ -21,7 +21,7 @@ static PRIMARY_MONITOR_INFO: Lazy<([u32; 2], [i32; 2])> = Lazy::new(|| {
 /// Internal struct that implements the EguiOverlay trait
 struct OverlayApp {
     state: Arc<Mutex<OverlayState>>,
-    config: OverlayConfig,
+    config: Arc<Mutex<OverlayConfig>>,
 }
 
 impl EguiOverlay for OverlayApp {
@@ -45,7 +45,8 @@ impl EguiOverlay for OverlayApp {
         }
 
         // Render the UI
-        let action = render_overlay(egui_context, &current_state, &self.config);
+        let current_config = self.config.lock().clone();
+        let action = render_overlay(egui_context, &current_state, &current_config);
 
         // Toggle passthrough based on whether mouse is over UI
         // If egui is using the pointer (hovering over widgets), disable passthrough
@@ -61,7 +62,19 @@ impl EguiOverlay for OverlayApp {
             }
             OverlayAction::Settings => {
                 info!("User opened settings");
-                // TODO: Implement settings UI
+                *self.state.lock() = OverlayState::settings();
+            }
+            OverlayAction::CloseSettings => {
+                info!("User closed settings");
+                *self.state.lock() = OverlayState::Idle;
+            }
+            OverlayAction::ToggleTheme => {
+                info!("User toggled theme");
+                let mut config = self.config.lock();
+                config.theme = match config.theme {
+                    OverlayTheme::Dark => OverlayTheme::Light,
+                    OverlayTheme::Light => OverlayTheme::Dark,
+                };
             }
             OverlayAction::None => {}
         }
@@ -69,7 +82,8 @@ impl EguiOverlay for OverlayApp {
         // Adaptive repaint rate based on state for better performance
         let repaint_interval = match &current_state {
             OverlayState::Recording { .. } => Duration::from_millis(50), // 20 FPS for smooth waveform animation
-            OverlayState::Idle if self.config.show_button_when_idle => Duration::from_secs(1), // 1 FPS when showing idle button
+            OverlayState::Settings => Duration::from_millis(100), // 10 FPS for settings UI (interactive)
+            OverlayState::Idle if current_config.show_button_when_idle => Duration::from_secs(1), // 1 FPS when showing idle button
             OverlayState::Idle => Duration::from_secs(5), // Very slow when completely hidden
             _ => Duration::from_millis(500), // 2 FPS for static states (processing/success/error)
         };
@@ -80,7 +94,7 @@ impl EguiOverlay for OverlayApp {
 /// The main overlay window manager
 pub struct OverlayWindow {
     state: Arc<Mutex<OverlayState>>,
-    config: OverlayConfig,
+    config: Arc<Mutex<OverlayConfig>>,
 }
 
 impl OverlayWindow {
@@ -89,7 +103,7 @@ impl OverlayWindow {
         info!("Creating overlay window");
         Self {
             state: Arc::new(Mutex::new(OverlayState::default())),
-            config,
+            config: Arc::new(Mutex::new(config)),
         }
     }
 
