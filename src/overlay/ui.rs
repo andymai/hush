@@ -160,7 +160,6 @@ fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _con
     // Get the rect we can draw in
     let available_rect = ui.available_rect_before_wrap();
     let available_width = available_rect.width();
-    let available_height = available_rect.height();
 
     // Calculate starting position (centered)
     let start_x = available_rect.left() + (available_width - TOTAL_WIDTH) / 2.0;

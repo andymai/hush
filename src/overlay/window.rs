@@ -151,6 +151,12 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
         glfw_callback: Box::new(|gtx| {
             // Scale window based on monitor scale
             gtx.window_hint(glfw::WindowHint::ScaleToMonitor(true));
+            // Set window to be always on top (floating)
+            gtx.window_hint(glfw::WindowHint::Floating(true));
+            // Remove decorations (titlebar, borders)
+            gtx.window_hint(glfw::WindowHint::Decorated(false));
+            // Set as a utility window (won't appear in taskbar and stays on top)
+            gtx.window_hint(glfw::WindowHint::FocusOnShow(false));
         }),
         #[cfg(not(target_os = "macos"))]
         opengl_window: Some(true), // OpenGL for non-macOS
@@ -161,9 +167,9 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
         ..Default::default()
     });
 
-    // Always on top
+    // Ensure window is always on top (redundant but helps on some window managers)
     glfw_backend.window.set_floating(true);
-    // Disable borders/titlebar
+    // Disable borders/titlebar (redundant but ensures it's applied)
     glfw_backend.window.set_decorated(false);
 
     // Position at primary monitor's offset to cover that screen
