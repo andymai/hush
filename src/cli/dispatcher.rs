@@ -7,7 +7,7 @@ use std::{env, fs};
 
 // Import Hush components
 use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config, hotkey};
-use crate::overlay::{OverlayWindowBuilder, OverlayState, OverlayPosition};
+use crate::overlay::{OverlayWindowBuilder, OverlayState};
 use crate::transcription::SimpleWhisperTranscriber;
 use crate::text_processing::{TextProcessor, ProcessingConfig, EditingMode, LlmProvider, CommandParser, CommandExecutor, InsertionHistory};
 use crate::hotkey::{HotkeyManager, HotkeyEvent};
@@ -499,7 +499,7 @@ impl CommandDispatcher {
                         }
 
                         // Update overlay
-                        let display_text = if processed_text.len() > 50 {
+                        let _display_text = if processed_text.len() > 50 {
                             format!("{}...", &processed_text[..47])
                         } else {
                             processed_text
