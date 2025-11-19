@@ -1,3 +1,4 @@
+use crate::transcription::cuda::CudaAvailability;
 /// Simple working Whisper implementation using whisper-rs
 /// This provides real speech-to-text without the complexity of PyTorch model conversion
 use crate::Result;
@@ -59,9 +60,14 @@ impl SimpleWhisperTranscriber {
         info!("Loading Whisper model from {:?}", self.model_path);
 
         // Create whisper context with GPU acceleration if available
+        let cuda = CudaAvailability::detect();
         let mut ctx_params = WhisperContextParameters::default();
-        ctx_params.use_gpu(true); // Enable GPU acceleration
-        info!("GPU acceleration enabled for Whisper context");
+        ctx_params.use_gpu(cuda.available);
+        if cuda.available {
+            info!("GPU acceleration enabled for Whisper context");
+        } else {
+            info!("Using CPU for Whisper context");
+        }
 
         let context =
             WhisperContext::new_with_params(self.model_path.to_string_lossy().as_ref(), ctx_params)

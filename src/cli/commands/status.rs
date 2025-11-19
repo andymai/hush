@@ -1,4 +1,4 @@
-use super::utils::{show_config_status, show_device_status};
+use super::utils::{show_config_status, show_device_status, show_system_info};
 use crate::{hotkey, AudioCapture, Config, TextInserter, WhisperTranscriber};
 /// Status command implementation
 ///
@@ -27,6 +27,8 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
     println!();
 
     // Always show basic status
+    show_system_info().await?;
+    println!();
     show_config_status().await?;
     println!();
     show_device_status().await?;

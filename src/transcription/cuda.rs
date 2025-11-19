@@ -1,9 +1,128 @@
-use crate::Result;
+use std::sync::OnceLock;
+use tracing::{info, warn};
 
-pub fn check_cuda_availability() -> Result<bool> {
-    todo!("Implement CUDA device detection")
+static CUDA_AVAILABLE: OnceLock<CudaAvailability> = OnceLock::new();
+
+#[derive(Debug, Clone)]
+pub struct CudaAvailability {
+    pub available: bool,
+    pub device_count: usize,
+    pub device_name: Option<String>,
+    pub cuda_version: Option<String>,
 }
 
-pub fn get_optimal_device() -> Result<String> {
-    todo!("Implement device selection logic")
+impl CudaAvailability {
+    /// Detect CUDA availability (cached)
+    pub fn detect() -> &'static Self {
+        CUDA_AVAILABLE.get_or_init(|| {
+            #[cfg(feature = "cuda")]
+            {
+                let available = candle_core::utils::cuda_is_available();
+
+                if available {
+                    let device_count = candle_core::utils::get_num_devices().unwrap_or(0);
+                    let device_name = if device_count > 0 {
+                        candle_core::cuda::device_name(0).ok()
+                    } else {
+                        None
+                    };
+                    let cuda_version = candle_core::cuda::cuda_version()
+                        .ok()
+                        .map(|v| format!("{}.{}", v / 1000, (v % 1000) / 10));
+
+                    info!(
+                        "🚀 CUDA detected: {} device(s), {:?}",
+                        device_count,
+                        device_name.as_deref().unwrap_or("Unknown")
+                    );
+
+                    CudaAvailability {
+                        available: true,
+                        device_count,
+                        device_name,
+                        cuda_version,
+                    }
+                } else {
+                    warn!("⚠️  CUDA not available, falling back to CPU");
+                    CudaAvailability {
+                        available: false,
+                        device_count: 0,
+                        device_name: None,
+                        cuda_version: None,
+                    }
+                }
+            }
+
+            #[cfg(not(feature = "cuda"))]
+            {
+                info!("ℹ️  Built without CUDA support (CPU-only mode)");
+                CudaAvailability {
+                    available: false,
+                    device_count: 0,
+                    device_name: None,
+                    cuda_version: None,
+                }
+            }
+        })
+    }
+
+    pub fn is_available() -> bool {
+        Self::detect().available
+    }
+}
+
+// Legacy compatibility functions
+pub fn check_cuda_availability() -> crate::Result<bool> {
+    Ok(CudaAvailability::is_available())
+}
+
+pub fn get_optimal_device() -> crate::Result<String> {
+    let cuda = CudaAvailability::detect();
+    if cuda.available {
+        Ok(format!(
+            "GPU: {}",
+            cuda.device_name.as_deref().unwrap_or("Unknown")
+        ))
+    } else {
+        Ok("CPU".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cuda_detection_cached() {
+        let first = CudaAvailability::detect();
+        let second = CudaAvailability::detect();
+
+        // Should return same reference (cached)
+        assert!(std::ptr::eq(first, second));
+    }
+
+    #[test]
+    fn test_legacy_function() {
+        // Legacy function should work
+        let _ = check_cuda_availability();
+        let _ = get_optimal_device();
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_cuda_feature_enabled() {
+        // When built with CUDA feature, detection should work
+        let cuda = CudaAvailability::detect();
+        // Don't assert available=true because CI might not have GPU
+        // Just verify detection runs without panic
+        let _ = cuda.available;
+    }
+
+    #[cfg(not(feature = "cuda"))]
+    #[test]
+    fn test_cpu_only_build() {
+        let cuda = CudaAvailability::detect();
+        assert!(!cuda.available);
+        assert_eq!(cuda.device_count, 0);
+    }
 }
