@@ -333,8 +333,6 @@ impl TextInserter {
 
         // Use uinput if available for more reliable backspace
         if let Some(uinput) = &mut self.uinput_keyboard {
-            use crate::text::uinput_keyboard::UinputKeyboard;
-
             // Send backspace keys to delete the characters
             for i in 0..char_count {
                 if i > 0 && i % 100 == 0 {

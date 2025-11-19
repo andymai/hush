@@ -163,7 +163,7 @@ impl TextProcessor {
         intent: &UserIntent,
         session_context: Option<&str>,
     ) -> String {
-        let mut prompt = text.to_string();
+        let prompt = text.to_string();
 
         // Add context hints to guide LLM processing
         let mut hints = Vec::new();
