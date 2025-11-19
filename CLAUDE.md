@@ -302,11 +302,11 @@ cargo build --release           # Release build works
 # 2. Push branch
 git push origin "agent/${AGENT_ID}/${TASK_ID}"
 
-# 3. Create PR
-gh pr create \
-  --title "${TASK_ID}: {brief_description}" \
-  --body "$(cat .ai/tasks/claimed/${TASK_ID}-${AGENT_ID}.md)" \
-  --label "ai-agent"
+# 3. Notify for PR creation
+echo "Branch pushed. Please create a PR with:"
+echo "  Title: ${TASK_ID}: {brief_description}"
+echo "  Body: Contents of .ai/tasks/claimed/${TASK_ID}-${AGENT_ID}.md"
+echo "  Label: ai-agent"
 
 # 4. Mark complete
 mv ".ai/tasks/claimed/${TASK_ID}-${AGENT_ID}.md" \
@@ -403,7 +403,7 @@ A task is complete when:
 - [ ] Error handling uses structured HushError types
 - [ ] Documentation added for public APIs
 - [ ] Branch pushed to remote
-- [ ] PR created with clear description
+- [ ] User notified to create PR with task details
 - [ ] Task moved to `complete/`
 
 A task should be blocked when:
