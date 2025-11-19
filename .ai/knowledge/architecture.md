@@ -576,6 +576,71 @@ fd "adapter" src/adapters/ --type f
 
 ---
 
+## Testing Architecture
+
+### Test Organization
+
+Hush follows a comprehensive testing strategy with multiple layers:
+
+**1. Unit Tests** - Bottom of each module in `#[cfg(test)]` blocks
+**2. Integration Tests** - In `tests/` directory for full pipeline tests
+**3. Binary Tests** - In `src/bin/test-*.rs` for manual testing tools
+**4. Doc Tests** - In documentation comments (verified examples)
+
+### Testing Principles
+
+1. **Hardware-Free Testing** - All tests use mocks (no mic/GPU/X11 required)
+2. **Mock-First Development** - Every trait has a mock in `src/core/mocks.rs`
+3. **Builder Pattern for Setup** - Use `HushAppBuilder` in tests
+4. **Test Both Paths** - Success and error scenarios
+
+### Mock Infrastructure
+
+**Location:** `src/core/mocks.rs`
+
+**Available mocks:** MockAudioSource, MockTranscriber, MockTextOutput, MockInputTrigger, MockStateObserver
+
+**Example:**
+```rust
+let app = HushAppBuilder::new()
+    .with_audio(Box::new(MockAudioSource::new()))
+    .with_transcriber(Box::new(MockTranscriber::new()))
+    .with_text_output(Box::new(MockTextOutput::new()))
+    .build()?;
+```
+
+**See `.ai/knowledge/testing-strategies.md` for comprehensive testing patterns**
+
+---
+
+## CI/CD Integration
+
+### GitHub Actions Workflow
+
+**Location:** `.github/workflows/ci.yml`
+
+### Core CI Jobs
+
+- `check` - Fast compilation check (~2 min)
+- `test` - Full test suite (~3-5 min)
+- `clippy` - Linting with zero warnings (~2 min)
+- `fmt` - Format check (~30 sec)
+- `security` - Vulnerability scanning (~1 min)
+- `msrv` - Minimum Rust 1.70 validation (~2 min)
+- `test-features` - Feature flag matrix (~5-8 min)
+
+**Total CI time:** ~5-8 minutes with caching
+
+### CI Optimization
+
+- **Parallel execution** - All jobs run concurrently
+- **Effective caching** - `Swatinem/rust-cache@v2`
+- **Fast failure detection** - `check` catches most errors in ~2 min
+
+**See `.ai/knowledge/ci-cd-patterns.md` for comprehensive CI/CD patterns**
+
+---
+
 ## Quick Reference Card
 
 | Question | Answer |
@@ -596,6 +661,10 @@ fd "adapter" src/adapters/ --type f
 **For additional details, refer to:**
 - `.ai/knowledge/conventions.md` - Coding conventions and patterns
 - `.ai/knowledge/error-handling.md` - Error handling guide
+- `.ai/knowledge/testing-strategies.md` - Comprehensive testing guide
+- `.ai/knowledge/ci-cd-patterns.md` - CI/CD workflows and optimization
+- `.ai/knowledge/cli-module-patterns.md` - CLI command organization
+- `.ai/knowledge/build-system.md` - Build dependencies and setup
 - `.ai/knowledge/adr-summary.md` - Architecture decisions
 - `.ai/knowledge/uinput-guide.md` - UInput text insertion guide
 - `.ai/knowledge/voice-commands.md` - Voice commands reference

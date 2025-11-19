@@ -685,4 +685,395 @@ echo "✅ Ready to commit"
 
 ---
 
+## Refactoring Safely
+
+### When to Refactor
+
+**Refactor when:**
+- ✅ Code is duplicated in multiple places
+- ✅ Function is >100 lines and has multiple responsibilities
+- ✅ Following an established pattern (consistency)
+- ✅ Tests exist to catch regressions
+- ✅ Improving code quality without changing functionality
+
+**Don't refactor when:**
+- ❌ No tests exist to verify behavior
+- ❌ Code is already well-structured
+- ❌ Would be the only refactoring in codebase (breaks consistency)
+- ❌ Mixing refactoring with feature changes
+
+### Safe Refactoring Process
+
+**1. Verify Current State**
+```bash
+# Run all tests before starting
+cargo test
+
+# Check current compilation
+cargo check
+
+# Verify clippy passes
+cargo clippy -- -D warnings
+```
+
+**2. Make Small, Incremental Changes**
+```bash
+# Pattern: Extract function
+# Step 1: Extract (keep old code)
+# Step 2: Verify tests pass
+cargo test
+# Step 3: Replace call sites one by one
+# Step 4: Verify after each replacement
+cargo check
+```
+
+**3. Commit Frequently**
+```bash
+# Commit after each small refactoring step
+git add -p  # Stage specific changes
+git commit -m "Step 1: Extract helper function"
+```
+
+**4. Run Full Verification**
+```bash
+# After all changes
+cargo check && \
+  cargo test && \
+  cargo clippy -- -D warnings && \
+  cargo fmt
+```
+
+### Refactoring Patterns
+
+**Extract Function:**
+```rust
+// Before: Complex function with duplicated logic
+fn process_data(data: &[u8]) -> Result<()> {
+    // 50 lines of validation
+    // 30 lines of processing
+    // 20 lines of storage
+}
+
+// After: Extracted responsibilities
+fn process_data(data: &[u8]) -> Result<()> {
+    validate_data(data)?;
+    let processed = process_internal(data)?;
+    store_result(processed)?;
+    Ok(())
+}
+
+fn validate_data(data: &[u8]) -> Result<()> { /* ... */ }
+fn process_internal(data: &[u8]) -> Result<ProcessedData> { /* ... */ }
+fn store_result(data: ProcessedData) -> Result<()> { /* ... */ }
+```
+
+**Extract Module:**
+```rust
+// Before: Large dispatcher.rs with all command logic
+
+// After: Modular structure
+// src/cli/dispatcher.rs - Routing only
+// src/cli/commands/record.rs - Record command
+// src/cli/commands/status.rs - Status command
+```
+
+**Introduce Parameter Object:**
+```rust
+// Before: Too many parameters
+fn create_app(
+    audio: Box<dyn AudioSource>,
+    transcriber: Box<dyn Transcriber>,
+    output: Box<dyn TextOutput>,
+    trigger: Box<dyn InputTrigger>,
+    config: Config,
+) -> Result<App> { /* ... */ }
+
+// After: Builder pattern
+let app = HushAppBuilder::new()
+    .with_audio(audio)
+    .with_transcriber(transcriber)
+    .with_text_output(output)
+    .with_trigger(trigger)
+    .with_config(config)
+    .build()?;
+```
+
+### Rollback Strategy
+
+**If refactoring goes wrong:**
+```bash
+# Stash current changes
+git stash
+
+# Or reset to last commit
+git reset --hard HEAD
+
+# Or reset to specific commit
+git reset --hard <commit-hash>
+
+# Review what changed
+git diff HEAD~1
+```
+
+---
+
+## Error Handling Improvements
+
+### Replacing unwrap() and expect()
+
+**Problem:** `unwrap()` and `expect()` cause panics in production.
+
+**Solution:** Replace with proper error handling.
+
+**Pattern 1: Use `?` operator**
+```rust
+// Before
+let value = some_option.unwrap();
+let result = some_result.expect("Failed");
+
+// After
+let value = some_option
+    .ok_or_else(|| HushError::Config("Missing value".into()))?;
+let result = some_result
+    .context("Failed to process")?;
+```
+
+**Pattern 2: Provide context**
+```rust
+use anyhow::Context;
+
+// Before
+let file = std::fs::read(path).unwrap();
+
+// After
+let file = std::fs::read(path)
+    .context(format!("Failed to read file at {}", path.display()))?;
+```
+
+**Pattern 3: Match for different errors**
+```rust
+// Before
+let config = load_config().expect("Config load failed");
+
+// After
+let config = load_config().unwrap_or_else(|e| {
+    eprintln!("Warning: Could not load config: {}", e);
+    eprintln!("Using default configuration");
+    Config::default()
+});
+```
+
+**Pattern 4: Map errors to domain errors**
+```rust
+// Before
+let device = get_device().unwrap();
+
+// After
+let device = get_device()
+    .map_err(|e| AudioError::DeviceNotFound(e.to_string()))?;
+```
+
+### When unwrap() is Acceptable
+
+**Test code:**
+```rust
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_something() {
+        let app = build_test_app().unwrap();  // OK in tests
+        // ...
+    }
+}
+```
+
+**Documented invariants:**
+```rust
+// OK - RwLock poisoning is unrecoverable
+let state = self.state.read()
+    .expect("State lock poisoned - this is a fatal bug");
+```
+
+### Finding unwrap/expect Usage
+
+```bash
+# Find all unwrap/expect calls
+rg "\.unwrap\(\)|\.expect\(" --type rust src/
+
+# Exclude test code
+rg "\.unwrap\(\)|\.expect\(" --type rust src/ -g '!*test*'
+
+# Use clippy to catch
+cargo clippy -- \
+    -W clippy::unwrap_used \
+    -W clippy::expect_used
+```
+
+---
+
+## Documentation Standards
+
+### Code Documentation
+
+**All public items must have doc comments:**
+```rust
+/// Captures audio from the system microphone
+///
+/// This struct provides a high-level interface for audio recording,
+/// abstracting over platform-specific audio APIs.
+///
+/// # Examples
+///
+/// ```
+/// let mut audio = AudioCapture::new()?;
+/// audio.start_recording()?;
+/// std::thread::sleep(Duration::from_secs(3));
+/// let buffer = audio.stop_recording()?;
+/// ```
+pub struct AudioCapture { /* ... */ }
+
+/// Starts recording audio from the default input device
+///
+/// # Errors
+///
+/// Returns `AudioError::NoDeviceAvailable` if no microphone is detected.
+/// Returns `AudioError::RecordingStartFailed` if the device cannot be opened.
+///
+/// # Examples
+///
+/// ```
+/// let mut audio = AudioCapture::new()?;
+/// audio.start_recording()?;
+/// ```
+pub fn start_recording(&mut self) -> Result<()> {
+    // Implementation
+}
+```
+
+### Documentation Structure
+
+**Public API documentation should include:**
+
+1. **Brief description** - One line summary
+2. **Detailed explanation** - What it does and why
+3. **Parameters** - What each parameter means
+4. **Returns** - What it returns (Ok and Err cases)
+5. **Errors** - When and why errors occur
+6. **Examples** - How to use it
+7. **Panics** - If it can panic, when and why
+8. **Safety** - For unsafe code, detailed safety requirements
+
+**Example:**
+```rust
+/// Transcribes audio buffer to text using Whisper model
+///
+/// Uses GPU acceleration if available, falls back to CPU.
+/// The transcription process typically takes 0.5-5 seconds
+/// depending on audio length and hardware.
+///
+/// # Arguments
+///
+/// * `audio` - Audio buffer to transcribe (16kHz, mono recommended)
+///
+/// # Returns
+///
+/// * `Ok(TranscriptionResult)` - Transcribed text with metadata
+/// * `Err(TranscriptionError::NoSpeechDetected)` - If audio is silent
+/// * `Err(TranscriptionError::AudioTooShort)` - If audio < 0.1 seconds
+///
+/// # Examples
+///
+/// ```
+/// let audio = record_audio()?;
+/// let result = transcriber.transcribe(&audio).await?;
+/// println!("Transcribed: {}", result.text);
+/// ```
+pub async fn transcribe(&self, audio: &AudioBuffer) -> Result<TranscriptionResult> {
+    // Implementation
+}
+```
+
+### Module Documentation
+
+**Add module-level docs to `mod.rs` or top of file:**
+```rust
+//! Audio capture and feedback module
+//!
+//! This module provides audio recording functionality using CPAL,
+//! with support for multiple audio backends (ALSA, PulseAudio, etc.)
+//! on Linux.
+//!
+//! # Examples
+//!
+//! ```
+//! use hush::audio::AudioCapture;
+//!
+//! let mut capture = AudioCapture::new()?;
+//! capture.start_recording()?;
+//! ```
+
+pub mod capture;
+pub mod feedback;
+```
+
+### Security Documentation
+
+**For security-sensitive code, document:**
+
+```rust
+/// Inserts text into the focused window using UInput
+///
+/// # Security Considerations
+///
+/// This function creates a virtual keyboard device that can send
+/// keystrokes to any application. It requires:
+/// - Access to /dev/uinput (root or input group)
+/// - User must trust Hush with keyboard input capability
+///
+/// The text is NOT logged or stored anywhere after insertion.
+///
+/// # Privacy
+///
+/// All transcription happens locally. No data is sent to external servers
+/// unless LLM polishing is explicitly enabled.
+pub async fn insert_text(&mut self, text: &str) -> Result<()> {
+    // Implementation
+}
+```
+
+### AI Agent Documentation
+
+**When creating knowledge files for AI agents:**
+
+1. **Focus on patterns, not details** - Teach how to fish
+2. **Include grep/search commands** - Help agents verify
+3. **Provide code examples** - Show the right way
+4. **Link to actual files** - Point to source of truth
+5. **Explain the "why"** - Not just the "what"
+
+**Example:**
+```markdown
+## Finding Trait Definitions
+
+Before implementing a trait, always verify it exists:
+
+\`\`\`bash
+# Find trait definition
+rg "pub trait AudioSource" src/core/traits.rs --context=5
+
+# Find implementations
+rg "impl AudioSource for" --type rust
+
+# Check if mock exists
+rg "MockAudioSource" src/core/mocks.rs
+\`\`\`
+
+**Never assume a trait exists.** If not found, either:
+1. Create it (if you're designing new architecture)
+2. Block the task (if expected to exist)
+\`\`\`
+```
+
+---
+
 **Remember**: This is a **trait-based**, **async**, **Rust** project with strong emphasis on **testability**, **platform independence**, and **user privacy**. When in doubt, check existing patterns in `src/core/` and `src/adapters/`.
