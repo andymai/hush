@@ -10,9 +10,15 @@ categories = ["multimedia::audio", "accessibility"]
 default-run = "hush"
 
 [features]
-default = ["notifications", "system-tray"]
+default = ["notifications", "system-tray", "cuda"]
 notifications = ["dep:notify-rust"]
 system-tray = ["dep:ksni"]
+cuda = [
+    "candle-core/cuda",
+    "candle-nn/cuda",
+    "candle-transformers/cuda",
+    "whisper-rs/cuda"
+]
 
 [dependencies]
 # Audio capture and processing
@@ -21,9 +27,10 @@ hound = "3.5"
 rodio = { version = "0.19", default-features = false, features = ["wav"] }
 
 # Whisper integration (using candle for pure Rust)
-candle-core = { version = "0.8", features = ["cuda"] }
-candle-nn = { version = "0.8", features = ["cuda"] }
-candle-transformers = { version = "0.8", features = ["cuda"] }
+# CUDA features are optional via the "cuda" feature flag
+candle-core = { version = "0.8" }
+candle-nn = { version = "0.8" }
+candle-transformers = { version = "0.8" }
 tokenizers = "0.19"
 hf-hub = { version = "0.3", features = ["tokio"] }
 byteorder = "1.5"
@@ -31,7 +38,7 @@ safetensors = "0.4"
 sha2 = "0.10"  # SHA256 checksum validation for model integrity
 
 # Alternative whisper implementation
-whisper-rs = { version = "0.15", features = ["tracing_backend", "cuda"] }
+whisper-rs = { version = "0.15", features = ["tracing_backend"] }
 
 # Text processing
 regex = "1.10"  # Pattern matching for filler words
