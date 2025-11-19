@@ -36,14 +36,16 @@ pub struct MockSystemTray {
     pub tooltip: String,
     pub menu: Option<TrayMenu>,
     pub is_visible: bool,
-    pub event_sender: mpsc::UnboundedSender<TrayEvent>,
-    pub event_receiver: mpsc::UnboundedReceiver<TrayEvent>,
+    pub event_sender: mpsc::Sender<TrayEvent>,
+    pub event_receiver: mpsc::Receiver<TrayEvent>,
 }
 
 impl MockSystemTray {
     pub fn new() -> Self {
-        let (event_sender, event_receiver) = mpsc::unbounded_channel();
-        
+        // Bounded channel with capacity for UI events (100 events buffer)
+        const TRAY_EVENT_CAPACITY: usize = 100;
+        let (event_sender, event_receiver) = mpsc::channel(TRAY_EVENT_CAPACITY);
+
         Self {
             events: Vec::new(),
             icon_state: TrayIconState::Idle,
@@ -54,20 +56,20 @@ impl MockSystemTray {
             event_receiver,
         }
     }
-    
+
     /// Simulate clicking a menu item (for testing)
     pub fn simulate_menu_click(&self, item: crate::core::traits::TrayMenuItem) {
-        let _ = self.event_sender.send(TrayEvent::MenuClicked(item));
+        let _ = self.event_sender.try_send(TrayEvent::MenuClicked(item));
     }
-    
+
     /// Simulate selecting a history item (for testing)
     pub fn simulate_history_selection(&self, entry_id: String) {
-        let _ = self.event_sender.send(TrayEvent::HistoryItemSelected(entry_id));
+        let _ = self.event_sender.try_send(TrayEvent::HistoryItemSelected(entry_id));
     }
-    
+
     /// Simulate quit request (for testing)
     pub fn simulate_quit(&self) {
-        let _ = self.event_sender.send(TrayEvent::QuitRequested);
+        let _ = self.event_sender.try_send(TrayEvent::QuitRequested);
     }
 }
 
@@ -95,7 +97,7 @@ impl SystemTray for MockSystemTray {
         self.menu = Some(menu);
     }
     
-    fn event_receiver(&self) -> &mpsc::UnboundedReceiver<TrayEvent> {
+    fn event_receiver(&self) -> &mpsc::Receiver<TrayEvent> {
         &self.event_receiver
     }
 }

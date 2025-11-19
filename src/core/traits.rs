@@ -656,7 +656,7 @@ pub trait SystemTray: Send + Sync {
     /// // Note: In real usage, this would be done in a separate task
     /// # })
     /// ```
-    fn event_receiver(&self) -> &mpsc::UnboundedReceiver<TrayEvent>;
+    fn event_receiver(&self) -> &mpsc::Receiver<TrayEvent>;
 }
 
 /// Transcription history storage
