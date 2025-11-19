@@ -15,11 +15,10 @@
 
 ### For Developers
 1. **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to Hush
-2. **[Architecture Overview](docs/ARCHITECTURE.md)** - System architecture and design
-3. **[Design Patterns](docs/architecture/DESIGN_PATTERNS.md)** - Core trait patterns and abstractions
-4. **[Error Handling Guide](docs/ERROR_HANDLING.md)** - Error handling patterns and best practices
-5. **[Refactoring Plan](docs/REFACTORING_PLAN.md)** - Ongoing code refactoring roadmap
-6. **[Architecture Decision Records](docs/architecture/adrs/README.md)** - Key architectural decisions
+2. **[Architecture Overview](.ai/knowledge/architecture.md)** - System architecture and design
+3. **[Conventions & Patterns](.ai/knowledge/conventions.md)** - Core trait patterns and coding standards
+4. **[Error Handling Guide](.ai/knowledge/error-handling.md)** - Error handling patterns and best practices
+5. **[Architecture Decisions](.ai/knowledge/adr-summary.md)** - Key architectural decisions
 
 ---
 
@@ -53,34 +52,29 @@
 ## Developer Documentation
 
 ### Architecture
-- **[Architecture Overview](docs/ARCHITECTURE.md)** - Trait-based architecture (Phase 1 complete)
+- **[Architecture Overview](.ai/knowledge/architecture.md)** - Trait-based architecture (Phase 1 complete)
   - Component abstractions
   - Mock implementations
   - Migration roadmap
   - Current status and metrics
 
-- **[Design Patterns](docs/architecture/DESIGN_PATTERNS.md)** - Core abstractions and patterns
+- **[Conventions & Patterns](.ai/knowledge/conventions.md)** - Core abstractions and patterns
   - AudioSource, Transcriber, TextOutput, InputTrigger traits
   - Platform abstraction
   - State management
-  - Implementation status
-
-- **[Complete Improvements Summary](docs/CHANGELOG.md)** - Recent improvements and refactoring
-  - Code review fixes
-  - Rust best practices (Oct 2025)
-  - Type safety enhancements
+  - Coding standards and best practices
 
 ### Architecture Decision Records (ADRs)
-- **[ADR Index](docs/architecture/adrs/README.md)** - All architectural decisions
-- **[ADR-001: Trait-Based Architecture](docs/architecture/adrs/ADR-001-trait-based-architecture.md)** - Component decoupling
-- **[ADR-002: Error Handling Strategy](docs/architecture/adrs/ADR-002-error-handling-strategy.md)** - Structured errors
-- **[ADR-003: Centralized State Management](docs/architecture/adrs/ADR-003-centralized-state-management.md)** - State machine design
+- **[ADR Summary](.ai/knowledge/adr-summary.md)** - Summary of key architectural decisions
+  - Trait-based architecture
+  - Error handling strategy
+  - Centralized state management
 
 ### Implementation Guides
 - **[Contributing Guide](CONTRIBUTING.md)** - Development setup, coding standards, PR process
-- **[Error Handling Guide](docs/ERROR_HANDLING.md)** - Error system usage and patterns
-- **[Refactoring Plan](docs/REFACTORING_PLAN.md)** - CLI dispatcher refactoring roadmap
-- **[Design Patterns Analysis](docs/archive/DESIGN_PATTERNS_ANALYSIS.md)** - UInput trait alignment analysis
+- **[Error Handling Guide](.ai/knowledge/error-handling.md)** - Error system usage and patterns
+- **[UInput Setup Guide](.ai/knowledge/uinput-guide.md)** - Text insertion setup
+- **[Voice Commands](.ai/knowledge/voice-commands.md)** - Voice command reference
 
 ---
 
@@ -118,12 +112,10 @@ These documents capture previous planning, analysis, and implementation approach
 - Overlay planning: [docs/archive/WISPR_FLOW_UX_PLAN.md](docs/archive/WISPR_FLOW_UX_PLAN.md)
 
 ### Architecture & Design
-- System overview: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- Core patterns: [docs/architecture/DESIGN_PATTERNS.md](docs/architecture/DESIGN_PATTERNS.md)
-- Error handling: [docs/ERROR_HANDLING.md](docs/ERROR_HANDLING.md)
-- Refactoring plan: [docs/REFACTORING_PLAN.md](docs/REFACTORING_PLAN.md)
-- All ADRs: [docs/architecture/adrs/](docs/architecture/adrs/)
-- Improvements log: [docs/CHANGELOG.md](docs/CHANGELOG.md)
+- System overview: [.ai/knowledge/architecture.md](.ai/knowledge/architecture.md)
+- Core patterns & conventions: [.ai/knowledge/conventions.md](.ai/knowledge/conventions.md)
+- Error handling: [.ai/knowledge/error-handling.md](.ai/knowledge/error-handling.md)
+- Architecture decisions: [.ai/knowledge/adr-summary.md](.ai/knowledge/adr-summary.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ---
@@ -166,11 +158,11 @@ When adding or updating documentation:
 - Voice commands not working? → [Voice Commands - Troubleshooting](docs/VOICE_COMMANDS.md#troubleshooting)
 
 ### Deep Dives
-- Understanding architecture → [Architecture Overview](docs/ARCHITECTURE.md)
-- Understanding design decisions → [ADRs](docs/architecture/adrs/README.md)
+- Understanding architecture → [Architecture Overview](.ai/knowledge/architecture.md)
+- Understanding design decisions → [ADR Summary](.ai/knowledge/adr-summary.md)
 - Contributing to codebase → [Contributing Guide](CONTRIBUTING.md)
-- Error handling patterns → [Error Handling Guide](docs/ERROR_HANDLING.md)
-- Ongoing refactoring → [Refactoring Plan](docs/REFACTORING_PLAN.md)
+- Error handling patterns → [Error Handling Guide](.ai/knowledge/error-handling.md)
+- Coding conventions → [Conventions Guide](.ai/knowledge/conventions.md)
 
 ---
 
