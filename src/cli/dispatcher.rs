@@ -1,4 +1,6 @@
-use crate::cli::commands::{handle_listen, handle_manual, handle_models, handle_setup, handle_test};
+use crate::cli::commands::{
+    handle_listen, handle_manual, handle_models, handle_setup, handle_test,
+};
 use crate::cli::{Commands, ModelCommands, SetupCommands, TestCommands};
 use crate::logging::RequestContext;
 use anyhow::{Context as AnyhowContext, Result};
