@@ -72,12 +72,18 @@ impl StateMachine {
 
     /// Get current state (cheap read-only access)
     pub fn current(&self) -> AppState {
-        *self.current.read().unwrap()
+        *self.current.read().unwrap_or_else(|poisoned| {
+            // If the lock is poisoned, recover by using the poisoned data
+            // This is safe because AppState is Copy and doesn't hold any invariants
+            *poisoned.into_inner()
+        })
     }
 
     /// Attempt state transition (validates transition is legal)
     pub fn transition(&self, new_state: AppState) -> Result<(), StateError> {
-        let mut current = self.current.write().unwrap();
+        let mut current = self.current.write().map_err(|e| {
+            StateError::LockPoisoned(format!("Failed to acquire write lock on current state: {}", e))
+        })?;
         let old_state = *current;
 
         // Validate transition
@@ -102,7 +108,9 @@ impl StateMachine {
             to: new_state,
             timestamp: Instant::now(),
         };
-        self.history.write().unwrap().push(transition);
+        self.history.write().map_err(|e| {
+            StateError::LockPoisoned(format!("Failed to acquire write lock on history: {}", e))
+        })?.push(transition);
 
         // Notify observers (release lock first to avoid deadlock)
         drop(current);
@@ -137,12 +145,18 @@ impl StateMachine {
 
     /// Add state observer
     pub fn add_observer(&self, observer: Box<dyn StateObserver>) {
-        self.observers.write().unwrap().push(observer);
+        self.observers.write().unwrap_or_else(|poisoned| {
+            // Recover from poisoned lock by clearing the poison and continuing
+            poisoned.into_inner()
+        }).push(observer);
     }
 
     /// Notify all observers of state change
     fn notify_observers(&self, old_state: AppState, new_state: AppState) {
-        let observers = self.observers.read().unwrap();
+        let observers = self.observers.read().unwrap_or_else(|poisoned| {
+            // Recover from poisoned lock - observers are still valid even if lock was poisoned
+            poisoned.into_inner()
+        });
         for observer in observers.iter() {
             observer.on_state_change(old_state, new_state);
         }
@@ -150,7 +164,10 @@ impl StateMachine {
 
     /// Get state history for debugging
     pub fn history(&self) -> Vec<StateTransition> {
-        self.history.read().unwrap().clone()
+        self.history.read().unwrap_or_else(|poisoned| {
+            // Recover from poisoned lock - history is still valid even if lock was poisoned
+            poisoned.into_inner()
+        }).clone()
     }
 }
 
