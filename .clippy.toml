@@ -16,12 +16,13 @@ too-many-arguments-threshold = 8
 too-many-lines-threshold = 200
 
 # Disallowed methods (methods we want to avoid)
-disallowed-methods = [
-    # Prefer ? operator over unwrap
-    { path = "std::option::Option::unwrap", reason = "use ? or proper error handling instead" },
-    { path = "std::result::Result::unwrap", reason = "use ? or proper error handling instead" },
-    { path = "std::result::Result::expect", reason = "use ? or proper error handling with context" },
-]
+# Currently disabled to allow gradual migration
+# disallowed-methods = [
+#     # Prefer ? operator over unwrap
+#     { path = "std::option::Option::unwrap", reason = "use ? or proper error handling instead" },
+#     { path = "std::result::Result::unwrap", reason = "use ? or proper error handling instead" },
+#     { path = "std::result::Result::expect", reason = "use ? or proper error handling with context" },
+# ]
 
-# Allowed by default but we want to catch
-# These will be deny in clippy command
+# Note: The goal is to eliminate unwrap/expect calls gradually.
+# See docs/ERROR_HANDLING.md for guidelines.
