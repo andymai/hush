@@ -1,5 +1,8 @@
 # Error Handling Guide
 
+**Last Updated:** 2025-11-19
+**Status:** Reference for AI agents working on Hush
+
 This guide explains the error handling patterns and best practices in Hush.
 
 ## Error System Architecture
@@ -329,24 +332,6 @@ fn test_error_recovery() {
     // Should have retried automatically
     assert!(result.is_ok());
 }
-```
-
-## Migration from Legacy Errors
-
-The legacy `src/error/` module has been removed. All code should use `src/core/error::HushError`.
-
-### Before (Legacy)
-```rust
-use crate::error::HushError;
-
-HushError::AudioCapture("Device not found".to_string())
-```
-
-### After (Current)
-```rust
-use crate::core::error::{HushError, AudioError};
-
-HushError::Audio(AudioError::DeviceNotFound("pulse".to_string()))
 ```
 
 ## Summary

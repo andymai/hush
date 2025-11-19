@@ -1,13 +1,9 @@
-# Voice Commands
+# Voice Commands Reference
 
----
-**Last Updated**: 2025-11-19
-**Status**: Active
-**Purpose**: Complete reference for voice commands in Hush listen mode
-**Related Documents**: [Main README](../README.md) | [Documentation Index](../DOCUMENTATION_INDEX.md)
----
+**Last Updated:** 2025-11-19
+**Status:** Active reference for AI agents
 
-Hush supports voice commands that allow you to control text formatting and editing hands-free during listen mode.
+Complete reference for voice commands in Hush listen mode.
 
 ## Supported Commands
 
@@ -131,9 +127,8 @@ Line three
 - Command-formatted text (with newlines) skips filler word removal to preserve formatting
 - Undo history is maintained for up to 50 insertions or 5 minutes
 
-## Technical Details
+## Technical Architecture
 
-### Architecture
 The voice command system consists of three main components:
 
 1. **CommandParser** (`src/text_processing/commands.rs`)
@@ -158,12 +153,13 @@ Voice commands are integrated into the `listen` mode pipeline:
 3. Text Processing (if needed) → Insertion
 4. **History Recording** for undo
 
-### Configuration
-Voice commands are enabled by default in listen mode. To disable:
-```bash
-# Not yet implemented - commands are always enabled
-# Future: ./hush listen --no-commands
-```
+### File Locations
+
+When working on voice commands, check:
+- `src/text_processing/commands.rs` - Command parsing logic
+- `src/text_processing/executor.rs` - Command execution
+- `src/text_processing/history.rs` - Undo history tracking
+- Tests in each file's `#[cfg(test)]` module
 
 ## Usage Examples
 
@@ -219,22 +215,6 @@ Planned commands for future releases:
 - "backspace" / "delete [n] words" - Granular deletion
 - "caps on" / "caps off" - Toggle capitalization mode
 
-## Troubleshooting
-
-### Command Not Recognized
-- Speak clearly and use exact command phrases
-- Commands are case-insensitive, so "NEW PARAGRAPH" works same as "new paragraph"
-- Check logs: `tail -f ~/.local/share/hush/logs/*.log | grep -i command`
-
-### Undo Not Working
-- Ensure you're undoing within 5 minutes of insertion
-- Check that the insertion was successful before trying to undo
-- Only the last insertion can be undone at a time
-
-### Commands Being Inserted as Text
-- This shouldn't happen - if it does, it's a bug
-- Report with example phrase and transcription in logs
-
 ## Testing
 
 Run the voice command tests:
@@ -256,3 +236,28 @@ Test manually:
 #
 # world
 ```
+
+## Implementation Notes for AI Agents
+
+When modifying voice command functionality:
+
+1. **Always use ripgrep to find existing patterns:**
+   ```bash
+   rg "CommandParser" src/text_processing/
+   rg "ExecutionResult" src/text_processing/
+   ```
+
+2. **Check existing tests before implementing:**
+   ```bash
+   rg "#\[test\]" src/text_processing/commands.rs
+   ```
+
+3. **Maintain backward compatibility:**
+   - Don't change existing command phrases
+   - Add new alternatives, don't remove old ones
+   - Preserve undo history behavior
+
+4. **Test with real speech patterns:**
+   - Commands should be case-insensitive
+   - Handle variations in pronunciation
+   - Test with LLM processing enabled and disabled
