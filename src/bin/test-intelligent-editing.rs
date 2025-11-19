@@ -10,18 +10,17 @@
 /// Usage: cargo run --bin test-intelligent-editing
 ///
 /// Note: Requires Whisper model and optionally an LLM model for polishing.
-
 use hush::audio::AudioCapture;
-use hush::hotkey::{HotkeyManager, HotkeyEvent};
-use hush::overlay::{OverlayWindowBuilder, OverlayState, OverlayPosition};
-use hush::transcription::SimpleWhisperTranscriber;
+use hush::hotkey::{HotkeyEvent, HotkeyManager};
+use hush::overlay::{OverlayPosition, OverlayState, OverlayWindowBuilder};
 use hush::text::TextInserter;
-use hush::text_processing::{TextProcessor, ProcessingConfig, EditingMode, LlmProvider};
+use hush::text_processing::{EditingMode, LlmProvider, ProcessingConfig, TextProcessor};
+use hush::transcription::SimpleWhisperTranscriber;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use tracing::{info, error, warn, Level};
+use tracing::{error, info, warn, Level};
 use tracing_subscriber;
 
 enum AudioCommand {
@@ -36,9 +35,7 @@ enum TranscriptionResult {
 
 fn main() {
     // Initialize logging
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .init();
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
     info!("🎤 Hush Intelligent Editing Test (Audio + Transcription + AI Polishing)");
     info!("════════════════════════════════════════════════════════════════════");
@@ -56,7 +53,7 @@ fn main() {
         Err(e) => {
             error!("Failed to create hotkey manager: {}", e);
             return;
-        }
+        },
     };
 
     // Start listening for hotkeys
@@ -69,14 +66,17 @@ fn main() {
     // Initialize audio capture (stays in main thread due to !Send trait)
     let mut audio_capture = match AudioCapture::new(None) {
         Ok(capture) => {
-            info!("✅ Audio capture initialized: {}", capture.get_device_name());
+            info!(
+                "✅ Audio capture initialized: {}",
+                capture.get_device_name()
+            );
             capture
-        }
+        },
         Err(e) => {
             error!("Failed to initialize audio capture: {}", e);
             error!("Please ensure your audio device is working");
             return;
-        }
+        },
     };
 
     // Initialize transcriber (async)
@@ -94,19 +94,19 @@ fn main() {
                     warn!("⚠️  Whisper model not loaded - will use simulation");
                 }
                 Some(t)
-            }
+            },
             Err(e) => {
                 warn!("Failed to initialize transcriber: {}", e);
                 warn!("Will use simulated transcription");
                 None
-            }
+            },
         }
     });
 
     // Initialize text processor with LLM provider
     let processing_config = ProcessingConfig {
         mode: EditingMode::Medium,
-        llm_provider: LlmProvider::None,  // No LLM for this test
+        llm_provider: LlmProvider::None, // No LLM for this test
         max_tokens: 200,
         temperature: 0.3,
     };
@@ -119,12 +119,12 @@ fn main() {
                 info!("✅ Text processor initialized (rule-based only)");
             }
             Some(Arc::new(processor))
-        }
+        },
         Err(e) => {
             warn!("Failed to initialize text processor: {}", e);
             warn!("Will skip text processing step");
             None
-        }
+        },
     };
 
     // Initialize text inserter
@@ -132,12 +132,12 @@ fn main() {
         Ok(inserter) => {
             info!("✅ Text inserter initialized");
             Some(Arc::new(Mutex::new(inserter)))
-        }
+        },
         Err(e) => {
             warn!("Failed to initialize text inserter: {}", e);
             warn!("Transcribed text will only be shown in overlay");
             None
-        }
+        },
     };
 
     // Create the overlay window
@@ -169,29 +169,36 @@ fn main() {
                     *state_handle_clone.lock().unwrap() = OverlayState::start_recording();
 
                     // Send command to start audio recording
-                    if audio_cmd_tx_clone.send(AudioCommand::StartRecording).is_err() {
+                    if audio_cmd_tx_clone
+                        .send(AudioCommand::StartRecording)
+                        .is_err()
+                    {
                         error!("Failed to send start recording command");
                         break;
                     }
-                }
+                },
                 Ok(HotkeyEvent::Released) => {
                     info!("════════════════════════════════════════════════════════");
                     info!("⏹️  HOTKEY RELEASED - Stopping recording");
                     info!("════════════════════════════════════════════════════════");
 
                     // Update overlay to processing state
-                    *state_handle_clone.lock().unwrap() = OverlayState::processing("Transcribing audio...");
+                    *state_handle_clone.lock().unwrap() =
+                        OverlayState::processing("Transcribing audio...");
 
                     // Send command to stop audio recording
-                    if audio_cmd_tx_clone.send(AudioCommand::StopRecording).is_err() {
+                    if audio_cmd_tx_clone
+                        .send(AudioCommand::StopRecording)
+                        .is_err()
+                    {
                         error!("Failed to send stop recording command");
                         break;
                     }
-                }
+                },
                 Err(e) => {
                     error!("Hotkey receiver error: {}", e);
                     break;
-                }
+                },
             }
         }
 
@@ -216,17 +223,18 @@ fn main() {
                     // Process the text
                     let processed_text = if let Some(ref processor) = text_processor_clone {
                         info!("🔄 Processing text...");
-                        *state_handle_clone2.lock().unwrap() = OverlayState::editing("Polishing text");
+                        *state_handle_clone2.lock().unwrap() =
+                            OverlayState::editing("Polishing text");
 
                         match result_runtime.block_on(processor.process(&raw_text)) {
                             Ok(polished) => {
                                 info!("✨ Text polished: '{}'", polished);
                                 polished
-                            }
+                            },
                             Err(e) => {
                                 warn!("Text processing failed: {}, using raw text", e);
                                 raw_text
-                            }
+                            },
                         }
                     } else {
                         info!("ℹ️  Skipping text processing (not available)");
@@ -255,23 +263,19 @@ fn main() {
                         processed_text
                     };
 
-                    *state_handle_clone2.lock().unwrap() = OverlayState::success(
-                        &display_text,
-                        Duration::from_secs(4)
-                    );
+                    *state_handle_clone2.lock().unwrap() =
+                        OverlayState::success(&display_text, Duration::from_secs(4));
 
                     info!("════════════════════════════════════════════════════════");
                     info!("✅ WORKFLOW COMPLETE");
                     info!("════════════════════════════════════════════════════════");
-                }
+                },
                 TranscriptionResult::Error(error_msg) => {
                     error!("❌ Transcription failed: {}", error_msg);
 
-                    *state_handle_clone2.lock().unwrap() = OverlayState::error(
-                        &error_msg,
-                        Duration::from_secs(4)
-                    );
-                }
+                    *state_handle_clone2.lock().unwrap() =
+                        OverlayState::error(&error_msg, Duration::from_secs(4));
+                },
             }
         }
 
@@ -297,16 +301,19 @@ fn main() {
 
                 if let Err(e) = audio_capture.start_recording() {
                     error!("Failed to start recording: {}", e);
-                    if transcription_tx.send(TranscriptionResult::Error(
-                        "Failed to start recording".to_string()
-                    )).is_err() {
+                    if transcription_tx
+                        .send(TranscriptionResult::Error(
+                            "Failed to start recording".to_string(),
+                        ))
+                        .is_err()
+                    {
                         error!("Failed to send error result");
                         break;
                     }
                 } else {
                     info!("✅ Recording started - speak now!");
                 }
-            }
+            },
 
             AudioCommand::StopRecording => {
                 info!("🛑 Stopping audio recording...");
@@ -316,25 +323,29 @@ fn main() {
                     Ok(data) => {
                         info!("✅ Recording stopped - {} samples captured", data.len());
                         data
-                    }
+                    },
                     Err(e) => {
                         error!("Failed to stop recording: {}", e);
-                        if transcription_tx.send(TranscriptionResult::Error(
-                            "Failed to stop recording".to_string()
-                        )).is_err() {
+                        if transcription_tx
+                            .send(TranscriptionResult::Error(
+                                "Failed to stop recording".to_string(),
+                            ))
+                            .is_err()
+                        {
                             error!("Failed to send error result");
                             break;
                         }
                         continue;
-                    }
+                    },
                 };
 
                 // Check if we have audio data
                 if audio_data.is_empty() {
                     warn!("No audio data recorded");
-                    if transcription_tx.send(TranscriptionResult::Error(
-                        "No audio recorded".to_string()
-                    )).is_err() {
+                    if transcription_tx
+                        .send(TranscriptionResult::Error("No audio recorded".to_string()))
+                        .is_err()
+                    {
                         error!("Failed to send error result");
                         break;
                     }
@@ -352,13 +363,16 @@ fn main() {
                             Ok(result) => {
                                 info!("✅ Transcription complete: '{}'", result.text);
                                 info!("   Confidence: {:.2}", result.confidence);
-                                info!("   Processing time: {:.2}s", result.processing_time.as_secs_f32());
+                                info!(
+                                    "   Processing time: {:.2}s",
+                                    result.processing_time.as_secs_f32()
+                                );
                                 TranscriptionResult::Success(result.text)
-                            }
+                            },
                             Err(e) => {
                                 error!("Transcription failed: {}", e);
                                 TranscriptionResult::Error("Transcription failed".to_string())
-                            }
+                            },
                         }
                     } else {
                         // Fallback to simulated transcription with filler words for testing
@@ -372,9 +386,9 @@ fn main() {
                     // No transcriber available - use simulation with fillers
                     warn!("No transcriber - using simulation with filler words");
                     thread::sleep(Duration::from_millis(500)); // Simulate processing
-                    TranscriptionResult::Success(
-                        format!("um well uh I mean this is like a simulated text you know")
-                    )
+                    TranscriptionResult::Success(format!(
+                        "um well uh I mean this is like a simulated text you know"
+                    ))
                 };
 
                 // Send transcription result
@@ -382,7 +396,7 @@ fn main() {
                     error!("Failed to send transcription result");
                     break;
                 }
-            }
+            },
         }
     }
 

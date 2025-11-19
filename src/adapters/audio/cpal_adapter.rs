@@ -2,7 +2,6 @@
 ///
 /// This adapter wraps the existing AudioCapture implementation,
 /// allowing it to be used with the new trait-based architecture.
-
 use crate::audio::AudioCapture;
 use crate::core::traits::{AudioBuffer, AudioConfig, AudioSource};
 use crate::Result;
@@ -22,11 +21,11 @@ impl ThreadSafeAudioCapture {
     fn new(device_name: Option<&str>) -> Result<Self> {
         Ok(ThreadSafeAudioCapture(AudioCapture::new(device_name)?))
     }
-    
+
     fn inner_mut(&mut self) -> &mut AudioCapture {
         &mut self.0
     }
-    
+
     fn inner(&self) -> &AudioCapture {
         &self.0
     }
@@ -44,9 +43,9 @@ impl CpalAudioAdapter {
     pub fn new(device_name: Option<&str>) -> Result<Self> {
         let inner = ThreadSafeAudioCapture::new(device_name)?;
         let device_name = inner.inner().get_device_name();
-        Ok(Self { 
-            inner: Arc::new(Mutex::new(inner)), 
-            device_name 
+        Ok(Self {
+            inner: Arc::new(Mutex::new(inner)),
+            device_name,
         })
     }
 
@@ -66,8 +65,7 @@ impl AudioSource for CpalAudioAdapter {
 
         // Convert to AudioBuffer
         Ok(AudioBuffer::new(
-            samples,
-            16000, // AudioCapture always uses 16kHz
+            samples, 16000, // AudioCapture always uses 16kHz
             1,     // AudioCapture always uses mono
         ))
     }

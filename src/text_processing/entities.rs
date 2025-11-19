@@ -1,7 +1,7 @@
-/// Entity recognition for proper capitalization
-use std::collections::{HashMap, HashSet};
 use once_cell::sync::Lazy;
 use regex::Regex;
+/// Entity recognition for proper capitalization
+use std::collections::{HashMap, HashSet};
 use tracing::debug;
 
 /// Static lists of entities that need proper capitalization
@@ -16,7 +16,6 @@ static TECH_BRANDS: &[(&str, &str)] = &[
     ("postgres", "PostgreSQL"),
     ("mysql", "MySQL"),
     ("mongodb", "MongoDB"),
-
     // Frameworks & libraries
     ("react", "React"),
     ("vue", "Vue"),
@@ -29,7 +28,6 @@ static TECH_BRANDS: &[(&str, &str)] = &[
     ("fastapi", "FastAPI"),
     ("pytorch", "PyTorch"),
     ("tensorflow", "TensorFlow"),
-
     // Platforms & services
     ("github", "GitHub"),
     ("gitlab", "GitLab"),
@@ -42,7 +40,6 @@ static TECH_BRANDS: &[(&str, &str)] = &[
     ("heroku", "Heroku"),
     ("docker", "Docker"),
     ("kubernetes", "Kubernetes"),
-
     // Databases & tools
     ("redis", "Redis"),
     ("elasticsearch", "Elasticsearch"),
@@ -50,7 +47,6 @@ static TECH_BRANDS: &[(&str, &str)] = &[
     ("rabbitmq", "RabbitMQ"),
     ("graphql", "GraphQL"),
     ("grpc", "gRPC"),
-
     // Operating systems
     ("linux", "Linux"),
     ("ubuntu", "Ubuntu"),
@@ -60,15 +56,10 @@ static TECH_BRANDS: &[(&str, &str)] = &[
 ];
 
 static ACRONYMS: &[&str] = &[
-    "API", "REST", "CRUD", "HTTP", "HTTPS", "SSH", "FTP",
-    "JSON", "XML", "HTML", "CSS", "SQL", "NoSQL",
-    "IDE", "CLI", "GUI", "UI", "UX",
-    "AWS", "GCP", "S3", "EC2", "RDS",
-    "CI", "CD", "DevOps", "MLOps",
-    "AI", "ML", "LLM", "NLP", "GPU", "CPU", "RAM",
-    "URL", "URI", "JWT", "OAuth", "SAML",
-    "TCP", "UDP", "DNS", "IP", "VPN",
-    "YAML", "TOML", "CSV", "PDF",
+    "API", "REST", "CRUD", "HTTP", "HTTPS", "SSH", "FTP", "JSON", "XML", "HTML", "CSS", "SQL",
+    "NoSQL", "IDE", "CLI", "GUI", "UI", "UX", "AWS", "GCP", "S3", "EC2", "RDS", "CI", "CD",
+    "DevOps", "MLOps", "AI", "ML", "LLM", "NLP", "GPU", "CPU", "RAM", "URL", "URI", "JWT", "OAuth",
+    "SAML", "TCP", "UDP", "DNS", "IP", "VPN", "YAML", "TOML", "CSV", "PDF",
 ];
 
 static COMMON_TECH_TERMS: &[(&str, &str)] = &[
@@ -87,9 +78,7 @@ static COMMON_TECH_TERMS: &[(&str, &str)] = &[
 ];
 
 /// Regex for detecting potential acronyms (2+ capital letters)
-static ACRONYM_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\b[A-Z]{2,}\b").unwrap()
-});
+static ACRONYM_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b[A-Z]{2,}\b").unwrap());
 
 /// Entity recognizer for smart capitalization
 pub struct EntityRecognizer {
@@ -114,9 +103,7 @@ impl EntityRecognizer {
             brands.insert(lowercase.to_string(), proper.to_string());
         }
 
-        let acronyms: HashSet<String> = ACRONYMS.iter()
-            .map(|s| s.to_string())
-            .collect();
+        let acronyms: HashSet<String> = ACRONYMS.iter().map(|s| s.to_string()).collect();
 
         Self {
             brands,
@@ -127,7 +114,8 @@ impl EntityRecognizer {
 
     /// Add custom entity mappings
     pub fn add_custom_entity(&mut self, lowercase: String, proper: String) {
-        self.custom_entities.insert(lowercase.to_lowercase(), proper);
+        self.custom_entities
+            .insert(lowercase.to_lowercase(), proper);
     }
 
     /// Load custom entities from a map
@@ -252,6 +240,9 @@ mod tests {
 
         // Unknown words should be preserved as-is
         assert_eq!(recognizer.capitalize("hello world"), "hello world");
-        assert_eq!(recognizer.capitalize("some random text"), "some random text");
+        assert_eq!(
+            recognizer.capitalize("some random text"),
+            "some random text"
+        );
     }
 }

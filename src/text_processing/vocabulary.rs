@@ -1,8 +1,8 @@
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 /// Domain-specific vocabulary management
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
-use anyhow::{Result, Context};
 use tracing::{debug, info};
 
 /// Domain-specific vocabulary configuration
@@ -67,8 +67,7 @@ impl DomainVocabulary {
         let path = path.as_ref();
         info!("Saving domain vocabulary to: {}", path.display());
 
-        let json = serde_json::to_string_pretty(self)
-            .context("Failed to serialize vocabulary")?;
+        let json = serde_json::to_string_pretty(self).context("Failed to serialize vocabulary")?;
 
         std::fs::write(path, json)
             .with_context(|| format!("Failed to write vocabulary file: {}", path.display()))?;

@@ -1,9 +1,8 @@
 /// Mock implementations of core traits for testing
 ///
 /// These mocks enable unit testing without hardware dependencies
-
 use super::traits::*;
-use super::types::{SampleRate, Channels, BufferSize};
+use super::types::{BufferSize, Channels, SampleRate};
 use crate::Result;
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -69,8 +68,8 @@ impl AudioSource for MockAudioSource {
         *is_recording = false;
 
         // Generate mock audio data based on simulated duration
-        let num_samples =
-            (self.simulate_duration.as_secs_f32() * self.config.sample_rate.as_u32() as f32) as usize;
+        let num_samples = (self.simulate_duration.as_secs_f32()
+            * self.config.sample_rate.as_u32() as f32) as usize;
         let samples = vec![0.1f32; num_samples]; // Simulated audio
 
         Ok(AudioBuffer::from_config(
@@ -302,13 +301,13 @@ impl InputTrigger for MockInputTrigger {
                 // Put the receiver back
                 *self.event_receiver.lock() = receiver_opt;
                 event
-            }
+            },
             None => {
                 // Receiver was already taken - this indicates a logic error
                 // Log and return None rather than panicking
                 tracing::warn!("MockInputTrigger receiver already consumed");
                 None
-            }
+            },
         }
     }
 
@@ -379,7 +378,13 @@ mod tests {
         trigger.trigger(TriggerEvent::StopRecording).unwrap();
 
         // Receive events
-        assert_eq!(trigger.next_event().await, Some(TriggerEvent::StartRecording));
-        assert_eq!(trigger.next_event().await, Some(TriggerEvent::StopRecording));
+        assert_eq!(
+            trigger.next_event().await,
+            Some(TriggerEvent::StartRecording)
+        );
+        assert_eq!(
+            trigger.next_event().await,
+            Some(TriggerEvent::StopRecording)
+        );
     }
 }

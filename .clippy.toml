@@ -1,0 +1,28 @@
+# Clippy linting configuration for Hush
+
+# Cognitive complexity threshold
+cognitive-complexity-threshold = 30
+
+# Documentation
+missing-docs-in-crate-items = false
+
+# Type complexity
+type-complexity-threshold = 250
+
+# Too many arguments
+too-many-arguments-threshold = 8
+
+# Too many lines
+too-many-lines-threshold = 200
+
+# Disallowed methods (methods we want to avoid)
+# Currently disabled to allow gradual migration
+# disallowed-methods = [
+#     # Prefer ? operator over unwrap
+#     { path = "std::option::Option::unwrap", reason = "use ? or proper error handling instead" },
+#     { path = "std::result::Result::unwrap", reason = "use ? or proper error handling instead" },
+#     { path = "std::result::Result::expect", reason = "use ? or proper error handling with context" },
+# ]
+
+# Note: The goal is to eliminate unwrap/expect calls gradually.
+# See docs/ERROR_HANDLING.md for guidelines.

@@ -1,0 +1,26 @@
+# Rust formatting configuration for Hush
+# Note: Only stable features are enabled to work with stable Rust toolchain
+
+# Edition
+edition = "2021"
+
+# Line width
+max_width = 100
+
+# Formatting
+use_small_heuristics = "Default"
+newline_style = "Unix"
+
+# Reorder
+reorder_imports = true
+reorder_modules = true
+
+# Match
+match_block_trailing_comma = true
+
+# Use
+use_field_init_shorthand = true
+use_try_shorthand = true
+
+# Misc
+remove_nested_parens = true

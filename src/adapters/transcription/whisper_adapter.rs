@@ -1,7 +1,6 @@
+use crate::core::traits::{AudioBuffer, Transcriber, TranscriberInfo, TranscriptionResult};
 /// Adapter for WhisperTranscriber to implement Transcriber trait
-
 use crate::transcription::WhisperTranscriber;
-use crate::core::traits::{Transcriber, TranscriptionResult, TranscriberInfo, AudioBuffer};
 use crate::Result;
 use async_trait::async_trait;
 use std::time::Duration;
@@ -28,7 +27,8 @@ impl WhisperAdapter {
 impl Transcriber for WhisperAdapter {
     async fn transcribe(&self, audio: &AudioBuffer) -> Result<TranscriptionResult> {
         // Call the inner transcriber with the audio samples
-        let result = self.inner
+        let result = self
+            .inner
             .transcribe_async(&audio.samples, audio.sample_rate)
             .await?;
 

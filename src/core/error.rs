@@ -1,10 +1,9 @@
+use std::path::PathBuf;
 /// Structured error types for Hush domain
 ///
 /// This module defines all error types with pattern matching support
 /// and user-friendly messages.
-
 use thiserror::Error;
-use std::path::PathBuf;
 
 /// Top-level domain errors
 #[derive(Error, Debug)]
@@ -172,9 +171,7 @@ impl HushError {
             HushError::Transcription(TranscriptionError::ModelNotFound(_)) => Recoverable,
             HushError::Transcription(TranscriptionError::CudaUnavailable(_)) => Recoverable,
             HushError::TextOutput(TextOutputError::DisplayServerUnavailable(_)) => Recoverable,
-            HushError::InputTrigger(InputTriggerError::HotkeyRegistrationFailed(..)) => {
-                Recoverable
-            }
+            HushError::InputTrigger(InputTriggerError::HotkeyRegistrationFailed(..)) => Recoverable,
             HushError::Config(_) => Recoverable,
 
             // Fatal - cannot continue
@@ -188,20 +185,20 @@ impl HushError {
         match self {
             HushError::Audio(AudioError::NoDeviceAvailable) => {
                 "No microphone detected. Please connect a microphone and try again.".to_string()
-            }
+            },
             HushError::Audio(AudioError::DeviceNotFound(name)) => {
                 format!("Microphone '{}' not found. Check your audio settings or remove device name from config.", name)
-            }
+            },
             HushError::Transcription(TranscriptionError::ModelNotFound(path)) => {
                 format!(
                     "Whisper model not found at '{}'.\nRun: ./scripts/download-models.sh",
                     path.display()
                 )
-            }
+            },
             HushError::Transcription(TranscriptionError::NoSpeechDetected) => {
                 "No speech detected in recording. Try speaking louder or closer to the microphone."
                     .to_string()
-            }
+            },
             _ => self.to_string(),
         }
     }

@@ -7,7 +7,9 @@ use std::path::PathBuf;
 #[command(about = "🤫 Hush - Voice-to-Text for Linux Developers")]
 #[command(version = "0.1.0")]
 #[command(author = "Andy")]
-#[command(long_about = "Fast, accurate voice-to-text for Linux developers using local Whisper models.\nSupports global hotkeys, multiple input methods, and UInput text insertion.")]
+#[command(
+    long_about = "Fast, accurate voice-to-text for Linux developers using local Whisper models.\nSupports global hotkeys, multiple input methods, and UInput text insertion."
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -331,8 +333,8 @@ impl Cli {
     }
 
     pub fn init_logging(&self) {
-        use tracing_subscriber::{EnvFilter, fmt};
         use tracing::Level;
+        use tracing_subscriber::{fmt, EnvFilter};
 
         let level = match self.verbose {
             0 => Level::WARN,
@@ -341,8 +343,8 @@ impl Cli {
             _ => Level::TRACE,
         };
 
-        let filter = EnvFilter::from_default_env()
-            .add_directive(format!("hush={}", level).parse().unwrap());
+        let filter =
+            EnvFilter::from_default_env().add_directive(format!("hush={}", level).parse().unwrap());
 
         fmt()
             .with_env_filter(filter)
