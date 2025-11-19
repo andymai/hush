@@ -10,7 +10,10 @@ use std::{env, fs};
 use tracing::{debug, error, info, warn};
 
 // Import Hush components
-use crate::{hotkey, AudioCapture, Config, TextInserter, WhisperTranscriber};
+use crate::{hotkey, AudioCapture, Config, WhisperTranscriber};
+
+#[cfg(target_os = "linux")]
+use crate::TextInserter;
 
 pub struct CommandDispatcher {
     _config_path: Option<PathBuf>,
@@ -220,13 +223,21 @@ impl CommandDispatcher {
                     println!("✅ Transcription: '{}'", result.text);
 
                     // Insert text
-                    let mut text_inserter = TextInserter::new()?;
-                    println!("⌨️ Inserting text (3 second delay)...");
-                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                    #[cfg(target_os = "linux")]
+                    {
+                        let mut text_inserter = TextInserter::new()?;
+                        println!("⌨️ Inserting text (3 second delay)...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
-                    match text_inserter.insert_text(&result.text) {
-                        Ok(()) => println!("✅ Text inserted successfully"),
-                        Err(e) => println!("❌ Text insertion failed: {}", e),
+                        match text_inserter.insert_text(&result.text) {
+                            Ok(()) => println!("✅ Text inserted successfully"),
+                            Err(e) => println!("❌ Text insertion failed: {}", e),
+                        }
+                    }
+
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        println!("ℹ️  Text insertion not available on this platform");
                     }
                 },
                 Err(e) => println!("❌ Transcription failed: {}", e),
@@ -303,9 +314,16 @@ impl CommandDispatcher {
             }
 
             print!("Text Insertion: ");
-            match TextInserter::new() {
-                Ok(_) => println!("✅ Available"),
-                Err(e) => println!("❌ Failed ({})", e),
+            #[cfg(target_os = "linux")]
+            {
+                match TextInserter::new() {
+                    Ok(_) => println!("✅ Available"),
+                    Err(e) => println!("❌ Failed ({})", e),
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                println!("ℹ️  Platform-specific (use trait-based adapters)");
             }
 
             print!("Hotkey System: ");
@@ -579,12 +597,13 @@ pub async fn test_transcription_system(
 
 pub async fn test_text_insertion_system(
     text: String,
-    all_methods: bool,
-    uinput: bool,
+    _all_methods: bool,
+    _uinput: bool,
 ) -> Result<()> {
     println!("⌨️ Testing text insertion system...");
     println!("Text to insert: '{}'", text);
 
+    #[cfg(target_os = "linux")]
     match crate::TextInserter::new() {
         Ok(mut inserter) => {
             if uinput || all_methods {
@@ -606,6 +625,12 @@ pub async fn test_text_insertion_system(
             }
         },
         Err(e) => println!("❌ Text insertion system test failed: {}", e),
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        println!("ℹ️  Text insertion system test is Linux-only");
+        println!("💡 Use trait-based adapters for platform-specific text insertion");
     }
 
     Ok(())
@@ -681,11 +706,23 @@ pub async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()>
             config.transcription.use_cuda,
         )
         .await?;
-        let mut text_inserter = if transcribe_only {
-            None
-        } else {
-            Some(crate::TextInserter::new()?)
-        };
+        let _text_inserter;
+        #[cfg(target_os = "linux")]
+        {
+            _text_inserter = if transcribe_only {
+                None
+            } else {
+                Some(crate::TextInserter::new()?)
+            };
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            _text_inserter = None::<()>;
+            if !transcribe_only {
+                println!("ℹ️  Text insertion not available on this platform");
+            }
+        }
 
         println!("Press Enter to start recording...");
         std::io::stdin()
@@ -710,6 +747,7 @@ pub async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()>
             Ok(result) => {
                 println!("✅ Transcription: '{}'", result.text);
 
+                #[cfg(target_os = "linux")]
                 if let Some(ref mut inserter) = text_inserter {
                     println!("⌨️ Inserting text (3 second delay)...");
                     tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
@@ -739,9 +777,16 @@ pub async fn run_all_tests(benchmarks: bool, output: Option<PathBuf>) -> Result<
 
     println!("\n=== Text Insertion System Test ===");
     // Skip interactive text insertion in full test
-    match crate::TextInserter::new() {
-        Ok(_) => println!("✅ Text insertion system available"),
-        Err(e) => println!("❌ Text insertion system failed: {}", e),
+    #[cfg(target_os = "linux")]
+    {
+        match crate::TextInserter::new() {
+            Ok(_) => println!("✅ Text insertion system available"),
+            Err(e) => println!("❌ Text insertion system failed: {}", e),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        println!("ℹ️  Text insertion test skipped (platform-specific)");
     }
 
     println!("\n=== Hotkey System Test ===");

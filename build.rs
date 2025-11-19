@@ -223,7 +223,15 @@ fn check_gpu_support() {
                     println!(
                         "cargo:warning=   Expected performance: ~120ms first token on M1/M2/M3"
                     );
-                    println!("cargo:warning=   (Metal support will be added in T-036)");
+
+                    #[cfg(feature = "metal")]
+                    println!("cargo:warning=   ✅ Metal feature enabled");
+
+                    #[cfg(not(feature = "metal"))]
+                    {
+                        println!("cargo:warning=   ⚠️  Metal feature not enabled");
+                        println!("cargo:warning=   Build with --features metal for GPU acceleration");
+                    }
                 } else {
                     println!("cargo:warning=ℹ️  Intel Mac detected");
                     println!("cargo:warning=   Metal GPU available but slower than Apple Silicon");
@@ -254,8 +262,11 @@ fn print_build_summary() {
     #[cfg(all(not(feature = "cuda"), target_os = "linux"))]
     println!("cargo:warning=   GPU: CPU only (use --features cuda for GPU)");
 
-    #[cfg(target_os = "macos")]
-    println!("cargo:warning=   GPU: Metal support coming in T-036");
+    #[cfg(all(target_os = "macos", feature = "metal"))]
+    println!("cargo:warning=   GPU: Metal enabled");
+
+    #[cfg(all(target_os = "macos", not(feature = "metal")))]
+    println!("cargo:warning=   GPU: CPU only (use --features metal for GPU)");
 
     #[cfg(feature = "notifications")]
     println!("cargo:warning=   Notifications: Enabled");

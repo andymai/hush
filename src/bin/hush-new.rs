@@ -1,5 +1,9 @@
 use clap::{Parser, Subcommand};
-use hush::adapters::{CpalAudioAdapter, HotkeyTriggerAdapter, WhisperAdapter, X11TextAdapter};
+use hush::adapters::{CpalAudioAdapter, HotkeyTriggerAdapter, WhisperAdapter};
+#[cfg(target_os = "linux")]
+use hush::adapters::text::X11TextAdapter;
+#[cfg(target_os = "macos")]
+use hush::adapters::text::MacOSTextAdapter;
 use hush::application::hush_app::AppMode;
 /// New Hush binary using trait-based architecture
 ///
@@ -162,8 +166,20 @@ async fn create_real_app(
     let transcriber = Box::new(WhisperAdapter::new(&config.transcription.model_path).await?);
 
     // Text output
-    info!("  ⌨️  Text Output: X11");
-    let text_output = Box::new(X11TextAdapter::new()?);
+    #[cfg(target_os = "linux")]
+    let text_output = {
+        info!("  ⌨️  Text Output: X11");
+        Box::new(X11TextAdapter::new()?)
+    };
+
+    #[cfg(target_os = "macos")]
+    let text_output = {
+        info!("  ⌨️  Text Output: macOS CGEvent");
+        Box::new(MacOSTextAdapter::new()?)
+    };
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    compile_error!("Unsupported platform");
 
     // Input trigger
     info!("  🎯 Input Trigger: {}", config.hotkey.combination);

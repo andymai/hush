@@ -1,7 +1,13 @@
 use anyhow::Result;
+
+#[cfg(not(target_os = "macos"))]
 use egui_overlay::{
     egui_render_three_d::ThreeDBackend, egui_window_glfw_passthrough::GlfwBackend, EguiOverlay,
 };
+
+#[cfg(target_os = "macos")]
+use egui_overlay::{egui_window_glfw_passthrough::GlfwBackend, EguiOverlay};
+
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -26,6 +32,7 @@ struct OverlayApp {
     config: Arc<Mutex<OverlayConfig>>,
 }
 
+#[cfg(not(target_os = "macos"))]
 impl EguiOverlay for OverlayApp {
     fn gui_run(
         &mut self,
@@ -123,6 +130,7 @@ impl OverlayWindow {
     }
 
     /// Run the overlay window (blocking)
+    #[cfg(not(target_os = "macos"))]
     pub fn run(self) -> Result<()> {
         info!("Starting overlay window event loop");
 
@@ -138,10 +146,16 @@ impl OverlayWindow {
         info!("Overlay window closed");
         Ok(())
     }
+
+    #[cfg(target_os = "macos")]
+    pub fn run(self) -> Result<()> {
+        Err(anyhow::anyhow!("Overlay is not supported on macOS yet"))
+    }
 }
 
 /// Custom start function that creates a fullscreen overlay
 /// This is based on egui_overlay::start but with monitor-sized window
+#[cfg(not(target_os = "macos"))]
 fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
     use egui_overlay::egui_window_glfw_passthrough::{glfw, GlfwBackend, GlfwConfig};
 

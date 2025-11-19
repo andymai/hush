@@ -159,7 +159,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(matches!(app.mode, AppMode::Daemon));
+        assert!(matches!(app.mode(), AppMode::Daemon));
 
         // One-shot mode
         let app = HushAppBuilder::new()
@@ -171,7 +171,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(matches!(app.mode, AppMode::OneShot { .. }));
+        assert!(matches!(app.mode(), AppMode::OneShot { .. }));
 
         // Manual mode
         let app = HushAppBuilder::new()
@@ -183,6 +183,6 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(matches!(app.mode, AppMode::Manual));
+        assert!(matches!(app.mode(), AppMode::Manual));
     }
 }

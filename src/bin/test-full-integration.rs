@@ -12,7 +12,8 @@
 use hush::audio::AudioCapture;
 use hush::hotkey::{HotkeyEvent, HotkeyManager};
 use hush::overlay::{OverlayPosition, OverlayState, OverlayWindowBuilder};
-use hush::text::TextInserter;
+use hush::adapters::text::create_text_adapter;
+use hush::core::traits::TextOutput;
 use hush::transcription::SimpleWhisperTranscriber;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
@@ -101,11 +102,14 @@ fn main() {
         }
     });
 
-    // Initialize text inserter
-    let text_inserter = match TextInserter::new() {
+    // Initialize text inserter using async runtime for the factory function
+    let text_inserter = match tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { create_text_adapter() })
+    {
         Ok(inserter) => {
             info!("✅ Text inserter initialized");
-            Some(Arc::new(Mutex::new(inserter)))
+            Some(Arc::new(parking_lot::Mutex::new(inserter)))
         },
         Err(e) => {
             warn!("Failed to initialize text inserter: {}", e);
@@ -196,7 +200,15 @@ fn main() {
                         // Small delay to ensure window focus is stable
                         thread::sleep(Duration::from_millis(200));
 
-                        if let Err(e) = inserter.lock().insert_text(&text) {
+                        // insert_text is async, so we need a runtime
+                        let text_clone = text.clone();
+                        let inserter_clone = Arc::clone(inserter);
+                        if let Err(e) = tokio::runtime::Runtime::new()
+                            .unwrap()
+                            .block_on(async {
+                                inserter_clone.lock().insert_text(&text_clone).await
+                            })
+                        {
                             error!("Failed to insert text: {}", e);
                             warn!("Text will only be shown in overlay");
                         } else {

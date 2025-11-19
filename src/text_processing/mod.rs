@@ -265,8 +265,9 @@ mod tests {
     async fn test_basic_processing() {
         let config = ProcessingConfig {
             mode: EditingMode::Medium,
-            use_llm: false,
-            llm_model_path: Default::default(),
+            llm_provider: LlmProvider::None,
+            max_tokens: 200,
+            temperature: 0.3,
         };
 
         let processor = TextProcessor::new(config).unwrap();

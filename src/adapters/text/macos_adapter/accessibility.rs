@@ -87,7 +87,7 @@ pub fn get_focused_window_info() -> Result<MacOSWindowInfo> {
 ///
 /// # Returns
 ///
-/// - `Ok((CGKeyCode, bool))` - Keycode and whether shift is needed
+/// - `Ok((u16, bool))` - Keycode (as CGKeyCode is a type alias for u16) and whether shift is needed
 /// - `Err` if character cannot be mapped (falls back to space)
 ///
 /// # Example
@@ -215,7 +215,7 @@ pub fn char_to_keycode(ch: char) -> Result<(CGKeyCode, bool)> {
         },
     };
 
-    Ok((CGKeyCode(code), shift))
+    Ok((code, shift))
 }
 
 #[cfg(test)]
@@ -225,35 +225,35 @@ mod tests {
     #[test]
     fn test_char_to_keycode_lowercase() {
         let (keycode, shift) = char_to_keycode('a').unwrap();
-        assert_eq!(keycode.0, 0);
+        assert_eq!(keycode, 0);
         assert_eq!(shift, false);
     }
 
     #[test]
     fn test_char_to_keycode_uppercase() {
         let (keycode, shift) = char_to_keycode('A').unwrap();
-        assert_eq!(keycode.0, 0);
+        assert_eq!(keycode, 0);
         assert_eq!(shift, true);
     }
 
     #[test]
     fn test_char_to_keycode_numbers() {
         let (keycode, shift) = char_to_keycode('5').unwrap();
-        assert_eq!(keycode.0, 23);
+        assert_eq!(keycode, 23);
         assert_eq!(shift, false);
     }
 
     #[test]
     fn test_char_to_keycode_space() {
         let (keycode, shift) = char_to_keycode(' ').unwrap();
-        assert_eq!(keycode.0, 49);
+        assert_eq!(keycode, 49);
         assert_eq!(shift, false);
     }
 
     #[test]
     fn test_char_to_keycode_punctuation() {
         let (keycode, shift) = char_to_keycode('.').unwrap();
-        assert_eq!(keycode.0, 47);
+        assert_eq!(keycode, 47);
         assert_eq!(shift, false);
     }
 
@@ -261,7 +261,7 @@ mod tests {
     fn test_char_to_keycode_unsupported() {
         // Unsupported character should return space keycode
         let (keycode, shift) = char_to_keycode('€').unwrap();
-        assert_eq!(keycode.0, 49); // Space
+        assert_eq!(keycode, 49); // Space
         assert_eq!(shift, false);
     }
 }

@@ -13,7 +13,10 @@ use crate::text_processing::{
     TextProcessor,
 };
 use crate::transcription::SimpleWhisperTranscriber;
-use crate::{AudioCapture, TextInserter};
+use crate::AudioCapture;
+
+#[cfg(target_os = "linux")]
+use crate::TextInserter;
 
 /// Listen command implementation
 ///
@@ -230,6 +233,7 @@ pub async fn handle_listen(
     };
 
     // Initialize text inserter
+    #[cfg(target_os = "linux")]
     let text_inserter = match TextInserter::new() {
         Ok(inserter) => {
             info!("✅ Text inserter initialized");
@@ -240,6 +244,12 @@ pub async fn handle_listen(
             warn!("Transcribed text will only be shown in overlay");
             None
         },
+    };
+
+    #[cfg(not(target_os = "linux"))]
+    let text_inserter: Option<std::sync::Arc<parking_lot::Mutex<()>>> = {
+        warn!("TextInserter not available on this platform (use trait-based adapters instead)");
+        None
     };
 
     // Initialize voice command components
@@ -323,6 +333,7 @@ pub async fn handle_listen(
                                     last_entry.char_count
                                 );
 
+                                #[cfg(target_os = "linux")]
                                 match inserter.lock().undo_last_insertion(last_entry.char_count) {
                                     Ok(_) => {
                                         *state_handle_clone2.lock() = OverlayState::idle();
@@ -334,6 +345,12 @@ pub async fn handle_listen(
                                             std::time::Duration::from_secs(3),
                                         );
                                     },
+                                }
+
+                                #[cfg(not(target_os = "linux"))]
+                                {
+                                    warn!("Undo not supported on this platform");
+                                    *state_handle_clone2.lock() = OverlayState::idle();
                                 }
                             } else {
                                 warn!("No recent insertion to undo");
@@ -377,6 +394,7 @@ pub async fn handle_listen(
                     };
 
                     // Insert text
+                    #[cfg(target_os = "linux")]
                     if let Some(ref inserter) = text_inserter_clone {
                         thread::sleep(std::time::Duration::from_millis(200));
 
@@ -391,6 +409,12 @@ pub async fn handle_listen(
                                 error!("Text insertion failed: {}", e);
                             },
                         }
+                    }
+
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        info!("Text insertion not available on this platform");
+                        info!("Processed text: {}", processed_text);
                     }
 
                     // Update overlay

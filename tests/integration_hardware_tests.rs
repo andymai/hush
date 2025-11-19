@@ -7,9 +7,11 @@
 ///
 /// Note: These tests are marked as #[ignore] by default since they require:
 /// - Microphone access
-/// - X11 display server
+/// - X11 display server (Linux) or Accessibility permissions (macOS)
 /// - Hotkey registration permissions
 /// - Whisper model files
+#![cfg(target_os = "linux")]
+
 use hush::adapters::{CpalAudioAdapter, HotkeyTriggerAdapter, WhisperAdapter, X11TextAdapter};
 use hush::application::{AppMode, HushAppBuilder};
 use hush::core::traits::{AudioSource, InputTrigger, TextOutput, Transcriber};

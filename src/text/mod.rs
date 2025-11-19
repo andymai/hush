@@ -54,11 +54,16 @@
 /// - ✅ Games and fullscreen applications
 /// - ✅ SSH sessions and remote terminals
 /// - ✅ X11 and Wayland applications
+
+#[cfg(target_os = "linux")]
 pub mod insertion;
+#[cfg(target_os = "linux")]
 pub mod uinput_keyboard;
 
+#[cfg(target_os = "linux")]
 pub use insertion::{
     check_dependencies, diagnose_uinput_issues, print_uinput_setup_guidance, InsertionMethod,
     TextInserter, WindowInfo,
 };
+#[cfg(target_os = "linux")]
 pub use uinput_keyboard::{check_uinput_availability, UinputKeyboard};
