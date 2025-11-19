@@ -144,6 +144,12 @@ impl Config {
             },
             hotkey: HotkeyConfig {
                 enabled: true,
+                // Platform-specific defaults:
+                // macOS: Cmd+Shift+V (more native to macOS)
+                // Linux: F10 (function key, less likely to conflict)
+                #[cfg(target_os = "macos")]
+                combination: "Cmd+Shift+V".to_string(),
+                #[cfg(not(target_os = "macos"))]
                 combination: "F10".to_string(),
             },
             wakeword: WakeWordConfig {
