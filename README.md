@@ -115,10 +115,18 @@ Hush is a production-ready voice-to-text application built specifically for Linu
 
 ## 🚀 Quick Start
 
+> **📖 For detailed installation instructions, troubleshooting, and all Linux distributions, see [INSTALL.md](INSTALL.md)**
+
 ### Prerequisites
 ```bash
 # Ubuntu/Debian
-sudo apt install libasound2-dev pkg-config
+sudo apt install libasound2-dev pkg-config libx11-dev libdbus-1-dev
+
+# Fedora/RHEL
+sudo dnf install pkg-config alsa-lib-devel libX11-devel dbus-devel
+
+# Arch Linux
+sudo pacman -S pkg-config alsa-lib libx11 dbus
 
 # For GPU acceleration (optional but recommended)
 # Install NVIDIA drivers 520.x+ and CUDA toolkit 12.0+
@@ -126,12 +134,21 @@ sudo apt install libasound2-dev pkg-config
 
 ### Installation
 
+**Automated Setup (Recommended):**
+```bash
+git clone https://github.com/andymai/hush.git
+cd hush
+./scripts/setup-dev.sh  # Installs dependencies and builds automatically
+./hush models download base
+./hush setup uinput --quick
+```
+
 **Quick Install (One-Liner):**
 ```bash
 git clone https://github.com/andymai/hush.git && cd hush && make build && ./hush models download base && ./hush setup uinput --quick
 ```
 
-**Step-by-Step (Recommended for Beginners):**
+**Step-by-Step (Manual):**
 ```bash
 # 1. Clone the repository
 git clone https://github.com/andymai/hush.git
@@ -149,6 +166,8 @@ make build
 # 5. Test your setup
 ./hush status --full
 ```
+
+> **💡 Tip:** For detailed instructions, all Linux distributions, and troubleshooting, see [INSTALL.md](INSTALL.md)
 
 ### First Run
 
@@ -356,7 +375,8 @@ Hush uses Linux UInput for hardware-level keyboard emulation, providing universa
 ## 📚 Documentation
 
 ### User Documentation
-- **[SETUP.md](SETUP.md)** - Complete installation and setup guide
+- **[INSTALL.md](INSTALL.md)** - **Complete installation guide for all Linux distributions**
+- **[SETUP.md](SETUP.md)** - Setup and configuration guide
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history and release notes
 
 ### Developer & AI Agent Documentation
@@ -486,8 +506,12 @@ A: Whisper models match or exceed commercial accuracy. The base model handles mo
 git clone https://github.com/andymai/hush.git
 cd hush
 
-# Install dependencies
-sudo apt install libasound2-dev pkg-config
+# Option 1: Automated setup (installs dependencies and builds)
+./scripts/setup-dev.sh
+
+# Option 2: Manual installation
+# Install dependencies (see INSTALL.md for other distributions)
+sudo apt install build-essential pkg-config libasound2-dev libx11-dev libdbus-1-dev
 
 # Build debug version
 make build
@@ -502,6 +526,13 @@ cargo test
 cargo clippy
 cargo fmt
 ```
+
+**Build without notifications** (avoids D-Bus dependency):
+```bash
+cargo build --release --no-default-features
+```
+
+For detailed build instructions and troubleshooting, see **[INSTALL.md](INSTALL.md)**.
 
 ### Project Structure
 
