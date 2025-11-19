@@ -1,5 +1,12 @@
 # UInput Quick Reference for Hush
 
+---
+**Last Updated**: 2025-11-19
+**Status**: Active
+**Purpose**: Quick setup commands for UInput text insertion
+**Related Documents**: [UInput Setup Guide](uinput-setup.md) | [Main README](../README.md) | [Documentation Index](../DOCUMENTATION_INDEX.md)
+---
+
 ## TL;DR Setup (Most Users)
 
 ```bash

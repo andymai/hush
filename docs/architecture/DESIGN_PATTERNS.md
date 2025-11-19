@@ -1,8 +1,14 @@
 # Core Trait Abstractions - Hush Voice-to-Text
 
-**Date**: 2025-10-07
-**Status**: Partially Implemented - UInput Integration Complete  
-**Related**: DEPENDENCY_ANALYSIS.md, ADR-001, /DESIGN_PATTERNS_ANALYSIS.md
+---
+**Last Updated**: 2025-11-19
+**Status**: Reference - UInput Integration Complete (Oct 2025), Additional features Nov 2025
+**Purpose**: Defines core trait abstractions for component decoupling
+**Related Documents**: [Architecture](../ARCHITECTURE.md) | [ADR-001](adrs/ADR-001-trait-based-architecture.md) | [Analysis](../archive/DESIGN_PATTERNS_ANALYSIS.md) | [Documentation Index](../../DOCUMENTATION_INDEX.md)
+**Original Date**: 2025-10-07
+---
+
+**Note**: This document describes the trait-based architecture design. UInput integration was completed in October 2025. For the latest features (desktop integration, settings UI, audio feedback) added in November 2025, see [POLISH_AND_DISTRIBUTION.md](../../POLISH_AND_DISTRIBUTION.md).
 
 ## Overview
 
