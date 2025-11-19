@@ -167,28 +167,16 @@ echo "ANTHROPIC_API_KEY=your_api_key_here" > .env
 
 ### ✅ Verify Installation
 
-After setup, verify everything works:
-
 ```bash
-# 1. Check system status
+# Check system status
 ./hush status --full
 
-# Expected output should show:
-# ✅ CUDA available: yes (or no if CPU-only)
-# ✅ Whisper model: base
-# ✅ UInput device: accessible
-# ✅ Audio device: detected
-
-# 2. Test audio capture
+# Test components
 ./hush test audio --duration 3
-
-# 3. Test transcription
 ./hush test transcription
-
-# 4. Test text insertion
 ./hush test text-insertion
 
-# All tests passing? You're ready to go! 🎉
+# All tests passing? You're ready!
 ./hush listen
 ```
 
@@ -254,39 +242,12 @@ Interactive mode for multiple recordings.
 
 ## 💼 Real-World Use Cases
 
-### 📝 Code Documentation
-Hold `Ctrl+Alt+V` while coding to dictate docstrings and comments:
-```python
-# You say: "Document this function new paragraph This function processes user input and returns sanitized output"
-# Hush types:
-"""Document this function
-
-This function processes user input and returns sanitized output"""
-```
-
-### 📧 Email & Communication
-Quickly compose messages in any app (Slack, email, terminal):
-```
-You say: "Hey team comma I've finished the API integration period New paragraph Ready for review exclamation"
-Hush types: "Hey team, I've finished the API integration.
-
-Ready for review!"
-```
-
-### 🐛 Bug Reports & Documentation
-Describe issues while debugging without breaking flow:
-```
-You say: "Reproduced the authentication bug period New paragraph Steps colon one period Navigate to login comma two period Enter credentials comma three period Click submit"
-```
-
-### 📖 Note Taking
-Capture thoughts during meetings, research, or planning sessions without breaking concentration. Works seamlessly in terminals, text editors, browsers, or any application.
-
-### 💬 Commit Messages
-Dictate well-formatted commit messages directly in your terminal:
-```bash
-git commit -m "  # Then use Hush to dictate your commit message
-```
+- **📝 Code Documentation** - Dictate docstrings, comments, and inline documentation
+- **📧 Email & Communication** - Compose messages in Slack, email, or any text field
+- **🐛 Bug Reports** - Describe issues and steps to reproduce while debugging
+- **📖 Note Taking** - Capture thoughts during meetings or research sessions
+- **💬 Commit Messages** - Dictate well-formatted git commit messages
+- **📚 Documentation** - Write docs, READMEs, and technical content hands-free
 
 ---
 
@@ -304,15 +265,6 @@ Say these commands during or after transcription:
 | `delete that` | `scratch that` | Remove last text insertion |
 | `cap that` | `capitalize that` | Capitalize preceding text |
 | `all caps` | `upper case` | Convert to UPPERCASE |
-
-**Example:**
-```
-"Hello world new paragraph this is a test"
-→
-Hello world
-
-this is a test
-```
 
 ### 🤖 LLM Integration (Optional)
 
@@ -377,21 +329,7 @@ Hush uses Linux UInput for hardware-level keyboard emulation, providing universa
 
 *Performance measured on RTX 4080 SUPER with 3-second audio clips*
 
-### Real-World Performance Examples
-
-**Typical 5-second dictation:**
-- With GPU (base model): ~0.5s total (feels instant ⚡)
-- Without GPU (base model): ~5s total (noticeable but acceptable)
-
-**10-second meeting note:**
-- With GPU (base model): ~0.8s total
-- Without GPU (base model): ~10s total
-
-**30-second paragraph:**
-- With GPU (base model): ~1.5s total
-- Without GPU (base model): ~30s total
-
-**💡 Recommendation:** For interactive use, GPU acceleration is highly recommended. For occasional use, CPU with tiny/base models works well.
+**💡 Recommendation:** For interactive use, GPU acceleration is highly recommended (10x faster). For occasional use, CPU with tiny/base models works well.
 
 ### GPU Acceleration
 
