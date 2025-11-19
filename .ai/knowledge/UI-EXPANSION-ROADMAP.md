@@ -272,8 +272,9 @@ Each task includes:
 
 ### For Developers:
 
-1. **Read the research:**
-   - `.ai/knowledge/rust-ui-frameworks-research.md`
+1. **Read the architecture:**
+   - **`.ai/knowledge/ui-architecture.md`** - Architecture patterns (REQUIRED)
+   - `.ai/knowledge/rust-ui-frameworks-research.md` - Framework research
 
 2. **Start with T-027:**
    - Create settings module structure
