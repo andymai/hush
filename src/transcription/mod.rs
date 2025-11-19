@@ -1,4 +1,5 @@
 pub mod cuda;
+pub mod device;
 pub mod models;
 /// Speech-to-text transcription using OpenAI's Whisper models
 ///
@@ -47,6 +48,7 @@ pub mod models;
 pub mod whisper;
 pub mod whisper_simple;
 
+pub use device::{GpuAvailability, GpuType};
 pub use models::{ModelInfo, ModelManager, ModelSize};
 pub use whisper::{TranscriptionResult, WhisperTranscriber};
 pub use whisper_simple::{SimpleTranscriptionResult, SimpleWhisperTranscriber};
