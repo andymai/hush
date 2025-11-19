@@ -78,7 +78,9 @@ static COMMON_TECH_TERMS: &[(&str, &str)] = &[
 ];
 
 /// Regex for detecting potential acronyms (2+ capital letters)
-static ACRONYM_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b[A-Z]{2,}\b").unwrap());
+/// Note: Uses expect() since the pattern is a hardcoded compile-time constant
+static ACRONYM_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\b[A-Z]{2,}\b").expect("ACRONYM_PATTERN regex is valid"));
 
 /// Entity recognizer for smart capitalization
 pub struct EntityRecognizer {

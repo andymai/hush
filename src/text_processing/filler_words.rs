@@ -52,18 +52,25 @@ static AGGRESSIVE_FILLERS: &[&str] = &[
 ];
 
 /// Precompiled regex patterns
-static MULTIPLE_SPACES: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+").unwrap());
+/// Note: These use expect() since the patterns are hardcoded compile-time constants
+static MULTIPLE_SPACES: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\s+").expect("MULTIPLE_SPACES regex is valid"));
 
-static SPACE_BEFORE_PUNCTUATION: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+([,.!?;:])").unwrap());
+static SPACE_BEFORE_PUNCTUATION: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\s+([,.!?;:])").expect("SPACE_BEFORE_PUNCTUATION regex is valid"));
 
 // Multiple patterns for repeated punctuation (Rust regex doesn't support backreferences)
-static REPEATED_PERIODS: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.{2,}").unwrap());
+static REPEATED_PERIODS: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\.{2,}").expect("REPEATED_PERIODS regex is valid"));
 
-static REPEATED_COMMAS: Lazy<Regex> = Lazy::new(|| Regex::new(r",{2,}").unwrap());
+static REPEATED_COMMAS: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r",{2,}").expect("REPEATED_COMMAS regex is valid"));
 
-static REPEATED_EXCLAMATION: Lazy<Regex> = Lazy::new(|| Regex::new(r"!{2,}").unwrap());
+static REPEATED_EXCLAMATION: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"!{2,}").expect("REPEATED_EXCLAMATION regex is valid"));
 
-static REPEATED_QUESTION: Lazy<Regex> = Lazy::new(|| Regex::new(r"\?{2,}").unwrap());
+static REPEATED_QUESTION: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\?{2,}").expect("REPEATED_QUESTION regex is valid"));
 
 pub struct FillerWordRemover {
     light_patterns: Vec<Regex>,
@@ -88,7 +95,8 @@ impl FillerWordRemover {
                 // Match the filler word with word boundaries
                 // Case insensitive, with optional surrounding spaces
                 let pattern = format!(r"(?i)\b{}\b", regex::escape(filler));
-                Regex::new(&pattern).unwrap()
+                // regex::escape() always produces valid regex, so expect() is safe here
+                Regex::new(&pattern).expect("Escaped regex pattern is valid")
             })
             .collect()
     }
@@ -146,7 +154,8 @@ impl FillerWordRemover {
             return trimmed.to_string();
         }
 
-        let last_char = trimmed.chars().last().unwrap();
+        // Safe to expect: we just checked that trimmed is not empty
+        let last_char = trimmed.chars().last().expect("trimmed is not empty");
         if matches!(last_char, '.' | '!' | '?') {
             trimmed.to_string()
         } else {
