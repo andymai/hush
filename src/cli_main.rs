@@ -62,7 +62,7 @@ pub enum Commands {
     /// Manual recording mode (interactive prompts)
     Manual {
         /// Number of recordings to make
-        #[arg(short, long, default_value = "1")]
+        #[arg(short = 'n', long, default_value = "1")]
         count: u32,
     },
 
@@ -260,7 +260,7 @@ pub enum TestCommands {
     /// Test complete voice-to-text pipeline
     Pipeline {
         /// Number of test recordings
-        #[arg(short, long, default_value = "1")]
+        #[arg(short = 'n', long, default_value = "1")]
         count: u32,
 
         /// Skip text insertion (just transcribe)
