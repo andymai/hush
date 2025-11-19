@@ -166,7 +166,7 @@ fn main() {
                     info!("════════════════════════════════════════════════════════");
 
                     // Update overlay to recording state
-                    *state_handle_clone.lock().unwrap() = OverlayState::start_recording();
+                    *state_handle_clone.lock() = OverlayState::start_recording();
 
                     // Send command to start audio recording
                     if audio_cmd_tx_clone
@@ -183,7 +183,7 @@ fn main() {
                     info!("════════════════════════════════════════════════════════");
 
                     // Update overlay to processing state
-                    *state_handle_clone.lock().unwrap() =
+                    *state_handle_clone.lock() =
                         OverlayState::processing("Transcribing audio...");
 
                     // Send command to stop audio recording
@@ -223,8 +223,8 @@ fn main() {
                     // Process the text
                     let processed_text = if let Some(ref processor) = text_processor_clone {
                         info!("🔄 Processing text...");
-                        *state_handle_clone2.lock().unwrap() =
-                            OverlayState::editing("Polishing text");
+                        *state_handle_clone2.lock() =
+                            OverlayState::processing("Polishing text");
 
                         match result_runtime.block_on(processor.process(&raw_text)) {
                             Ok(polished) => {
@@ -248,7 +248,7 @@ fn main() {
                         // Small delay to ensure window focus is stable
                         thread::sleep(Duration::from_millis(200));
 
-                        if let Err(e) = inserter.lock().unwrap().insert_text(&processed_text) {
+                        if let Err(e) = inserter.lock().insert_text(&processed_text) {
                             error!("Failed to insert text: {}", e);
                             warn!("Text will only be shown in overlay");
                         } else {

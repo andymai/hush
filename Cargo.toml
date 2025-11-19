@@ -92,7 +92,7 @@ sysinfo = "0.32"  # Conservative update, 0.37 has breaking changes
 chrono = { version = "0.4", features = ["serde"] }
 
 # HTTP client for downloading models
-reqwest = { version = "0.12", features = ["stream"] }
+reqwest = { version = "0.12", features = ["stream", "json"] }
 futures-util = "0.3"
 
 # Utilities

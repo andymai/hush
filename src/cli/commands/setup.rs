@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tracing::warn;
 
 use crate::cli::SetupCommands;

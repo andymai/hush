@@ -35,19 +35,19 @@ fn main() {
             let t = start.elapsed().as_secs_f32();
             // Simulate varying amplitude (like someone speaking)
             let amplitude = ((t * 2.0).sin() * 0.5 + 0.5) * 0.8; // 0.0 to 0.8
-            *state_handle.lock().unwrap() =
+            *state_handle.lock() =
                 OverlayState::start_recording().with_amplitude(amplitude);
             thread::sleep(Duration::from_millis(50)); // Update 20 times per second
         }
         info!("Transitioning to: Processing");
 
         // Processing state
-        *state_handle.lock().unwrap() = OverlayState::processing("Transcribing audio...");
+        *state_handle.lock() = OverlayState::processing("Transcribing audio...");
         thread::sleep(Duration::from_secs(3));
         info!("Transitioning to: Success");
 
         // Success state
-        *state_handle.lock().unwrap() = OverlayState::success(
+        *state_handle.lock() = OverlayState::success(
             "Hello world, this is a test transcription!",
             Duration::from_secs(3),
         );
@@ -61,7 +61,7 @@ fn main() {
         info!("Transitioning back to: Idle");
 
         // Back to idle
-        *state_handle.lock().unwrap() = OverlayState::Idle;
+        *state_handle.lock() = OverlayState::Idle;
         thread::sleep(Duration::from_secs(3));
 
         // Recording again with different amplitude pattern
@@ -71,12 +71,12 @@ fn main() {
             let t = start.elapsed().as_secs_f32();
             // Faster, more variable amplitude (excited speech)
             let amplitude = ((t * 5.0).sin().abs() * 0.9).max(0.2); // 0.2 to 0.9
-            *state_handle.lock().unwrap() =
+            *state_handle.lock() =
                 OverlayState::start_recording().with_amplitude(amplitude);
             thread::sleep(Duration::from_millis(50));
         }
 
-        *state_handle.lock().unwrap() = OverlayState::processing("Transcribing...");
+        *state_handle.lock() = OverlayState::processing("Transcribing...");
         thread::sleep(Duration::from_secs(2));
 
         *state_handle.lock().unwrap() =

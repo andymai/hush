@@ -10,6 +10,7 @@ use anyhow::Result;
 use parking_lot::Mutex;
 use serde_json::json;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -82,9 +83,9 @@ impl PerformanceMetrics {
         let mut system = System::new_all();
         system.refresh_all();
 
-        let cpu_usage = system.global_cpu_info().cpu_usage();
+        let cpu_usage = system.global_cpu_usage();
 
-        let memory_usage_mb = if let Some(process) = system.processes_by_name("hush").next() {
+        let memory_usage_mb = if let Some(process) = system.processes_by_name(OsStr::new("hush")).next() {
             process.memory() / 1024 / 1024
         } else {
             0

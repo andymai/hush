@@ -75,7 +75,7 @@ impl StateMachine {
         *self.current.read().unwrap_or_else(|poisoned| {
             // If the lock is poisoned, recover by using the poisoned data
             // This is safe because AppState is Copy and doesn't hold any invariants
-            *poisoned.into_inner()
+            poisoned.into_inner()
         })
     }
 

@@ -17,38 +17,29 @@ impl CudaAvailability {
         CUDA_AVAILABLE.get_or_init(|| {
             #[cfg(feature = "cuda")]
             {
-                let available = candle_core::utils::cuda_is_available();
+                // Try to create a CUDA device to check availability
+                match candle_core::Device::cuda_if_available(0) {
+                    Ok(device) => {
+                        // CUDA is available
+                        // Note: Device count and detailed info are not easily accessible
+                        // from candle_core's public API in newer versions
+                        info!("🚀 CUDA detected and available");
 
-                if available {
-                    let device_count = candle_core::utils::get_num_devices().unwrap_or(0);
-                    let device_name = if device_count > 0 {
-                        candle_core::cuda::device_name(0).ok()
-                    } else {
-                        None
-                    };
-                    let cuda_version = candle_core::cuda::cuda_version()
-                        .ok()
-                        .map(|v| format!("{}.{}", v / 1000, (v % 1000) / 10));
-
-                    info!(
-                        "🚀 CUDA detected: {} device(s), {:?}",
-                        device_count,
-                        device_name.as_deref().unwrap_or("Unknown")
-                    );
-
-                    CudaAvailability {
-                        available: true,
-                        device_count,
-                        device_name,
-                        cuda_version,
+                        CudaAvailability {
+                            available: true,
+                            device_count: 1, // At least one device is available
+                            device_name: Some("CUDA Device".to_string()), // Generic name
+                            cuda_version: None, // Version info not easily accessible
+                        }
                     }
-                } else {
-                    warn!("⚠️  CUDA not available, falling back to CPU");
-                    CudaAvailability {
-                        available: false,
-                        device_count: 0,
-                        device_name: None,
-                        cuda_version: None,
+                    Err(_) => {
+                        warn!("⚠️  CUDA not available, falling back to CPU");
+                        CudaAvailability {
+                            available: false,
+                            device_count: 0,
+                            device_name: None,
+                            cuda_version: None,
+                        }
                     }
                 }
             }

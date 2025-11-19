@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
-use super::state::{OverlayConfig, OverlayState};
+use super::state::{OverlayConfig, OverlayState, OverlayTheme};
 use super::ui::{render_overlay, OverlayAction};
 
 // Cache primary monitor info for faster overlay startup
