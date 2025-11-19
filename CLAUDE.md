@@ -31,6 +31,30 @@ You are an AI coding agent working autonomously on the **Hush** project - a fast
 └── docs/                        # Architecture documentation
 ```
 
+## Task Structure Rules
+
+**IMPORTANT:** Tasks in `.ai/tasks/` must be specific, actionable items.
+
+### ✅ Valid Tasks
+- Individual, completable work items (e.g., `T-037-implement-macos-system-tray-adapter.md`)
+- Format: `T-XXX-brief-description.md`
+- Each task has clear success criteria
+- Can be completed independently in one session
+
+### ❌ DO NOT Create in tasks/
+- **Overview documents** (e.g., `MACOS-SUPPORT-OVERVIEW.md`)
+- **Planning documents** (e.g., `PLATFORM-STRATEGY.md`)
+- **Multi-task epics** (break into individual tasks instead)
+- **Documentation** (belongs in `docs/` or `.ai/knowledge/`)
+
+### Where Planning Documents Belong
+- **Architecture/Design**: `.ai/knowledge/architecture.md` or `docs/architecture/`
+- **Platform Support Plans**: `docs/` directory
+- **Knowledge Base**: `.ai/knowledge/` directory
+- **ADRs**: `docs/architecture/decisions/` or `.ai/knowledge/adr-summary.md`
+
+**Rule of thumb:** If it's not a single completable task, it doesn't belong in `.ai/tasks/`.
+
 ## Task Lifecycle
 
 ### 1. Claim Task
