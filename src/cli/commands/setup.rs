@@ -210,7 +210,7 @@ async fn run_setup_wizard(auto: bool) -> Result<()> {
     // Step 2: Model download
     println!("\n📋 Step 2: Model Download");
     println!("Downloading recommended model (base)...");
-    crate::cli::dispatcher::download_model("base", false).await?;
+    super::models::download_model("base", false).await?;
 
     // Step 3: Test systems
     println!("\n📋 Step 3: System Test");
