@@ -1,5 +1,5 @@
-use crate::{AudioCapture, Config};
 use crate::transcription::cuda::CudaAvailability;
+use crate::{AudioCapture, Config};
 /// Utility functions shared across command handlers
 ///
 /// This module contains helper functions used by multiple command implementations.
