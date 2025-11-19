@@ -57,13 +57,18 @@ impl Config {
 
     pub fn load_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self> {
         use std::fs;
-        
-        let config_str = fs::read_to_string(path.as_ref())
-            .map_err(|e| anyhow::anyhow!("Failed to read config file {}: {}", path.as_ref().display(), e))?;
-        
+
+        let config_str = fs::read_to_string(path.as_ref()).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to read config file {}: {}",
+                path.as_ref().display(),
+                e
+            )
+        })?;
+
         let config: Config = toml::from_str(&config_str)
             .map_err(|e| anyhow::anyhow!("Failed to parse TOML config: {}", e))?;
-        
+
         config.validate()?;
         Ok(config)
     }
@@ -71,35 +76,50 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         // Validate audio configuration
         if self.audio.sample_rate < 8000 || self.audio.sample_rate > 48000 {
-            return Err(anyhow::anyhow!("Invalid sample rate: must be between 8000 and 48000 Hz"));
+            return Err(anyhow::anyhow!(
+                "Invalid sample rate: must be between 8000 and 48000 Hz"
+            ));
         }
         if self.audio.channels == 0 || self.audio.channels > 2 {
             return Err(anyhow::anyhow!("Invalid channels: must be 1 or 2"));
         }
         if self.audio.buffer_size < 64 || self.audio.buffer_size > 8192 {
-            return Err(anyhow::anyhow!("Invalid buffer size: must be between 64 and 8192"));
+            return Err(anyhow::anyhow!(
+                "Invalid buffer size: must be between 64 and 8192"
+            ));
         }
 
         // Validate transcription configuration
         let valid_models = ["tiny", "base", "small", "medium", "large"];
         if !valid_models.contains(&self.transcription.model_size.as_str()) {
-            return Err(anyhow::anyhow!("Invalid model size: must be one of {:?}", valid_models));
+            return Err(anyhow::anyhow!(
+                "Invalid model size: must be one of {:?}",
+                valid_models
+            ));
         }
         if self.transcription.beam_size < 1 || self.transcription.beam_size > 20 {
-            return Err(anyhow::anyhow!("Invalid beam size: must be between 1 and 20"));
+            return Err(anyhow::anyhow!(
+                "Invalid beam size: must be between 1 and 20"
+            ));
         }
 
         // Validate hotkey configuration
         if self.hotkey.enabled && self.hotkey.combination.is_empty() {
-            return Err(anyhow::anyhow!("Hotkey combination cannot be empty when hotkey is enabled"));
+            return Err(anyhow::anyhow!(
+                "Hotkey combination cannot be empty when hotkey is enabled"
+            ));
         }
 
-        // Validate wakeword configuration  
+        // Validate wakeword configuration
         if self.wakeword.enabled && self.wakeword.phrase.is_empty() {
-            return Err(anyhow::anyhow!("Wake phrase cannot be empty when wake word is enabled"));
+            return Err(anyhow::anyhow!(
+                "Wake phrase cannot be empty when wake word is enabled"
+            ));
         }
         if self.wakeword.sensitivity < 0.0 || self.wakeword.sensitivity > 1.0 {
-            return Err(anyhow::anyhow!("Wake word sensitivity must be between 0.0 and 1.0"));
+            return Err(anyhow::anyhow!(
+                "Wake word sensitivity must be between 0.0 and 1.0"
+            ));
         }
 
         Ok(())

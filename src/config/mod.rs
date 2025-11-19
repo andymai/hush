@@ -57,7 +57,6 @@
 ///     println!("Config reloaded!");
 /// }
 /// ```
-
 pub mod settings;
 
 pub use settings::{Config, ConfigWatcher};

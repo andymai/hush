@@ -4,8 +4,7 @@
 /// - Text transformations (capitalization, etc.)
 /// - Actions that require state (undo/delete)
 /// - Building the final output text
-
-use super::commands::{VoiceCommand, ParsedCommand};
+use super::commands::{ParsedCommand, VoiceCommand};
 use tracing::{debug, info, warn};
 
 /// Result of command execution
@@ -87,8 +86,8 @@ impl CommandExecutor {
                 VoiceCommand::Undo | VoiceCommand::DeleteThat => {
                     info!("Undo command detected");
                     return ExecutionResult::undo();
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -104,7 +103,7 @@ impl CommandExecutor {
                         pending_text.push(' ');
                     }
                     pending_text.push_str(text);
-                }
+                },
 
                 VoiceCommand::NewParagraph => {
                     // Flush pending text
@@ -115,7 +114,7 @@ impl CommandExecutor {
                     // Add double newline
                     output.push_str("\n\n");
                     debug!("Added paragraph break");
-                }
+                },
 
                 VoiceCommand::NewLine => {
                     // Flush pending text
@@ -126,7 +125,7 @@ impl CommandExecutor {
                     // Add single newline
                     output.push('\n');
                     debug!("Added line break");
-                }
+                },
 
                 VoiceCommand::CapitalizeThat => {
                     // Capitalize the pending text
@@ -136,7 +135,7 @@ impl CommandExecutor {
                     } else {
                         warn!("'cap that' command with no preceding text");
                     }
-                }
+                },
 
                 VoiceCommand::AllCaps => {
                     // Convert pending text to uppercase
@@ -146,13 +145,13 @@ impl CommandExecutor {
                     } else {
                         warn!("'all caps' command with no preceding text");
                     }
-                }
+                },
 
                 VoiceCommand::Undo | VoiceCommand::DeleteThat => {
                     // If undo appears mid-stream, treat as deletion of pending text
                     warn!("Undo/delete command in middle of text, clearing pending text");
                     pending_text.clear();
-                }
+                },
             }
         }
 
@@ -191,7 +190,7 @@ fn capitalize_first(s: &str) -> String {
             let mut result = first.to_uppercase().collect::<String>();
             result.push_str(chars.as_str());
             result
-        }
+        },
     }
 }
 
@@ -263,7 +262,11 @@ mod tests {
 
         assert!(result.text.is_some());
         let text = result.text.unwrap();
-        assert!(text.starts_with('H'), "Text should be capitalized: {}", text);
+        assert!(
+            text.starts_with('H'),
+            "Text should be capitalized: {}",
+            text
+        );
     }
 
     #[test]

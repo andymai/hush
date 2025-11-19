@@ -1,3 +1,5 @@
+pub mod cuda;
+pub mod models;
 /// Speech-to-text transcription using OpenAI's Whisper models
 ///
 /// This module provides GPU-accelerated speech transcription using locally-run
@@ -42,12 +44,9 @@
 /// Automatically detects and uses NVIDIA CUDA GPUs when available. Falls back
 /// to CPU processing if CUDA is unavailable. GPU acceleration provides 5-10x
 /// speedup for most model sizes.
-
 pub mod whisper;
 pub mod whisper_simple;
-pub mod cuda;
-pub mod models;
 
-pub use whisper::{WhisperTranscriber, TranscriptionResult};
-pub use whisper_simple::{SimpleWhisperTranscriber, SimpleTranscriptionResult};
-pub use models::{ModelManager, ModelSize, ModelInfo};
+pub use models::{ModelInfo, ModelManager, ModelSize};
+pub use whisper::{TranscriptionResult, WhisperTranscriber};
+pub use whisper_simple::{SimpleTranscriptionResult, SimpleWhisperTranscriber};

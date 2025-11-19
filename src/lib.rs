@@ -1,7 +1,7 @@
 // Core trait-based architecture (new)
-pub mod core;
 pub mod adapters;
 pub mod application;
+pub mod core;
 
 // Existing modules (legacy - will be migrated)
 pub mod audio;
@@ -22,8 +22,8 @@ pub mod text_processing;
 // pub mod tray;
 
 // CLI module (new unified command system)
-pub mod cli_main;
 pub mod cli;
+pub mod cli_main;
 
 // Logging system
 pub mod logging;
@@ -33,15 +33,15 @@ pub use audio::{AudioCapture, AudioFeedback};
 pub use config::{Config, ConfigWatcher};
 pub use hotkey::{HotkeyEvent, HotkeyManager};
 pub use text::TextInserter;
-pub use transcription::{WhisperTranscriber, TranscriptionResult as LegacyTranscriptionResult};
+pub use transcription::{TranscriptionResult as LegacyTranscriptionResult, WhisperTranscriber};
 pub use wakeword::WakeWordDetector;
 
 // Re-export new core types
 pub use core::{
-    traits::*,
     error::HushError,
-    state::{AppState, StateMachine, StateObserver},
     mocks::*,
+    state::{AppState, StateMachine, StateObserver},
+    traits::*,
 };
 
 // Common result type

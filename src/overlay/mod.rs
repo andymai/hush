@@ -34,10 +34,9 @@
 ///     Duration::from_secs(2)
 /// );
 /// ```
-
 mod state;
 mod ui;
 mod window;
 
-pub use state::{OverlayState, OverlayConfig, OverlayPosition, OverlayTheme};
+pub use state::{OverlayConfig, OverlayPosition, OverlayState, OverlayTheme};
 pub use window::{OverlayWindow, OverlayWindowBuilder};

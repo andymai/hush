@@ -54,9 +54,11 @@
 /// - ✅ Games and fullscreen applications
 /// - ✅ SSH sessions and remote terminals
 /// - ✅ X11 and Wayland applications
-
 pub mod insertion;
 pub mod uinput_keyboard;
 
-pub use insertion::{TextInserter, WindowInfo, InsertionMethod, check_dependencies, print_uinput_setup_guidance, diagnose_uinput_issues};
-pub use uinput_keyboard::{UinputKeyboard, check_uinput_availability};
+pub use insertion::{
+    check_dependencies, diagnose_uinput_issues, print_uinput_setup_guidance, InsertionMethod,
+    TextInserter, WindowInfo,
+};
+pub use uinput_keyboard::{check_uinput_availability, UinputKeyboard};

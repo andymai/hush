@@ -1,3 +1,5 @@
+pub mod record;
+pub mod status;
 /// Modular command implementations
 ///
 /// This module contains individual command handlers, each in their own file
@@ -20,14 +22,11 @@
 /// 3. Add the module declaration here
 /// 4. Export the handler function
 /// 5. Update the dispatcher to use the new handler
-
 pub mod utils;
-pub mod status;
-pub mod record;
 
 // Re-export command handlers
-pub use status::handle_status;
 pub use record::handle_record;
+pub use status::handle_status;
 
 // Re-export utilities for use by other commands
 pub use utils::*;

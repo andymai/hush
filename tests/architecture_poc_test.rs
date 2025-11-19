@@ -1,3 +1,4 @@
+use hush::core::mocks::{MockAudioSource, MockTextOutput, MockTranscriber};
 /// Proof of Concept Test for Trait-Based Architecture
 ///
 /// This test demonstrates the benefits of the new trait-based architecture:
@@ -5,9 +6,7 @@
 /// 2. Unit testing without hardware dependencies
 /// 3. Easy component substitution
 /// 4. Clear separation of concerns
-
-use hush::core::traits::{AudioSource, Transcriber, TextOutput, AudioBuffer, TranscriptionResult};
-use hush::core::mocks::{MockAudioSource, MockTranscriber, MockTextOutput};
+use hush::core::traits::{AudioBuffer, AudioSource, TextOutput, Transcriber, TranscriptionResult};
 use hush::Result;
 use std::time::Duration;
 
@@ -56,7 +55,7 @@ async fn test_pipeline_with_mock_components() {
     // Create mock components - NO HARDWARE REQUIRED! ✅
     let audio = Box::new(MockAudioSource::new());
     let transcriber = Box::new(MockTranscriber::with_responses(vec![
-        "Hello world".to_string(),
+        "Hello world".to_string()
     ]));
     let output = Box::new(MockTextOutput::new());
 
@@ -111,7 +110,10 @@ async fn test_error_handling_in_pipeline() {
     // Should fail at text insertion
     let result = pipeline.process_recording().await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("insertion failure"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("insertion failure"));
 }
 
 #[test]
@@ -241,19 +243,19 @@ async fn test_runtime_polymorphism() {
     assert_eq!(results, vec!["A", "B", "C"]);
 }
 
-/// SUMMARY: Benefits Demonstrated
-///
-/// ✅ **Testability**: All tests run without hardware (microphone, X11, GPU)
-/// ✅ **Mockability**: Easy to create test doubles for all components
-/// ✅ **Isolation**: Components can be tested independently
-/// ✅ **Flexibility**: Easy to swap implementations at runtime
-/// ✅ **Error Testing**: Easy to simulate error conditions
-/// ✅ **Extensibility**: New implementations just need to implement traits
-/// ✅ **Maintainability**: Clear contracts between components
-///
-/// This architecture makes it possible to:
-/// - Run tests in CI/CD without audio hardware
-/// - Test error scenarios that are hard to reproduce
-/// - Develop new features without hardware dependencies
-/// - Swap implementations (e.g., X11 → Wayland) without breaking code
-/// - Add new transcription backends easily
+// SUMMARY: Benefits Demonstrated
+//
+// ✅ **Testability**: All tests run without hardware (microphone, X11, GPU)
+// ✅ **Mockability**: Easy to create test doubles for all components
+// ✅ **Isolation**: Components can be tested independently
+// ✅ **Flexibility**: Easy to swap implementations at runtime
+// ✅ **Error Testing**: Easy to simulate error conditions
+// ✅ **Extensibility**: New implementations just need to implement traits
+// ✅ **Maintainability**: Clear contracts between components
+//
+// This architecture makes it possible to:
+// - Run tests in CI/CD without audio hardware
+// - Test error scenarios that are hard to reproduce
+// - Develop new features without hardware dependencies
+// - Swap implementations (e.g., X11 → Wayland) without breaking code
+// - Add new transcription backends easily

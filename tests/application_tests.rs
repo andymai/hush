@@ -5,9 +5,8 @@
 /// - Easy error scenario testing
 /// - Component isolation
 /// - State management validation
-
-use hush::application::{HushApp, HushAppBuilder, AppMode};
-use hush::core::mocks::{MockAudioSource, MockTranscriber, MockTextOutput, MockInputTrigger};
+use hush::application::{AppMode, HushApp, HushAppBuilder};
+use hush::core::mocks::{MockAudioSource, MockInputTrigger, MockTextOutput, MockTranscriber};
 use hush::core::state::AppState;
 use hush::core::traits::TriggerEvent;
 use std::time::Duration;
@@ -48,7 +47,10 @@ fn test_builder_validation() {
         .build();
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Transcriber not set"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Transcriber not set"));
 }
 
 #[tokio::test]
@@ -289,15 +291,15 @@ async fn test_audio_duration_tracking() {
     app.handle_recording_stop().await.unwrap();
 }
 
-/// SUMMARY: Benefits Demonstrated
-///
-/// ✅ **Hardware-Free Testing**: All tests run without microphone, X11, or GPU
-/// ✅ **State Management**: State machine prevents invalid transitions
-/// ✅ **Error Scenarios**: Easy to test failure modes
-/// ✅ **Component Isolation**: Each component can be mocked independently
-/// ✅ **Multiple Cycles**: Can test repeated use without cleanup issues
-/// ✅ **Different Modes**: Easy to test all application modes
-/// ✅ **Performance**: Tests run in milliseconds (no I/O waits)
-///
-/// This demonstrates that the refactored architecture achieves the goal:
-/// **Testable, maintainable, and extensible code.**
+// SUMMARY: Benefits Demonstrated
+//
+// ✅ **Hardware-Free Testing**: All tests run without microphone, X11, or GPU
+// ✅ **State Management**: State machine prevents invalid transitions
+// ✅ **Error Scenarios**: Easy to test failure modes
+// ✅ **Component Isolation**: Each component can be mocked independently
+// ✅ **Multiple Cycles**: Can test repeated use without cleanup issues
+// ✅ **Different Modes**: Easy to test all application modes
+// ✅ **Performance**: Tests run in milliseconds (no I/O waits)
+//
+// This demonstrates that the refactored architecture achieves the goal:
+// **Testable, maintainable, and extensible code.**

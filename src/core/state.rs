@@ -2,7 +2,6 @@
 ///
 /// Provides a type-safe state machine with validated transitions
 /// and observer pattern for component reactions.
-
 use super::error::StateError;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
@@ -18,9 +17,7 @@ pub enum AppState {
     Recording { started_at: Instant },
 
     /// Transcribing recorded audio
-    Transcribing {
-        audio_duration: std::time::Duration,
-    },
+    Transcribing { audio_duration: std::time::Duration },
 
     /// Inserting transcribed text
     Inserting { text_length: usize },

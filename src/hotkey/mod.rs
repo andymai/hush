@@ -37,7 +37,6 @@
 ///
 /// - Linux: X11 and Wayland (via global-hotkey crate)
 /// - Requires proper permissions for global keyboard access
-
 pub mod global;
 
 pub use global::{HotkeyEvent, HotkeyManager};

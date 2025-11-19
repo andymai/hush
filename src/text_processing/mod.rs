@@ -1,3 +1,8 @@
+mod commands;
+mod config;
+mod context;
+mod entities;
+mod executor;
 /// Text processing module for intelligent auto-editing
 ///
 /// This module provides post-processing of raw transcriptions to produce
@@ -9,30 +14,26 @@
 /// - Punctuation normalization
 /// - Capitalization fixes
 /// - Optional LLM-based polishing
-
 mod filler_words;
-mod llm;
-mod config;
-mod commands;
-mod executor;
 mod history;
-mod entities;
-mod context;
-mod session;
 mod intent;
+mod llm;
+mod session;
 mod vocabulary;
 
-pub use config::{ProcessingConfig, EditingMode, LlmProvider};
-pub use filler_words::FillerWordRemover;
-pub use llm::LlmProcessor;
-pub use commands::{VoiceCommand, ParsedCommand, CommandParser};
-pub use executor::{CommandExecutor, ExecutionResult};
-pub use history::{InsertionHistory, HistoryEntry};
+pub use commands::{CommandParser, ParsedCommand, VoiceCommand};
+pub use config::{EditingMode, LlmProvider, ProcessingConfig};
+pub use context::{
+    ApplicationContext, BrowserContext, CodeContext, CommunicationType, ContextDetector,
+};
 pub use entities::EntityRecognizer;
-pub use context::{ApplicationContext, ContextDetector, CodeContext, CommunicationType, BrowserContext};
-pub use session::{SessionMemory, SessionEntry};
-pub use intent::{UserIntent, IntentDetector, CommunicationStyle};
-pub use vocabulary::{DomainVocabulary, DomainVocabularies, VocabularyManager};
+pub use executor::{CommandExecutor, ExecutionResult};
+pub use filler_words::FillerWordRemover;
+pub use history::{HistoryEntry, InsertionHistory};
+pub use intent::{CommunicationStyle, IntentDetector, UserIntent};
+pub use llm::LlmProcessor;
+pub use session::{SessionEntry, SessionMemory};
+pub use vocabulary::{DomainVocabularies, DomainVocabulary, VocabularyManager};
 
 use anyhow::Result;
 use tracing::{debug, info};
@@ -73,24 +74,26 @@ impl TextProcessor {
             LlmProvider::None => {
                 info!("LLM processing disabled - using rule-based only");
                 None
-            }
+            },
             provider => {
                 match LlmProcessor::new(provider.clone(), config.max_tokens, config.temperature) {
                     Ok(processor) => {
                         info!("✅ LLM processor initialized");
                         Some(processor)
-                    }
+                    },
                     Err(e) => {
                         info!("⚠️  LLM processor not available: {}", e);
                         info!("Will use rule-based processing only");
                         None
-                    }
+                    },
                 }
-            }
+            },
         };
 
-        info!("✅ Text processor initialized with {} vocabulary entries",
-              vocabulary_manager.total_entries());
+        info!(
+            "✅ Text processor initialized with {} vocabulary entries",
+            vocabulary_manager.total_entries()
+        );
 
         Ok(Self {
             filler_remover,
@@ -192,7 +195,9 @@ impl TextProcessor {
 
     /// Record processed text in session memory
     pub fn record_in_session(&mut self, text: String) {
-        let context = self.context_detector.last_context()
+        let context = self
+            .context_detector
+            .last_context()
             .map(|c| c.description());
         self.session_memory.add(text, context);
     }
@@ -234,7 +239,9 @@ impl TextProcessor {
             session_entries: self.session_memory.len(),
             session_active: self.session_memory.is_active(),
             llm_enabled: self.is_llm_ready(),
-            current_context: self.context_detector.last_context()
+            current_context: self
+                .context_detector
+                .last_context()
                 .map(|c| c.description()),
         }
     }

@@ -1,8 +1,8 @@
+use once_cell::sync::Lazy;
+use regex::Regex;
+use std::process::Command;
 /// Application context detection for adaptive text processing
 use tracing::{debug, warn};
-use std::process::Command;
-use regex::Regex;
-use once_cell::sync::Lazy;
 
 /// The type of application the user is currently in
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,8 +34,8 @@ pub struct CodeContext {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommunicationType {
     Email,
-    Chat,      // Slack, Discord, Teams
-    Social,    // Twitter, LinkedIn, etc.
+    Chat,   // Slack, Discord, Teams
+    Social, // Twitter, LinkedIn, etc.
 }
 
 /// Browser context details
@@ -49,10 +49,10 @@ pub struct BrowserContext {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserSiteType {
-    CodeRepository,  // GitHub, GitLab
-    Documentation,   // MDN, docs.rs, etc.
-    Email,           // Gmail, Outlook
-    Chat,            // Slack web, Discord web
+    CodeRepository, // GitHub, GitLab
+    Documentation,  // MDN, docs.rs, etc.
+    Email,          // Gmail, Outlook
+    Chat,           // Slack web, Discord web
     SocialMedia,
     Other,
 }
@@ -77,8 +77,18 @@ static CODE_EDITOR_PATTERNS: &[(&str, &str)] = &[
 
 /// Patterns for detecting terminals
 static TERMINAL_PATTERNS: &[&str] = &[
-    "terminal", "konsole", "gnome-terminal", "xterm", "alacritty",
-    "kitty", "wezterm", "terminator", "tilix", "bash", "zsh", "fish",
+    "terminal",
+    "konsole",
+    "gnome-terminal",
+    "xterm",
+    "alacritty",
+    "kitty",
+    "wezterm",
+    "terminator",
+    "tilix",
+    "bash",
+    "zsh",
+    "fish",
 ];
 
 /// Patterns for detecting browsers
@@ -102,9 +112,7 @@ static LANGUAGE_EXTENSIONS: &[(&str, &str)] = &[
     ("kt", "Kotlin"),
 ];
 
-static FILE_EXTENSION_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\.([a-z0-9]+)\s*[-–—]").unwrap()
-});
+static FILE_EXTENSION_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.([a-z0-9]+)\s*[-–—]").unwrap());
 
 /// Application context detector
 pub struct ContextDetector {
@@ -114,9 +122,7 @@ pub struct ContextDetector {
 impl ContextDetector {
     /// Create a new context detector
     pub fn new() -> Self {
-        Self {
-            last_context: None,
-        }
+        Self { last_context: None }
     }
 
     /// Detect current application context
@@ -127,11 +133,13 @@ impl ContextDetector {
                 debug!("Detected context: {:?}", context);
                 self.last_context = Some(context.clone());
                 context
-            }
+            },
             None => {
                 debug!("Could not detect active window, using last known context");
-                self.last_context.clone().unwrap_or(ApplicationContext::Unknown)
-            }
+                self.last_context
+                    .clone()
+                    .unwrap_or(ApplicationContext::Unknown)
+            },
         }
     }
 
@@ -157,10 +165,7 @@ impl ContextDetector {
         }
 
         // Try wmctrl as fallback
-        if let Ok(output) = Command::new("wmctrl")
-            .args(&["-lx"])
-            .output()
-        {
+        if let Ok(output) = Command::new("wmctrl").args(&["-lx"]).output() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 // Parse wmctrl output to find active window
@@ -173,10 +178,7 @@ impl ContextDetector {
         }
 
         // Wayland: Try swaymsg for Sway/i3
-        if let Ok(output) = Command::new("swaymsg")
-            .args(&["-t", "get_tree"])
-            .output()
-        {
+        if let Ok(output) = Command::new("swaymsg").args(&["-t", "get_tree"]).output() {
             if output.status.success() {
                 // Parse JSON to find focused window
                 // This is complex, so we'll just return the raw output for now
@@ -220,27 +222,33 @@ impl ContextDetector {
             if info_lower.contains(pattern) {
                 let domain = self.extract_domain(info);
                 let site_type = self.classify_website(&domain);
-                return ApplicationContext::Browser(BrowserContext {
-                    domain,
-                    site_type,
-                });
+                return ApplicationContext::Browser(BrowserContext { domain, site_type });
             }
         }
 
         // Check for communication apps
-        if info_lower.contains("slack") || info_lower.contains("discord")
-            || info_lower.contains("teams") || info_lower.contains("telegram") {
+        if info_lower.contains("slack")
+            || info_lower.contains("discord")
+            || info_lower.contains("teams")
+            || info_lower.contains("telegram")
+        {
             return ApplicationContext::Communication(CommunicationType::Chat);
         }
 
-        if info_lower.contains("thunderbird") || info_lower.contains("evolution")
-            || info_lower.contains("gmail") || info_lower.contains("outlook") {
+        if info_lower.contains("thunderbird")
+            || info_lower.contains("evolution")
+            || info_lower.contains("gmail")
+            || info_lower.contains("outlook")
+        {
             return ApplicationContext::Communication(CommunicationType::Email);
         }
 
         // Check for documentation apps
-        if info_lower.contains("notion") || info_lower.contains("obsidian")
-            || info_lower.contains("logseq") || info_lower.contains("joplin") {
+        if info_lower.contains("notion")
+            || info_lower.contains("obsidian")
+            || info_lower.contains("logseq")
+            || info_lower.contains("joplin")
+        {
             return ApplicationContext::Documentation;
         }
 
@@ -304,12 +312,16 @@ impl ContextDetector {
             if domain_lower.contains("slack") || domain_lower.contains("discord") {
                 return BrowserSiteType::Chat;
             }
-            if domain_lower.contains("twitter") || domain_lower.contains("linkedin")
-                || domain_lower.contains("facebook") {
+            if domain_lower.contains("twitter")
+                || domain_lower.contains("linkedin")
+                || domain_lower.contains("facebook")
+            {
                 return BrowserSiteType::SocialMedia;
             }
-            if domain_lower.contains("docs.") || domain_lower.contains("documentation")
-                || domain_lower.contains("mdn") {
+            if domain_lower.contains("docs.")
+                || domain_lower.contains("documentation")
+                || domain_lower.contains("mdn")
+            {
                 return BrowserSiteType::Documentation;
             }
         }
@@ -334,7 +346,7 @@ impl ApplicationContext {
                 } else {
                     format!("{} - code editor", ctx.editor)
                 }
-            }
+            },
             ApplicationContext::Communication(comm_type) => match comm_type {
                 CommunicationType::Email => "Email".to_string(),
                 CommunicationType::Chat => "Chat".to_string(),
@@ -348,14 +360,17 @@ impl ApplicationContext {
                 } else {
                     "Browser".to_string()
                 }
-            }
+            },
             ApplicationContext::Unknown => "Unknown".to_string(),
         }
     }
 
     /// Check if this is a code-related context
     pub fn is_code(&self) -> bool {
-        matches!(self, ApplicationContext::Code(_) | ApplicationContext::Terminal)
+        matches!(
+            self,
+            ApplicationContext::Code(_) | ApplicationContext::Terminal
+        )
     }
 
     /// Check if this is a communication context
@@ -384,7 +399,7 @@ mod tests {
             ApplicationContext::Code(ctx) => {
                 assert_eq!(ctx.editor, "VS Code");
                 assert_eq!(ctx.language, Some("Rust".to_string()));
-            }
+            },
             _ => panic!("Expected Code context"),
         }
     }
@@ -405,7 +420,7 @@ mod tests {
         match context {
             ApplicationContext::Browser(ctx) => {
                 assert_eq!(ctx.site_type, BrowserSiteType::CodeRepository);
-            }
+            },
             _ => panic!("Expected Browser context"),
         }
     }

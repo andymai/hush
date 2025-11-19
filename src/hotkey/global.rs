@@ -1,8 +1,11 @@
 use crate::Result;
-use global_hotkey::{GlobalHotKeyManager, hotkey::{HotKey, Code, Modifiers}};
+use global_hotkey::{
+    hotkey::{Code, HotKey, Modifiers},
+    GlobalHotKeyManager,
+};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -23,28 +26,32 @@ pub struct HotkeyManager {
 
 impl HotkeyManager {
     pub fn new(combination: &str) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
-        info!("Initializing global hotkey manager with combination: {}", combination);
-        
+        info!(
+            "Initializing global hotkey manager with combination: {}",
+            combination
+        );
+
         // Parse the hotkey combination
         let (modifiers, key_code) = Self::parse_combination(combination)?;
-        
+
         // Create the hotkey
         let hotkey = HotKey::new(Some(modifiers), key_code);
-        
+
         // Initialize the global hotkey manager
         let manager = GlobalHotKeyManager::new()
             .map_err(|e| anyhow::anyhow!("Failed to create hotkey manager: {:?}", e))?;
-        
+
         // Register the hotkey
-        manager.register(hotkey)
+        manager
+            .register(hotkey)
             .map_err(|e| anyhow::anyhow!("Failed to register hotkey {}: {:?}", combination, e))?;
-        
+
         info!("Hotkey '{}' registered successfully", combination);
-        
+
         let (tx, rx) = mpsc::channel();
-        
+
         let start_signal = Arc::new((Mutex::new(false), Condvar::new()));
-        
+
         let hotkey_manager = HotkeyManager {
             manager: Arc::new(manager),
             hotkey,
@@ -52,63 +59,69 @@ impl HotkeyManager {
             running: Arc::new(AtomicBool::new(false)), // Start as false, will be set by start_listening
             start_signal: start_signal.clone(),
         };
-        
+
         // Start the event loop in a separate thread
         let manager_clone = hotkey_manager.manager.clone();
         let running_clone = hotkey_manager.running.clone();
         let combination_clone = combination.to_string();
         let start_signal_clone = start_signal.clone();
-        
+
         thread::spawn(move || {
-            Self::event_loop(manager_clone, running_clone, combination_clone, start_signal_clone, tx);
+            Self::event_loop(
+                manager_clone,
+                running_clone,
+                combination_clone,
+                start_signal_clone,
+                tx,
+            );
         });
-        
+
         Ok((hotkey_manager, rx))
     }
-    
+
     pub fn start_listening(&self) -> Result<()> {
         info!("Starting hotkey listener for '{}'", self.combination);
-        
+
         // Set the running flag to true
         self.running.store(true, Ordering::Relaxed);
-        
+
         // Signal the waiting thread to start
         let (lock, cvar) = &*self.start_signal;
         let mut started = lock.lock().unwrap();
         *started = true;
         cvar.notify_one();
-        
+
         info!("Hotkey listener started successfully (signaled thread)");
         Ok(())
     }
-    
+
     pub fn stop_listening(&self) -> Result<()> {
         info!("Stopping hotkey listener for '{}'", self.combination);
         self.running.store(false, Ordering::Relaxed);
-        
+
         // If the thread is still waiting for start signal, wake it up so it can exit
         let (lock, cvar) = &*self.start_signal;
         let mut started = lock.lock().unwrap();
         *started = true; // Set to true so the waiting thread wakes up
         cvar.notify_one();
-        
+
         Ok(())
     }
-    
+
     pub fn get_combination(&self) -> &str {
         &self.combination
     }
-    
+
     fn parse_combination(combination: &str) -> Result<(Modifiers, Code)> {
         let parts: Vec<&str> = combination.split('+').map(|s| s.trim()).collect();
-        
+
         if parts.is_empty() {
             return Err(anyhow::anyhow!("Empty hotkey combination"));
         }
-        
+
         let mut modifiers = Modifiers::empty();
         let mut key_code = None;
-        
+
         for part in &parts {
             match part.to_lowercase().as_str() {
                 "ctrl" | "control" => modifiers |= Modifiers::CONTROL,
@@ -117,39 +130,78 @@ impl HotkeyManager {
                 "super" | "cmd" | "win" => modifiers |= Modifiers::SUPER,
                 key => {
                     if key_code.is_some() {
-                        return Err(anyhow::anyhow!("Multiple key codes specified: {}", combination));
+                        return Err(anyhow::anyhow!(
+                            "Multiple key codes specified: {}",
+                            combination
+                        ));
                     }
                     key_code = Some(Self::parse_key_code(key)?);
-                }
+                },
             }
         }
-        
-        let key_code = key_code.ok_or_else(|| anyhow::anyhow!("No key code specified in: {}", combination))?;
-        
+
+        let key_code =
+            key_code.ok_or_else(|| anyhow::anyhow!("No key code specified in: {}", combination))?;
+
         Ok((modifiers, key_code))
     }
-    
+
     fn parse_key_code(key: &str) -> Result<Code> {
         let code = match key.to_lowercase().as_str() {
             // Letters
-            "a" => Code::KeyA, "b" => Code::KeyB, "c" => Code::KeyC, "d" => Code::KeyD,
-            "e" => Code::KeyE, "f" => Code::KeyF, "g" => Code::KeyG, "h" => Code::KeyH,
-            "i" => Code::KeyI, "j" => Code::KeyJ, "k" => Code::KeyK, "l" => Code::KeyL,
-            "m" => Code::KeyM, "n" => Code::KeyN, "o" => Code::KeyO, "p" => Code::KeyP,
-            "q" => Code::KeyQ, "r" => Code::KeyR, "s" => Code::KeyS, "t" => Code::KeyT,
-            "u" => Code::KeyU, "v" => Code::KeyV, "w" => Code::KeyW, "x" => Code::KeyX,
-            "y" => Code::KeyY, "z" => Code::KeyZ,
-            
+            "a" => Code::KeyA,
+            "b" => Code::KeyB,
+            "c" => Code::KeyC,
+            "d" => Code::KeyD,
+            "e" => Code::KeyE,
+            "f" => Code::KeyF,
+            "g" => Code::KeyG,
+            "h" => Code::KeyH,
+            "i" => Code::KeyI,
+            "j" => Code::KeyJ,
+            "k" => Code::KeyK,
+            "l" => Code::KeyL,
+            "m" => Code::KeyM,
+            "n" => Code::KeyN,
+            "o" => Code::KeyO,
+            "p" => Code::KeyP,
+            "q" => Code::KeyQ,
+            "r" => Code::KeyR,
+            "s" => Code::KeyS,
+            "t" => Code::KeyT,
+            "u" => Code::KeyU,
+            "v" => Code::KeyV,
+            "w" => Code::KeyW,
+            "x" => Code::KeyX,
+            "y" => Code::KeyY,
+            "z" => Code::KeyZ,
+
             // Numbers
-            "0" => Code::Digit0, "1" => Code::Digit1, "2" => Code::Digit2, "3" => Code::Digit3,
-            "4" => Code::Digit4, "5" => Code::Digit5, "6" => Code::Digit6, "7" => Code::Digit7,
-            "8" => Code::Digit8, "9" => Code::Digit9,
-            
+            "0" => Code::Digit0,
+            "1" => Code::Digit1,
+            "2" => Code::Digit2,
+            "3" => Code::Digit3,
+            "4" => Code::Digit4,
+            "5" => Code::Digit5,
+            "6" => Code::Digit6,
+            "7" => Code::Digit7,
+            "8" => Code::Digit8,
+            "9" => Code::Digit9,
+
             // Function keys
-            "f1" => Code::F1, "f2" => Code::F2, "f3" => Code::F3, "f4" => Code::F4,
-            "f5" => Code::F5, "f6" => Code::F6, "f7" => Code::F7, "f8" => Code::F8,
-            "f9" => Code::F9, "f10" => Code::F10, "f11" => Code::F11, "f12" => Code::F12,
-            
+            "f1" => Code::F1,
+            "f2" => Code::F2,
+            "f3" => Code::F3,
+            "f4" => Code::F4,
+            "f5" => Code::F5,
+            "f6" => Code::F6,
+            "f7" => Code::F7,
+            "f8" => Code::F8,
+            "f9" => Code::F9,
+            "f10" => Code::F10,
+            "f11" => Code::F11,
+            "f12" => Code::F12,
+
             // Special keys
             "space" => Code::Space,
             "enter" | "return" => Code::Enter,
@@ -162,13 +214,13 @@ impl HotkeyManager {
             "pageup" | "pgup" => Code::PageUp,
             "pagedown" | "pgdn" => Code::PageDown,
             "insert" | "ins" => Code::Insert,
-            
+
             // Arrow keys
             "up" | "arrowup" => Code::ArrowUp,
             "down" | "arrowdown" => Code::ArrowDown,
             "left" | "arrowleft" => Code::ArrowLeft,
             "right" | "arrowright" => Code::ArrowRight,
-            
+
             // Punctuation
             "," | "comma" => Code::Comma,
             "." | "period" => Code::Period,
@@ -181,15 +233,15 @@ impl HotkeyManager {
             "-" | "minus" => Code::Minus,
             "=" | "equal" => Code::Equal,
             "`" | "backquote" => Code::Backquote,
-            
+
             unknown => {
                 return Err(anyhow::anyhow!("Unknown key: {}", unknown));
-            }
+            },
         };
-        
+
         Ok(code)
     }
-    
+
     fn event_loop(
         _manager: Arc<GlobalHotKeyManager>,
         running: Arc<AtomicBool>,
@@ -198,7 +250,7 @@ impl HotkeyManager {
         tx: mpsc::Sender<HotkeyEvent>,
     ) {
         info!("Starting hotkey event loop for '{}'", combination);
-        
+
         // Wait for the start signal from start_listening()
         let (lock, cvar) = &*start_signal;
         let mut started = lock.lock().unwrap();
@@ -207,19 +259,22 @@ impl HotkeyManager {
             started = cvar.wait(started).unwrap();
         }
         info!("Event loop received start signal for '{}'", combination);
-        
+
         // Get the global receiver for hotkey events
         let receiver = global_hotkey::GlobalHotKeyEvent::receiver();
         info!("Got global hotkey receiver for '{}'", combination);
-        
+
         // Create a simple event loop that checks for hotkey events
         loop {
             let is_running = running.load(Ordering::Relaxed);
             if !is_running {
-                info!("Hotkey event loop stopping for '{}' (running = {})", combination, is_running);
+                info!(
+                    "Hotkey event loop stopping for '{}' (running = {})",
+                    combination, is_running
+                );
                 break;
             }
-            
+
             // Check for global hotkey events
             if let Ok(event) = receiver.try_recv() {
                 match event.state {
@@ -236,14 +291,14 @@ impl HotkeyManager {
                             warn!("Failed to send hotkey released event - receiver dropped");
                             break;
                         }
-                    }
+                    },
                 }
             }
-            
+
             // Small sleep to prevent busy waiting
             thread::sleep(Duration::from_millis(10));
         }
-        
+
         info!("Hotkey event loop terminated for '{}'", combination);
     }
 }
@@ -251,15 +306,18 @@ impl HotkeyManager {
 impl Drop for HotkeyManager {
     fn drop(&mut self) {
         info!("Dropping hotkey manager for '{}'", self.combination);
-        
+
         // Stop the listening thread
         if let Err(e) = self.stop_listening() {
             warn!("Failed to stop hotkey listener during drop: {:?}", e);
         }
-        
+
         // Unregister the hotkey
         if let Err(e) = self.manager.unregister(self.hotkey) {
-            warn!("Failed to unregister hotkey '{}': {:?}", self.combination, e);
+            warn!(
+                "Failed to unregister hotkey '{}': {:?}",
+                self.combination, e
+            );
         } else {
             info!("Hotkey '{}' unregistered successfully", self.combination);
         }

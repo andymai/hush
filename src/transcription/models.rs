@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use hf_hub::api::tokio::Api;
-use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-use tracing::{info, warn, debug};
+use std::path::{Path, PathBuf};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct ModelInfo {
@@ -59,8 +59,7 @@ pub struct ModelManager {
 impl ModelManager {
     pub fn new<P: AsRef<Path>>(cache_dir: P) -> Result<Self> {
         let cache_dir = cache_dir.as_ref().to_path_buf();
-        std::fs::create_dir_all(&cache_dir)
-            .context("Failed to create model cache directory")?;
+        std::fs::create_dir_all(&cache_dir).context("Failed to create model cache directory")?;
 
         let available_models = Self::init_available_models();
 
@@ -162,7 +161,8 @@ impl ModelManager {
     pub async fn ensure_model_downloaded(&self, size: &ModelSize) -> Result<PathBuf> {
         info!("Ensuring model {:?} is available", size);
 
-        let model_info = self.get_model_info(size)
+        let model_info = self
+            .get_model_info(size)
             .ok_or_else(|| anyhow::anyhow!("Unknown model size: {:?}", size))?;
 
         let model_path = self.cache_dir.join(&model_info.filename);
@@ -186,27 +186,31 @@ impl ModelManager {
     }
 
     async fn download_model(&self, info: &ModelInfo) -> Result<()> {
-        info!("Starting download of {} ({:.1}MB)", info.name, info.expected_size as f64 / 1_000_000.0);
+        info!(
+            "Starting download of {} ({:.1}MB)",
+            info.name,
+            info.expected_size as f64 / 1_000_000.0
+        );
 
         let api = Api::new()?;
         let repo = api.model(info.repo_id.clone());
 
         // Download the main model file
-        let model_file = repo.get(&info.filename).await
+        let model_file = repo
+            .get(&info.filename)
+            .await
             .context("Failed to download model file")?;
 
         // Also download config and tokenizer files if they exist
-        let _config_file = repo.get("config.json").await
-            .unwrap_or_else(|_| {
-                debug!("config.json not found, using defaults");
-                self.cache_dir.join("config.json") // placeholder
-            });
+        let _config_file = repo.get("config.json").await.unwrap_or_else(|_| {
+            debug!("config.json not found, using defaults");
+            self.cache_dir.join("config.json") // placeholder
+        });
 
-        let _tokenizer_file = repo.get("tokenizer.json").await
-            .unwrap_or_else(|_| {
-                debug!("tokenizer.json not found, using defaults");  
-                self.cache_dir.join("tokenizer.json") // placeholder
-            });
+        let _tokenizer_file = repo.get("tokenizer.json").await.unwrap_or_else(|_| {
+            debug!("tokenizer.json not found, using defaults");
+            self.cache_dir.join("tokenizer.json") // placeholder
+        });
 
         // Copy the model to our cache directory with the expected filename
         let target_path = self.cache_dir.join(&info.filename);
@@ -223,17 +227,19 @@ impl ModelManager {
         }
 
         // Check file size
-        let metadata = std::fs::metadata(path)
-            .context("Failed to read model file metadata")?;
+        let metadata = std::fs::metadata(path).context("Failed to read model file metadata")?;
 
         let file_size = metadata.len();
-        
+
         // Allow some variance in file size (±10%)
         let min_size = (info.expected_size as f64 * 0.9) as u64;
         let max_size = (info.expected_size as f64 * 1.1) as u64;
 
         if file_size < min_size || file_size > max_size {
-            warn!("Model file size mismatch: expected ~{}, got {}", info.expected_size, file_size);
+            warn!(
+                "Model file size mismatch: expected ~{}, got {}",
+                info.expected_size, file_size
+            );
             return Ok(false);
         }
 
@@ -256,10 +262,9 @@ impl ModelManager {
 
     pub async fn clear_cache(&self) -> Result<()> {
         info!("Clearing model cache at {:?}", self.cache_dir);
-        
+
         if self.cache_dir.exists() {
-            std::fs::remove_dir_all(&self.cache_dir)
-                .context("Failed to remove cache directory")?;
+            std::fs::remove_dir_all(&self.cache_dir).context("Failed to remove cache directory")?;
             std::fs::create_dir_all(&self.cache_dir)
                 .context("Failed to recreate cache directory")?;
         }
@@ -273,7 +278,7 @@ impl ModelManager {
         }
 
         let mut total_size = 0u64;
-        
+
         for entry in std::fs::read_dir(&self.cache_dir)? {
             let entry = entry?;
             let metadata = entry.metadata()?;
@@ -315,7 +320,7 @@ mod tests {
     fn test_model_manager_creation() {
         let temp_dir = TempDir::new().unwrap();
         let manager = ModelManager::new(temp_dir.path()).unwrap();
-        
+
         assert!(manager.cache_dir.exists());
         assert!(!manager.available_models.is_empty());
     }
@@ -324,7 +329,7 @@ mod tests {
     fn test_model_info_retrieval() {
         let temp_dir = TempDir::new().unwrap();
         let manager = ModelManager::new(temp_dir.path()).unwrap();
-        
+
         let info = manager.get_model_info(&ModelSize::Tiny);
         assert!(info.is_some());
         assert_eq!(info.unwrap().size, ModelSize::Tiny);

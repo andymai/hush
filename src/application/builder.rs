@@ -1,10 +1,9 @@
 /// Builder pattern for HushApp construction
 ///
 /// Provides a fluent API for constructing HushApp with various configurations
-
 use super::HushApp;
 use crate::application::hush_app::AppMode;
-use crate::core::traits::{AudioSource, Transcriber, TextOutput, InputTrigger};
+use crate::core::traits::{AudioSource, InputTrigger, TextOutput, Transcriber};
 use crate::Result;
 
 /// Builder for HushApp with fluent API
@@ -73,7 +72,10 @@ impl HushAppBuilder {
 
     /// Set one-shot mode
     pub fn oneshot_mode(self, duration_secs: u64, print_only: bool) -> Self {
-        self.with_mode(AppMode::OneShot { duration_secs, print_only })
+        self.with_mode(AppMode::OneShot {
+            duration_secs,
+            print_only,
+        })
     }
 
     /// Set manual mode
@@ -85,10 +87,18 @@ impl HushAppBuilder {
     ///
     /// Returns an error if required components are not set
     pub fn build(self) -> Result<HushApp> {
-        let audio = self.audio.ok_or_else(|| anyhow::anyhow!("Audio source not set"))?;
-        let transcriber = self.transcriber.ok_or_else(|| anyhow::anyhow!("Transcriber not set"))?;
-        let text_output = self.text_output.ok_or_else(|| anyhow::anyhow!("Text output not set"))?;
-        let input_trigger = self.input_trigger.ok_or_else(|| anyhow::anyhow!("Input trigger not set"))?;
+        let audio = self
+            .audio
+            .ok_or_else(|| anyhow::anyhow!("Audio source not set"))?;
+        let transcriber = self
+            .transcriber
+            .ok_or_else(|| anyhow::anyhow!("Transcriber not set"))?;
+        let text_output = self
+            .text_output
+            .ok_or_else(|| anyhow::anyhow!("Text output not set"))?;
+        let input_trigger = self
+            .input_trigger
+            .ok_or_else(|| anyhow::anyhow!("Input trigger not set"))?;
 
         Ok(HushApp::new(
             audio,
@@ -110,7 +120,7 @@ impl Default for HushAppBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::mocks::{MockAudioSource, MockTranscriber, MockTextOutput, MockInputTrigger};
+    use crate::core::mocks::{MockAudioSource, MockInputTrigger, MockTextOutput, MockTranscriber};
 
     #[test]
     fn test_builder_basic() {

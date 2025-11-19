@@ -1,13 +1,13 @@
 /// Comprehensive logging system for Hush
-/// 
+///
 /// This module provides:
 /// - Structured file logging with rotation
 /// - Performance metrics tracking
 /// - Request correlation and user journey tracking  
 /// - Health monitoring and system diagnostics
 /// - Component-specific log levels and filtering
-
 use anyhow::Result;
+use parking_lot::Mutex;
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -21,11 +21,11 @@ use tracing_subscriber::{
     fmt::{format::Writer, time::FormatTime, FmtContext, FormatEvent, FormatFields},
     EnvFilter,
 };
-use parking_lot::Mutex;
 
 /// Global session ID for correlating logs across the application lifecycle
 static SESSION_ID: once_cell::sync::Lazy<String> = once_cell::sync::Lazy::new(|| {
-    format!("hush_{}",
+    format!(
+        "hush_{}",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -81,9 +81,9 @@ impl PerformanceMetrics {
     pub fn collect() -> Self {
         let mut system = System::new_all();
         system.refresh_all();
-        
+
         let cpu_usage = system.global_cpu_info().cpu_usage();
-        
+
         let memory_usage_mb = if let Some(process) = system.processes_by_name("hush").next() {
             process.memory() / 1024 / 1024
         } else {
@@ -160,7 +160,9 @@ impl PerformanceMetrics {
             let pid = std::process::id();
             let fd_dir = PathBuf::from(format!("/proc/{}/fd", pid));
             if fd_dir.exists() {
-                std::fs::read_dir(fd_dir).map(|entries| entries.count()).unwrap_or(0)
+                std::fs::read_dir(fd_dir)
+                    .map(|entries| entries.count())
+                    .unwrap_or(0)
             } else {
                 0
             }
@@ -316,7 +318,7 @@ pub struct LoggingSystem {
 impl LoggingSystem {
     pub fn new(config: LoggingConfig) -> Result<Self> {
         let system_info = Arc::new(Mutex::new(System::new_all()));
-        
+
         Ok(Self {
             config,
             _guards: Vec::new(),
@@ -329,8 +331,7 @@ impl LoggingSystem {
         std::fs::create_dir_all(&self.config.log_dir)?;
 
         // Build component-specific filter
-        let mut filter = EnvFilter::from_default_env()
-            .add_directive("hush=info".parse().unwrap());
+        let mut filter = EnvFilter::from_default_env().add_directive("hush=info".parse().unwrap());
 
         for (component, level) in &self.config.component_levels {
             let directive = format!("hush::{}={}", component, level);
@@ -398,7 +399,7 @@ impl LoggingSystem {
         let os_name = System::name().unwrap_or_else(|| "Unknown".to_string());
         let kernel_version = System::kernel_version().unwrap_or_else(|| "Unknown".to_string());
         let os_info = format!("{} {}", os_name, kernel_version);
-        
+
         tracing::info!(
             session_id = %*SESSION_ID,
             os_info = %os_info,
@@ -421,7 +422,7 @@ impl LoggingSystem {
     /// Log health status of all components
     pub fn log_health_status(&self) {
         let metrics = PerformanceMetrics::collect();
-        
+
         tracing::info!(
             session_id = %*SESSION_ID,
             cpu_usage_percent = %metrics.cpu_usage,
@@ -440,8 +441,9 @@ impl LoggingSystem {
 fn generate_request_id() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(1);
-    
-    format!("req_{:08x}_{:04x}", 
+
+    format!(
+        "req_{:08x}_{:04x}",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -500,8 +502,8 @@ macro_rules! log_request_error {
 /// Component-specific logging helpers
 
 pub mod audio {
-    use tracing::info;
     use crate::logging::RequestContext;
+    use tracing::info;
 
     pub fn log_device_initialization(device_name: &str, sample_rate: u32, channels: u16) {
         info!(
@@ -517,8 +519,10 @@ pub mod audio {
     }
 
     pub fn log_recording_stopped(ctx: &RequestContext, samples: usize, duration_sec: f32) {
-        crate::log_request_end!(ctx, "Audio recording", 
-            samples = samples, 
+        crate::log_request_end!(
+            ctx,
+            "Audio recording",
+            samples = samples,
             duration_sec = duration_sec
         );
     }
@@ -529,8 +533,8 @@ pub mod audio {
 }
 
 pub mod transcription {
-    use tracing::info;
     use crate::logging::RequestContext;
+    use tracing::info;
 
     pub fn log_model_loading(model_path: &str, use_cuda: bool) {
         info!(
@@ -540,15 +544,23 @@ pub mod transcription {
         );
     }
 
-    pub fn log_transcription_started(ctx: &RequestContext, audio_duration_sec: f32, sample_rate: u32) {
-        crate::log_request_start!(ctx, "Transcription", 
+    pub fn log_transcription_started(
+        ctx: &RequestContext,
+        audio_duration_sec: f32,
+        sample_rate: u32,
+    ) {
+        crate::log_request_start!(
+            ctx,
+            "Transcription",
             audio_duration_sec = audio_duration_sec,
             sample_rate = sample_rate
         );
     }
 
     pub fn log_transcription_completed(ctx: &RequestContext, text: &str, confidence: f32) {
-        crate::log_request_end!(ctx, "Transcription",
+        crate::log_request_end!(
+            ctx,
+            "Transcription",
             text_length = text.len(),
             confidence = confidence
         );
@@ -560,8 +572,8 @@ pub mod transcription {
 }
 
 pub mod text_insertion {
-    use tracing::info;
     use crate::logging::RequestContext;
+    use tracing::info;
 
     pub fn log_insertion_method_selected(method: &str) {
         info!(
@@ -571,16 +583,16 @@ pub mod text_insertion {
     }
 
     pub fn log_text_inserted(ctx: &RequestContext, text: &str, method: &str) {
-        crate::log_request_end!(ctx, "Text insertion",
+        crate::log_request_end!(
+            ctx,
+            "Text insertion",
             text_length = text.len(),
             method = method
         );
     }
 
     pub fn log_insertion_error(ctx: &RequestContext, error: &dyn std::fmt::Display, method: &str) {
-        crate::log_request_error!(ctx, error, "Text insertion",
-            method = method
-        );
+        crate::log_request_error!(ctx, error, "Text insertion", method = method);
     }
 }
 
@@ -635,7 +647,7 @@ mod tests {
 
         let logging_system = LoggingSystem::new(config).unwrap();
         let _initialized = logging_system.initialize();
-        
+
         // Test that we can create request contexts
         let ctx = RequestContext::new("test");
         assert!(!ctx.request_id.is_empty());
