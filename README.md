@@ -2,7 +2,7 @@
 
 # 🤫 Hush
 
-**Fast, accurate, and private voice-to-text for Linux developers**
+**Fast, accurate, and private voice-to-text for Linux and macOS developers**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
@@ -41,9 +41,25 @@
 
 ## 🎯 About
 
-Hush is a production-ready voice-to-text application built specifically for Linux developers. It uses OpenAI's Whisper models locally with CUDA GPU acceleration for fast, accurate transcription, and features intelligent text processing with automatic filler word removal and optional LLM polishing.
+Hush is a production-ready voice-to-text application built for Linux and macOS developers. It uses OpenAI's Whisper models locally with GPU acceleration (CUDA on Linux, Metal on Apple Silicon) for fast, accurate transcription, and features intelligent text processing with automatic filler word removal and optional LLM polishing.
 
 **Privacy-first design:** All processing happens locally on your machine (except optional LLM integration). Your voice data never leaves your computer.
+
+### 🌐 Platform Support
+
+| Platform | Status | GPU Acceleration | Notes |
+|----------|--------|------------------|-------|
+| **Linux** | ✅ Fully Supported | CUDA (NVIDIA GPUs) | Primary platform, UInput integration |
+| **macOS** | ✅ Fully Supported | Metal (Apple Silicon) | Native NSStatusBar, Accessibility API |
+| **Windows** | 🚧 Planned | - | Not yet implemented |
+
+#### macOS
+- ✅ macOS 11.0 (Big Sur) and later
+- ✅ Apple Silicon (M1, M2, M3, M4) with Metal GPU acceleration (~120ms latency)
+- ✅ Intel Macs with CPU-only mode (~800ms latency)
+- ✅ Native system tray integration via NSStatusBar
+- ✅ Text insertion via Accessibility API and CGEvent
+- ✅ See [macOS Installation Guide](docs/macos/INSTALL.md)
 
 ### 🎬 Demo
 
@@ -375,8 +391,11 @@ Hush uses Linux UInput for hardware-level keyboard emulation, providing universa
 ## 📚 Documentation
 
 ### User Documentation
-- **[INSTALL.md](INSTALL.md)** - **Complete installation guide for all Linux distributions**
-- **[SETUP.md](SETUP.md)** - Setup and configuration guide
+- **[INSTALL.md](INSTALL.md)** - Complete installation guide for Linux distributions
+- **[macOS Installation](docs/macos/INSTALL.md)** - macOS installation and setup guide
+- **[macOS Permissions](docs/macos/PERMISSIONS.md)** - macOS permission setup guide
+- **[macOS Troubleshooting](docs/macos/TROUBLESHOOTING.md)** - macOS troubleshooting guide
+- **[SETUP.md](SETUP.md)** - General setup and configuration guide
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history and release notes
 
 ### Developer & AI Agent Documentation
@@ -396,7 +415,9 @@ All developer documentation and project context is in the `.ai/knowledge/` direc
 
 ## 💻 System Requirements
 
-### Minimum Requirements (CPU-only)
+### Linux
+
+#### Minimum Requirements (CPU-only)
 - **OS:** Linux (Ubuntu 20.04+, Fedora 35+, or equivalent)
 - **CPU:** x86_64 with AVX2 support
 - **RAM:** 4GB+ (8GB+ for larger models)
@@ -404,11 +425,27 @@ All developer documentation and project context is in the `.ai/knowledge/` direc
 - **Audio:** Microphone or audio input device
 - **Rust:** 1.70+
 
-### Recommended (GPU-accelerated)
+#### Recommended (GPU-accelerated)
 - **GPU:** NVIDIA GPU with CUDA support (GTX 1060 or newer)
 - **VRAM:** 4GB+ for base model, 8GB+ for large models
 - **CUDA:** CUDA Toolkit 12.0+
 - **Drivers:** NVIDIA 520.x or newer
+
+### macOS
+
+#### Minimum Requirements
+- **OS:** macOS 11.0 (Big Sur) or later
+- **CPU:** Apple Silicon or Intel (x86_64)
+- **RAM:** 8GB+ (16GB+ recommended)
+- **Storage:** 2GB free space for models
+- **Permissions:** Accessibility and Microphone access
+
+#### Recommended
+- **CPU:** Apple Silicon (M1, M2, M3, M4) for Metal GPU acceleration
+- **OS:** macOS 13.0 (Ventura) or later
+- **RAM:** 16GB+
+
+**See:** [macOS Installation Guide](docs/macos/INSTALL.md)
 
 ### Build Options
 
