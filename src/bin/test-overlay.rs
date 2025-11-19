@@ -35,8 +35,7 @@ fn main() {
             let t = start.elapsed().as_secs_f32();
             // Simulate varying amplitude (like someone speaking)
             let amplitude = ((t * 2.0).sin() * 0.5 + 0.5) * 0.8; // 0.0 to 0.8
-            *state_handle.lock() =
-                OverlayState::start_recording().with_amplitude(amplitude);
+            *state_handle.lock() = OverlayState::start_recording().with_amplitude(amplitude);
             thread::sleep(Duration::from_millis(50)); // Update 20 times per second
         }
         info!("Transitioning to: Processing");
@@ -71,8 +70,7 @@ fn main() {
             let t = start.elapsed().as_secs_f32();
             // Faster, more variable amplitude (excited speech)
             let amplitude = ((t * 5.0).sin().abs() * 0.9).max(0.2); // 0.2 to 0.9
-            *state_handle.lock() =
-                OverlayState::start_recording().with_amplitude(amplitude);
+            *state_handle.lock() = OverlayState::start_recording().with_amplitude(amplitude);
             thread::sleep(Duration::from_millis(50));
         }
 
