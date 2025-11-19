@@ -82,7 +82,10 @@ impl StateMachine {
     /// Attempt state transition (validates transition is legal)
     pub fn transition(&self, new_state: AppState) -> Result<(), StateError> {
         let mut current = self.current.write().map_err(|e| {
-            StateError::LockPoisoned(format!("Failed to acquire write lock on current state: {}", e))
+            StateError::LockPoisoned(format!(
+                "Failed to acquire write lock on current state: {}",
+                e
+            ))
         })?;
         let old_state = *current;
 
@@ -108,9 +111,12 @@ impl StateMachine {
             to: new_state,
             timestamp: Instant::now(),
         };
-        self.history.write().map_err(|e| {
-            StateError::LockPoisoned(format!("Failed to acquire write lock on history: {}", e))
-        })?.push(transition);
+        self.history
+            .write()
+            .map_err(|e| {
+                StateError::LockPoisoned(format!("Failed to acquire write lock on history: {}", e))
+            })?
+            .push(transition);
 
         // Notify observers (release lock first to avoid deadlock)
         drop(current);
@@ -145,10 +151,13 @@ impl StateMachine {
 
     /// Add state observer
     pub fn add_observer(&self, observer: Box<dyn StateObserver>) {
-        self.observers.write().unwrap_or_else(|poisoned| {
-            // Recover from poisoned lock by clearing the poison and continuing
-            poisoned.into_inner()
-        }).push(observer);
+        self.observers
+            .write()
+            .unwrap_or_else(|poisoned| {
+                // Recover from poisoned lock by clearing the poison and continuing
+                poisoned.into_inner()
+            })
+            .push(observer);
     }
 
     /// Notify all observers of state change
@@ -164,10 +173,13 @@ impl StateMachine {
 
     /// Get state history for debugging
     pub fn history(&self) -> Vec<StateTransition> {
-        self.history.read().unwrap_or_else(|poisoned| {
-            // Recover from poisoned lock - history is still valid even if lock was poisoned
-            poisoned.into_inner()
-        }).clone()
+        self.history
+            .read()
+            .unwrap_or_else(|poisoned| {
+                // Recover from poisoned lock - history is still valid even if lock was poisoned
+                poisoned.into_inner()
+            })
+            .clone()
     }
 }
 
