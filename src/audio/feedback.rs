@@ -35,7 +35,8 @@ impl AudioFeedback {
             return Ok(());
         }
 
-        std::thread::spawn(|| {
+        // Use tokio's blocking task pool instead of spawning a new thread
+        tokio::task::spawn_blocking(|| {
             if let Err(e) = play_tone(440.0, 100) {
                 warn!("Failed to play start sound: {}", e);
             }
@@ -50,7 +51,8 @@ impl AudioFeedback {
             return Ok(());
         }
 
-        std::thread::spawn(|| {
+        // Use tokio's blocking task pool instead of spawning a new thread
+        tokio::task::spawn_blocking(|| {
             if let Err(e) = play_tone(880.0, 100) {
                 warn!("Failed to play stop sound: {}", e);
             }
@@ -65,7 +67,8 @@ impl AudioFeedback {
             return Ok(());
         }
 
-        std::thread::spawn(|| {
+        // Use tokio's blocking task pool instead of spawning a new thread
+        tokio::task::spawn_blocking(|| {
             if let Err(e) = play_double_beep(220.0, 150, 50) {
                 warn!("Failed to play error sound: {}", e);
             }
@@ -80,7 +83,8 @@ impl AudioFeedback {
             return Ok(());
         }
 
-        std::thread::spawn(|| {
+        // Use tokio's blocking task pool instead of spawning a new thread
+        tokio::task::spawn_blocking(|| {
             if let Err(e) = play_tone(1320.0, 80) {
                 warn!("Failed to play success sound: {}", e);
             }
