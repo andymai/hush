@@ -17,7 +17,7 @@ Create a comprehensive settings window separate from the overlay panel. This wil
 ### Basic UI Layout
 - [ ] Create tabbed interface with sections: General, Models, Audio, Hotkeys, Advanced
 - [ ] Implement "General" tab with basic settings:
-  - Display theme (Dark/Light)
+  - Display theme (Dark/Light/System) - detect and respect system dark mode
   - Overlay position selector
   - Overlay opacity slider
   - Show button when idle toggle
@@ -73,20 +73,35 @@ This is Phase 1 of the UI expansion project. The settings window will serve as t
 
 ## Reference Documentation
 
-- **`.ai/knowledge/ui-architecture.md`** - UI architecture patterns (START HERE)
 - egui docs: https://docs.rs/egui
 - egui examples: https://github.com/emilk/egui/tree/master/examples
 - `.ai/knowledge/rust-ui-frameworks-research.md` - UI framework research
 - `.ai/knowledge/conventions.md` - Coding standards
 
-## Architecture Guidelines
+## Existing Patterns to Follow
 
-Follow these patterns from `ui-architecture.md`:
-- **Module Structure**: Create `src/settings/` with proper organization (section 1)
-- **State Management**: Use three-layer state model (section 2)
-- **Config Persistence**: Single TOML file with sections (section 3)
-- **Tab Interface**: Each tab implements `SettingsTab` trait (section 4)
-- **Window Lifecycle**: Manage open/close state properly (section 5)
+**Discover patterns via grep before writing code:**
+
+```bash
+# Find actual state management patterns
+rg "pub enum.*State" src/overlay/ --type rust
+
+# Find actual config patterns
+rg "pub struct.*Config" src/config/ --type rust
+
+# Find actual UI rendering patterns
+rg "render_" src/overlay/ui.rs --type rust
+
+# Find existing traits for reference
+rg "pub trait" src/core/traits.rs --type rust
+```
+
+**Key patterns from existing code:**
+- State-based UI rendering (see `src/overlay/ui.rs`: `render_overlay()`)
+- Enum state machines (see `src/overlay/state.rs`: `OverlayState`)
+- Functional rendering with pattern matching (not OOP trait objects)
+- Config structs with serde (see `src/config/settings.rs`)
+- System dark mode detection for theme (new requirement)
 
 ## Estimated Complexity
 

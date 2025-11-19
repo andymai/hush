@@ -84,17 +84,29 @@ This is Phase 2, Step 1 of the UI expansion project. It builds on T-027 (Enhance
 
 ## Reference Documentation
 
-- **`.ai/knowledge/ui-architecture.md`** - UI architecture patterns
 - Model specs: README.md (lines 341-349)
 - Model manager: `src/bin/model-manager.rs`
 - Whisper integration: `src/transcription/whisper.rs`
+- `.ai/knowledge/conventions.md` - Coding standards
 
-## Architecture Guidelines
+## Existing Patterns to Follow
 
-Follow these patterns from `ui-architecture.md`:
-- **Tab Interface**: Implement `SettingsTab` trait (section 4)
-- **State Management**: Use pending changes pattern (section 2)
-- **Error Handling**: User-friendly error messages (section 8)
+Search the codebase for patterns before implementing:
+```bash
+# Find config patterns
+rg "pub struct.*Config" src/config/ --type rust
+
+# Find state patterns
+rg "pub enum.*State" src/ --type rust
+
+# Find error handling patterns
+rg "pub enum.*Error" src/core/error.rs --type rust
+```
+
+**Follow existing Hush patterns:**
+- State-based UI (see `src/overlay/ui.rs`)
+- Structured error types (see `src/core/error.rs`)
+- Config with serde (see `src/config/settings.rs`)
 
 ## Estimated Complexity
 
