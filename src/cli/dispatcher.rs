@@ -1,4 +1,4 @@
-use crate::cli::commands::handle_manual;
+use crate::cli::commands::{handle_manual, handle_setup};
 use crate::cli::{Commands, ModelCommands, SetupCommands, TestCommands};
 use crate::logging::RequestContext;
 use anyhow::{Context as AnyhowContext, Result};
@@ -98,7 +98,7 @@ impl CommandDispatcher {
                 self.handle_listen(editing_mode.clone(), no_processing, no_button)
                     .await
             },
-            Commands::Setup { setup_command } => self.handle_setup(setup_command).await,
+            Commands::Setup { setup_command } => handle_setup(setup_command).await,
             Commands::Test { test_command } => self.handle_test(test_command).await,
             Commands::Models { model_command } => self.handle_models(model_command).await,
             Commands::Status {
@@ -674,25 +674,6 @@ impl CommandDispatcher {
         Ok(())
     }
 
-    async fn handle_setup(&self, setup_command: SetupCommands) -> Result<()> {
-        match setup_command {
-            SetupCommands::Uinput { quick, auto_fix } => {
-                if quick {
-                    print_uinput_quick_setup();
-                } else if auto_fix {
-                    auto_fix_uinput().await?;
-                } else {
-                    crate::text::print_uinput_setup_guidance();
-                }
-                Ok(())
-            },
-            SetupCommands::DiagnoseUinput => crate::text::diagnose_uinput_issues(),
-            SetupCommands::Audio { list, test } => setup_audio(list, test).await,
-            SetupCommands::Hotkeys { test, list } => setup_hotkeys(test, list).await,
-            SetupCommands::Wizard { auto } => run_setup_wizard(auto).await,
-        }
-    }
-
     async fn handle_test(&self, test_command: TestCommands) -> Result<()> {
         match test_command {
             TestCommands::Audio {
@@ -868,114 +849,6 @@ impl CommandDispatcher {
         println!("✅ Uninstallation complete!");
         Ok(())
     }
-}
-
-// Helper functions - these would be implemented in separate modules
-fn print_uinput_quick_setup() {
-    println!("🔧 Quick UInput Setup:");
-    println!("sudo usermod -a -G input $USER");
-    println!("sudo modprobe uinput");
-    println!("echo 'uinput' | sudo tee /etc/modules-load.d/uinput.conf");
-    println!("# Then log out and log back in");
-}
-
-async fn auto_fix_uinput() -> Result<()> {
-    warn!("Auto-fix functionality not yet implemented");
-    println!("🚧 Auto-fix is not yet implemented. Please run 'hush setup uinput' for manual instructions.");
-    Ok(())
-}
-
-async fn setup_audio(list: bool, test: Option<String>) -> Result<()> {
-    if list {
-        println!("🎵 Available Audio Devices:");
-        // Use existing functionality
-        if let Ok(devices) = crate::AudioCapture::list_devices() {
-            for (i, device) in devices.iter().enumerate() {
-                println!("  {}. {}", i + 1, device);
-            }
-        } else {
-            println!("❌ Failed to list audio devices");
-        }
-    }
-
-    if let Some(device_name) = test {
-        println!("🎤 Testing audio device: {}", device_name);
-        match crate::AudioCapture::new(Some(&device_name)) {
-            Ok(capture) => {
-                println!("✅ Device '{}' is available", capture.get_device_name());
-            },
-            Err(e) => {
-                println!("❌ Device test failed: {}", e);
-            },
-        }
-    }
-
-    Ok(())
-}
-
-async fn setup_hotkeys(test: Option<String>, list: bool) -> Result<()> {
-    if list {
-        println!("⌨️ Common Hotkey Combinations:");
-        println!("  • Ctrl+Shift+Space (default)");
-        println!("  • Ctrl+Alt+Space");
-        println!("  • F12");
-        println!("  • Ctrl+F12");
-        println!("  • Alt+Space");
-    }
-
-    if let Some(combination) = test {
-        println!("🎯 Testing hotkey combination: {}", combination);
-        // Test the hotkey combination
-        match crate::hotkey::HotkeyManager::new(&combination) {
-            Ok((manager, _receiver)) => {
-                println!("✅ Hotkey combination '{}' is valid", combination);
-                drop(manager);
-            },
-            Err(e) => {
-                println!("❌ Hotkey test failed: {}", e);
-            },
-        }
-    }
-
-    Ok(())
-}
-
-async fn run_setup_wizard(auto: bool) -> Result<()> {
-    println!("🧙 Hush Setup Wizard");
-    println!("This wizard will help you configure Hush for optimal performance.\n");
-
-    if !auto {
-        println!("Press Enter to continue, or Ctrl+C to cancel...");
-        std::io::stdin().read_line(&mut String::new()).unwrap();
-    }
-
-    // Step 1: UInput setup
-    println!("📋 Step 1: UInput Setup");
-    crate::text::print_uinput_setup_guidance();
-
-    if !auto {
-        println!("\nHave you completed the UInput setup? (y/N)");
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
-        if !input.trim().to_lowercase().starts_with('y') {
-            println!("⚠️ Please complete UInput setup before continuing.");
-            return Ok(());
-        }
-    }
-
-    // Step 2: Model download
-    println!("\n📋 Step 2: Model Download");
-    println!("Downloading recommended model (base)...");
-    download_model("base", false).await?;
-
-    // Step 3: Test systems
-    println!("\n📋 Step 3: System Test");
-    run_all_tests(false, None).await?;
-
-    println!("\n✅ Setup wizard completed!");
-    println!("You can now use 'hush start' to begin voice-to-text.");
-
-    Ok(())
 }
 
 // Test functions (these would call existing test binaries)
@@ -1268,7 +1141,7 @@ async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_all_tests(benchmarks: bool, output: Option<PathBuf>) -> Result<()> {
+pub async fn run_all_tests(benchmarks: bool, output: Option<PathBuf>) -> Result<()> {
     println!("🧪 Running all system tests...\n");
 
     // Test audio
@@ -1348,7 +1221,7 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
     Ok(())
 }
 
-async fn download_model(model_size: &str, force: bool) -> Result<()> {
+pub async fn download_model(model_size: &str, force: bool) -> Result<()> {
     println!("📥 Downloading model: {}", model_size);
 
     // Use model downloader functionality

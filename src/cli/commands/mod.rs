@@ -1,5 +1,6 @@
 pub mod manual;
 pub mod record;
+pub mod setup;
 pub mod status;
 /// Modular command implementations
 ///
@@ -28,6 +29,7 @@ pub mod utils;
 // Re-export command handlers
 pub use manual::handle_manual;
 pub use record::handle_record;
+pub use setup::handle_setup;
 pub use status::handle_status;
 
 // Re-export utilities for use by other commands
