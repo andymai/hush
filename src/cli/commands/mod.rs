@@ -1,5 +1,6 @@
 pub mod listen;
 pub mod manual;
+pub mod models;
 pub mod record;
 pub mod setup;
 pub mod status;
@@ -31,6 +32,7 @@ pub mod utils;
 // Re-export command handlers
 pub use listen::handle_listen;
 pub use manual::handle_manual;
+pub use models::handle_models;
 pub use record::handle_record;
 pub use setup::handle_setup;
 pub use status::handle_status;
@@ -46,7 +48,7 @@ pub use utils::*;
 //
 // Medium Priority:
 // - handle_test
-// - handle_models
+// ✅ handle_models (extracted)
 //
 // Low Priority (less frequently used):
 // - handle_install
