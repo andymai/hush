@@ -1,3 +1,4 @@
+use crate::cli::commands::handle_manual;
 use crate::cli::{Commands, ModelCommands, SetupCommands, TestCommands};
 use crate::logging::RequestContext;
 use anyhow::{Context as AnyhowContext, Result};
@@ -80,7 +81,7 @@ impl CommandDispatcher {
                     count = %count,
                     "Manual command parameters"
                 );
-                self.handle_manual(count).await
+                handle_manual(count).await
             },
             Commands::Listen {
                 editing_mode,
@@ -242,22 +243,6 @@ impl CommandDispatcher {
             Self::save_audio_to_file(&audio_data, &path, config.audio.sample_rate)?;
         }
 
-        Ok(())
-    }
-
-    async fn handle_manual(&self, count: u32) -> Result<()> {
-        info!("🎯 Starting manual recording mode ({} recordings)", count);
-
-        for i in 1..=count {
-            if count > 1 {
-                println!("\n📹 Recording {}/{}", i, count);
-            }
-
-            // Use the record handler for each iteration
-            self.handle_record(30, false, None).await?;
-        }
-
-        println!("✅ All recordings completed!");
         Ok(())
     }
 
