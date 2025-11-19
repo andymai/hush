@@ -10,8 +10,9 @@ categories = ["multimedia::audio", "accessibility"]
 default-run = "hush"
 
 [features]
-default = ["notifications"]
-notifications = []
+default = ["notifications", "system-tray"]
+notifications = ["dep:notify-rust"]
+system-tray = ["dep:ksni"]
 
 [dependencies]
 # Audio capture and processing
@@ -59,11 +60,11 @@ egui = "0.23"  # Must match egui_overlay 0.5 dependency
 egui_overlay = "0.5"
 raw-window-handle = "0.5"  # For window creation
 
-# System notifications
-notify-rust = "4.10"
+# System notifications (optional - requires libdbus)
+notify-rust = { version = "4.10", optional = true }
 
-# System tray integration
-ksni = "0.2"
+# System tray integration (optional - requires libdbus)
+ksni = { version = "0.2", optional = true }
 arboard = "3.0"
 
 # Application directories (XDG)
