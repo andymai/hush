@@ -121,7 +121,7 @@ x11rb = "0.13"
 input-linux = "0.7"
 
 # System tray integration (DBus-based)
-ksni = { version = "0.2", optional = true }
+ksni = { version = "0.3", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS system frameworks
