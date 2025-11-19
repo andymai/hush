@@ -1,3 +1,4 @@
+pub mod listen;
 pub mod manual;
 pub mod record;
 pub mod setup;
@@ -27,6 +28,7 @@ pub mod status;
 pub mod utils;
 
 // Re-export command handlers
+pub use listen::handle_listen;
 pub use manual::handle_manual;
 pub use record::handle_record;
 pub use setup::handle_setup;
@@ -37,8 +39,8 @@ pub use utils::*;
 
 // TODO: Extract remaining commands from dispatcher.rs (REFACTORING_PLAN.md)
 // High Priority (frequently used):
-// - handle_listen (most complex, 400+ lines)
-// - handle_setup
+// ✅ handle_listen (extracted)
+// ✅ handle_setup (extracted)
 //
 // Medium Priority:
 // - handle_test
