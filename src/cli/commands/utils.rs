@@ -1,4 +1,5 @@
 use crate::{AudioCapture, Config};
+use crate::transcription::cuda::CudaAvailability;
 /// Utility functions shared across command handlers
 ///
 /// This module contains helper functions used by multiple command implementations.
@@ -19,6 +20,31 @@ pub async fn show_config_status() -> Result<()> {
         Err(e) => {
             println!("  ❌ Failed to load config: {}", e);
         },
+    }
+
+    Ok(())
+}
+
+/// Display system information including GPU status
+pub async fn show_system_info() -> Result<()> {
+    println!("📊 System Information:");
+    println!("  OS: {}", std::env::consts::OS);
+    println!("  Architecture: {}", std::env::consts::ARCH);
+
+    let cuda = CudaAvailability::detect();
+    if cuda.available {
+        println!(
+            "  🚀 GPU: {} (CUDA {})",
+            cuda.device_name.as_deref().unwrap_or("Unknown"),
+            cuda.cuda_version.as_deref().unwrap_or("Unknown")
+        );
+        println!("     Devices: {}", cuda.device_count);
+    } else {
+        #[cfg(feature = "cuda")]
+        println!("  ⚠️  GPU: Not detected (using CPU)");
+
+        #[cfg(not(feature = "cuda"))]
+        println!("  💻 GPU: Not compiled (CPU-only build)");
     }
 
     Ok(())
