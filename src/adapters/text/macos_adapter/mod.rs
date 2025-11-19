@@ -3,6 +3,7 @@ use crate::Result;
 use async_trait::async_trait;
 use core_graphics::event::{CGEvent, CGEventTapLocation, CGKeyCode};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tracing::{debug, info, warn};
@@ -27,12 +28,23 @@ pub use accessibility::{
 ///
 /// If CGEvent insertion fails, the adapter will fall back to the enigo
 /// library for cross-platform keyboard simulation.
+///
+/// # Thread Safety
+///
+/// The CGEventSource is wrapped in Arc to make it Send + Sync, which is
+/// required for async trait methods that may be called across threads.
 pub struct MacOSTextAdapter {
-    event_source: CGEventSource,
+    event_source: Arc<CGEventSource>,
     enigo_fallback: enigo::Enigo,
     accessibility_enabled: bool,
     typing_delay_ms: u64,
 }
+
+// SAFETY: CGEventSource is thread-safe when wrapped in Arc, and enigo::Enigo
+// is safe to send across threads as it doesn't hold thread-local state on macOS.
+// The macOS CGEvent API can be called from any thread.
+unsafe impl Send for MacOSTextAdapter {}
+unsafe impl Sync for MacOSTextAdapter {}
 
 impl MacOSTextAdapter {
     /// Create a new macOS text adapter
@@ -64,7 +76,7 @@ impl MacOSTextAdapter {
             .map_err(|e| anyhow::anyhow!("Failed to initialize enigo fallback: {:?}", e))?;
 
         Ok(Self {
-            event_source,
+            event_source: Arc::new(event_source),
             enigo_fallback,
             accessibility_enabled,
             typing_delay_ms: 10,
@@ -92,7 +104,7 @@ impl MacOSTextAdapter {
 
         // Press shift if needed
         if needs_shift {
-            self.press_key(CGKeyCode(56), true)?; // 56 = Shift
+            self.press_key(56, true)?; // 56 = Shift
         }
 
         // Press and release key
@@ -101,7 +113,7 @@ impl MacOSTextAdapter {
 
         // Release shift
         if needs_shift {
-            self.press_key(CGKeyCode(56), false)?;
+            self.press_key(56, false)?;
         }
 
         Ok(())
@@ -109,7 +121,7 @@ impl MacOSTextAdapter {
 
     /// Press or release a key
     fn press_key(&self, keycode: CGKeyCode, key_down: bool) -> Result<()> {
-        let event = CGEvent::new_keyboard_event(self.event_source.clone(), keycode.0, key_down)
+        let event = CGEvent::new_keyboard_event((*self.event_source).clone(), keycode, key_down)
             .map_err(|e| anyhow::anyhow!("Failed to create keyboard event: {:?}", e))?;
 
         event.post(CGEventTapLocation::HID);

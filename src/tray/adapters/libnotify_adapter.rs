@@ -1,11 +1,14 @@
 /// Desktop notification provider using notify-rust
-/// 
+///
 /// Implements NotificationProvider trait for Linux desktop notifications.
 
 use crate::Result;
 use crate::core::traits::{NotificationProvider, NotificationLevel, TranscriptionResult};
 use async_trait::async_trait;
-use notify_rust::{Notification, Urgency};
+use notify_rust::Notification;
+
+#[cfg(target_os = "linux")]
+use notify_rust::Urgency;
 
 /// Desktop notification provider using libnotify
 pub struct LibnotifyProvider {
@@ -64,20 +67,25 @@ impl NotificationProvider for LibnotifyProvider {
         } else {
             format!("{} ({}% confidence)", result.text, confidence_percent)
         };
-        
+
+        #[cfg(target_os = "linux")]
         let urgency = if result.confidence < 0.7 {
             Urgency::Normal
         } else {
             Urgency::Low
         };
-        
-        Notification::new()
+
+        let mut notification = Notification::new();
+        notification
             .summary("🎙️ Transcription Complete")
             .body(&body)
             .icon("microphone-sensitivity-high")
-            .urgency(urgency)
-            .timeout(self.timeout_ms as i32)
-            .show()
+            .timeout(self.timeout_ms as i32);
+
+        #[cfg(target_os = "linux")]
+        notification.urgency(urgency);
+
+        notification.show()
             .map_err(|e| anyhow::anyhow!("Failed to show transcription notification: {}", e))?;
         
         Ok(())
@@ -87,27 +95,39 @@ impl NotificationProvider for LibnotifyProvider {
         if !self.enabled {
             return Ok(());
         }
-        
+
+        #[cfg(target_os = "linux")]
         let (icon, urgency, prefix) = match level {
             NotificationLevel::Info => ("dialog-information", Urgency::Normal, "ℹ️"),
             NotificationLevel::Warning => ("dialog-warning", Urgency::Normal, "⚠️"),
             NotificationLevel::Error => ("dialog-error", Urgency::Critical, "❌"),
         };
-        
+
+        #[cfg(not(target_os = "linux"))]
+        let (icon, prefix) = match level {
+            NotificationLevel::Info => ("dialog-information", "ℹ️"),
+            NotificationLevel::Warning => ("dialog-warning", "⚠️"),
+            NotificationLevel::Error => ("dialog-error", "❌"),
+        };
+
         let timeout = match level {
             NotificationLevel::Error => self.timeout_ms * 2, // Show errors longer
             _ => self.timeout_ms,
         };
-        
-        Notification::new()
+
+        let mut notification = Notification::new();
+        notification
             .summary(&format!("{} {}", prefix, self.app_name))
             .body(message)
             .icon(icon)
-            .urgency(urgency)
-            .timeout(timeout as i32)
-            .show()
+            .timeout(timeout as i32);
+
+        #[cfg(target_os = "linux")]
+        notification.urgency(urgency);
+
+        notification.show()
             .map_err(|e| anyhow::anyhow!("Failed to show status notification: {}", e))?;
-        
+
         Ok(())
     }
     

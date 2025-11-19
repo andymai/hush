@@ -53,16 +53,35 @@ use crate::cli::SetupCommands;
 pub async fn handle_setup(setup_command: SetupCommands) -> Result<()> {
     match setup_command {
         SetupCommands::Uinput { quick, auto_fix } => {
-            if quick {
-                print_uinput_quick_setup();
-            } else if auto_fix {
-                auto_fix_uinput().await?;
-            } else {
-                crate::text::print_uinput_setup_guidance();
+            #[cfg(target_os = "linux")]
+            {
+                if quick {
+                    print_uinput_quick_setup();
+                } else if auto_fix {
+                    auto_fix_uinput().await?;
+                } else {
+                    crate::text::print_uinput_setup_guidance();
+                }
+                Ok(())
             }
-            Ok(())
+            #[cfg(not(target_os = "linux"))]
+            {
+                eprintln!("UInput setup is only available on Linux");
+                eprintln!("On macOS, text insertion uses the CGEvent API");
+                Ok(())
+            }
         },
-        SetupCommands::DiagnoseUinput => crate::text::diagnose_uinput_issues(),
+        SetupCommands::DiagnoseUinput => {
+            #[cfg(target_os = "linux")]
+            {
+                crate::text::diagnose_uinput_issues()
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                eprintln!("UInput diagnostics are only available on Linux");
+                Ok(())
+            }
+        }
         SetupCommands::Audio { list, test } => setup_audio(list, test).await,
         SetupCommands::Hotkeys { test, list } => setup_hotkeys(test, list).await,
         SetupCommands::Wizard { auto } => run_setup_wizard(auto).await,
@@ -195,9 +214,19 @@ async fn run_setup_wizard(auto: bool) -> Result<()> {
             .context("Failed to read user input")?;
     }
 
-    // Step 1: UInput setup
-    println!("📋 Step 1: UInput Setup");
-    crate::text::print_uinput_setup_guidance();
+    // Step 1: UInput setup (Linux only)
+    #[cfg(target_os = "linux")]
+    {
+        println!("📋 Step 1: UInput Setup");
+        crate::text::print_uinput_setup_guidance();
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        println!("📋 Step 1: Accessibility Permissions");
+        println!("macOS requires Accessibility permissions for text insertion.");
+        println!("You will be prompted when you first use voice-to-text features.");
+    }
 
     if !auto {
         println!("\nHave you completed the UInput setup? (y/N)");

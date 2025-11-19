@@ -12,7 +12,7 @@ pub use x11_adapter::X11TextAdapter;
 
 // macOS adapter
 #[cfg(target_os = "macos")]
-mod macos_adapter;
+pub mod macos_adapter;
 #[cfg(target_os = "macos")]
 pub use macos_adapter::MacOSTextAdapter;
 

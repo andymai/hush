@@ -13,7 +13,7 @@
 use hush::audio::AudioCapture;
 use hush::hotkey::{HotkeyEvent, HotkeyManager};
 use hush::overlay::{OverlayPosition, OverlayState, OverlayWindowBuilder};
-use hush::text::TextInserter;
+use hush::adapters::text::create_text_adapter;
 use hush::text_processing::{EditingMode, LlmProvider, ProcessingConfig, TextProcessor};
 use hush::transcription::SimpleWhisperTranscriber;
 use std::path::PathBuf;
@@ -128,10 +128,13 @@ fn main() {
     };
 
     // Initialize text inserter
-    let text_inserter = match TextInserter::new() {
+    let text_inserter = match tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { create_text_adapter() })
+    {
         Ok(inserter) => {
             info!("✅ Text inserter initialized");
-            Some(Arc::new(Mutex::new(inserter)))
+            Some(Arc::new(parking_lot::Mutex::new(inserter)))
         },
         Err(e) => {
             warn!("Failed to initialize text inserter: {}", e);
@@ -246,7 +249,15 @@ fn main() {
                         // Small delay to ensure window focus is stable
                         thread::sleep(Duration::from_millis(200));
 
-                        if let Err(e) = inserter.lock().insert_text(&processed_text) {
+                        // insert_text is async, so we need a runtime
+                        let text_clone = processed_text.clone();
+                        let inserter_clone = Arc::clone(inserter);
+                        if let Err(e) = tokio::runtime::Runtime::new()
+                            .unwrap()
+                            .block_on(async {
+                                inserter_clone.lock().insert_text(&text_clone).await
+                            })
+                        {
                             error!("Failed to insert text: {}", e);
                             warn!("Text will only be shown in overlay");
                         } else {
@@ -261,7 +272,7 @@ fn main() {
                         processed_text
                     };
 
-                    *state_handle_clone2.lock().unwrap() =
+                    *state_handle_clone2.lock() =
                         OverlayState::success(&display_text, Duration::from_secs(4));
 
                     info!("════════════════════════════════════════════════════════");
@@ -271,7 +282,7 @@ fn main() {
                 TranscriptionResult::Error(error_msg) => {
                     error!("❌ Transcription failed: {}", error_msg);
 
-                    *state_handle_clone2.lock().unwrap() =
+                    *state_handle_clone2.lock() =
                         OverlayState::error(&error_msg, Duration::from_secs(4));
                 },
             }

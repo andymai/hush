@@ -32,7 +32,10 @@ pub mod logging;
 pub use audio::{AudioCapture, AudioFeedback};
 pub use config::{Config, ConfigWatcher};
 pub use hotkey::{HotkeyEvent, HotkeyManager};
+
+#[cfg(target_os = "linux")]
 pub use text::TextInserter;
+
 pub use transcription::{TranscriptionResult as LegacyTranscriptionResult, WhisperTranscriber};
 pub use wakeword::WakeWordDetector;
 

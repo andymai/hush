@@ -1,4 +1,7 @@
-use crate::{AudioCapture, Config, TextInserter, WhisperTranscriber};
+use crate::{AudioCapture, Config, WhisperTranscriber};
+
+#[cfg(target_os = "linux")]
+use crate::TextInserter;
 /// Record command implementation
 ///
 /// Handles single audio recording with optional transcription and text insertion.
@@ -89,13 +92,22 @@ pub async fn handle_record(
                 println!("✅ Transcription: '{}'", result.text);
 
                 // Insert text
-                let mut text_inserter = TextInserter::new()?;
-                println!("⌨️ Inserting text (3 second delay)...");
-                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                #[cfg(target_os = "linux")]
+                {
+                    let mut text_inserter = TextInserter::new()?;
+                    println!("⌨️ Inserting text (3 second delay)...");
+                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
-                match text_inserter.insert_text(&result.text) {
-                    Ok(()) => println!("✅ Text inserted successfully"),
-                    Err(e) => println!("❌ Text insertion failed: {}", e),
+                    match text_inserter.insert_text(&result.text) {
+                        Ok(()) => println!("✅ Text inserted successfully"),
+                        Err(e) => println!("❌ Text insertion failed: {}", e),
+                    }
+                }
+
+                #[cfg(not(target_os = "linux"))]
+                {
+                    println!("ℹ️  Text insertion not available on this platform");
+                    println!("💡 Use the trait-based adapters for platform-specific text insertion");
                 }
             },
             Err(e) => println!("❌ Transcription failed: {}", e),

@@ -9,5 +9,8 @@ pub mod transcription;
 
 pub use audio::CpalAudioAdapter;
 pub use hotkey::HotkeyTriggerAdapter;
+
+#[cfg(target_os = "linux")]
 pub use text::X11TextAdapter;
+
 pub use transcription::WhisperAdapter;

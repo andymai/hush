@@ -1,5 +1,8 @@
 use super::utils::{show_config_status, show_device_status, show_system_info};
-use crate::{hotkey, AudioCapture, Config, TextInserter, WhisperTranscriber};
+use crate::{hotkey, AudioCapture, Config, WhisperTranscriber};
+
+#[cfg(target_os = "linux")]
+use crate::TextInserter;
 /// Status command implementation
 ///
 /// Displays system status including configuration, devices, and component health.
@@ -45,9 +48,16 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
         }
 
         print!("Text Insertion: ");
-        match TextInserter::new() {
-            Ok(_) => println!("✅ Available"),
-            Err(e) => println!("❌ Failed ({})", e),
+        #[cfg(target_os = "linux")]
+        {
+            match TextInserter::new() {
+                Ok(_) => println!("✅ Available"),
+                Err(e) => println!("❌ Failed ({})", e),
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            println!("ℹ️  Platform-specific (use trait-based adapters)");
         }
 
         print!("Hotkey System: ");

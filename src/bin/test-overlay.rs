@@ -54,7 +54,7 @@ fn main() {
         info!("Transitioning to: Error");
 
         // Error state
-        *state_handle.lock().unwrap() =
+        *state_handle.lock() =
             OverlayState::error("Failed to transcribe audio", Duration::from_secs(3));
         thread::sleep(Duration::from_secs(4));
         info!("Transitioning back to: Idle");
@@ -77,7 +77,7 @@ fn main() {
         *state_handle.lock() = OverlayState::processing("Transcribing...");
         thread::sleep(Duration::from_secs(2));
 
-        *state_handle.lock().unwrap() =
+        *state_handle.lock() =
             OverlayState::success("Second transcription successful!", Duration::from_secs(2));
 
         thread::sleep(Duration::from_secs(5));
