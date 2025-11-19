@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use ksni::{Tray, TrayService, Handle, MenuItem};
 use tokio::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use tracing::warn;
 
 /// Embedded icon data - using microphone icon as base64 SVG
 const ICON_IDLE: &[u8] = include_bytes!("../../../assets/icons/microphone-idle.svg");
@@ -21,8 +22,8 @@ const ICON_ERROR: &[u8] = include_bytes!("../../../assets/icons/microphone-error
 /// KSNI-based system tray implementation
 pub struct KsniSystemTray {
     handle: Option<Handle<HushTrayIcon>>,
-    event_sender: mpsc::UnboundedSender<TrayEvent>,
-    event_receiver: mpsc::UnboundedReceiver<TrayEvent>,
+    event_sender: mpsc::Sender<TrayEvent>,
+    event_receiver: mpsc::Receiver<TrayEvent>,
     current_state: TrayIconState,
     tooltip: String,
 }
@@ -30,7 +31,9 @@ pub struct KsniSystemTray {
 impl KsniSystemTray {
     /// Create new KSNI system tray
     pub fn new() -> Result<Self> {
-        let (event_sender, event_receiver) = mpsc::unbounded_channel();
+        // Bounded channel with capacity for UI events (100 events buffer)
+        const TRAY_EVENT_CAPACITY: usize = 100;
+        let (event_sender, event_receiver) = mpsc::channel(TRAY_EVENT_CAPACITY);
         
         Ok(Self {
             handle: None,
@@ -108,7 +111,9 @@ impl KsniSystemTray {
                         let sender = self.event_sender.clone();
                         let id = item.id.clone();
                         Box::new(move || {
-                            let _ = sender.send(TrayEvent::HistoryItemSelected(id.clone()));
+                            if let Err(e) = sender.try_send(TrayEvent::HistoryItemSelected(id.clone())) {
+                                warn!("Failed to send tray event: {:?}", e);
+                            }
                         })
                     }
                 });
@@ -133,7 +138,9 @@ impl KsniSystemTray {
                     TrayMenuItem::StartRecording
                 };
                 Box::new(move || {
-                    let _ = sender.send(TrayEvent::MenuClicked(item));
+                    if let Err(e) = sender.try_send(TrayEvent::MenuClicked(item)) {
+                        warn!("Failed to send tray event: {:?}", e);
+                    }
                 })
             }
         });
@@ -146,42 +153,50 @@ impl KsniSystemTray {
             activate: {
                 let sender = self.event_sender.clone();
                 Box::new(move || {
-                    let _ = sender.send(TrayEvent::SettingsRequested);
+                    if let Err(e) = sender.try_send(TrayEvent::SettingsRequested) {
+                        warn!("Failed to send tray event: {:?}", e);
+                    }
                 })
             }
         });
-        
+
         // Clear history
         items.push(MenuItem::Action {
             label: "🗑️ Clear History".to_string(),
             activate: {
                 let sender = self.event_sender.clone();
                 Box::new(move || {
-                    let _ = sender.send(TrayEvent::MenuClicked(TrayMenuItem::ClearHistory));
+                    if let Err(e) = sender.try_send(TrayEvent::MenuClicked(TrayMenuItem::ClearHistory)) {
+                        warn!("Failed to send tray event: {:?}", e);
+                    }
                 })
             }
         });
-        
+
         items.push(MenuItem::Separator);
-        
+
         // About
         items.push(MenuItem::Action {
             label: "ℹ️ About Hush".to_string(),
             activate: {
                 let sender = self.event_sender.clone();
                 Box::new(move || {
-                    let _ = sender.send(TrayEvent::MenuClicked(TrayMenuItem::About));
+                    if let Err(e) = sender.try_send(TrayEvent::MenuClicked(TrayMenuItem::About)) {
+                        warn!("Failed to send tray event: {:?}", e);
+                    }
                 })
             }
         });
-        
+
         // Quit
         items.push(MenuItem::Action {
             label: "❌ Quit".to_string(),
             activate: {
                 let sender = self.event_sender.clone();
                 Box::new(move || {
-                    let _ = sender.send(TrayEvent::QuitRequested);
+                    if let Err(e) = sender.try_send(TrayEvent::QuitRequested) {
+                        warn!("Failed to send tray event: {:?}", e);
+                    }
                 })
             }
         });
@@ -219,18 +234,18 @@ impl SystemTray for KsniSystemTray {
         let _ = self.update_tray(Some(menu));
     }
     
-    fn event_receiver(&self) -> &mpsc::UnboundedReceiver<TrayEvent> {
+    fn event_receiver(&self) -> &mpsc::Receiver<TrayEvent> {
         &self.event_receiver
     }
 }
 
 /// KSNI Tray implementation
 struct HushTrayIcon {
-    event_sender: mpsc::UnboundedSender<TrayEvent>,
+    event_sender: mpsc::Sender<TrayEvent>,
 }
 
 impl HushTrayIcon {
-    fn new(event_sender: mpsc::UnboundedSender<TrayEvent>) -> Self {
+    fn new(event_sender: mpsc::Sender<TrayEvent>) -> Self {
         Self { event_sender }
     }
 }
@@ -260,7 +275,9 @@ impl Tray for HushTrayIcon {
                 activate: {
                     let sender = self.event_sender.clone();
                     Box::new(move || {
-                        let _ = sender.send(TrayEvent::MenuClicked(TrayMenuItem::StartRecording));
+                        if let Err(e) = sender.try_send(TrayEvent::MenuClicked(TrayMenuItem::StartRecording)) {
+                            warn!("Failed to send tray event: {:?}", e);
+                        }
                     })
                 }
             },
@@ -270,7 +287,9 @@ impl Tray for HushTrayIcon {
                 activate: {
                     let sender = self.event_sender.clone();
                     Box::new(move || {
-                        let _ = sender.send(TrayEvent::QuitRequested);
+                        if let Err(e) = sender.try_send(TrayEvent::QuitRequested) {
+                            warn!("Failed to send tray event: {:?}", e);
+                        }
                     })
                 }
             }
