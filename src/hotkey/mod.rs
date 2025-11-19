@@ -35,8 +35,17 @@
 ///
 /// # Platform Support
 ///
-/// - Linux: X11 and Wayland (via global-hotkey crate)
+/// - **Linux**: X11 and Wayland (via global-hotkey crate)
+/// - **macOS**: Requires main thread initialization (AppKit requirement)
+///   - HotkeyManager must be created on the main thread
+///   - Will fail with helpful error if created on background thread
 /// - Requires proper permissions for global keyboard access
+///
+/// # macOS Threading Note
+///
+/// On macOS, the GlobalHotKeyManager must be created on the main thread due to
+/// AppKit/Cocoa event handling requirements. If using `#[tokio::main]`, you may
+/// need to create the HotkeyManager before the tokio runtime starts.
 pub mod global;
 
 pub use global::{HotkeyEvent, HotkeyManager};
