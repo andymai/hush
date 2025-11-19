@@ -48,7 +48,7 @@ input-linux = "0.7"
 
 # Hotkey management
 global-hotkey = "0.6"  # Keep at 0.6 - 0.7 may have breaking changes
-winit = "0.29"
+winit = "0.30"
 
 # Configuration
 toml = "0.8"
