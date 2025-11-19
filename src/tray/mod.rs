@@ -14,11 +14,20 @@ pub use crate::core::traits::{
 };
 
 // Re-export adapter implementations
-pub use adapters::{
-    ksni_adapter::KsniSystemTray,
-    json_history::JsonHistoryStore, 
-    libnotify_adapter::LibnotifyProvider,
-};
+#[cfg(all(feature = "system-tray", target_os = "linux"))]
+pub use adapters::ksni_adapter::KsniSystemTray;
+
+#[cfg(all(feature = "system-tray", target_os = "macos"))]
+pub use adapters::macos_tray_adapter::MacOSTrayAdapter;
+
+pub use adapters::json_history::JsonHistoryStore;
+
+#[cfg(feature = "notifications")]
+pub use adapters::libnotify_adapter::LibnotifyProvider;
+
+// Re-export factory function
+#[cfg(feature = "system-tray")]
+pub use adapters::create_system_tray;
 
 // Re-export mocks for testing
 pub use mocks::{
