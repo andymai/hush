@@ -68,7 +68,7 @@ ksni = { version = "0.2", optional = true }
 arboard = "3.0"
 
 # Application directories (XDG)
-dirs = "5.0"  # Keep at 5.0 - 6.0 has breaking API changes
+dirs = "5.0"  # Keep at 6.0 - 6.0 has breaking API changes
 
 # Async runtime
 tokio = { version = "1.38", features = ["full"] }
