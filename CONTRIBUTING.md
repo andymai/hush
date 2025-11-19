@@ -85,11 +85,12 @@ hush/
 │           ├── record.rs
 │           └── utils.rs
 ├── tests/                         # Integration tests
-├── docs/                          # Documentation
-│   ├── ARCHITECTURE.md            # System architecture
-│   ├── ERROR_HANDLING.md          # Error handling guide
-│   ├── REFACTORING_PLAN.md        # Ongoing refactoring
-│   └── architecture/              # Detailed architecture docs
+├── .ai/                           # AI agent documentation
+│   └── knowledge/                 # Knowledge base for AI agents
+│       ├── architecture.md        # System architecture
+│       ├── conventions.md         # Coding standards & patterns
+│       ├── error-handling.md      # Error handling guide
+│       └── adr-summary.md         # Architecture decisions
 ├── models/                        # Whisper models directory
 └── config/                        # Configuration files
 ```
@@ -130,7 +131,7 @@ fn capture_audio() -> Result<Vec<f32>, HushError> {
 }
 ```
 
-See [docs/ERROR_HANDLING.md](docs/ERROR_HANDLING.md) for comprehensive guidelines.
+See [.ai/knowledge/error-handling.md](.ai/knowledge/error-handling.md) for comprehensive guidelines.
 
 ### Documentation
 
@@ -311,7 +312,7 @@ All PRs must pass:
 
 ### Adding a New Command
 
-See [docs/REFACTORING_PLAN.md](docs/REFACTORING_PLAN.md) for the command module pattern.
+Follow the modular command pattern documented in `.ai/knowledge/conventions.md`.
 
 1. Create `src/cli/commands/mycommand.rs`
 2. Implement `pub async fn handle_mycommand(...) -> Result<()>`
@@ -359,8 +360,8 @@ let value = some_function()
 
 1. **Code documentation** - Inline doc comments (`///`)
 2. **Module documentation** - Module-level docs in `mod.rs`
-3. **User guides** - Markdown in `docs/`
-4. **Architecture docs** - ADRs in `docs/architecture/adrs/`
+3. **User guides** - Markdown files in project root
+4. **Architecture docs** - `.ai/knowledge/` directory for AI agents
 
 ### Documentation Standards
 
@@ -374,9 +375,9 @@ let value = some_function()
 When you make changes:
 
 1. **Public API changes** → Update inline docs and potentially `README.md`
-2. **Architecture changes** → Update `ARCHITECTURE.md` or add ADR
+2. **Architecture changes** → Update `.ai/knowledge/architecture.md` or `.ai/knowledge/adr-summary.md`
 3. **New features** → Update relevant user guides
-4. **Bug fixes** → Update CHANGELOG.md
+4. **Coding patterns** → Update `.ai/knowledge/conventions.md`
 
 ## Getting Help
 
