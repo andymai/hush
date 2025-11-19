@@ -140,7 +140,7 @@ fn main() {
                     info!("═══════════════════════════════════════════════════════");
 
                     // Update overlay to recording state
-                    *state_handle_clone.lock().unwrap() = OverlayState::start_recording();
+                    *state_handle_clone.lock() = OverlayState::start_recording();
 
                     // Send command to start audio recording
                     if audio_cmd_tx_clone
@@ -157,7 +157,7 @@ fn main() {
                     info!("═══════════════════════════════════════════════════════");
 
                     // Update overlay to processing state
-                    *state_handle_clone.lock().unwrap() =
+                    *state_handle_clone.lock() =
                         OverlayState::processing("Transcribing audio...");
 
                     // Send command to stop audio recording
@@ -197,7 +197,7 @@ fn main() {
                         // Small delay to ensure window focus is stable
                         thread::sleep(Duration::from_millis(200));
 
-                        if let Err(e) = inserter.lock().unwrap().insert_text(&text) {
+                        if let Err(e) = inserter.lock().insert_text(&text) {
                             error!("Failed to insert text: {}", e);
                             warn!("Text will only be shown in overlay");
                         } else {
@@ -212,7 +212,7 @@ fn main() {
                         text
                     };
 
-                    *state_handle_clone2.lock().unwrap() =
+                    *state_handle_clone2.lock() =
                         OverlayState::success(&display_text, Duration::from_secs(4));
 
                     info!("═══════════════════════════════════════════════════════");
@@ -222,7 +222,7 @@ fn main() {
                 TranscriptionResult::Error(error_msg) => {
                     error!("❌ Transcription failed: {}", error_msg);
 
-                    *state_handle_clone2.lock().unwrap() =
+                    *state_handle_clone2.lock() =
                         OverlayState::error(&error_msg, Duration::from_secs(4));
                 },
             }

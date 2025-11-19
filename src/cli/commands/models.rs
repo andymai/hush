@@ -1,5 +1,5 @@
 use crate::cli::ModelCommands;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tracing::error;
 
 /// Handle model management commands
