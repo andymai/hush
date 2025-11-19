@@ -1,8 +1,14 @@
 # Hush Voice-to-Text: Architecture Documentation
 
+---
+**Last Updated**: 2025-11-19
+**Status**: Reference - Phase 1 Complete (Oct 2025), Additional features added Nov 2025
+**Purpose**: Documents trait-based architecture refactoring and migration roadmap
+**Related Documents**: [Design Patterns](architecture/DESIGN_PATTERNS.md) | [ADRs](architecture/adrs/README.md) | [Recent Features](../POLISH_AND_DISTRIBUTION.md) | [Documentation Index](../DOCUMENTATION_INDEX.md)
 **Project**: Hush - Fast, accurate voice-to-text for Linux developers
-**Last Updated**: 2025-10-06
-**Status**: Phase 1 Complete, Ready for Phase 2
+---
+
+**Note**: This document describes the Phase 1 architectural refactoring completed in October 2025. For the latest features (desktop integration, settings UI, audio feedback) added in November 2025, see [POLISH_AND_DISTRIBUTION.md](../POLISH_AND_DISTRIBUTION.md).
 
 ---
 

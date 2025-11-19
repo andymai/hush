@@ -1,6 +1,15 @@
 # Testing Voice-to-Text with Text Insertion
 
-Now that transcription is working, here's how to test the complete voice-to-text pipeline including actual text insertion into applications.
+---
+**STATUS**: 🗄️ **ARCHIVED** - Historical Reference Only
+**Last Updated**: 2025-11-19
+**Purpose**: Historical testing instructions from development phase
+**Related Documents**: [Main README](../../README.md) | [UInput Setup](../uinput-setup.md) | [Documentation Index](../../DOCUMENTATION_INDEX.md)
+---
+
+> **⚠️ ARCHIVED DOCUMENT**: This document contains testing instructions from the development phase. For current usage and testing instructions, see the [main README](../../README.md) and [UInput Setup Guide](../uinput-setup.md).
+
+This document describes how to test the complete voice-to-text pipeline including actual text insertion into applications.
 
 ## 🧪 Available Test Binaries
 

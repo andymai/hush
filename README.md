@@ -1,5 +1,11 @@
 # 🤫 Hush - Voice-to-Text for Linux Developers
 
+---
+**Last Updated**: 2025-11-19
+**Status**: Active
+**Related Documentation**: [Documentation Index](DOCUMENTATION_INDEX.md) | [Voice Commands](docs/VOICE_COMMANDS.md) | [Architecture](docs/ARCHITECTURE.md)
+---
+
 > **Fast, accurate, and private voice-to-text with GPU acceleration, intelligent text processing, and universal app compatibility**
 
 Hush is a production-ready voice-to-text application built specifically for Linux developers. It uses OpenAI's Whisper models locally with CUDA GPU acceleration for fast, accurate transcription, and features intelligent text processing with automatic filler word removal and optional LLM polishing. All processing happens locally (except optional LLM), ensuring your voice data never leaves your machine.
@@ -369,10 +375,24 @@ Hush includes built-in performance tracking:
 
 ## 📚 Documentation
 
-- **[Testing Guide](TESTING_VOICE_TO_TEXT.md)** - Complete testing instructions
-- **[UInput Integration](UINPUT_INTEGRATION.md)** - Technical implementation details
-- **[Simple Whisper Integration](SIMPLE_WHISPER_INTEGRATION.md)** - Model integration guide
-- **[Architecture Documentation](docs/architecture/)** - Design patterns and ADRs
+**Quick Navigation**: See [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for complete documentation guide
+
+### User Guides
+- **[Voice Commands Guide](docs/VOICE_COMMANDS.md)** - Complete command reference
+- **[UInput Quick Reference](docs/uinput-quick-reference.md)** - Fast setup guide
+- **[UInput Setup Guide](docs/uinput-setup.md)** - Detailed setup and troubleshooting
+- **[Model Management](models/README.md)** - Downloading and managing models
+
+### Developer Documentation
+- **[Architecture Overview](docs/ARCHITECTURE.md)** - System architecture and design
+- **[Design Patterns](docs/architecture/DESIGN_PATTERNS.md)** - Core trait abstractions
+- **[Architecture Decision Records](docs/architecture/adrs/)** - Key architectural decisions
+- **[Recent Features](POLISH_AND_DISTRIBUTION.md)** - Latest enhancements (2025-11-14)
+
+### Archive (Historical Reference)
+- **[Testing Guide](docs/archive/TESTING_VOICE_TO_TEXT.md)** - Historical testing instructions
+- **[UInput Integration Notes](docs/archive/UINPUT_INTEGRATION.md)** - Original implementation notes
+- **[Simple Whisper Integration](docs/archive/SIMPLE_WHISPER_INTEGRATION.md)** - Model integration history
 
 ## 🏗️ Development
 

@@ -1,9 +1,15 @@
 # ADR-003: Centralized State Management with Type-Safe State Machine
 
-**Date**: 2025-10-06
-**Status**: Proposed
+---
+**Last Updated**: 2025-11-19
+**Original Date**: 2025-10-06
+**Status**: Partially Implemented (Oct 2025) - Overlay state management added Nov 2025
 **Deciders**: Architecture Review
-**Related**: ADR-001, DEPENDENCY_ANALYSIS.md
+**Purpose**: Documents decision to implement centralized state machine
+**Related Documents**: [ADR-001](ADR-001-trait-based-architecture.md) | [Architecture](../../ARCHITECTURE.md) | [Recent Features](../../../POLISH_AND_DISTRIBUTION.md) | [Documentation Index](../../../DOCUMENTATION_INDEX.md)
+---
+
+**Implementation Status**: Core state machine implemented in October 2025. Additional state management for overlay UI (Settings, Recording, Processing states) added in November 2025 as part of desktop integration features.
 
 ## Context
 

@@ -1,9 +1,15 @@
 # ADR-002: Structured Error Handling with Custom Error Types
 
-**Date**: 2025-10-06
-**Status**: Proposed
+---
+**Last Updated**: 2025-11-19
+**Original Date**: 2025-10-06
+**Status**: Partially Implemented (Oct 2025)
 **Deciders**: Architecture Review
-**Related**: ADR-001, DEPENDENCY_ANALYSIS.md
+**Purpose**: Documents decision to use structured error handling with thiserror
+**Related Documents**: [ADR-001](ADR-001-trait-based-architecture.md) | [Architecture](../../ARCHITECTURE.md) | [Documentation Index](../../../DOCUMENTATION_INDEX.md)
+---
+
+**Implementation Status**: Core error types implemented in October 2025. Additional error handling added for desktop integration and text processing features in November 2025.
 
 ## Context
 
