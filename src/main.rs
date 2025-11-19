@@ -5,13 +5,10 @@ use std::collections::HashMap;
 use tracing::Level;
 use tracing::{error, info, warn};
 
-// On macOS, we need special handling for hotkey-based commands
-// The GlobalHotKeyManager MUST be created on the main thread before tokio starts
+// On macOS, we need to ensure hotkey-related operations happen on the main thread
+// before starting the tokio runtime. This is a platform requirement due to AppKit/Cocoa.
 #[cfg(target_os = "macos")]
 fn main() -> Result<()> {
-    use hush::cli_main::Commands;
-    use hush::hotkey::HotkeyManager;
-
     // Parse command line arguments on the main thread
     let cli = Cli::parse_args();
 
@@ -40,85 +37,40 @@ fn main() -> Result<()> {
         "🚀 Hush application starting (macOS main thread mode)"
     );
 
-    // Check if this command requires hotkeys (must be created on main thread)
-    let needs_hotkeys = matches!(cli.command, Commands::Listen { .. } | Commands::Start { .. });
+    // Create tokio runtime manually (not using #[tokio::main])
+    // This ensures we're on the true OS main thread
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
 
-    if needs_hotkeys {
-        info!("macOS: Command requires hotkeys, creating manager on main thread");
+    // Run the async code on the runtime, but main thread is preserved
+    let result = runtime.block_on(async {
+        // Create command dispatcher with global configuration
+        let dispatcher = CommandDispatcher::new(cli.config_file.clone(), !cli.no_notifications);
 
-        // Create hotkey manager on main thread BEFORE tokio runtime
-        let (hotkey_manager, hotkey_rx) = HotkeyManager::new("Ctrl+Alt+V")
-            .map_err(|e| {
-                error!("Failed to create hotkey manager on main thread: {}", e);
-                e
-            })?;
+        // Dispatch the command with error handling
+        dispatcher.dispatch(cli.command).await
+    });
 
-        hotkey_manager.start_listening()?;
-        info!("✅ Hotkey manager created successfully on main thread");
-
-        // Now create tokio runtime and pass the hotkey manager
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create tokio runtime");
-
-        // Run the async code with pre-created hotkey manager
-        let result = runtime.block_on(async {
-            let dispatcher = CommandDispatcher::new(cli.config_file.clone(), !cli.no_notifications);
-
-            // Pass hotkey manager to dispatcher for listen command
-            dispatcher.dispatch_with_hotkeys(cli.command, hotkey_manager, hotkey_rx).await
-        });
-
-        match &result {
-            Ok(()) => {
-                info!(
-                    session_id = %LoggingSystem::session_id(),
-                    "✅ Hush application completed successfully"
-                );
-            },
-            Err(e) => {
-                error!(
-                    session_id = %LoggingSystem::session_id(),
-                    error = %e,
-                    error_chain = ?e.chain().collect::<Vec<_>>(),
-                    "❌ Hush application failed"
-                );
-            },
-        }
-
-        result
-    } else {
-        // Commands that don't need hotkeys can use normal flow
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create tokio runtime");
-
-        let result = runtime.block_on(async {
-            let dispatcher = CommandDispatcher::new(cli.config_file.clone(), !cli.no_notifications);
-            dispatcher.dispatch(cli.command).await
-        });
-
-        match &result {
-            Ok(()) => {
-                info!(
-                    session_id = %LoggingSystem::session_id(),
-                    "✅ Hush application completed successfully"
-                );
-            },
-            Err(e) => {
-                error!(
-                    session_id = %LoggingSystem::session_id(),
-                    error = %e,
-                    error_chain = ?e.chain().collect::<Vec<_>>(),
-                    "❌ Hush application failed"
-                );
-            },
-        }
-
-        result
+    match &result {
+        Ok(()) => {
+            info!(
+                session_id = %LoggingSystem::session_id(),
+                "✅ Hush application completed successfully"
+            );
+        },
+        Err(e) => {
+            error!(
+                session_id = %LoggingSystem::session_id(),
+                error = %e,
+                error_chain = ?e.chain().collect::<Vec<_>>(),
+                "❌ Hush application failed"
+            );
+        },
     }
+
+    result
 }
 
 // On Linux, we can use the standard tokio::main approach
