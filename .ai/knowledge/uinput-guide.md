@@ -1,13 +1,9 @@
-# UInput Setup Guide for Hush Voice-to-Text
+# UInput Setup and Reference Guide
 
----
-**Last Updated**: 2025-11-19
-**Status**: Active
-**Purpose**: Comprehensive setup and troubleshooting guide for UInput text insertion
-**Related Documents**: [UInput Quick Reference](uinput-quick-reference.md) | [Main README](../README.md) | [Documentation Index](../DOCUMENTATION_INDEX.md)
----
+**Last Updated:** 2025-11-19
+**Status:** Active reference for AI agents
 
-This guide explains how to set up the Linux uinput subsystem for optimal text insertion with Hush. UInput provides kernel-level keyboard emulation that works universally across all applications, including VMs, secure password fields, and applications that don't accept simulated input.
+Comprehensive guide for Linux UInput text insertion in Hush.
 
 ## Overview
 
@@ -17,7 +13,25 @@ Hush uses a priority-based text insertion system:
 2. **X11/Enigo (Fallback)** - X11 window system simulation (good compatibility)
 3. **Clipboard (Last Resort)** - Copy-paste method (limited compatibility)
 
-## Quick Setup
+UInput provides kernel-level keyboard emulation that works universally across all applications, including VMs, secure password fields, and applications that don't accept simulated input.
+
+## Quick Setup (TL;DR)
+
+```bash
+# 1. Add yourself to input group
+sudo usermod -a -G input $USER
+
+# 2. Load uinput module
+sudo modprobe uinput
+
+# 3. Make uinput load at boot
+echo 'uinput' | sudo tee /etc/modules-load.d/uinput.conf
+
+# 4. Log out and log back in
+# 5. Test with: groups | grep input
+```
+
+## Detailed Setup Methods
 
 ### Method 1: Temporary Setup (Session Only)
 
@@ -80,14 +94,27 @@ Test that uinput is working correctly:
 # Check if uinput device exists
 ls -la /dev/uinput
 
-# Test with Hush's built-in test (if available)
-cargo run --bin test-uinput-keyboard
+# Check if uinput module is loaded
+lsmod | grep uinput
 
-# Or check Hush logs for uinput status
-# Look for messages like "Uinput keyboard: ready (primary method)"
+# Check if you're in input group
+groups | grep input
+
+# Test with Hush
+RUST_LOG=debug cargo run
+# Look for "Uinput keyboard: ready"
 ```
 
 ## Troubleshooting
+
+### Quick Fixes Table
+
+| Problem | Solution |
+|---------|----------|
+| `/dev/uinput` not found | `sudo modprobe uinput` |
+| Permission denied | Add user to `input` group |
+| Module not loading at boot | Add to `/etc/modules-load.d/uinput.conf` |
+| Works sometimes | Expected - secure apps may block input |
 
 ### Problem: `/dev/uinput` not found
 
@@ -215,19 +242,31 @@ Hush creates a virtual keyboard device with these characteristics:
 
 The uinput integration is automatic:
 1. **Initialization:** Hush attempts to create uinput device at startup
-2. **Fallback:** If uinput fails, falls back to X11 simulation automatically  
+2. **Fallback:** If uinput fails, falls back to X11 simulation automatically
 3. **Method selection:** Chooses optimal insertion method per application
 4. **Error handling:** Comprehensive error messages guide users to solutions
 
-### Performance Tuning
+### Implementation Details
 
+**For AI agents modifying text insertion code:**
+
+Key files to check:
 ```bash
-# Adjust typing delay for faster/slower typing (in milliseconds)
-# This can be configured in Hush settings or via API
-# Default: 10ms (very fast but reliable)
-# Slower systems: 20-50ms
-# Faster systems: 1-5ms
+# UInput implementation
+rg "UInputKeyboard" src/text/
+
+# Text insertion strategy
+rg "InsertionMethod" src/text/insertion.rs
+
+# Error handling
+rg "TextOutputError" src/core/error.rs
 ```
+
+The multi-method fallback system:
+1. Try UInput first
+2. If UInput unavailable, try X11/enigo
+3. If both fail, fall back to clipboard
+4. Log which method was used for debugging
 
 ## FAQ
 
@@ -278,14 +317,33 @@ cat /boot/config-$(uname -r) | grep UINPUT
 - **Remote desktop:** Depends on RDP/VNC client capabilities
 - **Fallback:** Hush will automatically fall back to other methods if uinput doesn't work
 
-## Support
+## Implementation Notes for AI Agents
 
-If you encounter issues not covered in this guide:
+When working on UInput functionality:
 
-1. **Check Hush logs** for specific error messages
-2. **Verify basic uinput functionality** with system tools
-3. **Test with simple applications first** (text editors, terminals)
-4. **Consider your desktop environment** and security policies
-5. **Open an issue** with detailed system information and error logs
+1. **Always verify existing code first:**
+   ```bash
+   rg "UInputKeyboard" src/
+   rg "uinput" src/text/
+   ```
 
-Remember: Hush is designed to work even without uinput, so the application will still function with fallback methods if uinput setup is not possible on your system.
+2. **Check error handling patterns:**
+   ```bash
+   rg "TextOutputError" src/core/error.rs
+   ```
+
+3. **Test fallback behavior:**
+   - Simulate UInput unavailable
+   - Verify X11 fallback works
+   - Test clipboard fallback
+
+4. **Never assume UInput is available:**
+   - Always implement graceful fallback
+   - Provide clear error messages
+   - Guide users to setup solutions
+
+## Reference
+
+- **Location:** `src/text/uinput_keyboard.rs` - UInput implementation
+- **Location:** `src/text/insertion.rs` - Multi-method text insertion
+- **Location:** `src/core/error.rs` - Text output errors

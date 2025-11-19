@@ -417,19 +417,22 @@ Hush uses Linux UInput for hardware-level keyboard emulation, providing universa
 
 ## 📚 Documentation
 
-### Quick Navigation
-See [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for complete documentation guide.
+### User Documentation
+- **[SETUP.md](SETUP.md)** - Complete installation and setup guide
+- **[CHANGELOG.md](CHANGELOG.md)** - Version history and release notes
 
-### User Guides
-- **[Voice Commands Guide](docs/VOICE_COMMANDS.md)** - Complete command reference
-- **[UInput Setup Guide](docs/uinput-setup.md)** - Detailed setup and troubleshooting
-- **[UInput Quick Reference](docs/uinput-quick-reference.md)** - Fast setup guide
-- **[Model Management](models/README.md)** - Downloading and managing models
+### Developer & AI Agent Documentation
+All developer documentation and project context is in the `.ai/knowledge/` directory:
+- **[Architecture](.ai/knowledge/architecture.md)** - Complete architecture reference
+- **[Conventions](.ai/knowledge/conventions.md)** - Coding standards and patterns
+- **[Error Handling](.ai/knowledge/error-handling.md)** - Error handling guide
+- **[Voice Commands](.ai/knowledge/voice-commands.md)** - Voice commands reference
+- **[UInput Guide](.ai/knowledge/uinput-guide.md)** - UInput setup and reference
+- **[ADR Summary](.ai/knowledge/adr-summary.md)** - Architecture decisions
 
-### Developer Documentation
-- **[Architecture Overview](docs/ARCHITECTURE.md)** - System architecture and design
-- **[Design Patterns](docs/architecture/DESIGN_PATTERNS.md)** - Core trait abstractions
-- **[Architecture Decision Records](docs/architecture/adrs/)** - Key architectural decisions
+### AI Coding Agent Protocol
+- **[CLAUDE.md](CLAUDE.md)** - AI agent protocol and task management
+- **[.ai/](.ai/)** - AI agent directory structure
 
 ---
 
