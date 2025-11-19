@@ -1,4 +1,6 @@
-use crate::cli::commands::{handle_listen, handle_manual, handle_models, handle_setup, handle_test};
+use crate::cli::commands::{
+    handle_listen, handle_manual, handle_models, handle_setup, handle_test,
+};
 use crate::cli::{Commands, ModelCommands, SetupCommands, TestCommands};
 use crate::logging::RequestContext;
 use anyhow::{Context as AnyhowContext, Result};
@@ -174,7 +176,9 @@ impl CommandDispatcher {
         let mut audio_capture = AudioCapture::new(config.audio.device.as_deref())?;
 
         println!("Press Enter to start recording...");
-        std::io::stdin().read_line(&mut String::new()).unwrap();
+        std::io::stdin()
+            .read_line(&mut String::new())
+            .context("Failed to read user input")?;
 
         println!(
             "🎤 Recording... (will auto-stop in {}s or press Enter to stop earlier)",
@@ -444,10 +448,16 @@ pub async fn test_transcription_system(
         let audio_data: Vec<f32> = if spec.sample_format == hound::SampleFormat::Int {
             reader
                 .samples::<i16>()
-                .map(|s| s.unwrap() as f32 / i16::MAX as f32)
-                .collect()
+                .map(|s| {
+                    s.context("Failed to read audio sample")
+                        .map(|v| v as f32 / i16::MAX as f32)
+                })
+                .collect::<Result<Vec<f32>>>()?
         } else {
-            reader.samples::<f32>().map(|s| s.unwrap()).collect()
+            reader
+                .samples::<f32>()
+                .map(|s| s.context("Failed to read audio sample"))
+                .collect::<Result<Vec<f32>>>()?
         };
 
         println!("   Samples: {}", audio_data.len());
@@ -536,7 +546,9 @@ pub async fn test_text_insertion_system(
 
             println!("⚠️ About to insert text at cursor position!");
             println!("Press Enter to continue (you have 3 seconds to position cursor)...");
-            std::io::stdin().read_line(&mut String::new()).unwrap();
+            std::io::stdin()
+                .read_line(&mut String::new())
+                .context("Failed to read user input")?;
 
             tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
@@ -628,12 +640,16 @@ pub async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()>
         };
 
         println!("Press Enter to start recording...");
-        std::io::stdin().read_line(&mut String::new()).unwrap();
+        std::io::stdin()
+            .read_line(&mut String::new())
+            .context("Failed to read user input")?;
 
         println!("🎤 Recording... (press Enter to stop)");
         audio_capture.start_recording()?;
 
-        std::io::stdin().read_line(&mut String::new()).unwrap();
+        std::io::stdin()
+            .read_line(&mut String::new())
+            .context("Failed to read user input")?;
 
         let audio_data = audio_capture.stop_recording()?;
         println!("✅ Recording stopped ({} samples)", audio_data.len());
@@ -736,8 +752,11 @@ async fn install_autostart() -> Result<()> {
     println!("📥 Installing autostart entry...");
 
     // Get XDG autostart directory
-    let config_home = env::var("XDG_CONFIG_HOME")
-        .unwrap_or_else(|_| format!("{}/.config", env::var("HOME").unwrap()));
+    let config_home = env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
+        env::var("HOME")
+            .map(|home| format!("{}/.config", home))
+            .unwrap_or_else(|_| ".config".to_string())
+    });
     let autostart_dir = PathBuf::from(config_home).join("autostart");
 
     // Create autostart directory if it doesn't exist
@@ -786,8 +805,11 @@ async fn install_desktop_entry() -> Result<()> {
     println!("📥 Installing desktop entry...");
 
     // Get XDG data directory
-    let data_home = env::var("XDG_DATA_HOME")
-        .unwrap_or_else(|_| format!("{}/.local/share", env::var("HOME").unwrap()));
+    let data_home = env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+        env::var("HOME")
+            .map(|home| format!("{}/.local/share", home))
+            .unwrap_or_else(|_| ".local/share".to_string())
+    });
     let applications_dir = PathBuf::from(data_home).join("applications");
 
     // Create applications directory if it doesn't exist
@@ -919,8 +941,11 @@ async fn install_system_wide() -> Result<()> {
 async fn remove_autostart() -> Result<()> {
     println!("🗑️  Removing autostart entry...");
 
-    let config_home = env::var("XDG_CONFIG_HOME")
-        .unwrap_or_else(|_| format!("{}/.config", env::var("HOME").unwrap()));
+    let config_home = env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
+        env::var("HOME")
+            .map(|home| format!("{}/.config", home))
+            .unwrap_or_else(|_| ".config".to_string())
+    });
     let autostart_file = PathBuf::from(config_home)
         .join("autostart")
         .join("hush.desktop");
@@ -946,8 +971,11 @@ async fn remove_autostart() -> Result<()> {
 async fn remove_desktop_entry() -> Result<()> {
     println!("🗑️  Removing desktop entry...");
 
-    let data_home = env::var("XDG_DATA_HOME")
-        .unwrap_or_else(|_| format!("{}/.local/share", env::var("HOME").unwrap()));
+    let data_home = env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+        env::var("HOME")
+            .map(|home| format!("{}/.local/share", home))
+            .unwrap_or_else(|_| ".local/share".to_string())
+    });
     let desktop_file = PathBuf::from(&data_home)
         .join("applications")
         .join("hush.desktop");
