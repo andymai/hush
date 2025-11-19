@@ -85,11 +85,12 @@ impl PerformanceMetrics {
 
         let cpu_usage = system.global_cpu_usage();
 
-        let memory_usage_mb = if let Some(process) = system.processes_by_name(OsStr::new("hush")).next() {
-            process.memory() / 1024 / 1024
-        } else {
-            0
-        };
+        let memory_usage_mb =
+            if let Some(process) = system.processes_by_name(OsStr::new("hush")).next() {
+                process.memory() / 1024 / 1024
+            } else {
+                0
+            };
 
         // Calculate disk usage for hush cache directory
         let disk_usage_mb = Self::calculate_disk_usage();

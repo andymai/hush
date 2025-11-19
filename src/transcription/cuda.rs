@@ -31,7 +31,7 @@ impl CudaAvailability {
                             device_name: Some("CUDA Device".to_string()), // Generic name
                             cuda_version: None, // Version info not easily accessible
                         }
-                    }
+                    },
                     Err(_) => {
                         warn!("⚠️  CUDA not available, falling back to CPU");
                         CudaAvailability {
@@ -40,7 +40,7 @@ impl CudaAvailability {
                             device_name: None,
                             cuda_version: None,
                         }
-                    }
+                    },
                 }
             }
 

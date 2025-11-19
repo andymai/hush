@@ -183,8 +183,7 @@ fn main() {
                     info!("════════════════════════════════════════════════════════");
 
                     // Update overlay to processing state
-                    *state_handle_clone.lock() =
-                        OverlayState::processing("Transcribing audio...");
+                    *state_handle_clone.lock() = OverlayState::processing("Transcribing audio...");
 
                     // Send command to stop audio recording
                     if audio_cmd_tx_clone
@@ -223,8 +222,7 @@ fn main() {
                     // Process the text
                     let processed_text = if let Some(ref processor) = text_processor_clone {
                         info!("🔄 Processing text...");
-                        *state_handle_clone2.lock() =
-                            OverlayState::processing("Polishing text");
+                        *state_handle_clone2.lock() = OverlayState::processing("Polishing text");
 
                         match result_runtime.block_on(processor.process(&raw_text)) {
                             Ok(polished) => {
