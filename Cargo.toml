@@ -124,7 +124,7 @@ objc = "0.2"                # Objective-C runtime
 tray-icon = { version = "0.14", optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.7", features = ["async_tokio"] }
 
 [[bench]]
 name = "architecture_benchmarks"
