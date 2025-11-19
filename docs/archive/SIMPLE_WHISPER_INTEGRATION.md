@@ -1,6 +1,15 @@
 # Simple Whisper Integration
 
-This document describes the new simple Whisper integration using `whisper-rs`, which provides real speech-to-text capabilities using the latest GGML format models compatible with whisper.cpp.
+---
+**STATUS**: 🗄️ **ARCHIVED** - Historical Reference Only
+**Last Updated**: 2025-11-19
+**Purpose**: Historical documentation of Whisper.cpp integration approach
+**Related Documents**: [Main README](../../README.md) | [Model Management](../../models/README.md) | [Documentation Index](../../DOCUMENTATION_INDEX.md)
+---
+
+> **⚠️ ARCHIVED DOCUMENT**: This document contains implementation notes from the Whisper integration process. While the core concepts remain valid, some specific details may have changed. For current usage, see the [main README](../../README.md).
+
+This document describes the Whisper integration using `whisper-rs`, which provides real speech-to-text capabilities using the latest GGML format models compatible with whisper.cpp.
 
 ## What Was Implemented
 

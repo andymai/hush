@@ -4,6 +4,7 @@ use crate::logging::RequestContext;
 use std::path::PathBuf;
 use tracing::{info, warn, error, debug};
 use std::{env, fs};
+use hound;
 
 // Import Hush components
 use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config, hotkey};
@@ -205,11 +206,11 @@ impl CommandDispatcher {
             println!("Print-only mode: audio recorded but not transcribed");
         }
         
-        // TODO: Implement save_audio functionality
-        if save_audio.is_some() {
-            warn!("Audio saving not yet implemented");
+        // Save audio to file if requested
+        if let Some(path) = save_audio {
+            Self::save_audio_to_file(&audio_data, &path, config.audio.sample_rate)?;
         }
-        
+
         Ok(())
     }
 
@@ -708,6 +709,35 @@ impl CommandDispatcher {
         }
     }
 
+    /// Save audio data to a WAV file
+    fn save_audio_to_file(audio_data: &[f32], path: &PathBuf, sample_rate: u32) -> Result<()> {
+        info!("💾 Saving audio to: {}", path.display());
+
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+
+        let mut writer = hound::WavWriter::create(path, spec)
+            .with_context(|| format!("Failed to create WAV file: {}", path.display()))?;
+
+        // Convert f32 samples to i16
+        for &sample in audio_data {
+            let sample_i16 = (sample * i16::MAX as f32) as i16;
+            writer.write_sample(sample_i16)
+                .with_context(|| "Failed to write audio sample")?;
+        }
+
+        writer.finalize()
+            .with_context(|| "Failed to finalize WAV file")?;
+
+        println!("✅ Audio saved to: {}", path.display());
+        info!("Audio file saved: {} samples @ {}Hz", audio_data.len(), sample_rate);
+        Ok(())
+    }
+
     async fn handle_status(&self, _config: bool, _devices: bool, full: bool) -> Result<()> {
         println!("🤫 Hush System Status");
         println!();
@@ -936,10 +966,9 @@ async fn test_audio_system(duration: u64, list_devices: bool, device: Option<Str
                             println!("✅ Audio recording completed");
                             println!("   Duration: {}s", duration);
                             println!("   Samples: {}", audio_data.len());
-                            
+
                             if let Some(save_path) = save {
-                                println!("💾 Saving audio to: {}", save_path.display());
-                                // TODO: Implement audio saving
+                                CommandDispatcher::save_audio_to_file(&audio_data, &save_path, 16000)?;
                             }
                         }
                         Err(e) => println!("❌ Failed to stop recording: {}", e),
@@ -961,8 +990,46 @@ async fn test_transcription_system(file: Option<PathBuf>, all_models: bool, timi
     
     if let Some(audio_file) = file {
         println!("Transcribing file: {}", audio_file.display());
-        // TODO: Implement file transcription
-        warn!("File transcription not yet implemented");
+
+        // Read the WAV file
+        let mut reader = hound::WavReader::open(&audio_file)
+            .with_context(|| format!("Failed to open audio file: {}", audio_file.display()))?;
+
+        let spec = reader.spec();
+        println!("   Sample rate: {}Hz", spec.sample_rate);
+        println!("   Channels: {}", spec.channels);
+        println!("   Bits per sample: {}", spec.bits_per_sample);
+
+        // Read samples and convert to f32
+        let audio_data: Vec<f32> = if spec.sample_format == hound::SampleFormat::Int {
+            reader.samples::<i16>()
+                .map(|s| s.unwrap() as f32 / i16::MAX as f32)
+                .collect()
+        } else {
+            reader.samples::<f32>()
+                .map(|s| s.unwrap())
+                .collect()
+        };
+
+        println!("   Samples: {}", audio_data.len());
+        println!("   Duration: {:.2}s", audio_data.len() as f32 / spec.sample_rate as f32);
+
+        // Transcribe
+        let transcriber = crate::WhisperTranscriber::new(&config.transcription.model_path, config.transcription.use_cuda).await?;
+
+        let start = std::time::Instant::now();
+        match transcriber.transcribe_async(&audio_data, spec.sample_rate).await {
+            Ok(result) => {
+                let elapsed = start.elapsed();
+                println!("\n✅ Transcription completed in {:?}", elapsed);
+                println!("   Text: '{}'", result.text);
+                println!("   Confidence: {:.2}", result.confidence);
+            }
+            Err(e) => {
+                println!("❌ Transcription failed: {}", e);
+                return Err(e);
+            }
+        }
     } else {
         // Test with generated audio
         match crate::WhisperTranscriber::new(&config.transcription.model_path, config.transcription.use_cuda).await {
@@ -1335,11 +1402,43 @@ async fn verify_models(model_size: Option<&str>, fix: bool) -> Result<()> {
              "medium".to_string(), "large".to_string()]
     };
     
+    // Expected sizes for whisper models (approximate, in MB)
+    let expected_sizes: std::collections::HashMap<&str, u64> = [
+        ("tiny", 75),
+        ("tiny.en", 75),
+        ("base", 145),
+        ("base.en", 145),
+        ("small", 466),
+        ("small.en", 466),
+        ("medium", 1500),
+        ("medium.en", 1500),
+        ("large", 2900),
+    ].iter().cloned().collect();
+
     for model in models_to_check {
         let model_path = cache_dir.join(format!("ggml-{}.bin", model));
         if model_path.exists() {
-            println!("✅ {} - Present", model);
-            // TODO: Add checksum verification
+            // Verify file size as basic integrity check
+            let metadata = std::fs::metadata(&model_path)?;
+            let size_mb = metadata.len() / (1024 * 1024);
+
+            if let Some(expected_size) = expected_sizes.get(model.as_str()) {
+                // Allow 10% variance in file size
+                let min_size = expected_size * 9 / 10;
+                let max_size = expected_size * 11 / 10;
+
+                if size_mb >= min_size && size_mb <= max_size {
+                    println!("✅ {} - Present ({} MB, size OK)", model, size_mb);
+                } else {
+                    println!("⚠️  {} - Present ({} MB, expected ~{} MB - may be corrupted)",
+                             model, size_mb, expected_size);
+                }
+            } else {
+                println!("✅ {} - Present ({} MB, unknown model)", model, size_mb);
+            }
+
+            // Note: For production use, consider adding SHA256 checksum verification
+            // by adding the `sha2` crate and storing known checksums
         } else {
             println!("❌ {} - Missing", model);
         }

@@ -14,10 +14,10 @@ default = ["notifications"]
 notifications = []
 
 [dependencies]
-# Audio capture and processing  
-cpal = "0.15"
+# Audio capture and processing
+cpal = "0.15"  # Keep at 0.15 - 0.16 has breaking changes
 hound = "3.5"
-rodio = { version = "0.17", default-features = false, features = ["wav"] }
+rodio = { version = "0.19", default-features = false, features = ["wav"] }
 
 # Whisper integration (using candle for pure Rust)
 candle-core = { version = "0.8", features = ["cuda"] }
@@ -39,13 +39,13 @@ dotenvy = "0.15"  # Environment variable loading
 
 # System integration
 x11rb = "0.13"
-enigo = "0.2"
+enigo = "0.2"  # Keep at 0.2 - 0.6 has major breaking changes
 libc = "0.2"
 # Kernel-level keyboard emulation
 input-linux = "0.7"
 
 # Hotkey management
-global-hotkey = "0.6"
+global-hotkey = "0.6"  # Keep at 0.6 - 0.7 may have breaking changes
 winit = "0.29"
 
 # Configuration
@@ -66,7 +66,7 @@ ksni = "0.2"
 arboard = "3.0"
 
 # Application directories (XDG)
-dirs = "5.0"
+dirs = "5.0"  # Keep at 5.0 - 6.0 has breaking API changes
 
 # Async runtime
 tokio = { version = "1.38", features = ["full"] }
@@ -79,11 +79,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 tracing-error = "0.2"
-sysinfo = "0.30"
+sysinfo = "0.32"  # Conservative update, 0.37 has breaking changes
 chrono = { version = "0.4", features = ["serde"] }
 
 # HTTP client for downloading models
-reqwest = { version = "0.11", features = ["stream"] }
+reqwest = { version = "0.12", features = ["stream"] }
 futures-util = "0.3"
 
 # Utilities

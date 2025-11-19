@@ -1,5 +1,12 @@
 # Architecture Decision Records (ADRs)
 
+---
+**Last Updated**: 2025-11-19
+**Status**: Active
+**Purpose**: Index of all architectural decisions for the Hush project
+**Related Documents**: [Architecture](../ARCHITECTURE.md) | [Design Patterns](../DESIGN_PATTERNS.md) | [Documentation Index](../../../DOCUMENTATION_INDEX.md)
+---
+
 This directory contains Architecture Decision Records for the Hush Voice-to-Text project.
 
 ## What is an ADR?
@@ -20,7 +27,7 @@ Each ADR follows this structure:
 ## Active ADRs
 
 ### [ADR-001: Trait-Based Architecture](./ADR-001-trait-based-architecture.md)
-**Status**: Proposed
+**Status**: Partially Implemented (UInput complete Oct 2025, other components in progress)
 **Summary**: Adopt trait-based architecture using the Adapter Pattern to decouple components and enable dependency injection.
 
 **Key Points**:
@@ -34,7 +41,7 @@ Each ADR follows this structure:
 ---
 
 ### [ADR-002: Error Handling Strategy](./ADR-002-error-handling-strategy.md)
-**Status**: Proposed
+**Status**: Partially Implemented (Oct 2025)
 **Summary**: Structured error handling using thiserror for domain errors while keeping anyhow for application-level errors.
 
 **Key Points**:
@@ -48,7 +55,7 @@ Each ADR follows this structure:
 ---
 
 ### [ADR-003: Centralized State Management](./ADR-003-centralized-state-management.md)
-**Status**: Proposed
+**Status**: Partially Implemented (Oct 2025)
 **Summary**: Implement centralized state machine with type-safe state transitions using Observer Pattern.
 
 **Key Points**:

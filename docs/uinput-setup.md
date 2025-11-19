@@ -1,5 +1,12 @@
 # UInput Setup Guide for Hush Voice-to-Text
 
+---
+**Last Updated**: 2025-11-19
+**Status**: Active
+**Purpose**: Comprehensive setup and troubleshooting guide for UInput text insertion
+**Related Documents**: [UInput Quick Reference](uinput-quick-reference.md) | [Main README](../README.md) | [Documentation Index](../DOCUMENTATION_INDEX.md)
+---
+
 This guide explains how to set up the Linux uinput subsystem for optimal text insertion with Hush. UInput provides kernel-level keyboard emulation that works universally across all applications, including VMs, secure password fields, and applications that don't accept simulated input.
 
 ## Overview

@@ -1,5 +1,12 @@
 # Hush Model Directory
 
+---
+**Last Updated**: 2025-11-19
+**Status**: Active
+**Purpose**: Information about Whisper models for voice-to-text transcription
+**Related Documents**: [Main README](../README.md) | [Documentation Index](../DOCUMENTATION_INDEX.md)
+---
+
 This directory contains Whisper models for offline voice-to-text transcription.
 
 ## Available Models
