@@ -1,0 +1,34 @@
+version: 2
+updates:
+  # Rust dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    # Group related dependencies to reduce PR noise
+    groups:
+      candle:
+        patterns:
+          - "candle-*"
+      egui:
+        patterns:
+          - "egui*"
+      tracing:
+        patterns:
+          - "tracing*"
+      tokio:
+        patterns:
+          - "tokio*"
+    # Keep existing version constraints
+    open-pull-requests-limit: 10
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
