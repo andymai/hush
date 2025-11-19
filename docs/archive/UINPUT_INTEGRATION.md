@@ -1,5 +1,16 @@
 # UInput Integration - Enhanced Text Insertion for Hush
 
+---
+**STATUS**: 🗄️ **ARCHIVED** - Historical Reference Only
+**Last Updated**: 2025-11-19
+**Purpose**: Historical implementation notes for UInput integration
+**Related Documents**: [UInput Setup Guide](../uinput-setup.md) | [UInput Quick Reference](../uinput-quick-reference.md) | [Documentation Index](../../DOCUMENTATION_INDEX.md)
+---
+
+> **⚠️ ARCHIVED DOCUMENT**: This document contains implementation notes from the UInput integration process. For current setup instructions and usage, see:
+> - [UInput Quick Reference](../uinput-quick-reference.md) - Fast setup
+> - [UInput Setup Guide](../uinput-setup.md) - Comprehensive guide
+
 This document describes the comprehensive UInput integration that has been added to Hush to provide optimal text insertion across all Linux applications.
 
 ## What's New

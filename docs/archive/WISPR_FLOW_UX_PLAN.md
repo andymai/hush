@@ -1,5 +1,20 @@
 # Wispr Flow-Style UX Implementation Plan
 
+---
+**STATUS**: 🗄️ **ARCHIVED** - Planning Document (Partially Implemented)
+**Last Updated**: 2025-11-19
+**Purpose**: Historical planning document for overlay UI and push-to-talk features
+**Related Documents**: [Recent Features](../../POLISH_AND_DISTRIBUTION.md) | [Main README](../../README.md) | [Documentation Index](../../DOCUMENTATION_INDEX.md)
+---
+
+> **⚠️ ARCHIVED PLANNING DOCUMENT**: This document contains the original planning for Wispr Flow-style UX. Many features have been implemented as of November 2025:
+> - ✅ Overlay window (Settings UI) - See [POLISH_AND_DISTRIBUTION.md](../../POLISH_AND_DISTRIBUTION.md)
+> - ✅ Audio feedback system
+> - ✅ Desktop integration
+> - ⏳ Push-to-talk mode (in progress)
+>
+> For current features, see the [main README](../../README.md) and [recent features documentation](../../POLISH_AND_DISTRIBUTION.md).
+
 ## 🎯 Goal
 Transform Hush to have a Wispr Flow-like experience with keyboard shortcuts and an onscreen overlay button.
 

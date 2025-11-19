@@ -25,13 +25,16 @@ use parking_lot::Mutex;
 
 /// Global session ID for correlating logs across the application lifecycle
 static SESSION_ID: once_cell::sync::Lazy<String> = once_cell::sync::Lazy::new(|| {
-    format!("hush_{}", 
+    format!("hush_{}",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs()
     )
 });
+
+/// Application start time for uptime tracking
+static APP_START_TIME: once_cell::sync::Lazy<Instant> = once_cell::sync::Lazy::new(Instant::now);
 
 /// Request correlation tracker - tracks individual voice-to-text operations
 #[derive(Clone)]
@@ -87,12 +90,85 @@ impl PerformanceMetrics {
             0
         };
 
+        // Calculate disk usage for hush cache directory
+        let disk_usage_mb = Self::calculate_disk_usage();
+
+        // Count open file descriptors (Linux only)
+        let open_files = Self::count_open_files();
+
+        // Calculate uptime
+        let uptime_seconds = APP_START_TIME.elapsed().as_secs();
+
         Self {
             cpu_usage,
             memory_usage_mb,
-            disk_usage_mb: 0, // TODO: Implement disk usage tracking
-            open_files: 0,    // TODO: Implement file descriptor counting
-            uptime_seconds: 0, // TODO: Implement uptime tracking
+            disk_usage_mb,
+            open_files,
+            uptime_seconds,
+        }
+    }
+
+    fn calculate_disk_usage() -> u64 {
+        // Calculate disk usage for hush cache directories
+        let mut total_size = 0u64;
+
+        if let Some(cache_dir) = dirs::cache_dir() {
+            let hush_cache = cache_dir.join("hush");
+            if hush_cache.exists() {
+                total_size += Self::dir_size(&hush_cache).unwrap_or(0);
+            }
+        }
+
+        // Also check for models and logs
+        if let Some(home_dir) = dirs::home_dir() {
+            let models_dir = home_dir.join(".hush/models");
+            if models_dir.exists() {
+                total_size += Self::dir_size(&models_dir).unwrap_or(0);
+            }
+        }
+
+        if let Some(data_dir) = dirs::data_local_dir() {
+            let logs_dir = data_dir.join("hush/logs");
+            if logs_dir.exists() {
+                total_size += Self::dir_size(&logs_dir).unwrap_or(0);
+            }
+        }
+
+        total_size / (1024 * 1024) // Convert to MB
+    }
+
+    fn dir_size(path: &PathBuf) -> Result<u64> {
+        let mut size = 0u64;
+        if path.is_dir() {
+            for entry in std::fs::read_dir(path)? {
+                let entry = entry?;
+                let metadata = entry.metadata()?;
+                if metadata.is_file() {
+                    size += metadata.len();
+                } else if metadata.is_dir() {
+                    size += Self::dir_size(&entry.path()).unwrap_or(0);
+                }
+            }
+        }
+        Ok(size)
+    }
+
+    fn count_open_files() -> usize {
+        // Count open file descriptors on Linux via /proc
+        #[cfg(target_os = "linux")]
+        {
+            let pid = std::process::id();
+            let fd_dir = PathBuf::from(format!("/proc/{}/fd", pid));
+            if fd_dir.exists() {
+                std::fs::read_dir(fd_dir).map(|entries| entries.count()).unwrap_or(0)
+            } else {
+                0
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            0 // Not implemented for non-Linux platforms
         }
     }
 }

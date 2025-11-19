@@ -1,9 +1,15 @@
 # ADR-001: Adopt Trait-Based Architecture for Component Decoupling
 
-**Date**: 2025-10-06
-**Status**: Proposed
+---
+**Last Updated**: 2025-11-19
+**Original Date**: 2025-10-06
+**Status**: Partially Implemented - UInput complete (Oct 2025), other components in progress
 **Deciders**: Architecture Review
-**Related**: DEPENDENCY_ANALYSIS.md, TRAIT_DESIGN.md
+**Purpose**: Documents decision to adopt trait-based architecture for component decoupling
+**Related Documents**: [Architecture](../../ARCHITECTURE.md) | [Design Patterns](../DESIGN_PATTERNS.md) | [Documentation Index](../../../DOCUMENTATION_INDEX.md)
+---
+
+**Implementation Status**: UInput text insertion has been successfully refactored to use trait abstractions. Other components (audio, transcription, hotkeys) are planned for future refactoring.
 
 ## Context
 

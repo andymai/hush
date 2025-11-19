@@ -1,6 +1,13 @@
 # Voice Commands
 
-Hush now supports voice commands that allow you to control text formatting and editing hands-free.
+---
+**Last Updated**: 2025-11-19
+**Status**: Active
+**Purpose**: Complete reference for voice commands in Hush listen mode
+**Related Documents**: [Main README](../README.md) | [Documentation Index](../DOCUMENTATION_INDEX.md)
+---
+
+Hush supports voice commands that allow you to control text formatting and editing hands-free during listen mode.
 
 ## Supported Commands
 
