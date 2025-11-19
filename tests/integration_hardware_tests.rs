@@ -59,11 +59,8 @@ fn test_audio_adapter_with_real_hardware() {
 async fn test_transcriber_adapter_with_real_model() {
     let config = Config::load().expect("Failed to load config");
 
-    let result = WhisperAdapter::new(
-        &config.transcription.model_path,
-        config.transcription.use_cuda,
-    )
-    .await;
+    // WhisperAdapter now auto-detects GPU (CUDA/Metal)
+    let result = WhisperAdapter::new(&config.transcription.model_path).await;
 
     match result {
         Ok(transcriber) => {
