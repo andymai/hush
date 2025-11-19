@@ -149,6 +149,136 @@ let result = transcriber.transcribe(&audio_buffer).await?;
 3. Avoid blocking operations in async context (use `spawn_blocking`)
 4. Use `Arc<Mutex<T>>` or `Arc<RwLock<T>>` for shared mutable state
 
+### Unsafe Code
+
+**Pattern**: Minimize `unsafe`, document thoroughly when necessary.
+
+The Hush codebase aims to minimize `unsafe` code, but it is necessary in limited cases:
+
+1. **Current Usage**: `unsafe impl Send` and `unsafe impl Sync` in `src/adapters/audio/cpal_adapter.rs`
+2. **Total Count**: 2 unsafe impls (as of 2025-11-19)
+
+#### When Unsafe is Necessary
+
+Unsafe code is ONLY acceptable when:
+
+1. **No safe alternative exists**: The functionality cannot be achieved with safe Rust
+2. **External requirements**: Third-party libraries or OS APIs impose unsafe requirements
+3. **Performance-critical with proof**: Benchmarks show significant improvement AND safety is verified
+4. **Trait bounds on non-Send/Sync types**: Wrapping platform-specific types for trait objects
+
+**Example: Audio Stream Threading**
+
+```rust
+/// SAFETY: This type wraps a non-Send/Sync type (cpal::Stream) but is ONLY
+/// accessed through Arc<Mutex<>>, ensuring exclusive access.
+///
+/// See detailed safety documentation in src/adapters/audio/cpal_adapter.rs
+unsafe impl Send for ThreadSafeAudioCapture {}
+unsafe impl Sync for ThreadSafeAudioCapture {}
+```
+
+#### Unsafe Code Documentation Requirements
+
+Every `unsafe` block or impl MUST include comprehensive SAFETY documentation:
+
+```rust
+/// SAFETY: [Short one-line summary]
+///
+/// ## Why unsafe is necessary
+/// [Explanation of why safe Rust cannot achieve this]
+///
+/// ## Safety invariants
+/// 1. [First invariant and how it's maintained]
+/// 2. [Second invariant and how it's maintained]
+///
+/// ## What could go wrong
+/// [Scenarios that would violate safety]
+///
+/// ## Why this is safe
+/// [Proof that invariants are maintained]
+///
+/// ## Alternatives considered
+/// [Other approaches and why they weren't used]
+///
+/// ## Testing
+/// [How safety is verified through tests]
+unsafe impl Send for Type {}
+```
+
+**Required Elements:**
+
+1. **Why unsafe is necessary**: Explain the underlying reason (e.g., "cpal::Stream is not Send because...")
+2. **Safety invariants**: List all conditions that MUST hold for safety
+3. **What could go wrong**: Enumerate potential safety violations
+4. **Why this is safe**: Prove invariants are maintained (private constructors, Arc<Mutex<>>, etc.)
+5. **Alternatives considered**: Document safe alternatives and why they were rejected
+6. **Testing**: Describe tests that verify safety (multi-threading, stress tests, etc.)
+
+#### Unsafe Code Testing Requirements
+
+All `unsafe` code MUST have:
+
+1. **Multi-threaded tests**: Verify Send/Sync bounds actually work
+2. **Stress tests**: Exercise concurrent access patterns
+3. **Compile-time tests**: Demonstrate safety invariants (e.g., private constructors)
+4. **Documentation tests**: Show safe usage patterns
+
+**Example Tests:**
+
+```rust
+#[test]
+fn test_send_across_threads() {
+    let obj = create_object();
+    std::thread::spawn(move || {
+        // Use obj safely
+    });
+}
+
+#[test]
+fn test_concurrent_access() {
+    let obj = Arc::new(create_object());
+    // Spawn multiple threads accessing obj
+}
+```
+
+#### Unsafe Code Review Checklist
+
+Before approving `unsafe` code:
+
+- [ ] Comprehensive SAFETY documentation with all required sections
+- [ ] Multi-threaded tests verify Send/Sync safety
+- [ ] No safe alternative exists or safe alternative is documented as rejected
+- [ ] Safety invariants are enforced (private constructors, type system, etc.)
+- [ ] Technical debt is noted if a better solution exists
+- [ ] Architecture documentation mentions the unsafe pattern
+
+#### Current Unsafe Code Inventory
+
+**src/adapters/audio/cpal_adapter.rs** (2 unsafe impls):
+- `unsafe impl Send for ThreadSafeAudioCapture`
+- `unsafe impl Sync for ThreadSafeAudioCapture`
+- **Reason**: cpal::Stream is not Send/Sync, but we need Send+Sync for trait objects
+- **Safety**: Private constructor + mandatory Arc<Mutex<>> wrapper ensures exclusive access
+- **Technical Debt**: Could be eliminated with message-passing architecture
+- **Tests**: Multi-threaded stress tests verify safety assumptions
+
+#### Future Unsafe Code
+
+Any new `unsafe` code must:
+
+1. Be reviewed by at least one other developer (or flagged for human review by agents)
+2. Follow all documentation requirements above
+3. Include comprehensive tests
+4. Be added to the unsafe code inventory in this document
+5. Consider if it could be refactored away in the future
+
+**Prefer safe alternatives:**
+- Use safe abstractions from `std` and trusted crates
+- Use message passing instead of shared mutable state
+- Use type system to enforce invariants (phantom types, marker types)
+- Consider if functionality is truly necessary
+
 ---
 
 ## Testing Conventions
