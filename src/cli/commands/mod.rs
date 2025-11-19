@@ -47,7 +47,7 @@ pub use utils::*;
 // ✅ handle_setup (extracted)
 //
 // Medium Priority:
-// - handle_test
+// ✅ handle_test (extracted)
 // ✅ handle_models (extracted)
 //
 // Low Priority (less frequently used):
