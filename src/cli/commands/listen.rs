@@ -419,6 +419,9 @@ pub async fn handle_listen(
     // Main thread: audio handling
     info!("🚀 Audio handler ready");
 
+    // Track amplitude monitoring threads for cleanup
+    let mut amplitude_threads: Vec<thread::JoinHandle<()>> = Vec::new();
+
     while let Ok(command) = audio_cmd_rx.recv() {
         match command {
             AudioCommand::StartRecording => {
@@ -434,7 +437,7 @@ pub async fn handle_listen(
 
                     // Batch amplitude updates to match overlay repaint rate (20 FPS during recording)
                     // This reduces mutex contention and provides smoother averaged values
-                    std::thread::spawn(move || {
+                    let amplitude_thread = std::thread::spawn(move || {
                         let mut amplitude_buffer = Vec::with_capacity(10);
                         let update_interval = std::time::Duration::from_millis(50); // 20 Hz, matches recording repaint
                         let mut last_update = std::time::Instant::now();
@@ -475,6 +478,7 @@ pub async fn handle_listen(
                             }
                         }
                     });
+                    amplitude_threads.push(amplitude_thread);
                 }
             },
             AudioCommand::StopRecording => {
@@ -530,6 +534,11 @@ pub async fn handle_listen(
     let _ = hotkey_thread.join();
     let _ = result_thread.join();
     let _ = overlay_thread.join();
+
+    // Join all amplitude monitoring threads
+    for thread in amplitude_threads {
+        let _ = thread.join();
+    }
 
     info!("Listen mode ended");
     Ok(())
