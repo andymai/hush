@@ -1,7 +1,7 @@
+use crate::transcription::cuda::CudaAvailability;
 /// Simple working Whisper implementation using whisper-rs
 /// This provides real speech-to-text without the complexity of PyTorch model conversion
 use crate::Result;
-use crate::transcription::cuda::CudaAvailability;
 use std::path::Path;
 use tracing::{info, warn};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};

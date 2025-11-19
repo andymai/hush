@@ -1,6 +1,6 @@
 use crate::logging::{transcription as logging, RequestContext};
-use crate::Result;
 use crate::transcription::cuda::CudaAvailability;
+use crate::Result;
 use candle_core::{Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::whisper::{self as m, Config};
@@ -277,10 +277,7 @@ impl WhisperTranscriber {
     pub fn device_info(&self) -> String {
         let cuda = CudaAvailability::detect();
         if cuda.available && matches!(self.device, Device::Cuda(_)) {
-            format!(
-                "GPU: {}",
-                cuda.device_name.as_deref().unwrap_or("Unknown")
-            )
+            format!("GPU: {}", cuda.device_name.as_deref().unwrap_or("Unknown"))
         } else {
             "CPU".to_string()
         }
