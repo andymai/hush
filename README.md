@@ -396,17 +396,35 @@ All developer documentation and project context is in the `.ai/knowledge/` direc
 
 ## 💻 System Requirements
 
-### Minimum Requirements
-- **OS:** Ubuntu 20.04+ or compatible Linux distribution
-- **RAM:** 4GB (8GB recommended)
+### Minimum Requirements (CPU-only)
+- **OS:** Linux (Ubuntu 20.04+, Fedora 35+, or equivalent)
+- **CPU:** x86_64 with AVX2 support
+- **RAM:** 4GB+ (8GB+ for larger models)
 - **Storage:** 1GB free space for models
 - **Audio:** Microphone or audio input device
+- **Rust:** 1.70+
 
-### Recommended for GPU Acceleration
-- **GPU:** NVIDIA GTX 1060 or newer
-- **VRAM:** 4GB+ (for larger models)
-- **CUDA:** 12.0+ toolkit
+### Recommended (GPU-accelerated)
+- **GPU:** NVIDIA GPU with CUDA support (GTX 1060 or newer)
+- **VRAM:** 4GB+ for base model, 8GB+ for large models
+- **CUDA:** CUDA Toolkit 12.0+
 - **Drivers:** NVIDIA 520.x or newer
+
+### Build Options
+
+**GPU-accelerated (default):**
+```bash
+cargo build --release
+# Requires: CUDA toolkit, NVIDIA GPU
+# Performance: ~0.5s for 3s audio (base model)
+```
+
+**CPU-only:**
+```bash
+cargo build --release --no-default-features --features notifications,system-tray
+# No CUDA required - works in Docker, Codespaces, CPU-only systems
+# Performance: ~4-6s for 3s audio (base model)
+```
 
 ---
 
@@ -448,8 +466,12 @@ sudo modprobe uinput && sudo chmod 666 /dev/uinput
 nvidia-smi
 
 # Check if Hush detects GPU
-./hush status --full | grep -i cuda
-# Expected: "use gpu = 1" and "CUDA0 total size"
+./hush status --full
+# Look for GPU information in the output
+
+# If GPU is not detected, Hush will automatically fall back to CPU
+# For CPU-only builds, rebuild without CUDA:
+cargo build --release --no-default-features --features notifications,system-tray
 
 # Test transcription performance
 ./hush test transcription --timing
@@ -525,6 +547,12 @@ cargo test
 # Check code quality
 cargo clippy
 cargo fmt
+```
+
+**Build without CUDA** (CPU-only, for systems without GPU):
+```bash
+cargo build --release --no-default-features --features notifications,system-tray
+# Useful for: Docker containers, GitHub Codespaces, cloud VMs, CPU-only systems
 ```
 
 **Build without notifications** (avoids D-Bus dependency):

@@ -1,4 +1,5 @@
 use crate::logging::{transcription as logging, RequestContext};
+use crate::transcription::cuda::CudaAvailability;
 use crate::Result;
 use candle_core::{Device, Tensor};
 use candle_nn::VarBuilder;
@@ -45,21 +46,19 @@ impl WhisperTranscriber {
             "🧠 Initializing Whisper transcriber"
         );
 
-        // Determine device first
-        let device = if use_cuda {
-            match Self::check_cuda_availability() {
-                Ok(()) => {
-                    info!("CUDA is available, using GPU acceleration");
-                    Device::new_cuda(0)?
-                },
-                Err(e) => {
-                    warn!(
-                        "CUDA requested but not available ({}), falling back to CPU",
-                        e
-                    );
-                    Device::Cpu
-                },
-            }
+        // Determine device first using enhanced CUDA detection
+        let cuda = CudaAvailability::detect();
+        let device = if use_cuda && cuda.available {
+            info!(
+                "Using GPU: {:?} (CUDA {})",
+                cuda.device_name.as_deref().unwrap_or("Unknown"),
+                cuda.cuda_version.as_deref().unwrap_or("Unknown")
+            );
+            Device::new_cuda(0)?
+        } else if use_cuda {
+            warn!("CUDA requested but not available, falling back to CPU");
+            info!("Using CPU (expect slower transcription)");
+            Device::Cpu
         } else {
             info!("Using CPU for inference");
             Device::Cpu
@@ -260,12 +259,27 @@ impl WhisperTranscriber {
     }
 
     fn check_cuda_availability() -> Result<()> {
-        // Check if CUDA is available
-        if candle_core::utils::cuda_is_available() {
+        // Use enhanced CUDA detection
+        if CudaAvailability::is_available() {
             info!("CUDA runtime detected");
             Ok(())
         } else {
             Err(anyhow::anyhow!("CUDA not available"))
+        }
+    }
+
+    /// Check if currently using GPU
+    pub fn is_using_gpu(&self) -> bool {
+        matches!(self.device, Device::Cuda(_))
+    }
+
+    /// Get device information string
+    pub fn device_info(&self) -> String {
+        let cuda = CudaAvailability::detect();
+        if cuda.available && matches!(self.device, Device::Cuda(_)) {
+            format!("GPU: {}", cuda.device_name.as_deref().unwrap_or("Unknown"))
+        } else {
+            "CPU".to_string()
         }
     }
 
@@ -364,11 +378,15 @@ impl WhisperTranscriber {
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("Invalid model path"))?;
 
-        // Enable GPU acceleration by default for this function
-        // TODO: Make this configurable based on caller preference
+        // Use GPU acceleration if available
+        let cuda = CudaAvailability::detect();
         let mut params = WhisperContextParameters::default();
-        params.use_gpu(true);
-        info!("GPU acceleration enabled for PyTorch model loading");
+        params.use_gpu(cuda.available);
+        if cuda.available {
+            info!("GPU acceleration enabled for PyTorch model loading");
+        } else {
+            info!("Using CPU for PyTorch model loading");
+        }
 
         let context = WhisperContext::new_with_params(model_path_str, params)
             .map_err(|e| anyhow::anyhow!("Failed to create WhisperContext: {}", e))?;

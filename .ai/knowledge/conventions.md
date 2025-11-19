@@ -537,21 +537,89 @@ ANTHROPIC_API_KEY=your_api_key_here  # For LLM text polishing
 
 ## Performance Conventions
 
-### GPU Acceleration
+### GPU Acceleration and CUDA Feature Flag
 
-**Pattern**: Detect CUDA availability, fall back to CPU.
+**Pattern**: Use CUDA feature flag for compile-time control, detect at runtime for fallback.
+
+#### Build Configurations
+
+```bash
+# GPU-accelerated build (default)
+cargo build --release
+
+# CPU-only build (no CUDA toolkit required)
+cargo build --release --no-default-features --features notifications,system-tray
+```
+
+#### Runtime Detection
 
 ```rust
-// Check GPU availability
-let use_gpu = candle_core::cuda_is_available();
+use crate::transcription::cuda::CudaAvailability;
 
-// Model loading with GPU
-let model = if use_gpu {
-    WhisperModel::load_with_cuda(model_path)?
+// Detect CUDA at runtime (cached)
+let cuda = CudaAvailability::detect();
+
+if cuda.available {
+    info!(
+        "Using GPU: {:?} (CUDA {})",
+        cuda.device_name,
+        cuda.cuda_version
+    );
+    // Use GPU acceleration
 } else {
-    WhisperModel::load_cpu(model_path)?
-};
+    info!("Using CPU (CUDA not available or not compiled)");
+    // Fall back to CPU
+}
+
+// Check if currently using GPU
+if CudaAvailability::is_available() {
+    // GPU code path
+}
 ```
+
+#### Feature Flag Configuration
+
+In `Cargo.toml`:
+
+```toml
+[features]
+default = ["notifications", "system-tray", "cuda"]
+cuda = [
+    "candle-core/cuda",
+    "candle-nn/cuda",
+    "candle-transformers/cuda",
+    "whisper-rs/cuda"
+]
+
+[dependencies]
+# CUDA features are optional via the "cuda" feature flag
+candle-core = { version = "0.8" }
+candle-nn = { version = "0.8" }
+candle-transformers = { version = "0.8" }
+```
+
+#### Conditional Compilation
+
+```rust
+#[cfg(feature = "cuda")]
+{
+    // CUDA-specific code
+    let available = candle_core::utils::cuda_is_available();
+}
+
+#[cfg(not(feature = "cuda"))]
+{
+    // CPU-only fallback
+    info!("Built without CUDA support (CPU-only mode)");
+}
+```
+
+**CUDA Usage Rules:**
+1. **Never hardcode GPU usage** - Always use `CudaAvailability::detect()`
+2. **Graceful fallback** - Code must work without GPU
+3. **Clear logging** - Inform user about GPU/CPU usage
+4. **Detection is cached** - Use `CudaAvailability::detect()` freely
+5. **Test both modes** - Verify CPU-only builds work
 
 ### Benchmarking
 
