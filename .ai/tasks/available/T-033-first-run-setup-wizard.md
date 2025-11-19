@@ -102,15 +102,6 @@ Create a guided setup wizard that runs on first launch to help new users configu
   - "Open Settings" (open settings window)
   - "Exit" (quit)
 
-### Wizard UI Design
-- [ ] Use centered, spacious layout
-- [ ] Large, readable text
-- [ ] Visual icons for each step
-- [ ] Consistent color scheme with overlay
-- [ ] Smooth transitions between steps
-- [ ] Responsive to window resizing
-- [ ] Keyboard shortcuts (Enter = Next, Esc = Back)
-
 ### Configuration Persistence
 - [ ] Save configuration after completion
 - [ ] Create config file: `~/.config/hush/settings.toml`
@@ -138,7 +129,6 @@ Create a guided setup wizard that runs on first launch to help new users configu
 - Hush works immediately after wizard completion
 - Wizard can be manually launched
 - Errors are handled gracefully
-- UI is intuitive and visually appealing
 
 ## Context
 

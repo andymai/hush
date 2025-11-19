@@ -8,9 +8,9 @@
 
 ## Overview
 
-This roadmap outlines a comprehensive plan to expand Hush's UI capabilities while maintaining its minimalist design philosophy. All enhancements use the existing egui framework.
+This roadmap outlines a comprehensive plan to expand Hush's UI capabilities using the existing egui framework.
 
-**Goal:** Make Hush accessible to all users (not just CLI-comfortable developers) while preserving its lightweight, fast, and privacy-first design.
+**Goal:** Make Hush accessible to all users (not just CLI-comfortable developers) through a settings GUI, setup wizard, and enhanced configuration tools.
 
 ---
 

@@ -57,12 +57,6 @@ This is Phase 1 of the UI expansion project. The settings window will serve as t
 - Overlay config: `src/overlay/state.rs`
 - System tray: Optional ksni support in `Cargo.toml`
 
-**Design philosophy:**
-- Keep it simple and focused
-- Follow egui best practices
-- Maintain Hush's minimalist aesthetic
-- Settings window should feel lightweight, not bloated
-
 ## Files to Create
 
 - `src/settings/mod.rs` - Module exports
