@@ -88,7 +88,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 tracing-error = "0.2"
-sysinfo = "0.32"  # Conservative update, 0.37 has breaking changes
+sysinfo = "0.37"  # Conservative update, 0.37 has breaking changes
 chrono = { version = "0.4", features = ["serde"] }
 
 # HTTP client for downloading models
