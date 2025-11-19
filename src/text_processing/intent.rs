@@ -43,36 +43,47 @@ pub enum CommunicationStyle {
 }
 
 /// Regex patterns for intent detection
+/// Note: These use expect() instead of unwrap() since the patterns are hardcoded
+/// compile-time constants that are validated during development and testing.
 static CODE_PATTERNS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(function|class|def|const|let|var|import|return|if|for|while)\b").unwrap()
+    Regex::new(r"(?i)\b(function|class|def|const|let|var|import|return|if|for|while)\b")
+        .expect("CODE_PATTERNS regex is valid")
 });
 
-static COMMENT_PATTERNS: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)^(comment|note|todo|fixme|hack)[:.]?\s").unwrap());
+static COMMENT_PATTERNS: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)^(comment|note|todo|fixme|hack)[:.]?\s")
+        .expect("COMMENT_PATTERNS regex is valid")
+});
 
 static COMMAND_PATTERNS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)^(run|execute|start|stop|install|uninstall|cd|ls|mkdir|git)\b").unwrap()
+    Regex::new(r"(?i)^(run|execute|start|stop|install|uninstall|cd|ls|mkdir|git)\b")
+        .expect("COMMAND_PATTERNS regex is valid")
 });
 
 static LIST_PATTERNS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(first|second|third|next|then|finally|steps?|items?)\b.*\b(first|second|and|also)\b").unwrap()
+    Regex::new(r"(?i)\b(first|second|third|next|then|finally|steps?|items?)\b.*\b(first|second|and|also)\b")
+        .expect("LIST_PATTERNS regex is valid")
 });
 
 static QUESTION_PATTERNS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)^(what|how|why|when|where|who|which|can|could|would|should|is|are|do|does)\b")
-        .unwrap()
+        .expect("QUESTION_PATTERNS regex is valid")
 });
 
-static TODO_PATTERNS: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)\b(todo|task|reminder|need to|have to|must|should)\b").unwrap());
+static TODO_PATTERNS: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\b(todo|task|reminder|need to|have to|must|should)\b")
+        .expect("TODO_PATTERNS regex is valid")
+});
 
 static EMAIL_PATTERNS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)\b(dear|hi|hello|regards|sincerely|best|thanks|subject|email|message)\b")
-        .unwrap()
+        .expect("EMAIL_PATTERNS regex is valid")
 });
 
-static CHAT_PATTERNS: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)\b(hey|yo|sup|lol|btw|omg|brb|imo|fyi)\b").unwrap());
+static CHAT_PATTERNS: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)\b(hey|yo|sup|lol|btw|omg|brb|imo|fyi)\b")
+        .expect("CHAT_PATTERNS regex is valid")
+});
 
 /// Intent detector
 pub struct IntentDetector {
