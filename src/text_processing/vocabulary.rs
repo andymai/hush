@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use anyhow::{Result, Context};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Domain-specific vocabulary configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
