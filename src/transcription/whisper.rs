@@ -312,7 +312,13 @@ impl WhisperTranscriber {
         // Load the model using whisper-rs with GPU acceleration
         let mut params = WhisperContextParameters::default();
         params.use_gpu(use_cuda);
-        let ctx = WhisperContext::new_with_params(model_path.to_str().unwrap(), params);
+        let model_path_str = model_path.to_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Model path contains invalid UTF-8: {}",
+                model_path.display()
+            )
+        })?;
+        let ctx = WhisperContext::new_with_params(model_path_str, params);
         let _whisper_ctx = match ctx {
             Ok(context) => {
                 info!("✅ Successfully loaded PyTorch model with whisper-rs");
@@ -553,7 +559,9 @@ impl WhisperTranscriber {
 
         // Run the encoder (lock the model for thread safety)
         let _encoder_output = {
-            let mut model = model_mutex.lock().unwrap();
+            let mut model = model_mutex
+                .lock()
+                .map_err(|e| anyhow::anyhow!("Model mutex lock poisoned: {}", e))?;
             model.encoder.forward(&mel_tensor, true)?
         };
 

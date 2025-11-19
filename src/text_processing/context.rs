@@ -112,7 +112,10 @@ static LANGUAGE_EXTENSIONS: &[(&str, &str)] = &[
     ("kt", "Kotlin"),
 ];
 
-static FILE_EXTENSION_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.([a-z0-9]+)\s*[-–—]").unwrap());
+/// Regex for detecting file extensions in text
+/// Note: Uses expect() since the pattern is a hardcoded compile-time constant
+static FILE_EXTENSION_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\.([a-z0-9]+)\s*[-–—]").expect("FILE_EXTENSION_RE regex is valid"));
 
 /// Application context detector
 pub struct ContextDetector {
