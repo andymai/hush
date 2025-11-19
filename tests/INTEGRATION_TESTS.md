@@ -2,7 +2,26 @@
 
 This document describes the comprehensive integration tests added to the Hush voice-to-text application.
 
-## Test Files
+## Test Organization
+
+The test suite is organized into several files:
+
+- **Integration Tests (Mock-Based)** - Hardware-independent tests using mocks
+  - `integration_full_pipeline.rs` - Full pipeline tests
+  - `integration_error_scenarios.rs` - Error handling tests
+  - `integration_state_machine.rs` - State transition tests
+  - `integration_concurrent.rs` - Concurrency tests
+
+- **Unit Tests** - Component-specific tests
+  - `application_tests.rs` - HushApp unit tests
+  - `architecture_poc_test.rs` - Architecture proof-of-concept
+
+- **Hardware Tests** - Real hardware integration (marked #[ignore])
+  - `integration_hardware_tests.rs` - Tests requiring real hardware
+
+- **Archived Tests** - Legacy tests moved to `tests/archive/`
+
+## New Integration Test Files (T-012)
 
 ### 1. `integration_full_pipeline.rs`
 
@@ -140,13 +159,13 @@ This enables:
 ### Running the Tests
 
 ```bash
-# Run all integration tests
+# Run all new integration tests
 cargo test --test integration_full_pipeline
 cargo test --test integration_error_scenarios
 cargo test --test integration_state_machine
 cargo test --test integration_concurrent
 
-# Run all tests together
+# Run all mock-based tests (no hardware required)
 cargo test
 
 # Run with output
@@ -154,7 +173,22 @@ cargo test -- --nocapture
 
 # Run specific test
 cargo test test_complete_voice_to_text_pipeline
+
+# Run hardware tests (requires real hardware)
+cargo test --test integration_hardware_tests -- --ignored
 ```
+
+### Test File Purposes
+
+| File | Purpose | Hardware Required |
+|------|---------|-------------------|
+| `integration_full_pipeline.rs` | Full pipeline with various configurations | No - uses mocks |
+| `integration_error_scenarios.rs` | Error handling and edge cases | No - uses mocks |
+| `integration_state_machine.rs` | State transitions and validation | No - uses mocks |
+| `integration_concurrent.rs` | Thread safety and concurrency | No - uses mocks |
+| `application_tests.rs` | HushApp unit tests | No - uses mocks |
+| `architecture_poc_test.rs` | Proof-of-concept for trait architecture | No - uses mocks |
+| `integration_hardware_tests.rs` | Real hardware validation | Yes - requires mic, X11, GPU |
 
 ### Test Coverage Goals
 
