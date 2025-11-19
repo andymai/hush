@@ -67,6 +67,9 @@ pub enum TranscriptionError {
     #[error("Failed to load model: {0}")]
     ModelLoadFailed(String),
 
+    #[error("Model checksum validation failed: expected {expected}, got {actual}")]
+    ChecksumMismatch { expected: String, actual: String },
+
     #[error("CUDA not available: {0}")]
     CudaUnavailable(String),
 
