@@ -10,16 +10,26 @@ categories = ["multimedia::audio", "accessibility"]
 default-run = "hush"
 
 [features]
-default = ["notifications", "system-tray", "cuda"]
+default = ["notifications", "system-tray"]
 notifications = ["dep:notify-rust"]
 # System tray uses platform-specific implementations
 # ksni on Linux, tray-icon on macOS
 system-tray = []
+
+# GPU acceleration features (mutually exclusive)
+# CUDA for NVIDIA GPUs (Linux/Windows)
 cuda = [
     "candle-core/cuda",
     "candle-nn/cuda",
     "candle-transformers/cuda",
     "whisper-rs/cuda"
+]
+
+# Metal for Apple Silicon/Intel Macs (macOS only)
+metal = [
+    "candle-core/metal",
+    "candle-nn/metal",
+    "candle-transformers/metal",
 ]
 
 [dependencies]
