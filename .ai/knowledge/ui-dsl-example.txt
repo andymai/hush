@@ -1,0 +1,170 @@
+# UI Component DSL - More Concise Than YAML
+# Domain-specific language for UI components
+
+@overlay.idle {
+  size: 60x4
+  position: bottom-center offset:32
+  shape: pill(radius:2)
+  fill: rgba(0,0,0,0.75)
+  border: 1 rgba(255,255,255,0.2)
+  shadow: 0 4 12 rgba(0,0,0,0.3)
+
+  &:hover {
+    scale: 1.05 @150ms ease-out
+  }
+
+  animation: pulse {
+    opacity: 0.75 -> 0.85
+    duration: 1s
+    loop: infinite
+  }
+}
+
+@overlay.recording {
+  extends: overlay.idle
+  size: 80x24
+  shape: pill(radius:12)
+  fill: rgba(76,175,140,0.95)  // sage green
+  shadow: 0 6 20 rgba(76,175,140,0.4)  // green glow
+
+  transition: from(overlay.idle) {
+    duration: 200ms
+    easing: ease-out
+    props: [width, height, background]
+  }
+
+  children {
+    waveform {
+      bars: 12
+      bar-width: 2.5
+      spacing: 1
+      color: white
+      height: 3..16  // min..max
+      animation: sine(freq:10hz, fps:20)
+    }
+  }
+}
+
+@window.settings {
+  size: 800x600 (min:600x400)
+  resizable: true
+  position: center
+  background: #FFFFFF (dark:#1C1C1E)
+  radius: 12
+  shadow: 0 12 48 rgba(0,0,0,0.2)
+
+  layout: vertical {
+    title-bar {
+      height: 48
+      background: #FAF8F5
+      border-bottom: 1 rgba(0,0,0,0.1)
+
+      flex: horizontal {
+        text("Hush Settings") {
+          font: 16/semibold
+          color: #1A1A1A
+          padding-left: 16
+        }
+        spacer
+        button.close {
+          icon: "x"
+          size: 32x32
+          margin-right: 8
+        }
+      }
+    }
+
+    tab-bar {
+      height: 40
+      tabs: [general, models, audio, hotkeys, advanced]
+
+      style {
+        inactive: 13/medium #666666
+        hover: 13/medium #4CAF8C + bg(rgba(76,175,140,0.1))
+        active: 13/medium #4CAF8C + border-bottom(2 #4CAF8C)
+      }
+
+      transition: 150ms ease-out
+    }
+
+    content {
+      padding: 24
+      max-width: 600
+      center: true
+    }
+  }
+}
+
+@button.primary {
+  height: 36
+  padding: 0 20
+  radius: 8
+  background: #4CAF8C
+  color: white
+  font: 13/medium
+  shadow: 0 2 4 rgba(0,0,0,0.1)
+
+  &:hover {
+    background: #3D9E7A
+    shadow: 0 3 6 rgba(0,0,0,0.1)
+    @150ms
+  }
+
+  &:active {
+    background: #2E8B68
+    shadow: 0 1 2 rgba(0,0,0,0.1)
+    scale: 0.98
+    @100ms
+  }
+
+  &:disabled {
+    background: #CCCCCC
+    color: #999999
+    cursor: not-allowed
+  }
+}
+
+// Inheritance
+@button.secondary extends button.primary {
+  background: transparent
+  color: #4CAF8C
+  border: 1 #4CAF8C
+  shadow: none
+
+  &:hover {
+    background: rgba(76,175,140,0.1)
+  }
+}
+
+// Conditional rendering
+@model-card {
+  when: state.installed {
+    badge("✓ Installed") {
+      color: #4CAF8C
+      position: top-right
+    }
+    button("Set Active") {
+      disabled: state.active
+    }
+  }
+
+  when: state.downloading {
+    progress-bar {
+      value: state.progress
+      color: #4CAF8C
+    }
+    text("${state.downloaded} / ${state.total}") {
+      font: 11/regular
+      color: #666666
+    }
+  }
+}
+
+// Responsive
+@settings-form {
+  layout: grid(columns:2, gap:12)
+
+  @media (width < 700) {
+    layout: vertical(gap:8)
+  }
+}
