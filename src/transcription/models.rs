@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use hf_hub::api::tokio::Api;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
@@ -11,6 +12,8 @@ pub struct ModelInfo {
     pub repo_id: String,
     pub filename: String,
     pub expected_size: u64,
+    /// SHA256 checksum for model integrity verification (None for custom models)
+    pub sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -80,6 +83,8 @@ impl ModelManager {
                 repo_id: "openai/whisper-tiny".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 39_000_000, // ~39MB
+                // TODO: Add SHA256 from https://huggingface.co/openai/whisper-tiny/blob/main/model.safetensors
+                sha256: None,
             },
         );
 
@@ -91,6 +96,9 @@ impl ModelManager {
                 repo_id: "openai/whisper-base".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 74_000_000, // ~74MB
+                sha256: Some(
+                    "07cadb9f25677c8d50df603e66a98fbd842cce45047139baeb16e6219a1e807b".to_string(),
+                ),
             },
         );
 
@@ -102,6 +110,8 @@ impl ModelManager {
                 repo_id: "openai/whisper-small".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 244_000_000, // ~244MB
+                // TODO: Add SHA256 from https://huggingface.co/openai/whisper-small/blob/main/model.safetensors
+                sha256: None,
             },
         );
 
@@ -113,6 +123,8 @@ impl ModelManager {
                 repo_id: "openai/whisper-medium".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 769_000_000, // ~769MB
+                // TODO: Add SHA256 from https://huggingface.co/openai/whisper-medium/blob/main/model.safetensors
+                sha256: None,
             },
         );
 
@@ -124,6 +136,8 @@ impl ModelManager {
                 repo_id: "openai/whisper-large".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 1_550_000_000, // ~1.55GB
+                // TODO: Add SHA256 from https://huggingface.co/openai/whisper-large/blob/main/model.safetensors
+                sha256: None,
             },
         );
 
@@ -135,6 +149,9 @@ impl ModelManager {
                 repo_id: "openai/whisper-large-v3".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 1_550_000_000, // ~1.55GB
+                sha256: Some(
+                    "a8e94b85976e5864ba3e9525c7e6c83b2a1eca42d4b797a0c7c24d778e40fd95".to_string(),
+                ),
             },
         );
 
@@ -221,6 +238,30 @@ impl ModelManager {
         Ok(())
     }
 
+    /// Computes the SHA256 checksum of a file
+    fn compute_sha256(path: &Path) -> Result<String> {
+        use std::io::Read;
+
+        let mut file =
+            std::fs::File::open(path).context("Failed to open file for checksum computation")?;
+
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 8192]; // 8KB buffer
+
+        loop {
+            let bytes_read = file
+                .read(&mut buffer)
+                .context("Failed to read file for checksum computation")?;
+            if bytes_read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..bytes_read]);
+        }
+
+        let result = hasher.finalize();
+        Ok(format!("{:x}", result))
+    }
+
     async fn is_model_valid(&self, path: &Path, info: &ModelInfo) -> Result<bool> {
         if !path.exists() {
             return Ok(false);
@@ -243,7 +284,24 @@ impl ModelManager {
             return Ok(false);
         }
 
-        // TODO: Add SHA256 checksum validation if we have the hashes
+        // Verify SHA256 checksum if available
+        if let Some(expected_sha256) = &info.sha256 {
+            debug!("Validating SHA256 checksum for {:?}", path);
+            let actual_sha256 =
+                Self::compute_sha256(path).context("Failed to compute model checksum")?;
+
+            if actual_sha256 != *expected_sha256 {
+                warn!(
+                    "Model checksum mismatch for {:?}: expected {}, got {}",
+                    path, expected_sha256, actual_sha256
+                );
+                return Ok(false);
+            }
+            debug!("SHA256 checksum validated successfully");
+        } else {
+            debug!("No SHA256 checksum available, skipping checksum validation");
+        }
+
         debug!("Model validation passed for {:?}", path);
         Ok(true)
     }
@@ -341,5 +399,47 @@ mod tests {
         assert_eq!(ModelManager::format_size(1536), "1.5 KB");
         assert_eq!(ModelManager::format_size(1_048_576), "1.0 MB");
         assert_eq!(ModelManager::format_size(1_073_741_824), "1.0 GB");
+    }
+
+    #[test]
+    fn test_compute_sha256() {
+        use std::io::Write;
+
+        // Create a temporary file with known content
+        let temp_dir = TempDir::new().unwrap();
+        let test_file = temp_dir.path().join("test.txt");
+        let mut file = std::fs::File::create(&test_file).unwrap();
+        file.write_all(b"Hello, World!").unwrap();
+        drop(file);
+
+        // Compute SHA256
+        let checksum = ModelManager::compute_sha256(&test_file).unwrap();
+
+        // Expected SHA256 for "Hello, World!"
+        // echo -n "Hello, World!" | sha256sum
+        let expected = "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f";
+
+        assert_eq!(checksum, expected);
+    }
+
+    #[test]
+    fn test_model_has_sha256_checksums() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+
+        // Verify that Base and LargeV3 models have checksums
+        let base_info = manager.get_model_info(&ModelSize::Base).unwrap();
+        assert!(base_info.sha256.is_some());
+        assert_eq!(
+            base_info.sha256.as_ref().unwrap(),
+            "07cadb9f25677c8d50df603e66a98fbd842cce45047139baeb16e6219a1e807b"
+        );
+
+        let large_v3_info = manager.get_model_info(&ModelSize::LargeV3).unwrap();
+        assert!(large_v3_info.sha256.is_some());
+        assert_eq!(
+            large_v3_info.sha256.as_ref().unwrap(),
+            "a8e94b85976e5864ba3e9525c7e6c83b2a1eca42d4b797a0c7c24d778e40fd95"
+        );
     }
 }
