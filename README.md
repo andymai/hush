@@ -1,108 +1,160 @@
-# 🤫 Hush - Voice-to-Text for Linux Developers
+<div align="center">
+
+# 🤫 Hush
+
+**Fast, accurate, and private voice-to-text for Linux developers**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
+[![CUDA](https://img.shields.io/badge/CUDA-12.0%2B-76B900.svg)](https://developer.nvidia.com/cuda-toolkit)
+
+[Quick Start](#-quick-start) • [Features](#-features) • [Documentation](#-documentation) • [Contributing](#-contributing)
+
+</div>
 
 ---
-**Last Updated**: 2025-11-19
-**Status**: Active
-**Related Documentation**: [Documentation Index](DOCUMENTATION_INDEX.md) | [Voice Commands](docs/VOICE_COMMANDS.md) | [Architecture](docs/ARCHITECTURE.md)
+
+## 📋 Table of Contents
+
+- [About](#-about)
+- [Why Hush?](#-why-hush)
+- [Features](#-features)
+- [Quick Start](#-quick-start)
+- [Usage](#-usage-modes)
+- [Configuration](#️-configuration)
+- [Documentation](#-documentation)
+- [System Requirements](#-system-requirements)
+- [Troubleshooting](#-troubleshooting)
+- [Development](#️-development)
+- [Contributing](#-contributing)
+- [License](#-license)
+- [Acknowledgments](#-acknowledgments)
+
 ---
 
-> **Fast, accurate, and private voice-to-text with GPU acceleration, intelligent text processing, and universal app compatibility**
+## 🎯 About
 
-Hush is a production-ready voice-to-text application built specifically for Linux developers. It uses OpenAI's Whisper models locally with CUDA GPU acceleration for fast, accurate transcription, and features intelligent text processing with automatic filler word removal and optional LLM polishing. All processing happens locally (except optional LLM), ensuring your voice data never leaves your machine.
+Hush is a production-ready voice-to-text application built specifically for Linux developers. It uses OpenAI's Whisper models locally with CUDA GPU acceleration for fast, accurate transcription, and features intelligent text processing with automatic filler word removal and optional LLM polishing.
 
-## ✨ Key Features
+**Privacy-first design:** All processing happens locally on your machine (except optional LLM integration). Your voice data never leaves your computer.
 
-- 🚀 **GPU-Accelerated** - CUDA support for lightning-fast transcription on NVIDIA GPUs
-- 🎤 **Local Voice Transcription** - Uses Whisper models locally, no cloud dependencies
-- ⌨️ **Universal Text Insertion** - Works with **ALL applications** including VMs, password fields, games
-- 🔒 **Privacy First** - All processing happens locally on your machine
-- 🎯 **Hardware-Level Integration** - Linux UInput support for maximum compatibility
-- 🖥️ **Intelligent Listening Mode** - Wispr Flow-style overlay with push-to-talk hotkey
+### 🎬 Demo
+
+<div align="center">
+
+<!-- TODO: Add demo GIF showing push-to-talk workflow -->
+*Hold `Ctrl+Alt+V` → Speak → Release → Text appears instantly*
+
+</div>
+
+---
+
+## 💡 Why Hush?
+
+| Challenge | Hush's Solution |
+|-----------|-----------------|
+| **Cloud transcription = privacy concerns** | 100% local processing with Whisper models |
+| **Slow CPU transcription** | CUDA GPU acceleration (up to 10x faster) |
+| **Clipboard workarounds** | Hardware-level text insertion via UInput |
+| **"Um, uh, like" in transcripts** | Intelligent filler word removal |
+| **Raw speech → professional text** | Optional LLM polishing with Claude API |
+| **Doesn't work in VMs/games** | Universal compatibility (X11, Wayland, SSH, VMs) |
+
+---
+
+## ✨ Features
+
+### Core Capabilities
+- 🚀 **GPU-Accelerated** - CUDA support for lightning-fast transcription (10x faster)
+- 🎤 **Local Voice Transcription** - Whisper models run entirely on your machine
+- 🔒 **Privacy First** - Zero cloud dependencies, your voice stays private
+- ⌨️ **Universal Text Insertion** - Works in ALL applications (VMs, terminals, games, browsers)
+- 🎯 **Hardware-Level Integration** - Linux UInput for maximum compatibility
+
+### Intelligent Features
+- 🎧 **Intelligent Listening Mode** - Wispr Flow-style overlay with push-to-talk hotkey
 - 🎨 **Visual Feedback** - Floating overlay with real-time amplitude monitoring
-- ✨ **Intelligent Text Processing** - Automatic filler word removal and LLM-based polishing
-- 🗣️ **Voice Commands** - "undo", "new paragraph", "new line", and more
-- 📊 **Advanced Logging** - Structured logging with performance metrics and request tracing
-- 🔧 **Multiple Model Sizes** - From tiny (75MB) to large (2.9GB) Whisper models
+- ✨ **Smart Text Processing** - Automatic filler word removal ("um", "uh", "like")
+- 🤖 **LLM Polishing** - Optional Claude API integration for professional output
+- 🗣️ **Voice Commands** - "undo", "new paragraph", "new line", "cap that"
+- 📝 **Undo Support** - Say "undo" to remove the last insertion
+
+### Developer Features
+- 🔧 **Multiple Model Sizes** - From tiny (75MB) to large (2.9GB)
+- 📊 **Advanced Logging** - Structured logging with performance metrics
 - ⚡ **Multiple Modes** - Intelligent listening, single recording, manual mode
+- 🧪 **Comprehensive Testing** - Built-in test suite for all components
+
+---
 
 ## 🚀 Quick Start
 
-### 1. Build Hush
+### Prerequisites
 ```bash
-# Install system dependencies
+# Ubuntu/Debian
 sudo apt install libasound2-dev pkg-config
 
-# Build with GPU support
-make build
+# For GPU acceleration (optional but recommended)
+# Install NVIDIA drivers 520.x+ and CUDA toolkit 12.0+
 ```
 
-### 2. Download Models
+### Installation
+
 ```bash
-# Download recommended base model
+# 1. Clone the repository
+git clone https://github.com/andymai/hush.git
+cd hush
+
+# 2. Build Hush
+make build
+
+# 3. Download a Whisper model
 ./hush models download base
 
-# Or start with tiny model for testing
-./hush models download tiny
-
-# List available models
-./hush models list
-```
-
-### 3. Setup Text Insertion (Recommended)
-For universal compatibility with all applications:
-
-```bash
-# Quick setup guide
+# 4. Setup text insertion (required for automatic typing)
 ./hush setup uinput --quick
 
-# Diagnose any issues
-./hush setup diagnose-uinput
-
-# Automated fix (requires sudo)
-./hush setup uinput --auto-fix
-```
-
-### 4. Test Everything
-```bash
-# Test your setup
+# 5. Test your setup
 ./hush status --full
-
-# Test audio capture
-./hush test audio --duration 3
-
-# Test transcription
-./hush test transcription --file audio.wav
-
-# Test text insertion
-./hush test text-insertion
-
-# Full pipeline test
-./hush test pipeline
 ```
 
-### 5. Start Using Hush 🎉
+### First Run
+
 ```bash
-# Start intelligent listening mode (recommended)
+# Start intelligent listening mode
 ./hush listen
 
-# Or do a quick single recording
-./hush record --duration 10
-
-# Or use manual mode for multiple recordings
-./hush manual
+# Hold Ctrl+Alt+V, speak, then release - your text appears!
 ```
 
-**Pro tip:** Hold `Ctrl+Alt+V` in listen mode to record, release to transcribe and insert!
+**Optional:** Enable LLM text polishing for professional output:
+```bash
+echo "ANTHROPIC_API_KEY=your_api_key_here" > .env
+./hush listen  # Will automatically use Claude for polishing
+```
+
+---
 
 ## 🎮 Usage Modes
 
 ### 🎧 Intelligent Listening Mode (Recommended)
-Wispr Flow-style push-to-talk with intelligent text processing:
-```bash
-# Start intelligent listening mode with overlay
-./hush listen
 
-# With custom editing mode (light, medium, aggressive)
+The most powerful mode - Wispr Flow-style push-to-talk with smart text processing.
+
+```bash
+./hush listen
+```
+
+**Features:**
+- 🎯 Hold `Ctrl+Alt+V` to record, release to transcribe
+- 🎨 Floating overlay with real-time amplitude feedback
+- ✨ Automatic filler word removal
+- 🤖 Optional LLM polishing for professional text
+- 🗣️ Voice commands: "undo", "new paragraph", "cap that"
+
+**Options:**
+```bash
+# Aggressive text editing for formal writing
 ./hush listen --editing-mode aggressive
 
 # Disable text processing (raw transcription only)
@@ -112,27 +164,25 @@ Wispr Flow-style push-to-talk with intelligent text processing:
 ./hush listen --no-button
 ```
 
-**Features:**
-- 🎯 **Push-to-talk**: Hold `Ctrl+Alt+V` to record, release to transcribe
-- 🎨 **Visual overlay**: Floating window with real-time amplitude feedback
-- ✨ **Smart processing**: Automatic filler word removal (um, uh, like, etc.)
-- 🤖 **LLM polishing**: Optional Claude API integration for professional text
-- 🗣️ **Voice commands**: Say "undo", "new paragraph", "new line", "cap that", etc.
-- 📝 **Undo support**: Say "undo" to remove the last insertion
+### 🎙️ Quick Recording
 
-### 🎧 Quick Recording
+Single recording with automatic transcription and insertion.
+
 ```bash
-# Single recording (auto-transcribe and insert)
+# Record for 10 seconds
 ./hush record --duration 10
 
-# Record but don't insert text
+# Record but only print (don't insert)
 ./hush record --duration 5 --print-only
 
-# Save audio for debugging
+# Save audio file for debugging
 ./hush record --duration 3 --save-audio debug.wav
 ```
 
 ### 🔧 Manual Mode
+
+Interactive mode for multiple recordings.
+
 ```bash
 # Interactive manual recording
 ./hush manual
@@ -141,27 +191,11 @@ Wispr Flow-style push-to-talk with intelligent text processing:
 ./hush manual --count 3
 ```
 
+---
+
 ## ⚙️ Configuration
 
-### 🤖 Optional LLM Integration
-Enable intelligent text polishing with Claude API (optional):
-
-```bash
-# Create .env file in project directory
-echo "ANTHROPIC_API_KEY=your_api_key_here" > .env
-
-# Then use listen mode - it will automatically detect and use the API
-./hush listen
-```
-
-**Text Processing Modes:**
-- **Light**: Minimal editing, preserves your natural speech
-- **Medium** (default): Balanced - removes filler words, light polishing
-- **Aggressive**: Heavy editing for professional, formal text
-
-**Note:** LLM integration is completely optional. Without an API key, Hush uses fast rule-based processing.
-
-### 🗣️ Voice Commands Reference
+### 🗣️ Voice Commands
 
 Say these commands during or after transcription:
 
@@ -172,77 +206,140 @@ Say these commands during or after transcription:
 | `undo` | `undo that` | Remove last text insertion |
 | `delete that` | `scratch that` | Remove last text insertion |
 | `cap that` | `capitalize that` | Capitalize preceding text |
-| `all caps` | `upper case` | Convert preceding text to UPPERCASE |
+| `all caps` | `upper case` | Convert to UPPERCASE |
 
-**Example:** Say "Hello world new paragraph this is a test" to insert:
+**Example:**
 ```
+"Hello world new paragraph this is a test"
+→
 Hello world
 
 this is a test
 ```
 
-### ⚙️ System Management
-```bash
-# Install desktop integration
-./hush install --desktop --autostart
+### 🤖 LLM Integration (Optional)
 
-# Check system status  
+Enable intelligent text polishing with Claude API:
+
+```bash
+# Create .env file in project directory
+echo "ANTHROPIC_API_KEY=your_api_key_here" > .env
+```
+
+**Editing Modes:**
+- **Light** - Minimal editing, preserves natural speech
+- **Medium** (default) - Removes filler words, light polishing
+- **Aggressive** - Heavy editing for professional, formal text
+
+```bash
+./hush listen --editing-mode aggressive
+```
+
+### ⚙️ System Management
+
+```bash
+# Check system status
 ./hush status --full
+
+# List audio devices
+./hush status --devices
 
 # Show configuration
 ./hush status --config
 
-# List audio devices
-./hush status --devices
+# Install desktop integration
+./hush install --desktop --autostart
 ```
+
+---
 
 ## 🎯 Universal App Compatibility
 
-With UInput integration, Hush works with:
+Hush uses Linux UInput for hardware-level keyboard emulation, providing universal compatibility:
 
-✅ **All Desktop Apps** - Text editors, IDEs, browsers, chat apps  
-✅ **Password Fields** - KeePass, password managers, login forms  
-✅ **Virtual Machines** - VMware, VirtualBox, QEMU guests  
-✅ **Games & Fullscreen** - Any application, including anti-cheat protected  
-✅ **Terminal Applications** - SSH sessions, vim, nano, tmux  
-✅ **Secure Contexts** - Lock screens, sudo prompts, elevated apps  
-✅ **Cross-Platform** - Works on X11, Wayland, and console applications  
+✅ **Desktop Applications** - Text editors, IDEs, browsers, chat apps
+✅ **Terminal Applications** - SSH sessions, vim, nano, tmux
+✅ **Virtual Machines** - VMware, VirtualBox, QEMU guests
+✅ **Games & Fullscreen Apps** - Any application, including those with anti-cheat
+✅ **Secure Contexts** - Lock screens, sudo prompts, elevated applications
+✅ **Cross-Platform** - Works on X11, Wayland, and console applications
 
-## 🚀 GPU Acceleration
+---
 
-**CUDA Support:** Hush automatically detects and uses NVIDIA GPUs for significantly faster transcription.
+## 🚀 Performance
 
-### Requirements
-- NVIDIA GPU (GTX 10-series or newer recommended)
-- CUDA toolkit 12.0+ installed
-- NVIDIA drivers 520.x or newer
-
-### Performance Benefits
-- **Up to 10x faster** transcription on supported GPUs
-- **Real-time processing** for most model sizes
-- **Reduced CPU usage** for better system responsiveness
-
-```bash
-# Check GPU status
-./hush status --full
-# Look for: "CUDA0 total size = XX MB" in model loading
-```
-
-## 📊 Model Sizes & Performance
+### Model Sizes & Speed
 
 | Model  | Size    | CPU Speed | GPU Speed | Accuracy | Use Case |
 |--------|---------|-----------|-----------|----------|-----------|
 | Tiny   | 75 MB   | ~2-3s     | ~0.3s     | Basic    | Quick testing, commands |
-| Base   | 145 MB  | ~4-6s     | ~0.5s     | Good     | **Recommended** general use |
+| **Base**   | **145 MB**  | **~4-6s**     | **~0.5s**     | **Good**     | **Recommended for general use** |
 | Small  | 466 MB  | ~8-12s    | ~0.8s     | Better   | Higher accuracy needs |
 | Medium | 1.5 GB  | ~15-25s   | ~1.5s     | High     | Professional use |
 | Large  | 2.9 GB  | ~30-45s   | ~2.5s     | Highest  | Maximum accuracy |
 
 *Performance measured on RTX 4080 SUPER with 3-second audio clips*
 
+### GPU Acceleration
+
+**CUDA Support:** Hush automatically detects and uses NVIDIA GPUs.
+
+**Requirements:**
+- NVIDIA GPU (GTX 10-series or newer)
+- CUDA toolkit 12.0+
+- NVIDIA drivers 520.x or newer
+
+**Benefits:**
+- Up to 10x faster transcription
+- Real-time processing for most models
+- Reduced CPU usage
+
+```bash
+# Check GPU status
+./hush status --full | grep -i cuda
+# Look for: "use gpu = 1" and "CUDA0 total size"
+```
+
+---
+
+## 📚 Documentation
+
+### Quick Navigation
+See [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for complete documentation guide.
+
+### User Guides
+- **[Voice Commands Guide](docs/VOICE_COMMANDS.md)** - Complete command reference
+- **[UInput Setup Guide](docs/uinput-setup.md)** - Detailed setup and troubleshooting
+- **[UInput Quick Reference](docs/uinput-quick-reference.md)** - Fast setup guide
+- **[Model Management](models/README.md)** - Downloading and managing models
+
+### Developer Documentation
+- **[Architecture Overview](docs/ARCHITECTURE.md)** - System architecture and design
+- **[Design Patterns](docs/architecture/DESIGN_PATTERNS.md)** - Core trait abstractions
+- **[Architecture Decision Records](docs/architecture/adrs/)** - Key architectural decisions
+
+---
+
+## 💻 System Requirements
+
+### Minimum Requirements
+- **OS:** Ubuntu 20.04+ or compatible Linux distribution
+- **RAM:** 4GB (8GB recommended)
+- **Storage:** 1GB free space for models
+- **Audio:** Microphone or audio input device
+
+### Recommended for GPU Acceleration
+- **GPU:** NVIDIA GTX 1060 or newer
+- **VRAM:** 4GB+ (for larger models)
+- **CUDA:** 12.0+ toolkit
+- **Drivers:** NVIDIA 520.x or newer
+
+---
+
 ## 🔧 Troubleshooting
 
-### ⌨️ Text Insertion Not Working?
+### Text Insertion Not Working?
+
 ```bash
 # Comprehensive diagnosis
 ./hush setup diagnose-uinput
@@ -257,164 +354,58 @@ sudo modprobe uinput && sudo chmod 666 /dev/uinput
 ./hush test text-insertion
 ```
 
-### 🎤 Audio Issues?
+### Audio Issues?
+
 ```bash
 # List available devices
 ./hush status --devices
 
 # Test audio capture
-./hush test audio --duration 3 --list-devices
+./hush test audio --duration 3
 
 # Test specific device
 ./hush test audio --device "pulse" --duration 2
 ```
 
-### 🧠 Model Issues?
-```bash
-# List downloaded models
-./hush models list
+### GPU Not Working?
 
-# Download missing models
-./hush models download base
-
-# Verify model integrity
-./hush models verify
-
-# Test transcription
-./hush test transcription --all-models
-```
-
-### 🚀 GPU Not Working?
 ```bash
 # Check CUDA status
 nvidia-smi
 
 # Check if Hush detects GPU
 ./hush status --full | grep -i cuda
+# Expected: "use gpu = 1" and "CUDA0 total size"
 
-# Expected output: "use gpu = 1" and "CUDA0 total size"
-
-# Test with/without GPU
+# Test transcription performance
 ./hush test transcription --timing
 ```
 
-### 📊 Performance Issues?
+### More Help
+
+- Check the [UInput Setup Guide](docs/uinput-setup.md) for detailed troubleshooting
+- Enable verbose logging: `./hush -vv record --duration 3`
+- View logs: `tail -f ~/.local/share/hush/logs/*.log`
+
+---
+
+## 🛠️ Development
+
+### Building from Source
+
 ```bash
-# Check system resources
-./hush status --full
-
-# Enable verbose logging
-./hush -vv record --duration 3 --print-only
-
-# Check logs
-tail -f ~/.local/share/hush/logs/*.log
-```
-
-## 🆆 Advanced Features
-
-### 🎨 Overlay UI
-
-The intelligent listening mode includes a floating overlay window:
-
-**Visual States:**
-- **Idle**: Tiny button (10×20px) at bottom-center (optional, use `--no-button` to hide)
-- **Recording**: Expanded bar (80×20px) with real-time amplitude visualization
-- **Processing**: Processing indicator while transcribing
-- **Success/Error**: Brief feedback message before returning to idle
-
-**Customization:**
-- Position: Bottom-center by default
-- Auto-hide: Success/error messages automatically fade
-- Minimal: Designed to stay out of your way
-
-### 📊 Comprehensive Logging
-```bash
-# Enable different logging levels
-./hush -v status          # Verbose
-./hush -vv record         # Debug  
-./hush -vvv test pipeline # Trace
-
-# View structured logs
-tail -f ~/.local/share/hush/logs/*.log
-
-# Log analysis
-grep "error" ~/.local/share/hush/logs/*.log
-grep "performance" ~/.local/share/hush/logs/*.log
-```
-
-### ⚙️ Configuration
-```bash
-# Custom config file
-./hush -c ~/.config/hush/custom.toml status
-
-# Show current configuration
-./hush status --config
-
-# Disable notifications
-./hush --no-notifications start
-```
-
-### 📊 Performance Monitoring
-Hush includes built-in performance tracking:
-- **Session correlation** - Track operations across the entire pipeline
-- **Request tracing** - Follow audio from capture to text insertion
-- **System metrics** - CPU usage, memory usage, processing times
-- **GPU utilization** - Monitor CUDA performance
-
-### 🗺 Component Testing
-```bash
-# Test individual components
-./hush test audio --save audio_test.wav
-./hush test transcription --file audio_test.wav --timing
-./hush test text-insertion --text "Hello World"
-./hush test hotkeys --combination "F11" --duration 10
-
-# Comprehensive system test
-./hush test all --benchmarks --output results.json
-```
-
-## 📚 Documentation
-
-**Quick Navigation**: See [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for complete documentation guide
-
-### User Guides
-- **[Voice Commands Guide](docs/VOICE_COMMANDS.md)** - Complete command reference
-- **[UInput Quick Reference](docs/uinput-quick-reference.md)** - Fast setup guide
-- **[UInput Setup Guide](docs/uinput-setup.md)** - Detailed setup and troubleshooting
-- **[Model Management](models/README.md)** - Downloading and managing models
-
-### Developer Documentation
-- **[Architecture Overview](docs/ARCHITECTURE.md)** - System architecture and design
-- **[Design Patterns](docs/architecture/DESIGN_PATTERNS.md)** - Core trait abstractions
-- **[Architecture Decision Records](docs/architecture/adrs/)** - Key architectural decisions
-- **[Recent Features](POLISH_AND_DISTRIBUTION.md)** - Latest enhancements (2025-11-14)
-
-### Archive (Historical Reference)
-- **[Testing Guide](docs/archive/TESTING_VOICE_TO_TEXT.md)** - Historical testing instructions
-- **[UInput Integration Notes](docs/archive/UINPUT_INTEGRATION.md)** - Original implementation notes
-- **[Simple Whisper Integration](docs/archive/SIMPLE_WHISPER_INTEGRATION.md)** - Model integration history
-
-## 🏗️ Development
-
-### Quick Start
-```bash
-# Clone and build
-git clone <repo-url>
+# Clone repository
+git clone https://github.com/andymai/hush.git
 cd hush
-make build
 
-# Download a model and test
-./hush models download tiny
-./hush status --full
-```
-
-### Development Setup
-```bash
 # Install dependencies
 sudo apt install libasound2-dev pkg-config
 
-# Build with full features
+# Build debug version
 make build
+
+# Build optimized release version
+make release
 
 # Run tests
 cargo test
@@ -424,69 +415,105 @@ cargo clippy
 cargo fmt
 ```
 
-### Building from Source
-```bash
-# Debug build
-make build
+### Project Structure
 
-# Release build (optimized)
-make release
-
-# Clean build artifacts
-make clean
+```
+hush/
+├── src/
+│   ├── adapters/         # External integrations (audio, text, hotkeys)
+│   ├── application/      # Application orchestration
+│   ├── audio/            # Audio capture and feedback
+│   ├── cli/              # Command-line interface
+│   ├── core/             # Core traits and types
+│   ├── overlay/          # Visual overlay UI
+│   ├── text_processing/  # Intelligent text processing
+│   ├── transcription/    # Whisper integration
+│   └── ...
+├── docs/                 # Documentation
+├── models/               # Whisper model storage
+└── tests/                # Integration tests
 ```
 
-## 💻 System Requirements
+### Testing
 
-### Minimum Requirements
-- **OS:** Ubuntu 20.04+ (or compatible Linux distribution)
-- **RAM:** 4GB (8GB recommended)
-- **Storage:** 1GB free space for models
-- **Audio:** Microphone or audio input device
-
-### Recommended for GPU Acceleration
-- **GPU:** NVIDIA GTX 1060 or newer
-- **VRAM:** 4GB+ (for larger models)
-- **CUDA:** 12.0+ toolkit
-- **Drivers:** NVIDIA 520.x or newer
-
-### Dependencies
 ```bash
-# Ubuntu/Debian
-sudo apt install libasound2-dev pkg-config
+# Test individual components
+./hush test audio --duration 3
+./hush test transcription --file audio.wav
+./hush test text-insertion
 
-# For GPU support, install CUDA toolkit
-# Follow NVIDIA's official CUDA installation guide
+# Full pipeline test
+./hush test pipeline
+
+# Run benchmarks
+cargo bench
 ```
-
-## 🎆 What's New
-
-**Latest features:**
-- 🎧 **Intelligent Listening Mode** - Wispr Flow-style overlay with push-to-talk (Ctrl+Alt+V)
-- 🎨 **Visual Overlay** - Floating window with real-time amplitude feedback
-- ✨ **Smart Text Processing** - Automatic filler word removal and LLM polishing
-- 🗣️ **Voice Commands** - Undo, formatting, and text manipulation via voice
-- 📝 **Undo Support** - Remove last insertion with "undo" command
-- 🤖 **LLM Integration** - Optional Claude API for professional text polishing
-- 🚀 **CUDA GPU Acceleration** - Up to 10x faster transcription
-- 📊 **Structured Logging** - Advanced debugging and performance monitoring
-- 🔧 **Automated Setup** - One-command UInput configuration
 
 ---
+
+## 🤝 Contributing
+
+We welcome contributions! Whether it's:
+
+- 🐛 Bug reports
+- 💡 Feature requests
+- 📝 Documentation improvements
+- 🔧 Code contributions
+
+### How to Contribute
+
+1. **Fork the repository**
+2. **Create a feature branch** (`git checkout -b feature/amazing-feature`)
+3. **Make your changes**
+4. **Run tests** (`cargo test`)
+5. **Check formatting** (`cargo fmt && cargo clippy`)
+6. **Commit your changes** (`git commit -m 'Add amazing feature'`)
+7. **Push to branch** (`git push origin feature/amazing-feature`)
+8. **Open a Pull Request**
+
+### Development Guidelines
+
+- Follow Rust best practices and idioms
+- Add tests for new features
+- Update documentation as needed
+- Keep commits focused and descriptive
+- Ensure all tests pass before submitting PR
+
+### Code of Conduct
+
+Be respectful, inclusive, and constructive. We're all here to build something useful together.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- **[OpenAI Whisper](https://github.com/openai/whisper)** - State-of-the-art speech recognition models
+- **[candle](https://github.com/huggingface/candle)** - Minimalist ML framework for Rust
+- **[whisper-rs](https://github.com/tazz4843/whisper-rs)** - Rust bindings for Whisper
+- **[Anthropic Claude](https://www.anthropic.com/claude)** - Optional LLM for text polishing
+- **The Rust Community** - For excellent tools and libraries
+
+---
+
+<div align="center">
 
 **Ready to experience intelligent voice-to-text?**
 
 ```bash
-# Build and setup
 make build
 ./hush models download base
 ./hush setup uinput --quick
-
-# Optional: Add Claude API for text polishing
-echo "ANTHROPIC_API_KEY=your_key" > .env
-
-# Start intelligent listening mode
 ./hush listen
 ```
 
-✨ **Works everywhere. Processes intelligently. Accelerated by GPU.**
+**Privacy-first • GPU-accelerated • Works everywhere**
+
+[⬆ Back to Top](#-hush)
+
+</div>
