@@ -6,7 +6,6 @@ pub mod application;
 // Existing modules (legacy - will be migrated)
 pub mod audio;
 pub mod config;
-pub mod error;
 pub mod hotkey;
 pub mod model_downloader;
 pub mod text;
@@ -32,7 +31,6 @@ pub mod logging;
 // Re-export main types for convenience (legacy)
 pub use audio::{AudioCapture, AudioFeedback};
 pub use config::{Config, ConfigWatcher};
-pub use error::{ErrorHandler, HushError as LegacyHushError};
 pub use hotkey::{HotkeyEvent, HotkeyManager};
 pub use text::TextInserter;
 pub use transcription::{WhisperTranscriber, TranscriptionResult as LegacyTranscriptionResult};
