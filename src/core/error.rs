@@ -142,6 +142,9 @@ pub enum StateError {
 
     #[error("Operation not allowed in current state: {state}")]
     OperationNotAllowed { state: String },
+
+    #[error("State lock poisoned: {0}")]
+    LockPoisoned(String),
 }
 
 /// Error severity for recovery decisions
