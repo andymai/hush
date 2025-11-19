@@ -150,5 +150,6 @@ The `.ai/` directory is a **reference implementation** of the AI Coding Agent Pr
 ---
 
 **For the full protocol, see:** `CLAUDE.md` in the project root
-**For project architecture:** `docs/ARCHITECTURE.md`
+**For project architecture:** `.ai/knowledge/architecture.md`
 **For coding conventions:** `.ai/knowledge/conventions.md`
+**For all knowledge files:** `.ai/knowledge/` directory

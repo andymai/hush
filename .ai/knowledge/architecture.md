@@ -1,10 +1,9 @@
 # Hush Architecture Summary
 
 **Last Updated:** 2025-11-19
-**Status:** Quick reference for AI agents
-**Full Documentation:** `docs/ARCHITECTURE.md`, `docs/architecture/DESIGN_PATTERNS.md`
+**Status:** Complete reference for AI agents
 
-This is a condensed architecture summary for AI agents. For complete details, see `docs/` directory.
+This is the complete architecture reference for AI agents working on Hush. All architecture details are consolidated in this file.
 
 ---
 
@@ -594,10 +593,11 @@ fd "adapter" src/adapters/ --type f
 
 ---
 
-**For full details, always refer to:**
-- `docs/ARCHITECTURE.md` - Complete architecture documentation
-- `docs/architecture/DESIGN_PATTERNS.md` - Design pattern details
-- `docs/architecture/adrs/` - Architecture Decision Records
-- `.ai/knowledge/conventions.md` - Project conventions
+**For additional details, refer to:**
+- `.ai/knowledge/conventions.md` - Coding conventions and patterns
+- `.ai/knowledge/error-handling.md` - Error handling guide
+- `.ai/knowledge/adr-summary.md` - Architecture decisions
+- `.ai/knowledge/uinput-guide.md` - UInput text insertion guide
+- `.ai/knowledge/voice-commands.md` - Voice commands reference
 
 **Remember:** Traits define the contract, adapters provide the implementation, mocks enable testing. Always search before assuming.
