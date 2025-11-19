@@ -155,16 +155,11 @@ async fn create_real_app(
 
     // Transcription
     info!(
-        "  🤖 Transcriber: {} (CUDA: {})",
-        config.transcription.model_size, config.transcription.use_cuda
+        "  🤖 Transcriber: {} (GPU auto-detect)",
+        config.transcription.model_size
     );
-    let transcriber = Box::new(
-        WhisperAdapter::new(
-            &config.transcription.model_path,
-            config.transcription.use_cuda,
-        )
-        .await?,
-    );
+    // WhisperAdapter now auto-detects GPU (CUDA on Linux, Metal on macOS)
+    let transcriber = Box::new(WhisperAdapter::new(&config.transcription.model_path).await?);
 
     // Text output
     info!("  ⌨️  Text Output: X11");
