@@ -190,7 +190,9 @@ async fn run_setup_wizard(auto: bool) -> Result<()> {
 
     if !auto {
         println!("Press Enter to continue, or Ctrl+C to cancel...");
-        std::io::stdin().read_line(&mut String::new()).unwrap();
+        std::io::stdin()
+            .read_line(&mut String::new())
+            .context("Failed to read user input")?;
     }
 
     // Step 1: UInput setup
@@ -200,7 +202,9 @@ async fn run_setup_wizard(auto: bool) -> Result<()> {
     if !auto {
         println!("\nHave you completed the UInput setup? (y/N)");
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
+        std::io::stdin()
+            .read_line(&mut input)
+            .context("Failed to read user input")?;
         if !input.trim().to_lowercase().starts_with('y') {
             println!("⚠️ Please complete UInput setup before continuing.");
             return Ok(());

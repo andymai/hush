@@ -171,7 +171,9 @@ async fn remove_model(model_size: &str, yes: bool) -> Result<()> {
         if !yes {
             println!("Are you sure you want to remove all models? (y/N)");
             let mut input = String::new();
-            std::io::stdin().read_line(&mut input).unwrap();
+            std::io::stdin()
+                .read_line(&mut input)
+                .context("Failed to read user input")?;
             if !input.trim().to_lowercase().starts_with('y') {
                 println!("Cancelled.");
                 return Ok(());
@@ -202,7 +204,9 @@ async fn remove_model(model_size: &str, yes: bool) -> Result<()> {
             if !yes {
                 println!("Are you sure you want to remove '{}'? (y/N)", model_size);
                 let mut input = String::new();
-                std::io::stdin().read_line(&mut input).unwrap();
+                std::io::stdin()
+                    .read_line(&mut input)
+                    .context("Failed to read user input")?;
                 if !input.trim().to_lowercase().starts_with('y') {
                     println!("Cancelled.");
                     return Ok(());
