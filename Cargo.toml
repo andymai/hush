@@ -12,7 +12,9 @@ default-run = "hush"
 [features]
 default = ["notifications", "system-tray", "cuda"]
 notifications = ["dep:notify-rust"]
-system-tray = ["dep:ksni"]
+# System tray uses platform-specific implementations
+# ksni on Linux, tray-icon on macOS
+system-tray = []
 cuda = [
     "candle-core/cuda",
     "candle-nn/cuda",
@@ -46,12 +48,9 @@ regex = "1.10"  # Pattern matching for filler words
 # LLM integration for text polishing
 dotenvy = "0.15"  # Environment variable loading
 
-# System integration
-x11rb = "0.13"
+# System integration (cross-platform)
 enigo = "0.2"  # Keep at 0.2 - 0.6 has major breaking changes
 libc = "0.2"
-# Kernel-level keyboard emulation
-input-linux = "0.7"
 
 # Hotkey management
 global-hotkey = "0.6"  # Keep at 0.6 - 0.7 may have breaking changes
@@ -67,11 +66,10 @@ egui = "0.23"  # Must match egui_overlay 0.5 dependency
 egui_overlay = "0.5"
 raw-window-handle = "0.5"  # For window creation
 
-# System notifications (optional - requires libdbus)
+# System notifications (optional - requires libdbus on Linux)
 notify-rust = { version = "4.10", optional = true }
 
-# System tray integration (optional - requires libdbus)
-ksni = { version = "0.2", optional = true }
+# Clipboard (cross-platform)
 arboard = "3.0"
 
 # Application directories (XDG)
@@ -100,6 +98,30 @@ once_cell = "1.19"
 parking_lot = "0.12"
 tempfile = "3.8"
 serde_json = "1.0"
+
+# ============================================================================
+# Platform-specific dependencies
+# ============================================================================
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# X11 window system
+x11rb = "0.13"
+
+# Kernel-level keyboard emulation (uinput)
+input-linux = "0.7"
+
+# System tray integration (DBus-based)
+ksni = { version = "0.2", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS system frameworks
+cocoa = "0.25"              # AppKit/Cocoa bindings
+core-graphics = "0.23"      # CGEvent API for keyboard simulation
+core-foundation = "0.9"     # CoreFoundation framework
+objc = "0.2"                # Objective-C runtime
+
+# System tray integration (macOS native)
+tray-icon = { version = "0.14", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
