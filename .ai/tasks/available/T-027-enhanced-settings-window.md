@@ -73,35 +73,35 @@ This is Phase 1 of the UI expansion project. The settings window will serve as t
 
 ## Reference Documentation
 
+- **`.ai/tasks/available/_UI-ARCHITECTURE-REFERENCE.md`** - **START HERE** - Actual Hush patterns
 - egui docs: https://docs.rs/egui
 - egui examples: https://github.com/emilk/egui/tree/master/examples
-- `.ai/knowledge/rust-ui-frameworks-research.md` - UI framework research
-- `.ai/knowledge/conventions.md` - Coding standards
+- `.ai/knowledge/rust-ui-frameworks-research.md` - Framework comparison
+- `.ai/knowledge/conventions.md` - General coding standards
 
-## Existing Patterns to Follow
+## Architecture Patterns (from _UI-ARCHITECTURE-REFERENCE.md)
 
-**Discover patterns via grep before writing code:**
+**Must follow these discovered Hush patterns:**
 
-```bash
-# Find actual state management patterns
-rg "pub enum.*State" src/overlay/ --type rust
+1. **State Machine with Enum** (not OOP traits)
+   - See: `src/overlay/state.rs` - `OverlayState` enum
+   - Apply: Create `SettingsWindowState` enum
 
-# Find actual config patterns
-rg "pub struct.*Config" src/config/ --type rust
+2. **Functional Rendering** (pure functions, pattern matching)
+   - See: `src/overlay/ui.rs` - `render_overlay()` function
+   - Apply: Create `render_settings_window()` function
 
-# Find actual UI rendering patterns
-rg "render_" src/overlay/ui.rs --type rust
+3. **Action Enum** (return intent, not side effects)
+   - See: `src/overlay/ui.rs` - `OverlayAction` enum
+   - Apply: Create `SettingsAction` enum
 
-# Find existing traits for reference
-rg "pub trait" src/core/traits.rs --type rust
-```
+4. **Config Pattern** (flat structure with serde)
+   - See: `src/config/settings.rs` - `Config` struct
+   - Apply: Extend existing `Config` with `UiConfig`
 
-**Key patterns from existing code:**
-- State-based UI rendering (see `src/overlay/ui.rs`: `render_overlay()`)
-- Enum state machines (see `src/overlay/state.rs`: `OverlayState`)
-- Functional rendering with pattern matching (not OOP trait objects)
-- Config structs with serde (see `src/config/settings.rs`)
-- System dark mode detection for theme (new requirement)
+5. **System Theme Detection**
+   - New requirement: `ThemeMode::System` auto-detects dark mode
+   - Use `dark-light` crate for platform detection
 
 ## Estimated Complexity
 

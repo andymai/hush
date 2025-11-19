@@ -84,29 +84,19 @@ This is Phase 2, Step 1 of the UI expansion project. It builds on T-027 (Enhance
 
 ## Reference Documentation
 
+- **`.ai/tasks/available/_UI-ARCHITECTURE-REFERENCE.md`** - UI patterns (required reading)
 - Model specs: README.md (lines 341-349)
 - Model manager: `src/bin/model-manager.rs`
 - Whisper integration: `src/transcription/whisper.rs`
 - `.ai/knowledge/conventions.md` - Coding standards
 
-## Existing Patterns to Follow
+## Architecture Patterns
 
-Search the codebase for patterns before implementing:
-```bash
-# Find config patterns
-rg "pub struct.*Config" src/config/ --type rust
-
-# Find state patterns
-rg "pub enum.*State" src/ --type rust
-
-# Find error handling patterns
-rg "pub enum.*Error" src/core/error.rs --type rust
-```
-
-**Follow existing Hush patterns:**
-- State-based UI (see `src/overlay/ui.rs`)
-- Structured error types (see `src/core/error.rs`)
-- Config with serde (see `src/config/settings.rs`)
+Follow patterns from _UI-ARCHITECTURE-REFERENCE.md:
+- Functional rendering with pattern matching (section 2)
+- Action enum for UI events (section 3)
+- Config pattern with serde (section 4)
+- Pure functions, no side effects in render
 
 ## Estimated Complexity
 
