@@ -1,53 +1,69 @@
+use super::config::EditingMode;
+use once_cell::sync::Lazy;
 /// Rule-based filler word removal
 use regex::Regex;
-use once_cell::sync::Lazy;
-use super::config::EditingMode;
 
 /// Common filler words and phrases to remove
-static LIGHT_FILLERS: &[&str] = &[
-    "um", "uh", "hmm", "er", "ah",
-];
+static LIGHT_FILLERS: &[&str] = &["um", "uh", "hmm", "er", "ah"];
 
 static MEDIUM_FILLERS: &[&str] = &[
-    "um", "uh", "hmm", "er", "ah",
-    "like", "you know", "i mean", "sort of", "kind of",
-    "basically", "actually", "literally", "totally",
+    "um",
+    "uh",
+    "hmm",
+    "er",
+    "ah",
+    "like",
+    "you know",
+    "i mean",
+    "sort of",
+    "kind of",
+    "basically",
+    "actually",
+    "literally",
+    "totally",
 ];
 
 static AGGRESSIVE_FILLERS: &[&str] = &[
-    "um", "uh", "hmm", "er", "ah",
-    "like", "you know", "i mean", "sort of", "kind of",
-    "basically", "actually", "literally", "totally",
-    "just", "really", "very", "quite",
-    "i think", "i guess", "maybe", "perhaps",
-    "anyway", "so yeah", "well",
+    "um",
+    "uh",
+    "hmm",
+    "er",
+    "ah",
+    "like",
+    "you know",
+    "i mean",
+    "sort of",
+    "kind of",
+    "basically",
+    "actually",
+    "literally",
+    "totally",
+    "just",
+    "really",
+    "very",
+    "quite",
+    "i think",
+    "i guess",
+    "maybe",
+    "perhaps",
+    "anyway",
+    "so yeah",
+    "well",
 ];
 
 /// Precompiled regex patterns
-static MULTIPLE_SPACES: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\s+").unwrap()
-});
+static MULTIPLE_SPACES: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+").unwrap());
 
-static SPACE_BEFORE_PUNCTUATION: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\s+([,.!?;:])").unwrap()
-});
+static SPACE_BEFORE_PUNCTUATION: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+([,.!?;:])").unwrap());
 
 // Multiple patterns for repeated punctuation (Rust regex doesn't support backreferences)
-static REPEATED_PERIODS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\.{2,}").unwrap()
-});
+static REPEATED_PERIODS: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.{2,}").unwrap());
 
-static REPEATED_COMMAS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r",{2,}").unwrap()
-});
+static REPEATED_COMMAS: Lazy<Regex> = Lazy::new(|| Regex::new(r",{2,}").unwrap());
 
-static REPEATED_EXCLAMATION: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"!{2,}").unwrap()
-});
+static REPEATED_EXCLAMATION: Lazy<Regex> = Lazy::new(|| Regex::new(r"!{2,}").unwrap());
 
-static REPEATED_QUESTION: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\?{2,}").unwrap()
-});
+static REPEATED_QUESTION: Lazy<Regex> = Lazy::new(|| Regex::new(r"\?{2,}").unwrap());
 
 pub struct FillerWordRemover {
     light_patterns: Vec<Regex>,
@@ -66,12 +82,15 @@ impl FillerWordRemover {
 
     /// Compile filler words into regex patterns
     fn compile_patterns(fillers: &[&str]) -> Vec<Regex> {
-        fillers.iter().map(|filler| {
-            // Match the filler word with word boundaries
-            // Case insensitive, with optional surrounding spaces
-            let pattern = format!(r"(?i)\b{}\b", regex::escape(filler));
-            Regex::new(&pattern).unwrap()
-        }).collect()
+        fillers
+            .iter()
+            .map(|filler| {
+                // Match the filler word with word boundaries
+                // Case insensitive, with optional surrounding spaces
+                let pattern = format!(r"(?i)\b{}\b", regex::escape(filler));
+                Regex::new(&pattern).unwrap()
+            })
+            .collect()
     }
 
     /// Remove filler words based on editing mode
@@ -94,7 +113,9 @@ impl FillerWordRemover {
         result = MULTIPLE_SPACES.replace_all(&result, " ").to_string();
 
         // Fix punctuation spacing
-        result = SPACE_BEFORE_PUNCTUATION.replace_all(&result, "$1").to_string();
+        result = SPACE_BEFORE_PUNCTUATION
+            .replace_all(&result, "$1")
+            .to_string();
 
         // Remove repeated punctuation (each type separately)
         result = REPEATED_PERIODS.replace_all(&result, ".").to_string();
@@ -141,10 +162,7 @@ mod tests {
     #[test]
     fn test_light_mode() {
         let remover = FillerWordRemover::new();
-        let result = remover.remove(
-            "um so I think we should uh do this",
-            EditingMode::Light
-        );
+        let result = remover.remove("um so I think we should uh do this", EditingMode::Light);
 
         // Should remove um and uh but keep "I think"
         assert!(!result.contains("um"));
@@ -157,7 +175,7 @@ mod tests {
         let remover = FillerWordRemover::new();
         let result = remover.remove(
             "um so like I think you know we should uh do this",
-            EditingMode::Medium
+            EditingMode::Medium,
         );
 
         // Should remove more fillers
@@ -170,10 +188,7 @@ mod tests {
     #[test]
     fn test_capitalization() {
         let remover = FillerWordRemover::new();
-        let result = remover.remove(
-            "um hello world",
-            EditingMode::Light
-        );
+        let result = remover.remove("um hello world", EditingMode::Light);
 
         assert!(result.starts_with("H"));
     }
@@ -181,10 +196,7 @@ mod tests {
     #[test]
     fn test_ending_punctuation() {
         let remover = FillerWordRemover::new();
-        let result = remover.remove(
-            "um hello world",
-            EditingMode::Light
-        );
+        let result = remover.remove("um hello world", EditingMode::Light);
 
         assert!(result.ends_with('.'));
     }
@@ -192,10 +204,7 @@ mod tests {
     #[test]
     fn test_whitespace_normalization() {
         let remover = FillerWordRemover::new();
-        let result = remover.remove(
-            "um   hello    world   um",
-            EditingMode::Light
-        );
+        let result = remover.remove("um   hello    world   um", EditingMode::Light);
 
         assert!(!result.contains("  ")); // No double spaces
     }

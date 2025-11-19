@@ -1,8 +1,11 @@
-/// Simple model manager for downloading and managing GGML whisper models
-use hush::{Result, model_downloader::{ModelDownloader, WhisperModel}};
-use std::path::PathBuf;
-use tracing::{info, error};
 use clap::{Parser, Subcommand};
+/// Simple model manager for downloading and managing GGML whisper models
+use hush::{
+    model_downloader::{ModelDownloader, WhisperModel},
+    Result,
+};
+use std::path::PathBuf;
+use tracing::{error, info};
 
 #[derive(Parser)]
 #[command(name = "simple-model-manager")]
@@ -50,9 +53,7 @@ impl From<ModelType> for WhisperModel {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     let cli = Cli::parse();
 
@@ -73,7 +74,11 @@ async fn main() -> Result<()> {
 
             let models = downloader.list_models().await;
             for (model, exists) in &models {
-                let status = if *exists { "✅ Downloaded" } else { "❌ Not available" };
+                let status = if *exists {
+                    "✅ Downloaded"
+                } else {
+                    "❌ Not available"
+                };
                 let size_info = match model {
                     WhisperModel::Tiny => " (~39 MB)",
                     WhisperModel::Base => " (~142 MB)",
@@ -81,13 +86,19 @@ async fn main() -> Result<()> {
                     WhisperModel::Medium => " (~1.5 GB)",
                     WhisperModel::Large => " (~2.9 GB)",
                 };
-                
-                info!("  {:<20} {} {}", 
-                      format!("{}{}", model.filename(), size_info), 
-                      status,
-                      if *exists { "" } else { " - Use 'download' command to get it" });
+
+                info!(
+                    "  {:<20} {} {}",
+                    format!("{}{}", model.filename(), size_info),
+                    status,
+                    if *exists {
+                        ""
+                    } else {
+                        " - Use 'download' command to get it"
+                    }
+                );
             }
-            
+
             if let Some(best_model) = downloader.find_best_available_model().await {
                 info!("");
                 info!("🎯 Best available model: {}", best_model.filename());
@@ -97,18 +108,18 @@ async fn main() -> Result<()> {
                 info!("Use 'simple-model-manager download base' to get started.");
             }
         },
-        
+
         Commands::Download { model } => {
             let whisper_model = WhisperModel::from(model);
             info!("📥 Downloading model: {}", whisper_model.filename());
             info!("Description: {}", whisper_model.description());
             info!("");
-            
+
             match downloader.ensure_model(&whisper_model).await {
                 Ok(model_path) => {
                     info!("✅ Model downloaded successfully!");
                     info!("Location: {:?}", model_path);
-                    
+
                     // Check file size
                     if let Ok(metadata) = std::fs::metadata(&model_path) {
                         let size_mb = metadata.len() as f64 / 1_048_576.0;
@@ -118,21 +129,21 @@ async fn main() -> Result<()> {
                 Err(e) => {
                     error!("❌ Failed to download model: {}", e);
                     std::process::exit(1);
-                }
+                },
             }
         },
-        
+
         Commands::Info => {
             info!("📁 Hush Models Information");
             info!("==========================");
             info!("Models directory: {:?}", models_dir);
             info!("Directory exists: {}", models_dir.exists());
-            
+
             if models_dir.exists() {
                 // Calculate total size of all models
                 let mut total_size = 0u64;
                 let mut file_count = 0u64;
-                
+
                 if let Ok(entries) = std::fs::read_dir(&models_dir) {
                     for entry in entries.flatten() {
                         if let Ok(metadata) = entry.metadata() {
@@ -143,13 +154,13 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                
+
                 info!("Total files: {}", file_count);
                 info!("Total size: {:.1} MB", total_size as f64 / 1_048_576.0);
             } else {
                 info!("Models directory will be created when first model is downloaded.");
             }
-            
+
             info!("");
             info!("💡 Quick start:");
             info!("  1. Download a model: simple-model-manager download base");

@@ -1,15 +1,14 @@
+use crate::config::settings::{HotkeyConfig, TranscriptionConfig};
+use crate::core::types::{BufferSize, Channels, SampleRate};
 /// Core trait abstractions for Hush components
 ///
 /// This module defines the interfaces for all major components,
 /// enabling dependency injection, testing, and extensibility.
-
 use crate::Result;
-use crate::core::types::{SampleRate, Channels, BufferSize};
-use crate::config::settings::{TranscriptionConfig, HotkeyConfig};
 use async_trait::async_trait;
 use std::time::Duration;
-use tokio::sync::mpsc;
 use std::time::SystemTime;
+use tokio::sync::mpsc;
 
 // ============================================================================
 // Audio Abstraction
@@ -27,9 +26,8 @@ pub struct AudioBuffer {
 impl AudioBuffer {
     /// Create audio buffer from raw values (for backward compatibility)
     pub fn new(samples: Vec<f32>, sample_rate: u32, channels: u16) -> Self {
-        let duration = Duration::from_secs_f32(
-            samples.len() as f32 / (sample_rate as f32 * channels as f32),
-        );
+        let duration =
+            Duration::from_secs_f32(samples.len() as f32 / (sample_rate as f32 * channels as f32));
         Self {
             samples,
             sample_rate,
@@ -280,19 +278,19 @@ pub struct TrayMenu {
 pub trait SystemTray: Send + Sync {
     /// Show the system tray icon
     async fn show(&mut self) -> Result<()>;
-    
+
     /// Hide the system tray icon
     async fn hide(&mut self) -> Result<()>;
-    
+
     /// Set the tray icon state
     fn set_icon(&mut self, state: TrayIconState);
-    
+
     /// Set the tooltip text
     fn set_tooltip(&mut self, text: &str);
-    
+
     /// Update the context menu
     fn update_menu(&mut self, menu: TrayMenu);
-    
+
     /// Get event receiver for tray interactions
     fn event_receiver(&self) -> &mpsc::UnboundedReceiver<TrayEvent>;
 }
@@ -302,16 +300,16 @@ pub trait SystemTray: Send + Sync {
 pub trait HistoryStore: Send + Sync {
     /// Add a new transcription entry
     async fn add_entry(&mut self, entry: TranscriptionEntry) -> Result<()>;
-    
+
     /// Get recent transcription entries (newest first)
     async fn get_recent(&self, limit: usize) -> Result<Vec<TranscriptionEntry>>;
-    
+
     /// Clear all history
     async fn clear(&mut self) -> Result<()>;
-    
+
     /// Get total number of stored entries
     fn len(&self) -> usize;
-    
+
     /// Check if history is empty
     fn is_empty(&self) -> bool {
         self.len() == 0
@@ -331,13 +329,13 @@ pub enum NotificationLevel {
 pub trait NotificationProvider: Send + Sync {
     /// Show a notification for completed transcription
     async fn show_transcription(&self, result: &TranscriptionResult) -> Result<()>;
-    
+
     /// Show a general status notification
     async fn show_status(&self, message: &str, level: NotificationLevel) -> Result<()>;
-    
+
     /// Check if notifications are enabled
     fn is_enabled(&self) -> bool;
-    
+
     /// Enable or disable notifications
     fn set_enabled(&mut self, enabled: bool);
 }

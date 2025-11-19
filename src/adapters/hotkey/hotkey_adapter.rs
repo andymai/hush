@@ -1,7 +1,6 @@
-/// Adapter for HotkeyManager to implement InputTrigger trait
-
-use crate::hotkey::{HotkeyManager, HotkeyEvent};
 use crate::core::traits::{InputTrigger, TriggerEvent};
+/// Adapter for HotkeyManager to implement InputTrigger trait
+use crate::hotkey::{HotkeyEvent, HotkeyManager};
 use crate::Result;
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -46,7 +45,7 @@ impl InputTrigger for HotkeyTriggerAdapter {
         // Convert HotkeyEvent to TriggerEvent
         // Note: This is a blocking receive, which isn't ideal for async
         // In a future version, we should make HotkeyManager use async channels
-        
+
         // Don't hold the lock across await points
         let recv_result = self.receiver.lock().try_recv();
         match recv_result {
@@ -56,7 +55,7 @@ impl InputTrigger for HotkeyTriggerAdapter {
                 // No event ready, yield to allow other tasks to run
                 tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
                 None
-            }
+            },
             Err(mpsc::TryRecvError::Disconnected) => None,
         }
     }

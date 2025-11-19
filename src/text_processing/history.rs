@@ -1,7 +1,6 @@
 /// Text insertion history for undo functionality
 ///
 /// Tracks text insertions so they can be undone via voice commands
-
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
@@ -74,9 +73,11 @@ impl InsertionHistory {
         }
 
         let entry = HistoryEntry::new(text.clone());
-        debug!("Recording insertion: '{}' ({} chars)",
-               if text.len() > 50 { &text[..50] } else { &text },
-               entry.char_count);
+        debug!(
+            "Recording insertion: '{}' ({} chars)",
+            if text.len() > 50 { &text[..50] } else { &text },
+            entry.char_count
+        );
 
         self.entries.push_back(entry);
 
@@ -94,7 +95,9 @@ impl InsertionHistory {
     /// Get the last insertion for undo
     /// Returns None if history is empty or last insertion is too old
     pub fn get_last(&self) -> Option<&HistoryEntry> {
-        self.entries.back().filter(|entry| entry.is_recent(self.max_age))
+        self.entries
+            .back()
+            .filter(|entry| entry.is_recent(self.max_age))
     }
 
     /// Remove and return the last insertion
@@ -108,9 +111,15 @@ impl InsertionHistory {
 
         let entry = self.entries.pop_back();
         if let Some(ref e) = entry {
-            info!("Popped last insertion: '{}' ({} chars)",
-                  if e.text.len() > 50 { &e.text[..50] } else { &e.text },
-                  e.char_count);
+            info!(
+                "Popped last insertion: '{}' ({} chars)",
+                if e.text.len() > 50 {
+                    &e.text[..50]
+                } else {
+                    &e.text
+                },
+                e.char_count
+            );
         }
         entry
     }

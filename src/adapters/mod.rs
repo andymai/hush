@@ -2,13 +2,12 @@
 ///
 /// These adapters wrap existing concrete types to implement the new traits,
 /// enabling gradual migration without breaking existing code.
-
 pub mod audio;
-pub mod transcription;
-pub mod text;
 pub mod hotkey;
+pub mod text;
+pub mod transcription;
 
 pub use audio::CpalAudioAdapter;
-pub use transcription::WhisperAdapter;
-pub use text::X11TextAdapter;
 pub use hotkey::HotkeyTriggerAdapter;
+pub use text::X11TextAdapter;
+pub use transcription::WhisperAdapter;

@@ -2,7 +2,6 @@
 ///
 /// These newtypes prevent mixing up parameters at compile time and provide
 /// semantic meaning to primitive types (following Effective Rust best practices).
-
 use crate::core::error::{AudioError, HushError};
 use std::fmt;
 

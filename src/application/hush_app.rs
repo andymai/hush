@@ -1,14 +1,13 @@
+use crate::core::state::{AppState, StateMachine};
 /// Refactored HushApp using trait-based dependency injection
 ///
 /// This is the new implementation that accepts trait objects instead of
 /// concrete types, enabling testing, mocking, and extensibility.
-
-use crate::core::traits::{AudioSource, Transcriber, TextOutput, InputTrigger, TriggerEvent};
-use crate::core::state::{AppState, StateMachine};
+use crate::core::traits::{AudioSource, InputTrigger, TextOutput, Transcriber, TriggerEvent};
 use crate::Result;
-use std::time::Instant;
-use tracing::{info, warn, error};
 use anyhow::Context;
+use std::time::Instant;
+use tracing::{error, info, warn};
 
 /// Main application orchestrator (trait-based version)
 pub struct HushApp {
@@ -31,7 +30,10 @@ pub struct HushApp {
 #[derive(Debug, Clone)]
 pub enum AppMode {
     Daemon,
-    OneShot { duration_secs: u64, print_only: bool },
+    OneShot {
+        duration_secs: u64,
+        print_only: bool,
+    },
     Manual,
 }
 
@@ -74,9 +76,10 @@ impl HushApp {
     pub async fn run(&mut self) -> Result<()> {
         match &self.mode {
             AppMode::Daemon => self.run_daemon_mode().await,
-            AppMode::OneShot { duration_secs, print_only } => {
-                self.run_oneshot_mode(*duration_secs, *print_only).await
-            }
+            AppMode::OneShot {
+                duration_secs,
+                print_only,
+            } => self.run_oneshot_mode(*duration_secs, *print_only).await,
             AppMode::Manual => self.run_manual_mode().await,
         }
     }
@@ -85,13 +88,18 @@ impl HushApp {
     async fn run_daemon_mode(&mut self) -> Result<()> {
         info!("🚀 Starting Hush in daemon mode");
         info!("📝 Instructions:");
-        info!("   • {} to start recording", self.input_trigger.description());
+        info!(
+            "   • {} to start recording",
+            self.input_trigger.description()
+        );
         info!("   • Release to stop and transcribe");
         info!("   • Text will be inserted at cursor");
         info!("   • Press Ctrl+C to quit");
 
         // Start listening for input trigger
-        self.input_trigger.start_listening().await
+        self.input_trigger
+            .start_listening()
+            .await
             .context("Failed to start input trigger listener")?;
         info!("🎯 Input trigger active - waiting for events...");
 
@@ -111,22 +119,22 @@ impl HushApp {
                         error!("Error starting recording: {:?}", e);
                         self.handle_error(e).await;
                     }
-                }
+                },
                 Some(TriggerEvent::StopRecording) => {
                     if let Err(e) = self.handle_recording_stop().await {
                         error!("Error stopping recording: {:?}", e);
                         self.handle_error(e).await;
                     }
-                }
+                },
                 Some(TriggerEvent::Cancel) => {
                     info!("Recording cancelled");
                     self.state.transition(AppState::Idle)?;
-                }
+                },
                 None => {
                     // Trigger closed, exit
                     info!("Input trigger closed, shutting down");
                     break;
-                }
+                },
             }
         }
 
@@ -175,7 +183,10 @@ impl HushApp {
         let result = self.transcriber.transcribe(&audio_buffer).await?;
         let transcription_time = transcription_start.elapsed();
 
-        info!("✅ Transcription completed in {:.2}s", transcription_time.as_secs_f32());
+        info!(
+            "✅ Transcription completed in {:.2}s",
+            transcription_time.as_secs_f32()
+        );
 
         let text = result.text.trim();
         if text.is_empty() {
@@ -241,7 +252,7 @@ impl HushApp {
                         continue;
                     }
                     info!("🎤 Recording... Press Enter to stop.");
-                }
+                },
                 AppState::Recording { .. } => {
                     // Stop and transcribe
                     if let Err(e) = self.handle_recording_stop().await {
@@ -250,10 +261,10 @@ impl HushApp {
                         continue;
                     }
                     info!("Press Enter to record again, 'q' to quit.");
-                }
+                },
                 _ => {
                     warn!("Cannot record in current state: {:?}", self.state.current());
-                }
+                },
             }
         }
 
@@ -276,11 +287,12 @@ impl HushApp {
         })?;
 
         // Start audio capture
-        self.audio.start_recording()
-            .with_context(|| format!(
+        self.audio.start_recording().with_context(|| {
+            format!(
                 "Failed to start recording on device '{}'",
                 self.audio.device_name()
-            ))?;
+            )
+        })?;
 
         // Log target window info if available
         if let Ok(Some(window)) = self.text_output.focused_window().await {
@@ -298,17 +310,24 @@ impl HushApp {
             return Ok(());
         }
 
-        let duration = self.state.current().recording_duration()
+        let duration = self
+            .state
+            .current()
+            .recording_duration()
             .unwrap_or_default();
 
-        info!("🛑 Stopping recording (duration: {:.2}s)...", duration.as_secs_f32());
+        info!(
+            "🛑 Stopping recording (duration: {:.2}s)...",
+            duration.as_secs_f32()
+        );
 
         // Stop audio capture
-        let audio_buffer = self.audio.stop_recording()
-            .with_context(|| format!(
+        let audio_buffer = self.audio.stop_recording().with_context(|| {
+            format!(
                 "Failed to stop recording on device '{}'",
                 self.audio.device_name()
-            ))?;
+            )
+        })?;
 
         self.state.transition(AppState::Transcribing {
             audio_duration: audio_buffer.duration,
@@ -320,22 +339,32 @@ impl HushApp {
             return Ok(());
         }
 
-        info!("📊 Audio captured: {} samples ({:.2}s)",
-               audio_buffer.len(),
-               audio_buffer.duration.as_secs_f32());
+        info!(
+            "📊 Audio captured: {} samples ({:.2}s)",
+            audio_buffer.len(),
+            audio_buffer.duration.as_secs_f32()
+        );
 
         // Transcribe
         info!("🔄 Transcribing audio...");
         let transcription_start = Instant::now();
-        let result = self.transcriber.transcribe(&audio_buffer).await
-            .with_context(|| format!(
-                "Failed to transcribe {:.2}s of audio using {}",
-                audio_buffer.duration.as_secs_f32(),
-                self.transcriber.info().name
-            ))?;
+        let result = self
+            .transcriber
+            .transcribe(&audio_buffer)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to transcribe {:.2}s of audio using {}",
+                    audio_buffer.duration.as_secs_f32(),
+                    self.transcriber.info().name
+                )
+            })?;
         let transcription_time = transcription_start.elapsed();
 
-        info!("✅ Transcription completed in {:.2}s", transcription_time.as_secs_f32());
+        info!(
+            "✅ Transcription completed in {:.2}s",
+            transcription_time.as_secs_f32()
+        );
 
         let text = result.text.trim();
         if text.is_empty() {
@@ -354,12 +383,13 @@ impl HushApp {
 
         info!("⌨️  Inserting text...");
         let insertion_start = Instant::now();
-        self.text_output.insert_text(text).await
-            .with_context(|| format!(
+        self.text_output.insert_text(text).await.with_context(|| {
+            format!(
                 "Failed to insert text ({} chars) using {}",
                 text.len(),
                 self.text_output.output_method()
-            ))?;
+            )
+        })?;
         let insertion_time = insertion_start.elapsed();
 
         info!("✅ Text inserted in {:.2}ms", insertion_time.as_millis());
@@ -373,9 +403,11 @@ impl HushApp {
 
         let words = text.split_whitespace().count();
         if words > 0 {
-            info!("📈 Performance: {} words, {:.0} chars/sec",
-                   words,
-                   text.len() as f32 / transcription_time.as_secs_f32());
+            info!(
+                "📈 Performance: {} words, {:.0} chars/sec",
+                words,
+                text.len() as f32 / transcription_time.as_secs_f32()
+            );
         }
 
         Ok(())
@@ -474,7 +506,7 @@ enum NotificationUrgency {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::mocks::{MockAudioSource, MockTranscriber, MockTextOutput, MockInputTrigger};
+    use crate::core::mocks::{MockAudioSource, MockInputTrigger, MockTextOutput, MockTranscriber};
 
     fn create_test_app() -> HushApp {
         HushApp::new(

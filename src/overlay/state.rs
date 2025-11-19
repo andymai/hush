@@ -12,14 +12,9 @@ pub enum OverlayState {
         amplitude: f32,
     },
     /// Processing - transcribing the audio
-    Processing {
-        message: String,
-    },
+    Processing { message: String },
     /// Success - text was inserted successfully
-    Success {
-        text: String,
-        show_until: Instant,
-    },
+    Success { text: String, show_until: Instant },
     /// Error - something went wrong
     Error {
         message: String,
@@ -97,7 +92,7 @@ impl OverlayState {
         match self {
             Self::Success { show_until, .. } | Self::Error { show_until, .. } => {
                 Instant::now() >= *show_until
-            }
+            },
             _ => false,
         }
     }
@@ -175,7 +170,7 @@ impl Default for OverlayConfig {
             width: 80.0,  // Recording width
             height: 24.0, // Recording height (idle is 60x4, recording is 80x24)
             position: OverlayPosition::BottomCenter,
-            opacity: 1.0,  // Fully opaque for clean look
+            opacity: 1.0, // Fully opaque for clean look
             auto_hide_duration: Duration::from_secs(2),
             show_button_when_idle: true,
             theme: OverlayTheme::Dark,
@@ -192,15 +187,18 @@ impl OverlayConfig {
             OverlayPosition::TopLeft => (padding, padding),
             OverlayPosition::TopRight => (screen_width - self.width - padding, padding),
             OverlayPosition::BottomLeft => (padding, screen_height - self.height - padding),
-            OverlayPosition::BottomRight => {
-                (screen_width - self.width - padding, screen_height - self.height - padding)
-            }
-            OverlayPosition::BottomCenter => {
-                ((screen_width - self.width) / 2.0, screen_height - self.height - padding)
-            }
-            OverlayPosition::Center => {
-                ((screen_width - self.width) / 2.0, (screen_height - self.height) / 2.0)
-            }
+            OverlayPosition::BottomRight => (
+                screen_width - self.width - padding,
+                screen_height - self.height - padding,
+            ),
+            OverlayPosition::BottomCenter => (
+                (screen_width - self.width) / 2.0,
+                screen_height - self.height - padding,
+            ),
+            OverlayPosition::Center => (
+                (screen_width - self.width) / 2.0,
+                (screen_height - self.height) / 2.0,
+            ),
         }
     }
 }

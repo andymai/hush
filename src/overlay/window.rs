@@ -1,12 +1,14 @@
 use anyhow::Result;
-use egui_overlay::{EguiOverlay, egui_window_glfw_passthrough::GlfwBackend, egui_render_three_d::ThreeDBackend};
-use std::sync::Arc;
+use egui_overlay::{
+    egui_render_three_d::ThreeDBackend, egui_window_glfw_passthrough::GlfwBackend, EguiOverlay,
+};
+use once_cell::sync::Lazy;
 use parking_lot::Mutex;
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn};
-use once_cell::sync::Lazy;
 
-use super::state::{OverlayState, OverlayConfig};
+use super::state::{OverlayConfig, OverlayState};
 use super::ui::{render_overlay, OverlayAction};
 
 // Cache primary monitor info for faster overlay startup
@@ -52,22 +54,24 @@ impl EguiOverlay for OverlayApp {
         // If egui is using the pointer (hovering over widgets), disable passthrough
         // so we can interact with the overlay. Otherwise, enable passthrough.
         let is_pointer_over_area = egui_context.is_pointer_over_area();
-        glfw_backend.window.set_mouse_passthrough(!is_pointer_over_area);
+        glfw_backend
+            .window
+            .set_mouse_passthrough(!is_pointer_over_area);
 
         // Handle UI actions
         match action {
             OverlayAction::StartRecording => {
                 info!("User clicked to start recording");
                 *self.state.lock() = OverlayState::start_recording();
-            }
+            },
             OverlayAction::Settings => {
                 info!("User opened settings");
                 *self.state.lock() = OverlayState::settings();
-            }
+            },
             OverlayAction::CloseSettings => {
                 info!("User closed settings");
                 *self.state.lock() = OverlayState::Idle;
-            }
+            },
             OverlayAction::ToggleTheme => {
                 info!("User toggled theme");
                 let mut config = self.config.lock();
@@ -75,8 +79,8 @@ impl EguiOverlay for OverlayApp {
                     OverlayTheme::Dark => OverlayTheme::Light,
                     OverlayTheme::Light => OverlayTheme::Dark,
                 };
-            }
-            OverlayAction::None => {}
+            },
+            OverlayAction::None => {},
         }
 
         // Adaptive repaint rate based on state for better performance
@@ -139,12 +143,14 @@ impl OverlayWindow {
 /// Custom start function that creates a fullscreen overlay
 /// This is based on egui_overlay::start but with monitor-sized window
 fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
-    use egui_overlay::egui_window_glfw_passthrough::{GlfwBackend, GlfwConfig, glfw};
+    use egui_overlay::egui_window_glfw_passthrough::{glfw, GlfwBackend, GlfwConfig};
 
     // Get cached primary monitor size and position
     let (monitor_size, monitor_pos) = *PRIMARY_MONITOR_INFO;
-    info!("Creating fullscreen overlay window: {}x{} at ({}, {})",
-        monitor_size[0], monitor_size[1], monitor_pos[0], monitor_pos[1]);
+    info!(
+        "Creating fullscreen overlay window: {}x{} at ({}, {})",
+        monitor_size[0], monitor_size[1], monitor_pos[0], monitor_pos[1]
+    );
 
     let mut glfw_backend = GlfwBackend::new(GlfwConfig {
         size: monitor_size,
@@ -173,7 +179,9 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
     glfw_backend.window.set_decorated(false);
 
     // Position at primary monitor's offset to cover that screen
-    glfw_backend.window.set_pos(monitor_pos[0] as i32, monitor_pos[1] as i32);
+    glfw_backend
+        .window
+        .set_pos(monitor_pos[0] as i32, monitor_pos[1] as i32);
 
     // Note: Mouse passthrough is toggled dynamically in gui_run()
     // based on whether the mouse is over the overlay widget
@@ -232,7 +240,10 @@ fn get_primary_monitor_info() -> Option<([u32; 2], [i32; 2])> {
         for (i, monitor) in monitors.iter().enumerate() {
             if let Some(mode) = monitor.get_video_mode() {
                 let pos = monitor.get_pos();
-                info!("  Monitor {}: {}x{} at ({}, {})", i, mode.width, mode.height, pos.0, pos.1);
+                info!(
+                    "  Monitor {}: {}x{} at ({}, {})",
+                    i, mode.width, mode.height, pos.0, pos.1
+                );
             }
         }
     });
@@ -242,7 +253,10 @@ fn get_primary_monitor_info() -> Option<([u32; 2], [i32; 2])> {
         m.and_then(|mon| {
             let mode = mon.get_video_mode()?;
             let pos = mon.get_pos();
-            info!("Using primary monitor: {}x{} at ({}, {})", mode.width, mode.height, pos.0, pos.1);
+            info!(
+                "Using primary monitor: {}x{} at ({}, {})",
+                mode.width, mode.height, pos.0, pos.1
+            );
             Some(([mode.width, mode.height], [pos.0, pos.1]))
         })
     })

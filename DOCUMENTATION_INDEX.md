@@ -14,9 +14,12 @@
 4. **[UInput Setup Guide](docs/uinput-setup.md)** - Detailed setup and troubleshooting
 
 ### For Developers
-1. **[Architecture Overview](docs/ARCHITECTURE.md)** - System architecture and design
-2. **[Design Patterns](docs/architecture/DESIGN_PATTERNS.md)** - Core trait patterns and abstractions
-3. **[Architecture Decision Records](docs/architecture/adrs/README.md)** - Key architectural decisions
+1. **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to Hush
+2. **[Architecture Overview](docs/ARCHITECTURE.md)** - System architecture and design
+3. **[Design Patterns](docs/architecture/DESIGN_PATTERNS.md)** - Core trait patterns and abstractions
+4. **[Error Handling Guide](docs/ERROR_HANDLING.md)** - Error handling patterns and best practices
+5. **[Refactoring Plan](docs/REFACTORING_PLAN.md)** - Ongoing code refactoring roadmap
+6. **[Architecture Decision Records](docs/architecture/adrs/README.md)** - Key architectural decisions
 
 ---
 
@@ -74,6 +77,9 @@
 - **[ADR-003: Centralized State Management](docs/architecture/adrs/ADR-003-centralized-state-management.md)** - State machine design
 
 ### Implementation Guides
+- **[Contributing Guide](CONTRIBUTING.md)** - Development setup, coding standards, PR process
+- **[Error Handling Guide](docs/ERROR_HANDLING.md)** - Error system usage and patterns
+- **[Refactoring Plan](docs/REFACTORING_PLAN.md)** - CLI dispatcher refactoring roadmap
 - **[Design Patterns Analysis](docs/archive/DESIGN_PATTERNS_ANALYSIS.md)** - UInput trait alignment analysis
 
 ---
@@ -114,8 +120,11 @@ These documents capture previous planning, analysis, and implementation approach
 ### Architecture & Design
 - System overview: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Core patterns: [docs/architecture/DESIGN_PATTERNS.md](docs/architecture/DESIGN_PATTERNS.md)
+- Error handling: [docs/ERROR_HANDLING.md](docs/ERROR_HANDLING.md)
+- Refactoring plan: [docs/REFACTORING_PLAN.md](docs/REFACTORING_PLAN.md)
 - All ADRs: [docs/architecture/adrs/](docs/architecture/adrs/)
 - Improvements log: [docs/CHANGELOG.md](docs/CHANGELOG.md)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ---
 
@@ -159,7 +168,9 @@ When adding or updating documentation:
 ### Deep Dives
 - Understanding architecture → [Architecture Overview](docs/ARCHITECTURE.md)
 - Understanding design decisions → [ADRs](docs/architecture/adrs/README.md)
-- Contributing to codebase → [Architecture Overview](docs/ARCHITECTURE.md) + [Design Patterns](docs/architecture/DESIGN_PATTERNS.md)
+- Contributing to codebase → [Contributing Guide](CONTRIBUTING.md)
+- Error handling patterns → [Error Handling Guide](docs/ERROR_HANDLING.md)
+- Ongoing refactoring → [Refactoring Plan](docs/REFACTORING_PLAN.md)
 
 ---
 

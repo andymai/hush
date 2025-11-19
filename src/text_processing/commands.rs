@@ -1,3 +1,4 @@
+use once_cell::sync::Lazy;
 /// Voice command detection and execution
 ///
 /// This module provides support for voice commands like:
@@ -10,10 +11,8 @@
 /// - Standalone: "new paragraph" → action only
 /// - With text: "hello world new paragraph" → text + action
 /// - Multiple: "first line new paragraph second line" → multiple actions
-
 use regex::Regex;
 use tracing::{debug, info};
-use once_cell::sync::Lazy;
 
 /// A voice command parsed from transcribed text
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +49,9 @@ pub struct ParsedCommand {
 impl ParsedCommand {
     /// Check if this contains any actual commands (not just text)
     pub fn has_commands(&self) -> bool {
-        self.segments.iter().any(|seg| !matches!(seg, VoiceCommand::Text(_)))
+        self.segments
+            .iter()
+            .any(|seg| !matches!(seg, VoiceCommand::Text(_)))
     }
 
     /// Check if this is only text with no commands
@@ -75,16 +76,32 @@ impl ParsedCommand {
 static COMMAND_PATTERNS: Lazy<Vec<(Regex, VoiceCommand)>> = Lazy::new(|| {
     vec![
         // Paragraph and line breaks
-        (Regex::new(r"\b(new paragraph|next paragraph)\b").unwrap(), VoiceCommand::NewParagraph),
-        (Regex::new(r"\b(new line|next line)\b").unwrap(), VoiceCommand::NewLine),
-
+        (
+            Regex::new(r"\b(new paragraph|next paragraph)\b").unwrap(),
+            VoiceCommand::NewParagraph,
+        ),
+        (
+            Regex::new(r"\b(new line|next line)\b").unwrap(),
+            VoiceCommand::NewLine,
+        ),
         // Undo/delete
-        (Regex::new(r"\b(undo|undo that)\b").unwrap(), VoiceCommand::Undo),
-        (Regex::new(r"\b(delete that|scratch that)\b").unwrap(), VoiceCommand::DeleteThat),
-
+        (
+            Regex::new(r"\b(undo|undo that)\b").unwrap(),
+            VoiceCommand::Undo,
+        ),
+        (
+            Regex::new(r"\b(delete that|scratch that)\b").unwrap(),
+            VoiceCommand::DeleteThat,
+        ),
         // Capitalization
-        (Regex::new(r"\b(cap that|capitalize that)\b").unwrap(), VoiceCommand::CapitalizeThat),
-        (Regex::new(r"\b(all caps|upper case)\b").unwrap(), VoiceCommand::AllCaps),
+        (
+            Regex::new(r"\b(cap that|capitalize that)\b").unwrap(),
+            VoiceCommand::CapitalizeThat,
+        ),
+        (
+            Regex::new(r"\b(all caps|upper case)\b").unwrap(),
+            VoiceCommand::AllCaps,
+        ),
     ]
 });
 
@@ -162,8 +179,14 @@ impl CommandParser {
         let parsed = ParsedCommand { segments };
 
         if parsed.has_commands() {
-            info!("Detected {} command(s) in text",
-                  parsed.segments.iter().filter(|s| !matches!(s, VoiceCommand::Text(_))).count());
+            info!(
+                "Detected {} command(s) in text",
+                parsed
+                    .segments
+                    .iter()
+                    .filter(|s| !matches!(s, VoiceCommand::Text(_)))
+                    .count()
+            );
             debug!("Parsed segments: {:?}", parsed.segments);
         }
 
