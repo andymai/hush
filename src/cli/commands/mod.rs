@@ -3,6 +3,7 @@ pub mod manual;
 pub mod record;
 pub mod setup;
 pub mod status;
+pub mod test;
 /// Modular command implementations
 ///
 /// This module contains individual command handlers, each in their own file
@@ -33,6 +34,7 @@ pub use manual::handle_manual;
 pub use record::handle_record;
 pub use setup::handle_setup;
 pub use status::handle_status;
+pub use test::handle_test;
 
 // Re-export utilities for use by other commands
 pub use utils::*;
