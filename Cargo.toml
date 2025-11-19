@@ -32,7 +32,7 @@ candle-core = { version = "0.8" }
 candle-nn = { version = "0.8" }
 candle-transformers = { version = "0.8" }
 tokenizers = "0.19"
-hf-hub = { version = "0.3", features = ["tokio"] }
+hf-hub = { version = "0.4", features = ["tokio"] }
 byteorder = "1.5"
 safetensors = "0.4"
 sha2 = "0.10"  # SHA256 checksum validation for model integrity
