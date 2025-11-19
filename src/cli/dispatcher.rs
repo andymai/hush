@@ -1,4 +1,4 @@
-use crate::cli::commands::{handle_listen, handle_manual, handle_setup};
+use crate::cli::commands::{handle_listen, handle_manual, handle_setup, handle_test};
 use crate::cli::{Commands, ModelCommands, SetupCommands, TestCommands};
 use crate::logging::RequestContext;
 use anyhow::{Context as AnyhowContext, Result};
@@ -88,7 +88,7 @@ impl CommandDispatcher {
                 handle_listen(editing_mode.clone(), no_processing, no_button).await
             },
             Commands::Setup { setup_command } => handle_setup(setup_command).await,
-            Commands::Test { test_command } => self.handle_test(test_command).await,
+            Commands::Test { test_command } => handle_test(test_command).await,
             Commands::Models { model_command } => self.handle_models(model_command).await,
             Commands::Status {
                 config,
@@ -233,36 +233,6 @@ impl CommandDispatcher {
         }
 
         Ok(())
-    }
-
-    async fn handle_test(&self, test_command: TestCommands) -> Result<()> {
-        match test_command {
-            TestCommands::Audio {
-                duration,
-                list_devices,
-                device,
-                save,
-            } => test_audio_system(duration, list_devices, device, save).await,
-            TestCommands::Transcription {
-                file,
-                all_models,
-                timing,
-            } => test_transcription_system(file, all_models, timing).await,
-            TestCommands::TextInsertion {
-                text,
-                all_methods,
-                uinput,
-            } => test_text_insertion_system(text, all_methods, uinput).await,
-            TestCommands::Hotkeys {
-                combination,
-                duration,
-            } => test_hotkey_system(combination, duration).await,
-            TestCommands::Pipeline {
-                count,
-                transcribe_only,
-            } => test_full_pipeline(count, transcribe_only).await,
-            TestCommands::All { benchmarks, output } => run_all_tests(benchmarks, output).await,
-        }
     }
 
     async fn handle_models(&self, model_command: ModelCommands) -> Result<()> {
@@ -413,7 +383,7 @@ impl CommandDispatcher {
 }
 
 // Test functions (these would call existing test binaries)
-async fn test_audio_system(
+pub async fn test_audio_system(
     duration: u64,
     list_devices: bool,
     device: Option<String>,
@@ -462,7 +432,7 @@ async fn test_audio_system(
     Ok(())
 }
 
-async fn test_transcription_system(
+pub async fn test_transcription_system(
     file: Option<PathBuf>,
     all_models: bool,
     timing: bool,
@@ -562,7 +532,11 @@ async fn test_transcription_system(
     Ok(())
 }
 
-async fn test_text_insertion_system(text: String, all_methods: bool, uinput: bool) -> Result<()> {
+pub async fn test_text_insertion_system(
+    text: String,
+    all_methods: bool,
+    uinput: bool,
+) -> Result<()> {
     println!("⌨️ Testing text insertion system...");
     println!("Text to insert: '{}'", text);
 
@@ -590,7 +564,7 @@ async fn test_text_insertion_system(text: String, all_methods: bool, uinput: boo
     Ok(())
 }
 
-async fn test_hotkey_system(combination: Option<String>, duration: u64) -> Result<()> {
+pub async fn test_hotkey_system(combination: Option<String>, duration: u64) -> Result<()> {
     let config = crate::Config::load()?;
     let hotkey_combo = combination.unwrap_or(config.hotkey.combination);
 
@@ -642,7 +616,7 @@ async fn test_hotkey_system(combination: Option<String>, duration: u64) -> Resul
     Ok(())
 }
 
-async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()> {
+pub async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()> {
     println!("🔄 Testing complete voice-to-text pipeline...");
 
     for i in 1..=count {
