@@ -37,7 +37,6 @@
 /// # Platform Support
 ///
 /// Currently supports Linux via ALSA/PulseAudio through the `cpal` library.
-
 pub mod capture;
 pub mod feedback;
 

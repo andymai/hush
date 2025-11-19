@@ -1,7 +1,6 @@
-/// Adapter for TextInserter to implement TextOutput trait
-
-use crate::text::TextInserter;
 use crate::core::traits::{TextOutput, WindowInfo};
+/// Adapter for TextInserter to implement TextOutput trait
+use crate::text::TextInserter;
 use crate::Result;
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -17,8 +16,8 @@ impl X11TextAdapter {
     /// Create new adapter wrapping a TextInserter instance
     pub fn new() -> Result<Self> {
         let inner = TextInserter::new()?;
-        Ok(Self { 
-            inner: Arc::new(Mutex::new(inner))
+        Ok(Self {
+            inner: Arc::new(Mutex::new(inner)),
         })
     }
 
@@ -45,7 +44,7 @@ impl TextOutput for X11TextAdapter {
                     class: class.clone(),
                     app_name: class, // Use class as app_name for now
                 }))
-            }
+            },
             Err(_) => Ok(None),
         }
     }
@@ -77,7 +76,7 @@ mod tests {
     #[test]
     fn test_adapter_implements_trait() {
         // Verify the adapter compiles as trait object
-        let _can_box: Result<Box<dyn TextOutput>> = X11TextAdapter::new()
-            .map(|adapter| Box::new(adapter) as Box<dyn TextOutput>);
+        let _can_box: Result<Box<dyn TextOutput>> =
+            X11TextAdapter::new().map(|adapter| Box::new(adapter) as Box<dyn TextOutput>);
     }
 }

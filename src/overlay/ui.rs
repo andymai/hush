@@ -1,5 +1,5 @@
-use egui::{Context, Frame, Stroke, Color32, RichText, Sense};
-use super::state::{OverlayState, OverlayConfig, OverlayTheme};
+use super::state::{OverlayConfig, OverlayState, OverlayTheme};
+use egui::{Color32, Context, Frame, RichText, Sense, Stroke};
 
 // Overlay dimensions
 const IDLE_WIDTH: f32 = 60.0;
@@ -8,9 +8,9 @@ const RECORDING_WIDTH: f32 = 80.0;
 const RECORDING_HEIGHT: f32 = 24.0;
 
 // Theme colors - alpha values
-const BG_ALPHA_DARK: u8 = 200;  // ~78% opacity
+const BG_ALPHA_DARK: u8 = 200; // ~78% opacity
 const BG_ALPHA_LIGHT: u8 = 200;
-const BORDER_ALPHA: u8 = 60;    // ~23% opacity
+const BORDER_ALPHA: u8 = 60; // ~23% opacity
 
 // Waveform animation parameters
 const WAVEFORM_NUM_BARS: usize = 12;
@@ -20,7 +20,11 @@ const WAVEFORM_BASE_HEIGHT: f32 = 3.0;
 const WAVEFORM_MAX_HEIGHT: f32 = 16.0;
 
 /// Render the overlay UI based on current state
-pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfig) -> OverlayAction {
+pub fn render_overlay(
+    ctx: &Context,
+    state: &OverlayState,
+    config: &OverlayConfig,
+) -> OverlayAction {
     let mut action = OverlayAction::None;
 
     // Configure the style based on theme
@@ -28,15 +32,16 @@ pub fn render_overlay(ctx: &Context, state: &OverlayState, config: &OverlayConfi
 
     // Dynamic sizing based on state
     let (width, height) = match state {
-        OverlayState::Idle => (IDLE_WIDTH, IDLE_HEIGHT),  // Very short pill when inactive
-        OverlayState::Recording { .. } => (RECORDING_WIDTH, RECORDING_HEIGHT),  // Expand taller when recording
-        OverlayState::Settings => (220.0, 140.0),  // Larger panel for settings
-        _ => (RECORDING_WIDTH, RECORDING_HEIGHT),  // Other states use recording size
+        OverlayState::Idle => (IDLE_WIDTH, IDLE_HEIGHT), // Very short pill when inactive
+        OverlayState::Recording { .. } => (RECORDING_WIDTH, RECORDING_HEIGHT), // Expand taller when recording
+        OverlayState::Settings => (220.0, 140.0), // Larger panel for settings
+        _ => (RECORDING_WIDTH, RECORDING_HEIGHT), // Other states use recording size
     };
 
     // Get screen dimensions and calculate default position
     let screen_rect = ctx.screen_rect();
-    let (default_x, default_y) = config.get_window_position(screen_rect.width(), screen_rect.height());
+    let (default_x, default_y) =
+        config.get_window_position(screen_rect.width(), screen_rect.height());
 
     // Create a draggable overlay area
     // The area will remember its position between frames
@@ -98,11 +103,11 @@ fn apply_theme(ctx: &Context, theme: OverlayTheme) {
         OverlayTheme::Dark => {
             style.visuals.window_fill = Color32::from_rgba_unmultiplied(20, 20, 20, 240);
             style.visuals.panel_fill = Color32::from_rgba_unmultiplied(20, 20, 20, 240);
-        }
+        },
         OverlayTheme::Light => {
             style.visuals.window_fill = Color32::from_rgba_unmultiplied(240, 240, 240, 240);
             style.visuals.panel_fill = Color32::from_rgba_unmultiplied(240, 240, 240, 240);
-        }
+        },
     }
 
     ctx.set_style(style);
@@ -136,10 +141,7 @@ fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayActio
 
     // Empty idle state - just a tiny black pill (10x20)
     // Make the entire area clickable
-    let response = ui.allocate_response(
-        ui.available_size(),
-        Sense::click()
-    );
+    let response = ui.allocate_response(ui.available_size(), Sense::click());
 
     if response.clicked() {
         action = OverlayAction::StartRecording;
@@ -148,7 +150,12 @@ fn render_idle_state(ui: &mut egui::Ui, _config: &OverlayConfig) -> OverlayActio
     action
 }
 
-fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _config: &OverlayConfig) {
+fn render_recording_state(
+    ui: &mut egui::Ui,
+    duration: f32,
+    amplitude: f32,
+    _config: &OverlayConfig,
+) {
     // Waveform animation - draw bars directly using painter for performance
     // Creates an animated waveform visualization that responds to audio amplitude
 
@@ -185,10 +192,8 @@ fn render_recording_state(ui: &mut egui::Ui, duration: f32, amplitude: f32, _con
         let y = center_y - height * 0.5;
 
         // Draw the bar with rounded ends (pill-shaped) for visual consistency with overlay
-        let bar_rect = egui::Rect::from_min_size(
-            egui::pos2(x, y),
-            egui::vec2(WAVEFORM_BAR_WIDTH, height)
-        );
+        let bar_rect =
+            egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(WAVEFORM_BAR_WIDTH, height));
         painter.rect_filled(bar_rect, ROUNDING, Color32::WHITE);
     }
 
@@ -215,9 +220,7 @@ fn render_success_state(ui: &mut egui::Ui, _text: &str, _config: &OverlayConfig)
     ui.vertical_centered(|ui| {
         ui.add_space(4.0);
 
-        let text = RichText::new("done")
-            .size(10.0)
-            .color(Color32::WHITE);
+        let text = RichText::new("done").size(10.0).color(Color32::WHITE);
         ui.label(text);
 
         ui.add_space(4.0);
@@ -229,9 +232,7 @@ fn render_error_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig
     ui.vertical_centered(|ui| {
         ui.add_space(4.0);
 
-        let text = RichText::new("error")
-            .size(10.0)
-            .color(Color32::WHITE);
+        let text = RichText::new("error").size(10.0).color(Color32::WHITE);
         ui.label(text);
 
         ui.add_space(4.0);
@@ -259,9 +260,7 @@ fn render_settings_state(ui: &mut egui::Ui, config: &OverlayConfig) -> OverlayAc
         // Theme toggle
         ui.horizontal(|ui| {
             ui.add_space(8.0);
-            let label = RichText::new("Theme:")
-                .size(10.0)
-                .color(Color32::GRAY);
+            let label = RichText::new("Theme:").size(10.0).color(Color32::GRAY);
             ui.label(label);
 
             ui.add_space(4.0);
@@ -271,7 +270,10 @@ fn render_settings_state(ui: &mut egui::Ui, config: &OverlayConfig) -> OverlayAc
                 OverlayTheme::Light => "Light",
             };
 
-            if ui.button(RichText::new(theme_text).size(10.0).color(Color32::WHITE)).clicked() {
+            if ui
+                .button(RichText::new(theme_text).size(10.0).color(Color32::WHITE))
+                .clicked()
+            {
                 action = OverlayAction::ToggleTheme;
             }
         });
@@ -281,16 +283,12 @@ fn render_settings_state(ui: &mut egui::Ui, config: &OverlayConfig) -> OverlayAc
         // Hotkey info
         ui.horizontal(|ui| {
             ui.add_space(8.0);
-            let label = RichText::new("Hotkey:")
-                .size(10.0)
-                .color(Color32::GRAY);
+            let label = RichText::new("Hotkey:").size(10.0).color(Color32::GRAY);
             ui.label(label);
 
             ui.add_space(4.0);
 
-            let hotkey_text = RichText::new("Ctrl+Alt+V")
-                .size(10.0)
-                .color(Color32::WHITE);
+            let hotkey_text = RichText::new("Ctrl+Alt+V").size(10.0).color(Color32::WHITE);
             ui.label(hotkey_text);
         });
 
@@ -306,9 +304,7 @@ fn render_settings_state(ui: &mut egui::Ui, config: &OverlayConfig) -> OverlayAc
 
             ui.add_space(4.0);
 
-            let mode_text = RichText::new("Medium")
-                .size(10.0)
-                .color(Color32::WHITE);
+            let mode_text = RichText::new("Medium").size(10.0).color(Color32::WHITE);
             ui.label(mode_text);
         });
 
@@ -317,7 +313,10 @@ fn render_settings_state(ui: &mut egui::Ui, config: &OverlayConfig) -> OverlayAc
         // Close button
         ui.horizontal(|ui| {
             ui.add_space(8.0);
-            if ui.button(RichText::new("Close").size(10.0).color(Color32::WHITE)).clicked() {
+            if ui
+                .button(RichText::new("Close").size(10.0).color(Color32::WHITE))
+                .clicked()
+            {
                 action = OverlayAction::CloseSettings;
             }
         });
@@ -327,4 +326,3 @@ fn render_settings_state(ui: &mut egui::Ui, config: &OverlayConfig) -> OverlayAc
 
     action
 }
-

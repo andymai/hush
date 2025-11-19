@@ -1,9 +1,9 @@
+use super::config::{EditingMode, LlmProvider};
 /// LLM-based text polishing using Anthropic Claude API via HTTP
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
-use super::config::{EditingMode, LlmProvider};
 
 /// LLM processor for grammar correction and polishing
 pub struct LlmProcessor {
@@ -74,7 +74,7 @@ impl LlmProcessor {
                     temperature,
                     client: Client::new(),
                 })
-            }
+            },
             LlmProvider::OpenAI { api_key, model } => {
                 info!("Initializing OpenAI API client");
                 info!("  Model: {}", model);
@@ -98,10 +98,10 @@ impl LlmProcessor {
                     temperature,
                     client: Client::new(),
                 })
-            }
+            },
             LlmProvider::None => {
                 anyhow::bail!("No LLM provider configured");
-            }
+            },
         }
     }
 
@@ -110,15 +110,15 @@ impl LlmProcessor {
         match &self.provider {
             LlmProvider::Anthropic { api_key, model } => {
                 self.polish_with_claude(text, mode, api_key, model).await
-            }
+            },
             LlmProvider::OpenAI { .. } => {
                 warn!("OpenAI polishing not implemented, returning input");
                 Ok(text.to_string())
-            }
+            },
             LlmProvider::None => {
                 debug!("No LLM provider, skipping polishing");
                 Ok(text.to_string())
-            }
+            },
         }
     }
 
@@ -136,8 +136,7 @@ impl LlmProcessor {
         let key = if let Some(k) = api_key {
             k.clone()
         } else {
-            std::env::var("ANTHROPIC_API_KEY")
-                .context("ANTHROPIC_API_KEY not found")?
+            std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY not found")?
         };
 
         // Create prompts
@@ -164,7 +163,8 @@ impl LlmProcessor {
 
         // Send request
         let start = std::time::Instant::now();
-        let response = self.client
+        let response = self
+            .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &key)
             .header("anthropic-version", "2023-06-01")
@@ -210,10 +210,15 @@ impl LlmProcessor {
 
             // Haiku pricing: $0.25/M input, $1.25/M output
             let cost = (input_tokens as f64 / 1_000_000.0) * 0.25
-                     + (output_tokens as f64 / 1_000_000.0) * 1.25;
+                + (output_tokens as f64 / 1_000_000.0) * 1.25;
 
-            info!("Claude API: {} input tokens, {} output tokens, ~${:.6}, {:.2}ms",
-                input_tokens, output_tokens, cost, elapsed.as_millis());
+            info!(
+                "Claude API: {} input tokens, {} output tokens, ~${:.6}, {:.2}ms",
+                input_tokens,
+                output_tokens,
+                cost,
+                elapsed.as_millis()
+            );
         }
 
         debug!("Polished result: '{}'", polished);
@@ -223,7 +228,8 @@ impl LlmProcessor {
 
     /// Create system prompt based on editing mode
     fn create_system_prompt(mode: EditingMode) -> String {
-        let base = "You are a professional text editor. Your job is to polish voice transcriptions.";
+        let base =
+            "You are a professional text editor. Your job is to polish voice transcriptions.";
 
         let instructions = match mode {
             EditingMode::Light => {
@@ -232,14 +238,14 @@ impl LlmProcessor {
 - Remove only the most common filler words (um, uh, er, ah)
 - Add basic punctuation if completely missing
 - Preserve the speaker's original style and voice completely"
-            }
+            },
             EditingMode::Medium => {
                 "Make balanced edits:
 - Fix grammar and punctuation errors
 - Remove filler words (um, uh, like, you know, I mean, basically, actually)
 - Improve sentence structure slightly while maintaining meaning
 - Keep the speaker's tone but make it more professional"
-            }
+            },
             EditingMode::Aggressive => {
                 "Make comprehensive edits:
 - Rewrite for maximum clarity and professionalism
@@ -247,7 +253,7 @@ impl LlmProcessor {
 - Fix grammar, spelling, and sentence structure completely
 - Reorganize for better flow while preserving all key information
 - Make it sound polished and articulate"
-            }
+            },
         };
 
         format!("{}\n\n{}\n\nRETURN ONLY THE EDITED TEXT. Do not add explanations, quotes, or any other content.", base, instructions)

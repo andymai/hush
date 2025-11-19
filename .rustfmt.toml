@@ -1,34 +1,15 @@
 # Rust formatting configuration for Hush
+# Note: Only stable features are enabled to work with stable Rust toolchain
 
 # Edition
 edition = "2021"
 
 # Line width
 max_width = 100
-# Ideal width for comments and strings
-comment_width = 80
-
-# Imports
-imports_granularity = "Crate"
-group_imports = "StdExternalCrate"
 
 # Formatting
 use_small_heuristics = "Default"
 newline_style = "Unix"
-
-# Function definitions
-fn_params_layout = "Tall"
-fn_single_line = false
-
-# Chains
-chain_width = 60
-
-# Control flow
-control_brace_style = "AlwaysSameLine"
-
-# Trailing
-trailing_comma = "Vertical"
-trailing_semicolon = true
 
 # Reorder
 reorder_imports = true
@@ -40,18 +21,6 @@ match_block_trailing_comma = true
 # Use
 use_field_init_shorthand = true
 use_try_shorthand = true
-
-# Format
-format_code_in_doc_comments = true
-format_macro_matchers = true
-format_strings = true
-
-# Normalize
-normalize_comments = true
-normalize_doc_attributes = true
-
-# Wrap
-wrap_comments = true
 
 # Misc
 remove_nested_parens = true

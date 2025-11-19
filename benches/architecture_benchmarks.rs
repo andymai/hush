@@ -5,11 +5,10 @@
 /// significant performance regression.
 ///
 /// Run with: cargo bench
-
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use hush::core::traits::{AudioSource, Transcriber, AudioBuffer};
-use hush::core::mocks::{MockAudioSource, MockTranscriber};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use hush::adapters::CpalAudioAdapter;
+use hush::core::mocks::{MockAudioSource, MockTranscriber};
+use hush::core::traits::{AudioBuffer, AudioSource, Transcriber};
 use std::time::Duration;
 
 /// Benchmark: Method call overhead (trait object vs direct)
@@ -82,15 +81,13 @@ fn benchmark_component_creation(c: &mut Criterion) {
 
 /// Benchmark: State checks
 fn benchmark_state_checks(c: &mut Criterion) {
-    use hush::core::state::{StateMachine, AppState};
+    use hush::core::state::{AppState, StateMachine};
 
     let mut group = c.benchmark_group("state_checks");
 
     let state = StateMachine::new();
 
-    group.bench_function("current_state", |b| {
-        b.iter(|| black_box(state.current()))
-    });
+    group.bench_function("current_state", |b| b.iter(|| black_box(state.current())));
 
     group.bench_function("is_recording", |b| {
         b.iter(|| black_box(state.current().is_recording()))

@@ -1,6 +1,6 @@
+use once_cell::sync::Lazy;
 /// Intent detection for adaptive text processing
 use regex::Regex;
-use once_cell::sync::Lazy;
 use tracing::debug;
 
 /// Detected user intent from transcription
@@ -38,8 +38,8 @@ pub enum UserIntent {
 /// Communication style
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommunicationStyle {
-    Formal,      // Email, professional communication
-    Casual,      // Chat, informal messaging
+    Formal, // Email, professional communication
+    Casual, // Chat, informal messaging
 }
 
 /// Regex patterns for intent detection
@@ -47,9 +47,8 @@ static CODE_PATTERNS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)\b(function|class|def|const|let|var|import|return|if|for|while)\b").unwrap()
 });
 
-static COMMENT_PATTERNS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)^(comment|note|todo|fixme|hack)[:.]?\s").unwrap()
-});
+static COMMENT_PATTERNS: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)^(comment|note|todo|fixme|hack)[:.]?\s").unwrap());
 
 static COMMAND_PATTERNS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)^(run|execute|start|stop|install|uninstall|cd|ls|mkdir|git)\b").unwrap()
@@ -60,20 +59,20 @@ static LIST_PATTERNS: Lazy<Regex> = Lazy::new(|| {
 });
 
 static QUESTION_PATTERNS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)^(what|how|why|when|where|who|which|can|could|would|should|is|are|do|does)\b").unwrap()
+    Regex::new(r"(?i)^(what|how|why|when|where|who|which|can|could|would|should|is|are|do|does)\b")
+        .unwrap()
 });
 
-static TODO_PATTERNS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(todo|task|reminder|need to|have to|must|should)\b").unwrap()
-});
+static TODO_PATTERNS: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)\b(todo|task|reminder|need to|have to|must|should)\b").unwrap());
 
 static EMAIL_PATTERNS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(dear|hi|hello|regards|sincerely|best|thanks|subject|email|message)\b").unwrap()
+    Regex::new(r"(?i)\b(dear|hi|hello|regards|sincerely|best|thanks|subject|email|message)\b")
+        .unwrap()
 });
 
-static CHAT_PATTERNS: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(hey|yo|sup|lol|btw|omg|brb|imo|fyi)\b").unwrap()
-});
+static CHAT_PATTERNS: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)\b(hey|yo|sup|lol|btw|omg|brb|imo|fyi)\b").unwrap());
 
 /// Intent detector
 pub struct IntentDetector {
@@ -160,19 +159,25 @@ impl IntentDetector {
         let text_lower = text.to_lowercase();
 
         // Simple language detection based on keywords
-        if text_lower.contains("function") || text_lower.contains("const ")
-            || text_lower.contains("let ") || text_lower.contains("var ") {
+        if text_lower.contains("function")
+            || text_lower.contains("const ")
+            || text_lower.contains("let ")
+            || text_lower.contains("var ")
+        {
             return Some("JavaScript".to_string());
         }
-        if text_lower.contains("def ") || text_lower.contains("import ")
-            && text_lower.contains("from") {
+        if text_lower.contains("def ")
+            || text_lower.contains("import ") && text_lower.contains("from")
+        {
             return Some("Python".to_string());
         }
         if text_lower.contains("func ") || text_lower.contains("package ") {
             return Some("Go".to_string());
         }
-        if text_lower.contains("fn ") || text_lower.contains("let mut")
-            || text_lower.contains("impl ") {
+        if text_lower.contains("fn ")
+            || text_lower.contains("let mut")
+            || text_lower.contains("impl ")
+        {
             return Some("Rust".to_string());
         }
 
@@ -195,10 +200,18 @@ impl UserIntent {
     /// Get a description of this intent
     pub fn description(&self) -> &str {
         match self {
-            UserIntent::Code { is_comment: true, .. } => "Code comment",
-            UserIntent::Code { is_comment: false, .. } => "Code",
-            UserIntent::Communication { style: CommunicationStyle::Formal } => "Formal communication",
-            UserIntent::Communication { style: CommunicationStyle::Casual } => "Casual chat",
+            UserIntent::Code {
+                is_comment: true, ..
+            } => "Code comment",
+            UserIntent::Code {
+                is_comment: false, ..
+            } => "Code",
+            UserIntent::Communication {
+                style: CommunicationStyle::Formal,
+            } => "Formal communication",
+            UserIntent::Communication {
+                style: CommunicationStyle::Casual,
+            } => "Casual chat",
             UserIntent::Documentation => "Documentation",
             UserIntent::Command { .. } => "Command",
             UserIntent::List => "List",
@@ -210,10 +223,7 @@ impl UserIntent {
 
     /// Check if this intent should preserve technical formatting
     pub fn preserve_technical_formatting(&self) -> bool {
-        matches!(
-            self,
-            UserIntent::Code { .. } | UserIntent::Command { .. }
-        )
+        matches!(self, UserIntent::Code { .. } | UserIntent::Command { .. })
     }
 
     /// Check if this intent should be more formal
@@ -237,13 +247,11 @@ impl UserIntent {
                 "Format as bullet points".to_string(),
                 "One item per line".to_string(),
             ],
-            UserIntent::Todo => vec![
-                "Format as TODO comment or task".to_string(),
-            ],
-            UserIntent::Question => vec![
-                "End with question mark".to_string(),
-            ],
-            UserIntent::Communication { style: CommunicationStyle::Formal } => vec![
+            UserIntent::Todo => vec!["Format as TODO comment or task".to_string()],
+            UserIntent::Question => vec!["End with question mark".to_string()],
+            UserIntent::Communication {
+                style: CommunicationStyle::Formal,
+            } => vec![
                 "Use professional language".to_string(),
                 "Add greeting/closing if appropriate".to_string(),
             ],
@@ -275,7 +283,13 @@ mod tests {
         assert!(matches!(intent, UserIntent::Todo));
 
         let intent = detector.detect("comment: this needs work");
-        assert!(matches!(intent, UserIntent::Code { is_comment: true, .. }));
+        assert!(matches!(
+            intent,
+            UserIntent::Code {
+                is_comment: true,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -359,17 +373,23 @@ mod tests {
 
         let intent = detector.detect("function foo returns bar");
         match intent {
-            UserIntent::Code { language: Some(lang), .. } => {
+            UserIntent::Code {
+                language: Some(lang),
+                ..
+            } => {
                 assert_eq!(lang, "JavaScript");
-            }
+            },
             _ => panic!("Expected Code intent with language"),
         }
 
         let intent = detector.detect("def foo return bar");
         match intent {
-            UserIntent::Code { language: Some(lang), .. } => {
+            UserIntent::Code {
+                language: Some(lang),
+                ..
+            } => {
                 assert_eq!(lang, "Python");
-            }
+            },
             _ => panic!("Expected Code intent with language"),
         }
     }

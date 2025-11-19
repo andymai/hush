@@ -1,12 +1,11 @@
+use crate::{AudioCapture, Config, TextInserter, WhisperTranscriber};
 /// Record command implementation
 ///
 /// Handles single audio recording with optional transcription and text insertion.
-
 use anyhow::Result;
-use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config};
+use hound;
 use std::path::PathBuf;
 use tracing::info;
-use hound;
 
 /// Handle the record command
 ///
@@ -39,7 +38,7 @@ use hound;
 pub async fn handle_record(
     duration: u64,
     print_only: bool,
-    save_audio: Option<PathBuf>
+    save_audio: Option<PathBuf>,
 ) -> Result<()> {
     info!("🎙️ Starting single recording (max {}s)", duration);
 
@@ -78,10 +77,14 @@ pub async fn handle_record(
         println!("🗣️ Transcribing...");
         let transcriber = WhisperTranscriber::new(
             &config.transcription.model_path,
-            config.transcription.use_cuda
-        ).await?;
+            config.transcription.use_cuda,
+        )
+        .await?;
 
-        match transcriber.transcribe_async(&audio_data, config.audio.sample_rate).await {
+        match transcriber
+            .transcribe_async(&audio_data, config.audio.sample_rate)
+            .await
+        {
             Ok(result) => {
                 println!("✅ Transcription: '{}'", result.text);
 
@@ -94,7 +97,7 @@ pub async fn handle_record(
                     Ok(()) => println!("✅ Text inserted successfully"),
                     Err(e) => println!("❌ Text insertion failed: {}", e),
                 }
-            }
+            },
             Err(e) => println!("❌ Transcription failed: {}", e),
         }
     } else {

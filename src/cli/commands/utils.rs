@@ -1,9 +1,8 @@
+use crate::{AudioCapture, Config};
 /// Utility functions shared across command handlers
 ///
 /// This module contains helper functions used by multiple command implementations.
-
 use anyhow::Result;
-use crate::{AudioCapture, Config};
 use tracing::warn;
 
 /// Display configuration status information
@@ -16,10 +15,10 @@ pub async fn show_config_status() -> Result<()> {
             println!("  Use CUDA: {}", config.transcription.use_cuda);
             println!("  Sample Rate: {}Hz", config.audio.sample_rate);
             println!("  Hotkey: {}", config.hotkey.combination);
-        }
+        },
         Err(e) => {
             println!("  ❌ Failed to load config: {}", e);
-        }
+        },
     }
 
     Ok(())
@@ -38,10 +37,10 @@ pub async fn show_device_status() -> Result<()> {
                     println!("  {}. {}", i + 1, device);
                 }
             }
-        }
+        },
         Err(e) => {
             println!("  ❌ Failed to list devices: {}", e);
-        }
+        },
     }
 
     Ok(())
@@ -81,10 +80,10 @@ pub async fn setup_audio(list: bool, test: Option<String>) -> Result<()> {
         match AudioCapture::new(Some(&device_name)) {
             Ok(capture) => {
                 println!("✅ Device '{}' is available", capture.get_device_name());
-            }
+            },
             Err(e) => {
                 println!("❌ Device test failed: {}", e);
-            }
+            },
         }
     }
 
@@ -108,10 +107,10 @@ pub async fn setup_hotkeys(test: Option<String>, list: bool) -> Result<()> {
             Ok((manager, _receiver)) => {
                 println!("✅ Hotkey combination '{}' is valid", combination);
                 drop(manager);
-            }
+            },
             Err(e) => {
                 println!("❌ Hotkey test failed: {}", e);
-            }
+            },
         }
     }
 

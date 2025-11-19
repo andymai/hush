@@ -1,11 +1,11 @@
+use crate::logging::{audio as logging, RequestContext};
 use crate::Result;
-use crate::logging::{RequestContext, audio as logging};
-use cpal::{Device, Host, Stream, StreamConfig, SampleRate};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{Device, Host, SampleRate, Stream, StreamConfig};
 use parking_lot::Mutex;
-use std::sync::Arc;
 use std::sync::mpsc;
-use tracing::{info, warn, error, debug, trace};
+use std::sync::Arc;
+use tracing::{debug, error, info, trace, warn};
 
 // Pre-allocate audio buffer for typical recording durations
 // This prevents reallocations during recording
@@ -42,13 +42,13 @@ impl AudioCapture {
     pub fn new(device_name: Option<&str>) -> Result<Self> {
         let ctx = RequestContext::new("audio_capture_init")
             .with_metadata("device_requested", device_name.unwrap_or("default"));
-        
+
         info!(
             request_id = %ctx.request_id,
             device_name = ?device_name,
             "🎤 Initializing audio capture system"
         );
-        
+
         // Get the default host (will use PipeWire/JACK on Linux)
         let host = cpal::default_host();
         let host_name = host.id().name();
@@ -57,7 +57,7 @@ impl AudioCapture {
             host_name = %host_name,
             "Audio host selected"
         );
-        
+
         // Select audio device
         let device = match device_name {
             Some(name) => {
@@ -96,20 +96,20 @@ impl AudioCapture {
                             );
                             e
                         })?
-                    }
+                    },
                 }
-            }
+            },
         };
-        
+
         let device_name_str = device.name().unwrap_or("Unknown".to_string());
         logging::log_device_initialization(&device_name_str, 16000, 1);
-        
+
         info!(
             request_id = %ctx.request_id,
             device_name = %device_name_str,
             "✅ Audio device selected successfully"
         );
-        
+
         // Get supported input config, with fallback to working device
         let (device, _supported_config) = match device.default_input_config() {
             Ok(config) => {
@@ -117,15 +117,22 @@ impl AudioCapture {
                 (device, config)
             },
             Err(e) => {
-                warn!("Failed to get default input config from {}: {}", 
-                      device.name().unwrap_or("Unknown".to_string()), e);
+                warn!(
+                    "Failed to get default input config from {}: {}",
+                    device.name().unwrap_or("Unknown".to_string()),
+                    e
+                );
                 warn!("Trying to find alternative working device...");
-                
+
                 match Self::find_working_input_device(&host) {
                     Ok(working_device) => {
-                        let config = working_device.default_input_config()
+                        let config = working_device
+                            .default_input_config()
                             .map_err(|e| anyhow::anyhow!("Working device config failed: {}", e))?;
-                        info!("Found working device: {}", working_device.name().unwrap_or("Unknown".to_string()));
+                        info!(
+                            "Found working device: {}",
+                            working_device.name().unwrap_or("Unknown".to_string())
+                        );
                         info!("Working device config: {:?}", config);
                         (working_device, config)
                     },
@@ -145,14 +152,14 @@ impl AudioCapture {
                             simulated_mode: true,
                             amplitude_tx: None,
                         });
-                    }
+                    },
                 }
-            }
+            },
         };
 
         // Create our desired config (16kHz mono for Whisper)
         let config = StreamConfig {
-            channels: 1, // Mono for speech recognition
+            channels: 1,                    // Mono for speech recognition
             sample_rate: SampleRate(16000), // Optimal for Whisper
             buffer_size: cpal::BufferSize::Fixed(1024),
         };
@@ -177,14 +184,14 @@ impl AudioCapture {
             amplitude_tx: None,
         })
     }
-    
+
     pub fn start_recording(&mut self) -> Result<()> {
         let ctx = RequestContext::new("audio_recording")
             .with_metadata("simulated", &self.simulated_mode.to_string())
             .with_metadata("device", &self.get_device_name());
-        
+
         logging::log_recording_started(&ctx, &self.get_device_name());
-        
+
         if self.stream.is_some() {
             warn!(
                 request_id = %ctx.request_id,
@@ -192,18 +199,18 @@ impl AudioCapture {
             );
             return Ok(());
         }
-        
+
         // Clear the buffer and mark as recording
         let buffer_len_before = self.buffer.lock().len();
         self.buffer.lock().clear();
         *self.is_recording.lock() = true;
-        
+
         debug!(
             request_id = %ctx.request_id,
             buffer_cleared_samples = %buffer_len_before,
             "Audio buffer cleared and recording flag set"
         );
-        
+
         // Handle simulated mode for testing
         if self.simulated_mode {
             info!(
@@ -212,71 +219,74 @@ impl AudioCapture {
             );
             return Ok(());
         }
-        
+
         let buffer_clone = Arc::clone(&self.buffer);
         let is_recording_clone = Arc::clone(&self.is_recording);
         let amplitude_tx_clone = self.amplitude_tx.clone();
 
         // Build the input stream
-        let stream = self.device.build_input_stream(
-            &self.config,
-            move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                if *is_recording_clone.lock() {
-                    buffer_clone.lock().extend_from_slice(data);
+        let stream = self
+            .device
+            .build_input_stream(
+                &self.config,
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    if *is_recording_clone.lock() {
+                        buffer_clone.lock().extend_from_slice(data);
 
-                    // Calculate and send amplitude for waveform visualization
-                    if let Some(ref tx) = amplitude_tx_clone {
-                        let amplitude = calculate_rms_amplitude(data);
-                        let _ = tx.send(amplitude); // Ignore send errors (non-blocking)
+                        // Calculate and send amplitude for waveform visualization
+                        if let Some(ref tx) = amplitude_tx_clone {
+                            let amplitude = calculate_rms_amplitude(data);
+                            let _ = tx.send(amplitude); // Ignore send errors (non-blocking)
+                        }
                     }
-                }
-            },
-            |err| {
-                error!("Audio stream error: {}", err);
-            },
-            None,
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to build input stream: {}", e))?;
-        
+                },
+                |err| {
+                    error!("Audio stream error: {}", err);
+                },
+                None,
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to build input stream: {}", e))?;
+
         // Start the stream
-        stream.play()
+        stream
+            .play()
             .map_err(|e| anyhow::anyhow!("Failed to start audio stream: {}", e))?;
-        
+
         self.stream = Some(stream);
         info!("Audio recording started successfully");
         Ok(())
     }
-    
+
     pub fn stop_recording(&mut self) -> Result<Vec<f32>> {
         let ctx = RequestContext::new("audio_recording_stop")
             .with_metadata("simulated", &self.simulated_mode.to_string())
             .with_metadata("device", &self.get_device_name());
-        
+
         debug!(
             request_id = %ctx.request_id,
             simulated = %self.simulated_mode,
             "🛑 Stopping audio recording"
         );
-        
+
         *self.is_recording.lock() = false;
-        
+
         // Handle simulated mode with fake audio data
         if self.simulated_mode {
             // Generate 3 seconds of simulated audio data (silence for now)
             let duration_samples = (3.0 * self.config.sample_rate.0 as f32) as usize;
             let simulated_data = vec![0.0f32; duration_samples];
-            
+
             info!(
                 request_id = %ctx.request_id,
                 samples_generated = %simulated_data.len(),
                 duration_sec = %3.0,
                 "🧪 Generated simulated audio data"
             );
-            
+
             logging::log_recording_stopped(&ctx, simulated_data.len(), 3.0);
             return Ok(simulated_data);
         }
-        
+
         // Stop the actual audio stream
         if let Some(stream) = self.stream.take() {
             if let Err(e) = stream.pause() {
@@ -287,33 +297,33 @@ impl AudioCapture {
                 );
                 return Err(anyhow::anyhow!("Failed to stop audio stream: {}", e));
             }
-            
+
             debug!(
                 request_id = %ctx.request_id,
                 "Audio stream stopped successfully"
             );
         }
-        
+
         // Extract recorded data from buffer
         let recorded_data = {
             let mut buffer = self.buffer.lock();
             let data = buffer.clone();
             let buffer_size = buffer.len();
             buffer.clear();
-            
+
             trace!(
                 request_id = %ctx.request_id,
                 buffer_size = %buffer_size,
                 "Audio buffer extracted and cleared"
             );
-            
+
             data
         };
-        
+
         let duration_sec = recorded_data.len() as f32 / self.config.sample_rate.0 as f32;
-        
+
         logging::log_recording_stopped(&ctx, recorded_data.len(), duration_sec);
-        
+
         info!(
             request_id = %ctx.request_id,
             samples = %recorded_data.len(),
@@ -321,14 +331,14 @@ impl AudioCapture {
             sample_rate = %self.config.sample_rate.0,
             "✅ Audio recording completed successfully"
         );
-        
+
         Ok(recorded_data)
     }
-    
+
     pub fn is_recording(&self) -> bool {
         *self.is_recording.lock()
     }
-    
+
     pub fn get_device_name(&self) -> String {
         self.device.name().unwrap_or("Unknown Device".to_string())
     }
@@ -340,11 +350,12 @@ impl AudioCapture {
         self.amplitude_tx = Some(tx);
         rx
     }
-    
+
     fn find_device_by_name(host: &Host, name: &str) -> Result<Device> {
-        let devices = host.input_devices()
+        let devices = host
+            .input_devices()
             .map_err(|e| anyhow::anyhow!("Failed to enumerate input devices: {}", e))?;
-        
+
         for device in devices {
             if let Ok(device_name) = device.name() {
                 if device_name.contains(name) {
@@ -352,23 +363,27 @@ impl AudioCapture {
                 }
             }
         }
-        
+
         Err(anyhow::anyhow!("Device '{}' not found", name))
     }
-    
+
     fn find_working_input_device(host: &Host) -> Result<Device> {
-        let devices: Vec<Device> = host.input_devices()
+        let devices: Vec<Device> = host
+            .input_devices()
             .map_err(|e| anyhow::anyhow!("Failed to enumerate input devices: {}", e))?
             .collect();
-        
+
         // Preferred device names in order of preference
         let preferred_devices = ["pulse", "pipewire", "jack", "plughw:CARD=Microphone"];
-        
+
         // First, try preferred devices
         for preferred in &preferred_devices {
             for device in &devices {
                 if let Ok(device_name) = device.name() {
-                    if device_name.to_lowercase().contains(&preferred.to_lowercase()) {
+                    if device_name
+                        .to_lowercase()
+                        .contains(&preferred.to_lowercase())
+                    {
                         if device.default_input_config().is_ok() {
                             info!("Found preferred working device: {}", device_name);
                             return Ok(device.clone());
@@ -377,7 +392,7 @@ impl AudioCapture {
                 }
             }
         }
-        
+
         // If no preferred devices work, try any device that has a working config
         for device in &devices {
             if device.default_input_config().is_ok() {
@@ -386,17 +401,18 @@ impl AudioCapture {
                 return Ok(device.clone());
             }
         }
-        
+
         Err(anyhow::anyhow!("No working input devices found"))
     }
-    
+
     fn is_config_supported(device: &Device, config: &StreamConfig) -> bool {
-        device.supported_input_configs()
+        device
+            .supported_input_configs()
             .map(|mut configs| {
                 configs.any(|c| {
-                    c.channels() == config.channels &&
-                    c.min_sample_rate() <= config.sample_rate &&
-                    c.max_sample_rate() >= config.sample_rate
+                    c.channels() == config.channels
+                        && c.min_sample_rate() <= config.sample_rate
+                        && c.max_sample_rate() >= config.sample_rate
                 })
             })
             .unwrap_or(false)
@@ -405,16 +421,17 @@ impl AudioCapture {
     /// List all available input devices
     pub fn list_devices() -> Result<Vec<String>> {
         let host = cpal::default_host();
-        let devices = host.input_devices()
+        let devices = host
+            .input_devices()
             .map_err(|e| anyhow::anyhow!("Failed to enumerate devices: {}", e))?;
-        
+
         let mut device_names = Vec::new();
         for device in devices {
             if let Ok(name) = device.name() {
                 device_names.push(name);
             }
         }
-        
+
         Ok(device_names)
     }
 }

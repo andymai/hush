@@ -11,11 +11,11 @@ use tracing_subscriber;
 struct Cli {
     #[command(subcommand)]
     command: Commands,
-    
+
     /// Model cache directory
     #[arg(long, default_value = "./models")]
     cache_dir: PathBuf,
-    
+
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
@@ -48,20 +48,18 @@ fn parse_model_size(s: &str) -> Result<ModelSize, String> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    
+
     // Initialize logging
     let level = if cli.verbose {
         tracing::Level::DEBUG
     } else {
         tracing::Level::INFO
     };
-    
-    tracing_subscriber::fmt()
-        .with_max_level(level)
-        .init();
 
-    let manager = ModelManager::new(&cli.cache_dir)
-        .context("Failed to initialize model manager")?;
+    tracing_subscriber::fmt().with_max_level(level).init();
+
+    let manager =
+        ModelManager::new(&cli.cache_dir).context("Failed to initialize model manager")?;
 
     match cli.command {
         Commands::List => list_models(&manager).await?,
@@ -79,21 +77,25 @@ async fn list_models(manager: &ModelManager) -> Result<()> {
 
     let available = manager.list_available_models();
     let cached = manager.list_cached_models();
-    
+
     for model_info in &available {
         let is_cached = cached.contains(&model_info.size);
-        let status = if is_cached { "✓ cached" } else { "  not cached" };
+        let status = if is_cached {
+            "✓ cached"
+        } else {
+            "  not cached"
+        };
         let size_str = ModelManager::format_size(model_info.expected_size);
-        
+
         println!(
-            "  {} {} - {} ({})", 
+            "  {} {} - {} ({})",
             status,
             model_info.size.to_string(),
             model_info.name,
             size_str
         );
     }
-    
+
     println!();
     let total_cached = cached.len();
     let total_available = available.len();
@@ -103,32 +105,41 @@ async fn list_models(manager: &ModelManager) -> Result<()> {
 }
 
 async fn download_model(manager: &ModelManager, model: ModelSize) -> Result<()> {
-    let model_info = manager.get_model_info(&model)
+    let model_info = manager
+        .get_model_info(&model)
         .ok_or_else(|| anyhow::anyhow!("Unknown model: {:?}", model))?;
-    
-    println!("Downloading {} ({})...", 
-             model_info.name, 
-             ModelManager::format_size(model_info.expected_size));
-    
-    let path = manager.ensure_model_downloaded(&model).await
+
+    println!(
+        "Downloading {} ({})...",
+        model_info.name,
+        ModelManager::format_size(model_info.expected_size)
+    );
+
+    let path = manager
+        .ensure_model_downloaded(&model)
+        .await
         .context("Failed to download model")?;
-    
+
     println!("✓ Model downloaded successfully to: {}", path.display());
     Ok(())
 }
 
 async fn show_info(manager: &ModelManager) -> Result<()> {
-    let cache_size = manager.get_cache_size()
+    let cache_size = manager
+        .get_cache_size()
         .context("Failed to calculate cache size")?;
-    
+
     let cached_models = manager.list_cached_models();
-    
+
     println!("Model Cache Information:");
     println!();
     println!("Cache directory: {}", manager.cache_dir.display());
-    println!("Total cache size: {}", ModelManager::format_size(cache_size));
+    println!(
+        "Total cache size: {}",
+        ModelManager::format_size(cache_size)
+    );
     println!("Cached models: {}", cached_models.len());
-    
+
     if !cached_models.is_empty() {
         println!();
         println!("Cached models:");
@@ -138,41 +149,44 @@ async fn show_info(manager: &ModelManager) -> Result<()> {
                 let file_size = std::fs::metadata(&path)
                     .map(|m| ModelManager::format_size(m.len()))
                     .unwrap_or_else(|_| "unknown".to_string());
-                
+
                 println!("  {} - {}", info.name, file_size);
             }
         }
     }
-    
+
     Ok(())
 }
 
 async fn clear_cache(manager: &ModelManager, skip_confirm: bool) -> Result<()> {
     let cache_size = manager.get_cache_size()?;
-    
+
     if cache_size == 0 {
         println!("Cache is already empty.");
         return Ok(());
     }
-    
+
     if !skip_confirm {
-        println!("This will delete {} of cached models.", 
-                 ModelManager::format_size(cache_size));
+        println!(
+            "This will delete {} of cached models.",
+            ModelManager::format_size(cache_size)
+        );
         println!("Are you sure? (y/N)");
-        
+
         let mut input = String::new();
         std::io::stdin().read_line(&mut input)?;
-        
+
         if !input.trim().to_lowercase().starts_with('y') {
             println!("Cancelled.");
             return Ok(());
         }
     }
-    
-    manager.clear_cache().await
+
+    manager
+        .clear_cache()
+        .await
         .context("Failed to clear cache")?;
-    
+
     println!("✓ Cache cleared successfully.");
     Ok(())
 }
-

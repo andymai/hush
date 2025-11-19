@@ -10,10 +10,9 @@
 /// - X11 display server
 /// - Hotkey registration permissions
 /// - Whisper model files
-
-use hush::adapters::{CpalAudioAdapter, WhisperAdapter, X11TextAdapter, HotkeyTriggerAdapter};
-use hush::application::{HushAppBuilder, AppMode};
-use hush::core::traits::{AudioSource, Transcriber, TextOutput, InputTrigger};
+use hush::adapters::{CpalAudioAdapter, HotkeyTriggerAdapter, WhisperAdapter, X11TextAdapter};
+use hush::application::{AppMode, HushAppBuilder};
+use hush::core::traits::{AudioSource, InputTrigger, TextOutput, Transcriber};
 use hush::Config;
 use std::time::Duration;
 
@@ -30,7 +29,9 @@ fn test_audio_adapter_with_real_hardware() {
             println!("   Config: {:?}", adapter.config());
 
             // Test recording cycle
-            adapter.start_recording().expect("Failed to start recording");
+            adapter
+                .start_recording()
+                .expect("Failed to start recording");
             assert!(adapter.is_recording());
 
             // Record for 1 second
@@ -40,14 +41,16 @@ fn test_audio_adapter_with_real_hardware() {
             assert!(!adapter.is_recording());
             assert!(!buffer.is_empty());
 
-            println!("   Recorded: {} samples ({:.2}s)",
-                     buffer.len(),
-                     buffer.duration.as_secs_f32());
-        }
+            println!(
+                "   Recorded: {} samples ({:.2}s)",
+                buffer.len(),
+                buffer.duration.as_secs_f32()
+            );
+        },
         Err(e) => {
             eprintln!("⚠️  Audio adapter creation failed: {}", e);
             eprintln!("   This is expected if no microphone is available");
-        }
+        },
     }
 }
 
@@ -59,7 +62,8 @@ async fn test_transcriber_adapter_with_real_model() {
     let result = WhisperAdapter::new(
         &config.transcription.model_path,
         config.transcription.use_cuda,
-    ).await;
+    )
+    .await;
 
     match result {
         Ok(transcriber) => {
@@ -82,17 +86,17 @@ async fn test_transcriber_adapter_with_real_model() {
                     println!("   Transcription: '{}'", transcription.text);
                     println!("   Confidence: {:.2}", transcription.confidence);
                     println!("   Processing Time: {:?}", transcription.processing_time);
-                }
+                },
                 Err(e) => {
                     eprintln!("   ⚠️  Transcription failed: {}", e);
-                }
+                },
             }
-        }
+        },
         Err(e) => {
             eprintln!("⚠️  Transcriber creation failed: {}", e);
             eprintln!("   This is expected if model files are not available");
             eprintln!("   Run: ./scripts/download-models.sh");
-        }
+        },
     }
 }
 
@@ -109,12 +113,12 @@ fn test_text_output_adapter_with_x11() {
 
             // Note: We don't actually insert text in tests to avoid disrupting user's workflow
             println!("   (Text insertion not tested to avoid disruption)");
-        }
+        },
         Err(e) => {
             eprintln!("⚠️  Text output adapter creation failed: {}", e);
             eprintln!("   This is expected if X11 is not available");
             eprintln!("   Check: echo $DISPLAY");
-        }
+        },
     }
 }
 
@@ -130,12 +134,12 @@ fn test_hotkey_adapter_with_system() {
 
             // Note: We don't test actual hotkey events to avoid system interference
             println!("   (Event listening not tested to avoid interference)");
-        }
+        },
         Err(e) => {
             eprintln!("⚠️  Hotkey adapter creation failed: {}", e);
             eprintln!("   This might require elevated permissions");
             eprintln!("   Try: Use 'hush manual' mode instead");
-        }
+        },
     }
 }
 
@@ -151,7 +155,8 @@ async fn test_full_application_with_real_hardware() {
     let transcriber_result = WhisperAdapter::new(
         &config.transcription.model_path,
         config.transcription.use_cuda,
-    ).await;
+    )
+    .await;
     let text_output_result = X11TextAdapter::new();
     let hotkey_result = HotkeyTriggerAdapter::new(&config.hotkey.combination);
 
@@ -210,11 +215,11 @@ async fn test_full_application_with_real_hardware() {
             println!("   Input Trigger: {}", stats.input_trigger_desc);
             println!();
             println!("🎉 Integration test passed!");
-        }
+        },
         Err(e) => {
             eprintln!("❌ Application creation failed: {}", e);
             panic!("Integration test failed");
-        }
+        },
     }
 }
 

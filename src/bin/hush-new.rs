@@ -1,13 +1,12 @@
+use clap::{Parser, Subcommand};
+use hush::adapters::{CpalAudioAdapter, HotkeyTriggerAdapter, WhisperAdapter, X11TextAdapter};
+use hush::application::hush_app::AppMode;
 /// New Hush binary using trait-based architecture
 ///
 /// This demonstrates the refactored architecture in action with real components
-
 use hush::application::HushAppBuilder;
-use hush::application::hush_app::AppMode;
-use hush::adapters::{CpalAudioAdapter, WhisperAdapter, X11TextAdapter, HotkeyTriggerAdapter};
-use hush::core::mocks::{MockAudioSource, MockTranscriber, MockTextOutput, MockInputTrigger};
+use hush::core::mocks::{MockAudioSource, MockInputTrigger, MockTextOutput, MockTranscriber};
 use hush::{Config, Result};
-use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing::info;
 
@@ -73,7 +72,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| log_level.into())
+                .unwrap_or_else(|_| log_level.into()),
         )
         .init();
 
@@ -89,7 +88,10 @@ async fn main() -> Result<()> {
     // Determine mode
     let mode = match cli.command {
         Some(Commands::Daemon) => AppMode::Daemon,
-        Some(Commands::OneShot { duration, print_only }) => AppMode::OneShot {
+        Some(Commands::OneShot {
+            duration,
+            print_only,
+        }) => AppMode::OneShot {
             duration_secs: duration,
             print_only,
         },
@@ -97,7 +99,7 @@ async fn main() -> Result<()> {
         Some(Commands::Info) => {
             show_system_info(&config, cli.mock).await?;
             return Ok(());
-        }
+        },
         None => AppMode::Daemon, // Default
     };
 
@@ -143,18 +145,25 @@ async fn create_real_app(
     info!("Initializing real hardware components...");
 
     // Audio
-    info!("  📢 Audio: {} ({}Hz, {} channels)",
-          config.audio.device.as_deref().unwrap_or("default"),
-          config.audio.sample_rate,
-          config.audio.channels);
+    info!(
+        "  📢 Audio: {} ({}Hz, {} channels)",
+        config.audio.device.as_deref().unwrap_or("default"),
+        config.audio.sample_rate,
+        config.audio.channels
+    );
     let audio = Box::new(CpalAudioAdapter::new(config.audio.device.as_deref())?);
 
     // Transcription
-    info!("  🤖 Transcriber: {} (CUDA: {})",
-          config.transcription.model_size,
-          config.transcription.use_cuda);
+    info!(
+        "  🤖 Transcriber: {} (CUDA: {})",
+        config.transcription.model_size, config.transcription.use_cuda
+    );
     let transcriber = Box::new(
-        WhisperAdapter::new(&config.transcription.model_path, config.transcription.use_cuda).await?
+        WhisperAdapter::new(
+            &config.transcription.model_path,
+            config.transcription.use_cuda,
+        )
+        .await?,
     );
 
     // Text output
@@ -182,7 +191,10 @@ async fn show_system_info(config: &Config, use_mock: bool) -> Result<()> {
     println!("========================================");
     println!();
     println!("Architecture: Trait-Based (v0.2.0)");
-    println!("Mock Mode: {}", if use_mock { "Enabled" } else { "Disabled" });
+    println!(
+        "Mock Mode: {}",
+        if use_mock { "Enabled" } else { "Disabled" }
+    );
     println!();
 
     if use_mock {
@@ -193,22 +205,30 @@ async fn show_system_info(config: &Config, use_mock: bool) -> Result<()> {
         println!("  Input Trigger: MockInputTrigger");
     } else {
         println!("🔧 Real Components:");
-        println!("  Audio: {} ({}Hz, {} ch)",
-                 config.audio.device.as_deref().unwrap_or("default"),
-                 config.audio.sample_rate,
-                 config.audio.channels);
-        println!("  Transcriber: Whisper {} (CUDA: {})",
-                 config.transcription.model_size,
-                 config.transcription.use_cuda);
+        println!(
+            "  Audio: {} ({}Hz, {} ch)",
+            config.audio.device.as_deref().unwrap_or("default"),
+            config.audio.sample_rate,
+            config.audio.channels
+        );
+        println!(
+            "  Transcriber: Whisper {} (CUDA: {})",
+            config.transcription.model_size, config.transcription.use_cuda
+        );
         println!("  Text Output: X11 (enigo + xclip)");
-        println!("  Input Trigger: {} (global-hotkey)",
-                 config.hotkey.combination);
+        println!(
+            "  Input Trigger: {} (global-hotkey)",
+            config.hotkey.combination
+        );
     }
 
     println!();
     println!("📊 Configuration:");
     println!("  Config File: config/default.toml");
-    println!("  Model Path: {}", config.transcription.model_path.display());
+    println!(
+        "  Model Path: {}",
+        config.transcription.model_path.display()
+    );
     println!("  Language: {}", config.transcription.language);
     println!("  Beam Size: {}", config.transcription.beam_size);
     println!();

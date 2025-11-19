@@ -1,10 +1,9 @@
+use super::utils::{show_config_status, show_device_status};
+use crate::{hotkey, AudioCapture, Config, TextInserter, WhisperTranscriber};
 /// Status command implementation
 ///
 /// Displays system status including configuration, devices, and component health.
-
 use anyhow::Result;
-use crate::{AudioCapture, WhisperTranscriber, TextInserter, Config, hotkey};
-use super::utils::{show_config_status, show_device_status};
 
 /// Handle the status command
 ///
@@ -57,7 +56,12 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
         }
 
         print!("Whisper Transcriber: ");
-        match WhisperTranscriber::new(&config.transcription.model_path, config.transcription.use_cuda).await {
+        match WhisperTranscriber::new(
+            &config.transcription.model_path,
+            config.transcription.use_cuda,
+        )
+        .await
+        {
             Ok(_) => println!("✅ Available"),
             Err(e) => println!("❌ Failed ({})", e),
         }
