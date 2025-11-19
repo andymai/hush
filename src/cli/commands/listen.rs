@@ -283,7 +283,16 @@ pub async fn handle_listen(
     let command_executor_clone = command_executor.clone();
     let insertion_history_clone = insertion_history.clone();
     let result_thread = thread::spawn(move || {
-        let result_runtime = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+        let result_runtime = match tokio::runtime::Runtime::new() {
+            Ok(runtime) => runtime,
+            Err(e) => {
+                error!(
+                    "Failed to create tokio runtime for result processing: {}",
+                    e
+                );
+                return;
+            },
+        };
 
         while let Ok(result) = transcription_rx.recv() {
             match result {
@@ -338,11 +347,10 @@ pub async fn handle_listen(
                     }
 
                     // If no text to insert, skip
-                    if exec_result.text.is_none() {
-                        continue;
-                    }
-
-                    let command_text = exec_result.text.unwrap();
+                    let command_text = match exec_result.text {
+                        Some(text) => text,
+                        None => continue,
+                    };
 
                     // Process text (if enabled and should_process is true)
                     let processed_text = if exec_result.should_process {
