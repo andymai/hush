@@ -302,11 +302,22 @@ cargo build --release           # Release build works
 # 2. Push branch
 git push origin "agent/${AGENT_ID}/${TASK_ID}"
 
-# 3. Notify for PR creation
-echo "Branch pushed. Please create a PR with:"
-echo "  Title: ${TASK_ID}: {brief_description}"
-echo "  Body: Contents of .ai/tasks/claimed/${TASK_ID}-${AGENT_ID}.md"
-echo "  Label: ai-agent"
+# 3. Create PR using GitHub API
+# Extract repo info from git remote
+REPO_URL=$(git remote get-url origin | sed -E 's|^.*[:/]([^/]+/[^/]+)(\.git)?$|\1|')
+BASE_BRANCH=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+
+# Create PR using GitHub REST API
+curl -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+  "https://api.github.com/repos/${REPO_URL}/pulls" \
+  -d "{
+    \"title\": \"${TASK_ID}: {brief_description}\",
+    \"body\": \"$(cat .ai/tasks/claimed/${TASK_ID}-${AGENT_ID}.md | jq -Rs .)\",
+    \"head\": \"agent/${AGENT_ID}/${TASK_ID}\",
+    \"base\": \"${BASE_BRANCH}\"
+  }"
 
 # 4. Mark complete
 mv ".ai/tasks/claimed/${TASK_ID}-${AGENT_ID}.md" \
@@ -403,7 +414,7 @@ A task is complete when:
 - [ ] Error handling uses structured HushError types
 - [ ] Documentation added for public APIs
 - [ ] Branch pushed to remote
-- [ ] User notified to create PR with task details
+- [ ] PR created via GitHub API
 - [ ] Task moved to `complete/`
 
 A task should be blocked when:
