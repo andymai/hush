@@ -31,6 +31,13 @@ impl HotkeyManager {
             combination
         );
 
+        // macOS requires hotkey manager to be created on main thread
+        #[cfg(target_os = "macos")]
+        {
+            info!("macOS detected: Checking main thread requirement");
+            crate::adapters::hotkey::ensure_main_thread()?;
+        }
+
         // Parse the hotkey combination
         let (modifiers, key_code) = Self::parse_combination(combination)?;
 
