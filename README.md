@@ -159,9 +159,9 @@ cd hush
 ./hush setup uinput --quick
 ```
 
-**Quick Install (One-Liner):**
+**Quick Install (One-Liner - GPU Accelerated):**
 ```bash
-git clone https://github.com/andymai/hush.git && cd hush && make build && ./hush models download base && ./hush setup uinput --quick
+git clone https://github.com/andymai/hush.git && cd hush && make release && ./hush models download base && ./hush setup uinput --quick
 ```
 
 **Step-by-Step (Manual):**
@@ -170,8 +170,8 @@ git clone https://github.com/andymai/hush.git && cd hush && make build && ./hush
 git clone https://github.com/andymai/hush.git
 cd hush
 
-# 2. Build Hush
-make build
+# 2. Build Hush with GPU acceleration
+make release
 
 # 3. Download a Whisper model
 ./hush models download base
@@ -182,6 +182,8 @@ make build
 # 5. Test your setup
 ./hush status --full
 ```
+
+> **💡 Note:** `make release` builds with CUDA GPU acceleration (10x faster). For CPU-only systems, use `make release-cpu` instead.
 
 > **💡 Tip:** For detailed instructions, all Linux distributions, and troubleshooting, see [INSTALL.md](INSTALL.md)
 
@@ -449,19 +451,23 @@ All developer documentation and project context is in the `.ai/knowledge/` direc
 
 ### Build Options
 
-**GPU-accelerated (default):**
+**GPU-accelerated with CUDA (recommended):**
 ```bash
-cargo build --release
-# Requires: CUDA toolkit, NVIDIA GPU
+make release
+# OR: cargo build --release --features cuda
+# Requires: CUDA toolkit 12.0+, NVIDIA GPU
 # Performance: ~0.5s for 3s audio (base model)
 ```
 
 **CPU-only:**
 ```bash
-cargo build --release --no-default-features --features notifications,system-tray
+make release-cpu
+# OR: cargo build --release
 # No CUDA required - works in Docker, Codespaces, CPU-only systems
 # Performance: ~4-6s for 3s audio (base model)
 ```
+
+**Note:** The Makefile defaults to GPU-accelerated builds. Use `make release` for CUDA or `make release-cpu` for CPU-only.
 
 ---
 
@@ -507,8 +513,8 @@ nvidia-smi
 # Look for GPU information in the output
 
 # If GPU is not detected, Hush will automatically fall back to CPU
-# For CPU-only builds, rebuild without CUDA:
-cargo build --release --no-default-features --features notifications,system-tray
+# For CPU-only builds, use:
+make release-cpu
 
 # Test transcription performance
 ./hush test transcription --timing
@@ -572,11 +578,14 @@ cd hush
 # Install dependencies (see INSTALL.md for other distributions)
 sudo apt install build-essential pkg-config libasound2-dev libx11-dev libdbus-1-dev
 
-# Build debug version
+# Build debug version (for development, no GPU)
 make build
 
-# Build optimized release version
+# Build optimized release with CUDA GPU acceleration (recommended)
 make release
+
+# Build CPU-only release (no GPU required)
+make release-cpu
 
 # Run tests
 cargo test
@@ -586,16 +595,24 @@ cargo clippy
 cargo fmt
 ```
 
-**Build without CUDA** (CPU-only, for systems without GPU):
-```bash
-cargo build --release --no-default-features --features notifications,system-tray
-# Useful for: Docker containers, GitHub Codespaces, cloud VMs, CPU-only systems
-```
+**Using Cargo directly:**
 
-**Build without notifications** (avoids D-Bus dependency):
 ```bash
+# GPU-accelerated build with CUDA
+cargo build --release --features cuda
+
+# CPU-only build (no CUDA)
+cargo build --release
+
+# Minimal build without notifications (avoids D-Bus dependency)
 cargo build --release --no-default-features
 ```
+
+**Build targets:**
+- `make build` - Debug build for development (no GPU)
+- `make release` - Optimized release with CUDA GPU acceleration (recommended)
+- `make release-cpu` - Optimized release CPU-only (for systems without GPU)
+- `make clean` - Clean build artifacts
 
 For detailed build instructions and troubleshooting, see **[INSTALL.md](INSTALL.md)**.
 
@@ -711,7 +728,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Ready to experience intelligent voice-to-text?**
 
 ```bash
-make build
+make release  # GPU-accelerated build (10x faster)
 ./hush models download base
 ./hush setup uinput --quick
 ./hush listen
