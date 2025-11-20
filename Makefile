@@ -1,17 +1,18 @@
-.PHONY: build clean dev release install link help
+.PHONY: build clean dev release release-cpu install link help
 
 # Default target
 help:
 	@echo "🤫 Hush - Voice-to-Text for Linux Developers"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  build    - Build debug version and create symlink"
-	@echo "  dev      - Same as build (alias)"
-	@echo "  release  - Build release version and create symlink"
-	@echo "  clean    - Clean build artifacts and remove symlink"
-	@echo "  link     - Create/update symlink to binary"
-	@echo "  install  - Build release and install to ~/.cargo/bin"
-	@echo "  help     - Show this help message"
+	@echo "  build       - Build debug version and create symlink"
+	@echo "  dev         - Same as build (alias)"
+	@echo "  release     - Build release version with CUDA GPU acceleration"
+	@echo "  release-cpu - Build release version (CPU only, no GPU)"
+	@echo "  clean       - Clean build artifacts and remove symlink"
+	@echo "  link        - Create/update symlink to binary"
+	@echo "  install     - Build release and install to ~/.cargo/bin"
+	@echo "  help        - Show this help message"
 
 # Development build (default)
 build: link
@@ -21,12 +22,19 @@ build: link
 
 dev: build
 
-# Release build
+# Release build (with CUDA GPU acceleration)
 release:
-	@echo "🚀 Building release version..."
+	@echo "🚀 Building release version with CUDA..."
+	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH cargo build --release --features cuda
+	@ln -sf target/release/hush ./hush
+	@echo "✅ Release build complete (CUDA enabled). Use ./hush to run."
+
+# CPU-only release build (no GPU acceleration)
+release-cpu:
+	@echo "🚀 Building CPU-only release version..."
 	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH cargo build --release
 	@ln -sf target/release/hush ./hush
-	@echo "✅ Release build complete. Use ./hush to run."
+	@echo "✅ Release build complete (CPU only). Use ./hush to run."
 
 # Clean everything
 clean:
