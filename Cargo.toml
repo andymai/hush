@@ -72,8 +72,8 @@ serde = { version = "1.0", features = ["derive"] }
 clap = { version = "4.0", features = ["derive", "color", "help", "usage"] }
 
 # Overlay GUI dependencies
-egui = "0.23"  # Must match egui_overlay 0.5 dependency
-egui_overlay = "0.5"
+egui = "0.33"  # Must match egui_overlay 0.5 dependency
+egui_overlay = "0.9"
 raw-window-handle = "0.5"  # For window creation
 
 # System notifications (optional - requires libdbus on Linux)
