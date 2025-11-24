@@ -40,9 +40,9 @@ rodio = { version = "0.19", default-features = false, features = ["wav"] }
 
 # Whisper integration (using candle for pure Rust)
 # CUDA features are optional via the "cuda" feature flag
-candle-core = { version = "0.8" }
-candle-nn = { version = "0.8" }
-candle-transformers = { version = "0.8" }
+candle-core = { version = "0.9" }
+candle-nn = { version = "0.9" }
+candle-transformers = { version = "0.9" }
 tokenizers = "0.19"
 hf-hub = { version = "0.3", features = ["tokio"] }
 byteorder = "1.5"
