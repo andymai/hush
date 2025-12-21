@@ -4,7 +4,6 @@ use crate::transcription::device::GpuAvailability;
 use crate::transcription::WhisperTranscriber;
 use crate::Result;
 use async_trait::async_trait;
-use std::time::Duration;
 use tracing::info;
 
 /// Adapter that wraps WhisperTranscriber to implement Transcriber trait
@@ -76,18 +75,11 @@ impl Transcriber for WhisperAdapter {
     fn info(&self) -> TranscriberInfo {
         use crate::transcription::device::GpuType;
 
-        let hardware_accelerated = !matches!(self.gpu_type, GpuType::Cpu);
-
         TranscriberInfo {
             name: match self.gpu_type {
                 GpuType::Cuda => "Whisper (CUDA)".to_string(),
                 GpuType::Cpu => "Whisper (CPU)".to_string(),
             },
-            version: "1.0.0".to_string(),
-            supports_languages: vec!["en".to_string(), "es".to_string(), "fr".to_string()],
-            max_audio_duration: Some(Duration::from_secs(30)),
-            requires_network: false,
-            hardware_accelerated,
         }
     }
 

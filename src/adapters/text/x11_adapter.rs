@@ -47,10 +47,6 @@ impl TextOutput for X11TextAdapter {
         }
     }
 
-    fn is_available(&self) -> bool {
-        true
-    }
-
     fn output_method(&self) -> &str {
         "X11"
     }
@@ -65,7 +61,6 @@ mod tests {
     fn test_x11_adapter_creation() {
         if let Ok(adapter) = X11TextAdapter::new() {
             assert_eq!(adapter.output_method(), "X11");
-            assert!(adapter.is_available());
         }
     }
 

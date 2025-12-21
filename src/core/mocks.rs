@@ -92,10 +92,6 @@ impl AudioSource for MockAudioSource {
     fn device_name(&self) -> &str {
         &self.device_name
     }
-
-    fn config(&self) -> AudioConfig {
-        self.config
-    }
 }
 
 // ============================================================================
@@ -174,11 +170,6 @@ impl Transcriber for MockTranscriber {
     fn info(&self) -> TranscriberInfo {
         TranscriberInfo {
             name: "MockTranscriber".to_string(),
-            version: "1.0.0".to_string(),
-            supports_languages: vec!["en".to_string()],
-            max_audio_duration: Some(Duration::from_secs(30)),
-            requires_network: false,
-            hardware_accelerated: false,
         }
     }
 
@@ -246,10 +237,6 @@ impl TextOutput for MockTextOutput {
             class: "MockApp".to_string(),
             app_name: "Mock Application".to_string(),
         }))
-    }
-
-    fn is_available(&self) -> bool {
-        true
     }
 
     fn output_method(&self) -> &str {
