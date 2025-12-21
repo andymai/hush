@@ -1,23 +1,19 @@
-# Hush Configuration File
-# Fast, accurate voice-to-text for Linux developers
-
 [audio]
-sample_rate = 16000  # Optimal for Whisper
-channels = 1         # Mono audio for speech
-buffer_size = 1024   # Balance between latency and performance
-# device = "hw:0,0"    # Specific device, or leave commented for auto-detect
+sample_rate = 16000
+channels = 1
+buffer_size = 1024
 
 [transcription]
-model_path = "/home/andy/.cache/hush/models/ggml-base.bin"  # GGML format for whisper-rs
-model_size = "base"  # tiny, base, small, medium, large
-language = "en"        # English optimized
-use_cuda = true        # Enable GPU acceleration if available
-beam_size = 5          # Balance speed vs accuracy
-no_speech_threshold = 0.6  # Silence detection
+model_path = "/home/andy/.cache/hush/models/model.safetensors"
+model_size = "base"
+language = "en"
+use_cuda = true
+beam_size = 5
+no_speech_threshold = 0.6000000238418579
 
 [hotkey]
 enabled = true
-combination = "Ctrl+Shift+Space"  # Default hotkey combination
+combination = "Ctrl+Shift+Space"
 
 [feedback]
-audio_enabled = false  # Sound files not yet included
+audio_enabled = false

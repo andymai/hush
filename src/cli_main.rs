@@ -294,6 +294,12 @@ pub enum ModelCommands {
         yes: bool,
     },
 
+    /// Set the active model (downloads if needed and updates config)
+    Set {
+        /// Model size to set as active (tiny, base, small, medium, large, large-v3)
+        model_size: String,
+    },
+
     /// Show model cache information
     Info {
         /// Clear cache statistics
