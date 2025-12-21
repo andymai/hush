@@ -29,23 +29,7 @@ impl WhisperAdapter {
         })
     }
 
-    /// Create adapter with explicit GPU preference (for testing/debugging)
-    #[allow(dead_code)]
-    pub async fn new_with_gpu_preference(
-        model_path: &std::path::Path,
-        use_gpu: bool,
-    ) -> Result<Self> {
-        let inner = WhisperTranscriber::new(model_path, use_gpu).await?;
-        let gpu_type = if use_gpu {
-            GpuAvailability::gpu_type()
-        } else {
-            crate::transcription::device::GpuType::Cpu
-        };
-
-        Ok(Self { inner, gpu_type })
-    }
-
-    /// Get reference to inner WhisperTranscriber (for migration period)
+    /// Get reference to inner WhisperTranscriber
     pub fn inner(&self) -> &WhisperTranscriber {
         &self.inner
     }
