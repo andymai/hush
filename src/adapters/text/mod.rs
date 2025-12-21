@@ -1,8 +1,8 @@
-/// Text output adapters
-///
-/// Platform-specific implementations of the TextOutput trait.
-/// - Linux: X11TextAdapter
-/// - macOS: MacOSTextAdapter
+// Text output adapters
+//
+// Platform-specific implementations of the TextOutput trait.
+// - Linux: X11TextAdapter
+// - macOS: MacOSTextAdapter
 
 // Linux adapter
 #[cfg(target_os = "linux")]

@@ -10,11 +10,7 @@ categories = ["multimedia::audio", "accessibility"]
 default-run = "hush"
 
 [features]
-default = ["notifications", "system-tray"]
-notifications = ["dep:notify-rust"]
-# System tray uses platform-specific implementations
-# ksni on Linux, tray-icon on macOS
-system-tray = []
+default = []
 
 # GPU acceleration features (mutually exclusive)
 # CUDA for NVIDIA GPUs (Linux/Windows)
@@ -77,8 +73,6 @@ egui = "0.23"  # Must match egui_overlay 0.5 dependency
 egui_overlay = "0.5"
 raw-window-handle = "0.5"  # For window creation
 
-# System notifications (optional - requires libdbus on Linux)
-notify-rust = { version = "4.10", optional = true }
 
 # Clipboard (cross-platform)
 arboard = "3.0"
@@ -121,18 +115,12 @@ x11rb = "0.13"
 # Kernel-level keyboard emulation (uinput)
 input-linux = "0.7"
 
-# System tray integration (DBus-based)
-ksni = "0.2"
-
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS system frameworks
 cocoa = "0.25"              # AppKit/Cocoa bindings
 core-graphics = "0.23"      # CGEvent API for keyboard simulation
 core-foundation = "0.9"     # CoreFoundation framework
 objc = "0.2"                # Objective-C runtime
-
-# System tray integration (macOS native)
-tray-icon = { version = "0.14", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
@@ -159,26 +147,4 @@ cudarc = { git = "https://github.com/coreylowman/cudarc" }
 [[bin]]
 name = "hush"
 path = "src/main.rs"
-
-# Model management utilities
-[[bin]]
-name = "model-manager"
-path = "src/bin/model-manager.rs"
-
-[[bin]]
-name = "simple-model-manager"
-path = "src/bin/simple-model-manager.rs"
-
-# Integration tests
-[[bin]]
-name = "test-overlay"
-path = "src/bin/test-overlay.rs"
-
-[[bin]]
-name = "test-full-integration"
-path = "src/bin/test-full-integration.rs"
-
-[[bin]]
-name = "test-intelligent-editing"
-path = "src/bin/test-intelligent-editing.rs"
 

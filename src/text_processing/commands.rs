@@ -275,11 +275,11 @@ mod tests {
         // Should preserve original case
         match &result.segments[0] {
             VoiceCommand::Text(text) => assert_eq!(text, "Hello World"),
-            _ => panic!("Expected text segment"),
+            _ => unreachable!("Expected text segment"),
         }
         match &result.segments[2] {
             VoiceCommand::Text(text) => assert_eq!(text, "This Is A Test"),
-            _ => panic!("Expected text segment"),
+            _ => unreachable!("Expected text segment"),
         }
     }
 }

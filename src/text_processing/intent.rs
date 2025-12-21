@@ -390,7 +390,7 @@ mod tests {
             } => {
                 assert_eq!(lang, "JavaScript");
             },
-            _ => panic!("Expected Code intent with language"),
+            _ => unreachable!("Expected Code intent with language"),
         }
 
         let intent = detector.detect("def foo return bar");
@@ -401,7 +401,7 @@ mod tests {
             } => {
                 assert_eq!(lang, "Python");
             },
-            _ => panic!("Expected Code intent with language"),
+            _ => unreachable!("Expected Code intent with language"),
         }
     }
 }

@@ -1,9 +1,10 @@
 use std::time::{Duration, Instant};
 
 /// The current state of the overlay
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum OverlayState {
     /// Idle state - showing button or waiting for hotkey
+    #[default]
     Idle,
     /// Recording audio - capturing voice input
     Recording {
@@ -44,7 +45,11 @@ impl OverlayState {
     /// Update recording amplitude (immutable - creates new state)
     pub fn with_amplitude(self, new_amplitude: f32) -> Self {
         match self {
-            Self::Recording { start_time, smoothed_amplitude, .. } => Self::Recording {
+            Self::Recording {
+                start_time,
+                smoothed_amplitude,
+                ..
+            } => Self::Recording {
                 start_time,
                 amplitude: new_amplitude.clamp(0.0, 1.0),
                 smoothed_amplitude,
@@ -56,7 +61,12 @@ impl OverlayState {
     /// Update recording amplitude in-place (more efficient - avoids clone)
     /// Also updates smoothed_amplitude with attack/decay for smooth animations
     pub fn update_amplitude(&mut self, new_amplitude: f32) {
-        if let Self::Recording { amplitude, smoothed_amplitude, .. } = self {
+        if let Self::Recording {
+            amplitude,
+            smoothed_amplitude,
+            ..
+        } = self
+        {
             let clamped = new_amplitude.clamp(0.0, 1.0);
             *amplitude = clamped;
 
@@ -84,7 +94,9 @@ impl OverlayState {
     /// Get smoothed amplitude for animation (if recording)
     pub fn smoothed_amplitude(&self) -> Option<f32> {
         match self {
-            Self::Recording { smoothed_amplitude, .. } => Some(*smoothed_amplitude),
+            Self::Recording {
+                smoothed_amplitude, ..
+            } => Some(*smoothed_amplitude),
             _ => None,
         }
     }
@@ -145,12 +157,6 @@ impl OverlayState {
     /// Create a settings state
     pub fn settings() -> Self {
         Self::Settings
-    }
-}
-
-impl Default for OverlayState {
-    fn default() -> Self {
-        Self::Idle
     }
 }
 

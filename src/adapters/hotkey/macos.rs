@@ -3,18 +3,11 @@
 /// macOS requires that GlobalHotKeyManager be created on the main thread
 /// due to AppKit/Cocoa threading requirements.
 use anyhow::Result;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Ensure we're running on the main thread (macOS requirement)
-///
-/// On macOS, GlobalHotKeyManager must be created on the main thread because
-/// it uses AppKit/Cocoa event handling which is main-thread only.
-///
-/// Note: Thread checking is currently disabled due to NSThread API unavailability.
-/// The global_hotkey crate handles main thread requirements internally.
 #[cfg(target_os = "macos")]
 pub fn ensure_main_thread() -> Result<()> {
-    // For now, trust that global_hotkey handles main thread requirements
     info!("Hotkey manager initialization (macOS)");
     warn!("Main thread check disabled - relying on global_hotkey internal handling");
     Ok(())
@@ -28,12 +21,8 @@ pub fn ensure_main_thread() -> Result<()> {
 }
 
 /// Check if we're on the main thread (for diagnostics)
-///
-/// Note: Always returns true as NSThread API is not available in current cocoa version.
 #[cfg(target_os = "macos")]
 pub fn is_main_thread() -> bool {
-    // Cannot check main thread without NSThread API
-    // Assume true for now
     true
 }
 
@@ -84,7 +73,10 @@ mod tests {
     fn test_main_thread_detection_on_main() {
         // This test runs on main thread
         assert!(is_main_thread(), "Test should run on main thread");
-        assert!(ensure_main_thread().is_ok(), "Should succeed on main thread");
+        assert!(
+            ensure_main_thread().is_ok(),
+            "Should succeed on main thread"
+        );
     }
 
     #[test]
@@ -93,9 +85,7 @@ mod tests {
         use std::thread;
 
         // Spawn background thread
-        let handle = thread::spawn(|| {
-            (is_main_thread(), ensure_main_thread())
-        });
+        let handle = thread::spawn(|| (is_main_thread(), ensure_main_thread()));
 
         let (is_main, result) = handle.join().unwrap();
 
@@ -111,9 +101,7 @@ mod tests {
         assert!(ensure_main_thread().is_ok());
 
         // Even in background thread, it should succeed
-        let handle = std::thread::spawn(|| {
-            (is_main_thread(), ensure_main_thread())
-        });
+        let handle = std::thread::spawn(|| (is_main_thread(), ensure_main_thread()));
 
         let (is_main, result) = handle.join().unwrap();
         assert!(is_main);

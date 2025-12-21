@@ -30,19 +30,17 @@ impl X11TextAdapter {
 #[async_trait]
 impl TextOutput for X11TextAdapter {
     async fn insert_text(&mut self, text: &str) -> Result<()> {
-        // TextInserter's insert_text is synchronous
         self.inner.lock().insert_text(text)
     }
 
     async fn focused_window(&self) -> Result<Option<WindowInfo>> {
-        // Get focused window info
         match self.inner.lock().get_focused_window() {
             Ok(window) => {
                 let class = window.class.clone();
                 Ok(Some(WindowInfo {
                     title: window.title,
                     class: class.clone(),
-                    app_name: class, // Use class as app_name for now
+                    app_name: class,
                 }))
             },
             Err(_) => Ok(None),
@@ -50,7 +48,6 @@ impl TextOutput for X11TextAdapter {
     }
 
     fn is_available(&self) -> bool {
-        // X11 is available if we successfully created the adapter
         true
     }
 
@@ -66,7 +63,6 @@ mod tests {
 
     #[test]
     fn test_x11_adapter_creation() {
-        // This will only work if X11 is available
         if let Ok(adapter) = X11TextAdapter::new() {
             assert_eq!(adapter.output_method(), "X11");
             assert!(adapter.is_available());
@@ -75,7 +71,6 @@ mod tests {
 
     #[test]
     fn test_adapter_implements_trait() {
-        // Verify the adapter compiles as trait object
         let _can_box: Result<Box<dyn TextOutput>> =
             X11TextAdapter::new().map(|adapter| Box::new(adapter) as Box<dyn TextOutput>);
     }

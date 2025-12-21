@@ -78,6 +78,12 @@ pub struct FillerWordRemover {
     aggressive_patterns: Vec<Regex>,
 }
 
+impl Default for FillerWordRemover {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FillerWordRemover {
     pub fn new() -> Self {
         Self {

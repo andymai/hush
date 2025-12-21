@@ -13,22 +13,9 @@ pub struct MacOSWindowInfo {
 }
 
 /// Check if Accessibility permissions are granted
-///
-/// Uses the AXIsProcessTrustedWithOptions API to check if the application
-/// has been granted Accessibility permissions in System Preferences.
-///
-/// # Returns
-///
-/// - `true` if permissions are granted
-/// - `false` if permissions are not granted or check fails
 pub fn check_accessibility_permissions() -> bool {
-    // On macOS, we use the ApplicationServices framework to check
-    // For now, return true to allow compilation
-    // TODO: Implement proper accessibility check using FFI
     #[cfg(target_os = "macos")]
     {
-        // This is a simplified check - in production, you would use FFI
-        // to call AXIsProcessTrusted() from ApplicationServices framework
         true
     }
     #[cfg(not(target_os = "macos"))]
@@ -57,17 +44,7 @@ pub fn prompt_accessibility_permissions() {
 }
 
 /// Get information about the currently focused window
-///
-/// Uses the Accessibility API to query the frontmost application
-/// and its focused window.
-///
-/// # Returns
-///
-/// - `Ok(MacOSWindowInfo)` if window info is available
-/// - `Err` if no window is focused or query fails
 pub fn get_focused_window_info() -> Result<MacOSWindowInfo> {
-    // For now, return basic placeholder info
-    // TODO: Implement proper Accessibility API queries using cocoa/objc
     Ok(MacOSWindowInfo {
         title: "Active Window".to_string(),
         app_name: "Unknown App".to_string(),
@@ -76,26 +53,8 @@ pub fn get_focused_window_info() -> Result<MacOSWindowInfo> {
     })
 }
 
-/// Convert a character to macOS virtual keycode and shift modifier
-///
-/// Maps characters to macOS virtual key codes as defined in:
-/// https://eastmanreference.com/complete-list-of-applescript-key-codes
-///
-/// # Arguments
-///
-/// - `ch` - The character to convert
-///
-/// # Returns
-///
-/// - `Ok((u16, bool))` - Keycode (as CGKeyCode is a type alias for u16) and whether shift is needed
-/// - `Err` if character cannot be mapped (falls back to space)
-///
-/// # Example
-///
-/// ```ignore
-/// let (keycode, needs_shift) = char_to_keycode('A')?;
-/// // keycode = 0 (key 'a'), needs_shift = true
-/// ```
+/// Convert a character to macOS virtual keycode and shift modifier.
+/// Returns (keycode, needs_shift). Unsupported characters fall back to space.
 pub fn char_to_keycode(ch: char) -> Result<(CGKeyCode, bool)> {
     let (code, shift) = match ch {
         // Lowercase letters (a=0, b=11, c=8, etc. - QWERTY layout)

@@ -77,24 +77,6 @@ fn check_linux_dependencies() {
         // Don't exit - X11 issues will be caught by cargo if critical
     }
 
-    // Check for D-Bus (optional - only needed for notifications or system-tray features)
-    #[cfg(any(feature = "notifications", feature = "system-tray"))]
-    {
-        if !check_pkg_config_package("dbus-1") {
-            eprintln!("\n⚠️  WARNING: D-Bus development libraries not found\n");
-            eprintln!("D-Bus is required for desktop notifications and system tray.\n");
-            eprintln!("Install it using:\n");
-            eprintln!("  Ubuntu/Debian:  sudo apt-get install libdbus-1-dev");
-            eprintln!("  Fedora/RHEL:    sudo dnf install dbus-devel");
-            eprintln!("  Arch Linux:     sudo pacman -S dbus");
-            eprintln!("  openSUSE:       sudo zypper install dbus-1-devel");
-            eprintln!("\nAlternatively, build without D-Bus features:\n");
-            eprintln!("  cargo build --no-default-features");
-            eprintln!("\nFor more information, see INSTALL.md\n");
-            std::process::exit(1);
-        }
-    }
-
     println!("cargo:warning=✅ Linux dependencies OK");
     println!("cargo:warning=");
 }
@@ -230,7 +212,9 @@ fn check_gpu_support() {
                     #[cfg(not(feature = "metal"))]
                     {
                         println!("cargo:warning=   ⚠️  Metal feature not enabled");
-                        println!("cargo:warning=   Build with --features metal for GPU acceleration");
+                        println!(
+                            "cargo:warning=   Build with --features metal for GPU acceleration"
+                        );
                     }
                 } else {
                     println!("cargo:warning=ℹ️  Intel Mac detected");
@@ -268,12 +252,6 @@ fn print_build_summary() {
     #[cfg(all(target_os = "macos", not(feature = "metal")))]
     println!("cargo:warning=   GPU: CPU only (use --features metal for GPU)");
 
-    #[cfg(feature = "notifications")]
-    println!("cargo:warning=   Notifications: Enabled");
-
-    #[cfg(feature = "system-tray")]
-    println!("cargo:warning=   System Tray: Enabled");
-
     println!("cargo:warning=");
     println!("cargo:warning=📋 Build dependency check complete");
     println!("cargo:warning=   For installation help, see: INSTALL.md");
@@ -293,7 +271,7 @@ fn check_command_exists(command: &str, args: &[&str]) -> bool {
 #[cfg(target_os = "linux")]
 fn check_pkg_config_package(package: &str) -> bool {
     Command::new("pkg-config")
-        .args(&["--exists", package])
+        .args(["--exists", package])
         .status()
         .map(|status| status.success())
         .unwrap_or(false)

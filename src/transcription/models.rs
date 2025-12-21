@@ -27,8 +27,10 @@ pub enum ModelSize {
     LargeV3,
 }
 
-impl ModelSize {
-    pub fn from_str(s: &str) -> Result<Self> {
+impl std::str::FromStr for ModelSize {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
         match s.to_lowercase().as_str() {
             "tiny" => Ok(ModelSize::Tiny),
             "base" => Ok(ModelSize::Base),
@@ -40,16 +42,18 @@ impl ModelSize {
             _ => Err(anyhow::anyhow!("Unknown model size: {}", s)),
         }
     }
+}
 
-    pub fn to_string(&self) -> String {
+impl std::fmt::Display for ModelSize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ModelSize::Tiny => "tiny".to_string(),
-            ModelSize::Base => "base".to_string(),
-            ModelSize::Small => "small".to_string(),
-            ModelSize::Medium => "medium".to_string(),
-            ModelSize::Large => "large".to_string(),
-            ModelSize::LargeV2 => "large-v2".to_string(),
-            ModelSize::LargeV3 => "large-v3".to_string(),
+            ModelSize::Tiny => write!(f, "tiny"),
+            ModelSize::Base => write!(f, "base"),
+            ModelSize::Small => write!(f, "small"),
+            ModelSize::Medium => write!(f, "medium"),
+            ModelSize::Large => write!(f, "large"),
+            ModelSize::LargeV2 => write!(f, "large-v2"),
+            ModelSize::LargeV3 => write!(f, "large-v3"),
         }
     }
 }
@@ -83,7 +87,7 @@ impl ModelManager {
                 repo_id: "openai/whisper-tiny".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 39_000_000, // ~39MB
-                // TODO: Add SHA256 from https://huggingface.co/openai/whisper-tiny/blob/main/model.safetensors
+                // TODO: Verify SHA256 checksum when downloading
                 sha256: None,
             },
         );
@@ -110,7 +114,7 @@ impl ModelManager {
                 repo_id: "openai/whisper-small".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 244_000_000, // ~244MB
-                // TODO: Add SHA256 from https://huggingface.co/openai/whisper-small/blob/main/model.safetensors
+                // TODO: Verify SHA256 checksum when downloading
                 sha256: None,
             },
         );
@@ -123,7 +127,7 @@ impl ModelManager {
                 repo_id: "openai/whisper-medium".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 769_000_000, // ~769MB
-                // TODO: Add SHA256 from https://huggingface.co/openai/whisper-medium/blob/main/model.safetensors
+                // TODO: Verify SHA256 checksum when downloading
                 sha256: None,
             },
         );
@@ -136,7 +140,7 @@ impl ModelManager {
                 repo_id: "openai/whisper-large".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 1_550_000_000, // ~1.55GB
-                // TODO: Add SHA256 from https://huggingface.co/openai/whisper-large/blob/main/model.safetensors
+                // TODO: Verify SHA256 checksum when downloading
                 sha256: None,
             },
         );
@@ -369,9 +373,9 @@ mod tests {
 
     #[test]
     fn test_model_size_parsing() {
-        assert_eq!(ModelSize::from_str("tiny").unwrap(), ModelSize::Tiny);
-        assert_eq!(ModelSize::from_str("LARGE").unwrap(), ModelSize::Large);
-        assert_eq!(ModelSize::from_str("large-v3").unwrap(), ModelSize::LargeV3);
+        assert_eq!("tiny".parse::<ModelSize>().unwrap(), ModelSize::Tiny);
+        assert_eq!("LARGE".parse::<ModelSize>().unwrap(), ModelSize::Large);
+        assert_eq!("large-v3".parse::<ModelSize>().unwrap(), ModelSize::LargeV3);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use candle_core::Device;
 use std::sync::OnceLock;
-use tracing::{info, warn};
+use tracing::info;
 
 static GPU_AVAILABILITY: OnceLock<GpuAvailability> = OnceLock::new();
 

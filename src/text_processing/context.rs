@@ -155,7 +155,7 @@ impl ContextDetector {
     fn detect_active_window(&self) -> Option<String> {
         // Try xdotool first (works on X11)
         if let Ok(output) = Command::new("xdotool")
-            .args(&["getactivewindow", "getwindowname"])
+            .args(["getactivewindow", "getwindowname"])
             .output()
         {
             if output.status.success() {
@@ -168,7 +168,7 @@ impl ContextDetector {
         }
 
         // Try wmctrl as fallback
-        if let Ok(output) = Command::new("wmctrl").args(&["-lx"]).output() {
+        if let Ok(output) = Command::new("wmctrl").args(["-lx"]).output() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 // Parse wmctrl output to find active window
@@ -181,7 +181,7 @@ impl ContextDetector {
         }
 
         // Wayland: Try swaymsg for Sway/i3
-        if let Ok(output) = Command::new("swaymsg").args(&["-t", "get_tree"]).output() {
+        if let Ok(output) = Command::new("swaymsg").args(["-t", "get_tree"]).output() {
             if output.status.success() {
                 // Parse JSON to find focused window
                 // This is complex, so we'll just return the raw output for now
@@ -403,7 +403,7 @@ mod tests {
                 assert_eq!(ctx.editor, "VS Code");
                 assert_eq!(ctx.language, Some("Rust".to_string()));
             },
-            _ => panic!("Expected Code context"),
+            _ => unreachable!("Expected Code context"),
         }
     }
 
@@ -424,7 +424,7 @@ mod tests {
             ApplicationContext::Browser(ctx) => {
                 assert_eq!(ctx.site_type, BrowserSiteType::CodeRepository);
             },
-            _ => panic!("Expected Browser context"),
+            _ => unreachable!("Expected Browser context"),
         }
     }
 

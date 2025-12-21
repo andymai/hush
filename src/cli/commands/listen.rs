@@ -2,7 +2,6 @@ use anyhow::Result;
 use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use tracing::{error, info, warn};
 
@@ -19,57 +18,6 @@ use crate::AudioCapture;
 
 #[cfg(target_os = "linux")]
 use crate::TextInserter;
-
-#[cfg(target_os = "linux")]
-use ksni;
-
-/// Simple system tray for Hush
-#[cfg(target_os = "linux")]
-#[derive(Debug)]
-struct HushTray {
-    quit_flag: Arc<AtomicBool>,
-}
-
-#[cfg(target_os = "linux")]
-impl ksni::Tray for HushTray {
-    fn id(&self) -> String {
-        "hush-voice-to-text".to_string()
-    }
-
-    fn icon_name(&self) -> String {
-        "preferences-desktop-accessibility".to_string()  // Accessibility/speech icon
-    }
-
-    fn title(&self) -> String {
-        "Hush".to_string()
-    }
-
-    fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        use ksni::menu::*;
-        vec![
-            StandardItem {
-                label: "Hush Voice-to-Text".to_string(),
-                enabled: false,
-                ..Default::default()
-            }
-            .into(),
-            ksni::MenuItem::Separator,
-            StandardItem {
-                label: "Quit".to_string(),
-                activate: Box::new(|tray: &mut Self| {
-                    tray.quit_flag.store(true, Ordering::SeqCst);
-                }),
-                ..Default::default()
-            }
-            .into(),
-        ]
-    }
-}
-
-/// Listen command implementation
-///
-/// Handles intelligent listening mode with hotkey-activated recording,
-/// real-time transcription, text processing, and automated text insertion.
 
 /// Handle the listen command
 ///
@@ -165,7 +113,7 @@ pub async fn handle_listen(
     // Load configuration
     let config = Config::load().unwrap_or_else(|e| {
         warn!("Failed to load config, using defaults: {}", e);
-        Config::default()
+        Config::programmatic_default()
     });
     let hotkey_combination = config.hotkey.combination.clone();
 
@@ -313,28 +261,9 @@ pub async fn handle_listen(
     let insertion_history = Arc::new(Mutex::new(InsertionHistory::new()));
     info!("✅ Voice command system initialized");
 
-    // Initialize system tray (Linux only)
-    #[cfg(target_os = "linux")]
-    let quit_flag = Arc::new(AtomicBool::new(false));
-    #[cfg(target_os = "linux")]
-    let quit_flag_clone = quit_flag.clone();
-
-    #[cfg(target_os = "linux")]
-    {
-        let tray = HushTray { quit_flag: quit_flag.clone() };
-        let service = ksni::TrayService::new(tray);
-        // Run tray service in a dedicated thread (it's blocking)
-        thread::spawn(move || {
-            if let Err(e) = service.run() {
-                warn!("System tray error: {}", e);
-            }
-        });
-        info!("✅ System tray initialized");
-    }
-
-    // Create overlay - hide when idle since we have system tray
+    // Create overlay
     let overlay = OverlayWindowBuilder::new()
-        .show_button_when_idle(false)  // Window hidden when idle, only tray icon visible
+        .show_button_when_idle(false)
         .hotkey(&hotkey_combination)
         .build();
 
@@ -520,14 +449,6 @@ pub async fn handle_listen(
     let mut amplitude_threads: Vec<thread::JoinHandle<()>> = Vec::new();
 
     loop {
-        // Check quit flag from system tray (Linux only)
-        #[cfg(target_os = "linux")]
-        if quit_flag_clone.load(Ordering::SeqCst) {
-            info!("Quit requested from system tray");
-            break;
-        }
-
-        // Use try_recv with timeout to allow quit flag checking
         let command = match audio_cmd_rx.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(cmd) => cmd,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
@@ -610,7 +531,8 @@ pub async fn handle_listen(
                 }
 
                 // Silence detection: calculate RMS energy of audio
-                let rms = (audio_data.iter().map(|s| s * s).sum::<f32>() / audio_data.len() as f32).sqrt();
+                let rms = (audio_data.iter().map(|s| s * s).sum::<f32>() / audio_data.len() as f32)
+                    .sqrt();
                 const SILENCE_THRESHOLD: f32 = 0.005;
 
                 if rms < SILENCE_THRESHOLD {
@@ -626,10 +548,17 @@ pub async fn handle_listen(
                                 // Filter common Whisper hallucinations on near-silence
                                 let text = result.text.trim().to_lowercase();
                                 let hallucinations = [
-                                    "you", "thank you", "thanks", "thank you.",
-                                    "thanks for watching", "bye", "goodbye",
-                                    "thank you for watching", "see you next time",
-                                    "subscribe", "like and subscribe",
+                                    "you",
+                                    "thank you",
+                                    "thanks",
+                                    "thank you.",
+                                    "thanks for watching",
+                                    "bye",
+                                    "goodbye",
+                                    "thank you for watching",
+                                    "see you next time",
+                                    "subscribe",
+                                    "like and subscribe",
                                 ];
                                 if hallucinations.iter().any(|h| text == *h) {
                                     *state_handle.lock() = OverlayState::idle();

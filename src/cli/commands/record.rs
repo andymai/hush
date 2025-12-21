@@ -107,7 +107,9 @@ pub async fn handle_record(
                 #[cfg(not(target_os = "linux"))]
                 {
                     println!("ℹ️  Text insertion not available on this platform");
-                    println!("💡 Use the trait-based adapters for platform-specific text insertion");
+                    println!(
+                        "💡 Use the trait-based adapters for platform-specific text insertion"
+                    );
                 }
             },
             Err(e) => println!("❌ Transcription failed: {}", e),

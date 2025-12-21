@@ -13,6 +13,7 @@ pub struct AudioFeedback {
 
 impl AudioFeedback {
     /// Create a new audio feedback system
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> Result<Self> {
         // Try to initialize audio output, but don't fail if unavailable
         let (_stream, enabled) = match OutputStream::try_default() {

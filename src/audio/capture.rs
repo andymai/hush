@@ -383,11 +383,10 @@ impl AudioCapture {
                     if device_name
                         .to_lowercase()
                         .contains(&preferred.to_lowercase())
+                        && device.default_input_config().is_ok()
                     {
-                        if device.default_input_config().is_ok() {
-                            info!("Found preferred working device: {}", device_name);
-                            return Ok(device.clone());
-                        }
+                        info!("Found preferred working device: {}", device_name);
+                        return Ok(device.clone());
                     }
                 }
             }

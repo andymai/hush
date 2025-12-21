@@ -126,7 +126,7 @@ impl Config {
     }
 
     /// Create a default configuration programmatically
-    pub fn default() -> Self {
+    pub fn programmatic_default() -> Self {
         Config {
             audio: AudioConfig {
                 sample_rate: 16000,

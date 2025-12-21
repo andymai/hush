@@ -15,9 +15,6 @@ pub struct WhisperAdapter {
 
 impl WhisperAdapter {
     /// Create new adapter with automatic GPU detection
-    ///
-    /// Detects available GPU (CUDA or Metal) and creates transcriber accordingly.
-    /// Falls back to CPU if no GPU is available.
     pub async fn new(model_path: &std::path::Path) -> Result<Self> {
         // Detect GPU availability
         let gpu = GpuAvailability::detect();
@@ -63,17 +60,15 @@ impl WhisperAdapter {
 #[async_trait]
 impl Transcriber for WhisperAdapter {
     async fn transcribe(&self, audio: &AudioBuffer) -> Result<TranscriptionResult> {
-        // Call the inner transcriber with the audio samples
         let result = self
             .inner
             .transcribe_async(&audio.samples, audio.sample_rate)
             .await?;
 
-        // Convert legacy TranscriptionResult to new one
         Ok(TranscriptionResult {
             text: result.text,
             confidence: result.confidence,
-            language: None, // Legacy result doesn't have language
+            language: None,
             processing_time: result.processing_time,
         })
     }
@@ -98,7 +93,6 @@ impl Transcriber for WhisperAdapter {
     }
 
     async fn is_ready(&self) -> bool {
-        // Whisper is ready if it was successfully initialized
         true
     }
 }
@@ -109,10 +103,6 @@ mod tests {
 
     #[test]
     fn test_whisper_adapter_compiles() {
-        // This test verifies the adapter compiles and implements the trait
-        // Actual functionality is tested via integration tests with real models
-
-        // Type check: ensure we can Box the trait object
         fn _type_check(adapter: WhisperAdapter) -> Box<dyn Transcriber> {
             Box::new(adapter)
         }

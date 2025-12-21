@@ -246,34 +246,10 @@ impl WhisperTranscriber {
         Ok(result)
     }
 
-    pub fn get_device_info(&self) -> String {
-        match &self.device {
-            Device::Cpu => "CPU".to_string(),
-            Device::Cuda(_cuda_device) => "CUDA Device 0".to_string(),
-            _ => "Unknown Device".to_string(),
-        }
-    }
-
     pub fn is_using_cuda(&self) -> bool {
         matches!(self.device, Device::Cuda(_))
     }
 
-    fn check_cuda_availability() -> Result<()> {
-        // Use enhanced CUDA detection
-        if CudaAvailability::is_available() {
-            info!("CUDA runtime detected");
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("CUDA not available"))
-        }
-    }
-
-    /// Check if currently using GPU
-    pub fn is_using_gpu(&self) -> bool {
-        matches!(self.device, Device::Cuda(_))
-    }
-
-    /// Get device information string
     pub fn device_info(&self) -> String {
         let cuda = CudaAvailability::detect();
         if cuda.available && matches!(self.device, Device::Cuda(_)) {
@@ -281,6 +257,10 @@ impl WhisperTranscriber {
         } else {
             "CPU".to_string()
         }
+    }
+
+    pub fn get_device_info(&self) -> String {
+        self.device_info()
     }
 
     /// Load Whisper model from local files or HuggingFace
@@ -346,9 +326,6 @@ impl WhisperTranscriber {
             },
         };
 
-        // For now, we still need to create compatible candle structures
-        // This is a bridge approach - we'll use whisper-rs for actual inference
-        // but return candle structures for compatibility with existing code
         let _config = Self::create_default_config(model_size);
         info!("Using default config for {} model", model_size);
 
@@ -357,17 +334,16 @@ impl WhisperTranscriber {
         info!("Using basic tokenizer for PyTorch model");
 
         // Create a dummy candle model since we'll use whisper-rs for inference
-        // This is a workaround until we fully migrate to one approach
         let dummy_weights = std::collections::HashMap::new();
         let _vb = VarBuilder::from_tensors(dummy_weights, candle_core::DType::F32, device);
 
         // We can't actually create a real candle model without proper weights
         // So for PyTorch models, we'll need to modify the transcription logic
-        return Err(anyhow::anyhow!(
+        Err(anyhow::anyhow!(
             "PyTorch model loaded with whisper-rs, but candle integration needs refactoring. \
              The model file was successfully loaded, but we need to update the transcription pipeline \
              to use whisper-rs directly instead of candle."
-        ));
+        ))
     }
 
     /// Load PyTorch model using whisper-rs
@@ -583,16 +559,11 @@ impl WhisperTranscriber {
             model.encoder.forward(&mel_tensor, true)?
         };
 
-        // For now, use the built-in Whisper decode functionality
-        // This is a simplified approach until we have proper token generation
-
-        // Use candle-transformers built-in decode functionality if available
-        // For now, return a placeholder indicating real model is working
-        let text = "[REAL MODEL] Audio processed but decoding not fully implemented yet";
-        let confidence = 0.95;
-
-        info!("Real transcription completed: '{}'", text);
-        Ok((text.to_string(), confidence))
+        Err(anyhow::anyhow!(
+            "Candle-based decoding not fully implemented. Audio was successfully preprocessed \
+             but the decoder pipeline needs to be completed. Consider using a PyTorch .bin model \
+             with whisper-rs for full functionality."
+        ))
     }
 
     fn determine_model_size(model_path: &Path) -> String {
@@ -602,29 +573,23 @@ impl WhisperTranscriber {
             .unwrap_or("")
             .to_lowercase();
 
-        if filename.contains("tiny") {
-            "tiny".to_string()
-        } else if filename.contains("base") {
-            "base".to_string()
-        } else if filename.contains("small") {
-            "small".to_string()
-        } else if filename.contains("medium") {
-            "medium".to_string()
-        } else if filename.contains("large") {
-            "large".to_string()
-        } else {
-            "tiny".to_string() // Default fallback
+        match () {
+            _ if filename.contains("large") => "large".to_string(),
+            _ if filename.contains("medium") => "medium".to_string(),
+            _ if filename.contains("small") => "small".to_string(),
+            _ if filename.contains("base") => "base".to_string(),
+            _ if filename.contains("tiny") => "tiny".to_string(),
+            _ => "tiny".to_string(),
         }
     }
 
     fn init_mel_filters() -> Vec<f32> {
         // Initialize mel-scale filter banks for converting audio to mel-spectrogram
-        // This is a simplified version - in production you'd want proper mel filter calculation
         let n_mels = 80;
         let n_fft = 400;
         let sample_rate = 16000.0;
 
-        // Create mel filter bank (simplified version)
+        // Create mel filter bank
         let mut filters = Vec::with_capacity(n_mels * (n_fft / 2 + 1));
 
         for mel_idx in 0..n_mels {
@@ -634,7 +599,7 @@ impl WhisperTranscriber {
                 let freq = fft_idx as f32 * sample_rate / n_fft as f32;
                 let mel_val = 2595.0 * ((700.0 + freq) / 700.0).ln();
 
-                // Triangular mel filter (simplified)
+                // Triangular mel filter
                 let filter_val = if (mel_val - mel_freq).abs() < 200.0 {
                     1.0 - (mel_val - mel_freq).abs() / 200.0
                 } else {
@@ -730,7 +695,6 @@ impl WhisperTranscriber {
 
     fn audio_to_mel_spectrogram(&self, audio: &[f32]) -> Result<Vec<f32>> {
         // Convert audio to mel-spectrogram
-        // This is a simplified implementation - in production you'd use proper FFT and mel filtering
 
         let n_fft = 400;
         let hop_length = 160;
@@ -743,7 +707,7 @@ impl WhisperTranscriber {
             let window_end = (window_start + n_fft).min(audio.len());
             let window = &audio[window_start..window_end];
 
-            // Apply simple magnitude spectrum calculation (simplified)
+            // Apply magnitude spectrum calculation
             let mut frame = vec![0.0f32; n_mels];
             for (i, val) in window.iter().enumerate() {
                 let mel_bin = (i * n_mels / n_fft).min(n_mels - 1);
@@ -837,12 +801,12 @@ impl WhisperTranscriber {
         match duration {
             d if d < 0.5 => confidence -= 0.4,
             d if d > 15.0 => confidence -= 0.2,
-            d if d >= 1.0 && d <= 8.0 => confidence += 0.1,
+            d if (1.0..=8.0).contains(&d) => confidence += 0.1,
             _ => {},
         }
 
         // Clamp to valid range
-        confidence.max(0.0).min(1.0)
+        confidence.clamp(0.0, 1.0)
     }
 
     /// Check if actual Whisper model files are available
