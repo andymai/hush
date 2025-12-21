@@ -53,8 +53,22 @@ impl EguiOverlay for OverlayApp {
             *self.state.lock() = OverlayState::Idle;
         }
 
-        // Render the UI
+        // Get config for visibility check
         let current_config = self.config.lock().clone();
+
+        // Hide/show window based on state - this prevents taskbar appearance
+        let should_be_visible = match &current_state {
+            OverlayState::Idle => current_config.show_button_when_idle,
+            _ => true, // Show for recording, processing, success, error, settings
+        };
+
+        if should_be_visible {
+            glfw_backend.window.show();
+        } else {
+            glfw_backend.window.hide();
+        }
+
+        // Render the UI
         let action = render_overlay(egui_context, &current_state, &current_config);
 
         // Toggle passthrough based on whether mouse is over UI
@@ -175,8 +189,10 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
             gtx.window_hint(glfw::WindowHint::Floating(true));
             // Remove decorations (titlebar, borders)
             gtx.window_hint(glfw::WindowHint::Decorated(false));
-            // Set as a utility window (won't appear in taskbar and stays on top)
+            // Don't take focus when shown
             gtx.window_hint(glfw::WindowHint::FocusOnShow(false));
+            // Don't auto-iconify when focus lost (for fullscreen)
+            gtx.window_hint(glfw::WindowHint::AutoIconify(false));
         }),
         #[cfg(not(target_os = "macos"))]
         opengl_window: Some(true), // OpenGL for non-macOS
@@ -196,6 +212,19 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
     glfw_backend
         .window
         .set_pos(monitor_pos[0] as i32, monitor_pos[1] as i32);
+
+    // Hide from taskbar on X11 by setting _NET_WM_STATE_SKIP_TASKBAR
+    #[cfg(target_os = "linux")]
+    {
+        use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+        if let RawWindowHandle::Xlib(handle) = glfw_backend.window.raw_window_handle() {
+            if let Err(e) = set_skip_taskbar_x11(handle.window as u32) {
+                warn!("Failed to set skip taskbar hint: {}", e);
+            } else {
+                info!("Window hidden from taskbar");
+            }
+        }
+    }
 
     // Note: Mouse passthrough is toggled dynamically in gui_run()
     // based on whether the mouse is over the overlay widget
@@ -325,6 +354,12 @@ impl OverlayWindowBuilder {
         self
     }
 
+    /// Set the hotkey combination to display
+    pub fn hotkey(mut self, hotkey: impl Into<String>) -> Self {
+        self.config.hotkey = hotkey.into();
+        self
+    }
+
     /// Build the overlay window
     pub fn build(self) -> OverlayWindow {
         OverlayWindow::new(self.config)
@@ -335,4 +370,22 @@ impl Default for OverlayWindowBuilder {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Set X11 window properties to hide from taskbar
+/// Uses override_redirect to bypass window manager entirely
+#[cfg(target_os = "linux")]
+fn set_skip_taskbar_x11(window_id: u32) -> anyhow::Result<()> {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt};
+    use x11rb::rust_connection::RustConnection;
+
+    let (conn, _screen_num) = RustConnection::connect(None)?;
+
+    // Set override_redirect to bypass window manager (no taskbar, no decorations)
+    let values = ChangeWindowAttributesAux::new().override_redirect(1);
+    conn.change_window_attributes(window_id, &values)?;
+
+    conn.flush()?;
+    Ok(())
 }

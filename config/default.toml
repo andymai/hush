@@ -8,8 +8,8 @@ buffer_size = 1024   # Balance between latency and performance
 # device = "hw:0,0"    # Specific device, or leave commented for auto-detect
 
 [transcription]
-model_path = "models/ggml-tiny.bin"  # GGML format for whisper-rs
-model_size = "tiny"  # tiny, base, small, medium, large
+model_path = "/home/andy/.cache/hush/models/ggml-base.bin"  # GGML format for whisper-rs
+model_size = "base"  # tiny, base, small, medium, large
 language = "en"        # English optimized
 use_cuda = true        # Enable GPU acceleration if available
 beam_size = 5          # Balance speed vs accuracy
@@ -17,7 +17,7 @@ no_speech_threshold = 0.6  # Silence detection
 
 [hotkey]
 enabled = true
-combination = "F11"  # Default hotkey combination (F11 is less commonly reserved)
+combination = "Ctrl+Alt+V"  # Default hotkey combination
 
 [wakeword]
 enabled = false

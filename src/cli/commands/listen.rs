@@ -2,10 +2,12 @@ use anyhow::Result;
 use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use tracing::{error, info, warn};
 
 // Import Hush components
+use crate::config::Config;
 use crate::hotkey::{HotkeyEvent, HotkeyManager};
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
 use crate::text_processing::{
@@ -17,6 +19,52 @@ use crate::AudioCapture;
 
 #[cfg(target_os = "linux")]
 use crate::TextInserter;
+
+#[cfg(target_os = "linux")]
+use ksni;
+
+/// Simple system tray for Hush
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct HushTray {
+    quit_flag: Arc<AtomicBool>,
+}
+
+#[cfg(target_os = "linux")]
+impl ksni::Tray for HushTray {
+    fn id(&self) -> String {
+        "hush-voice-to-text".to_string()
+    }
+
+    fn icon_name(&self) -> String {
+        "preferences-desktop-accessibility".to_string()  // Accessibility/speech icon
+    }
+
+    fn title(&self) -> String {
+        "Hush".to_string()
+    }
+
+    fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
+        use ksni::menu::*;
+        vec![
+            StandardItem {
+                label: "Hush Voice-to-Text".to_string(),
+                enabled: false,
+                ..Default::default()
+            }
+            .into(),
+            ksni::MenuItem::Separator,
+            StandardItem {
+                label: "Quit".to_string(),
+                activate: Box::new(|tray: &mut Self| {
+                    tray.quit_flag.store(true, Ordering::SeqCst);
+                }),
+                ..Default::default()
+            }
+            .into(),
+        ]
+    }
+}
 
 /// Listen command implementation
 ///
@@ -114,9 +162,16 @@ pub async fn handle_listen(
     info!("   Text processing: {}", !no_processing);
     info!("   Show button: {}", !no_button);
 
+    // Load configuration
+    let config = Config::load().unwrap_or_else(|e| {
+        warn!("Failed to load config, using defaults: {}", e);
+        Config::default()
+    });
+    let hotkey_combination = config.hotkey.combination.clone();
+
     println!("🎤 Hush Intelligent Listening Mode");
     println!("═══════════════════════════════════════════════════════");
-    println!("Press Ctrl+Alt+V to start recording");
+    println!("Press {} to start recording", hotkey_combination);
     println!("Release to transcribe and insert text");
     println!("Press Ctrl+C to quit");
     println!("═══════════════════════════════════════════════════════\n");
@@ -152,9 +207,9 @@ pub async fn handle_listen(
     let (transcription_tx, transcription_rx) = mpsc::channel::<TranscriptionResult>();
 
     // Create hotkey manager
-    let (hotkey_manager, hotkey_rx) = HotkeyManager::new("Ctrl+Alt+V")?;
+    let (hotkey_manager, hotkey_rx) = HotkeyManager::new(&hotkey_combination)?;
     hotkey_manager.start_listening()?;
-    info!("✅ Hotkey 'Ctrl+Alt+V' registered");
+    info!("✅ Hotkey '{}' registered", hotkey_combination);
 
     // Initialize audio capture (main thread - !Send)
     let mut audio_capture = AudioCapture::new(None)?;
@@ -258,10 +313,30 @@ pub async fn handle_listen(
     let insertion_history = Arc::new(Mutex::new(InsertionHistory::new()));
     info!("✅ Voice command system initialized");
 
-    // Create overlay with new tiny design
+    // Initialize system tray (Linux only)
+    #[cfg(target_os = "linux")]
+    let quit_flag = Arc::new(AtomicBool::new(false));
+    #[cfg(target_os = "linux")]
+    let quit_flag_clone = quit_flag.clone();
+
+    #[cfg(target_os = "linux")]
+    {
+        let tray = HushTray { quit_flag: quit_flag.clone() };
+        let service = ksni::TrayService::new(tray);
+        // Run tray service in a dedicated thread (it's blocking)
+        thread::spawn(move || {
+            if let Err(e) = service.run() {
+                warn!("System tray error: {}", e);
+            }
+        });
+        info!("✅ System tray initialized");
+    }
+
+    // Create overlay - hide when idle since we have system tray
     let overlay = OverlayWindowBuilder::new()
-        .show_button_when_idle(!no_button)
-        .build(); // Uses defaults: 10x20 idle, 80x20 recording, BottomCenter
+        .show_button_when_idle(false)  // Window hidden when idle, only tray icon visible
+        .hotkey(&hotkey_combination)
+        .build();
 
     let state_handle = overlay.state();
 
@@ -307,8 +382,6 @@ pub async fn handle_listen(
         while let Ok(result) = transcription_rx.recv() {
             match result {
                 TranscriptionResult::Success(raw_text) => {
-                    info!("✅ Transcription successful: '{}'", raw_text);
-
                     // Parse for voice commands
                     let parsed = command_parser_clone.parse(&raw_text);
 
@@ -446,7 +519,20 @@ pub async fn handle_listen(
     // Track amplitude monitoring threads for cleanup
     let mut amplitude_threads: Vec<thread::JoinHandle<()>> = Vec::new();
 
-    while let Ok(command) = audio_cmd_rx.recv() {
+    loop {
+        // Check quit flag from system tray (Linux only)
+        #[cfg(target_os = "linux")]
+        if quit_flag_clone.load(Ordering::SeqCst) {
+            info!("Quit requested from system tray");
+            break;
+        }
+
+        // Use try_recv with timeout to allow quit flag checking
+        let command = match audio_cmd_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+            Ok(cmd) => cmd,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         match command {
             AudioCommand::StartRecording => {
                 if let Err(e) = audio_capture.start_recording() {
@@ -523,11 +609,34 @@ pub async fn handle_listen(
                     continue;
                 }
 
+                // Silence detection: calculate RMS energy of audio
+                let rms = (audio_data.iter().map(|s| s * s).sum::<f32>() / audio_data.len() as f32).sqrt();
+                const SILENCE_THRESHOLD: f32 = 0.005;
+
+                if rms < SILENCE_THRESHOLD {
+                    *state_handle.lock() = OverlayState::idle();
+                    continue;
+                }
+
                 // Transcribe
                 let transcription_result = if let Some(ref t) = transcriber {
                     if t.is_ready() {
                         match t.transcribe(&audio_data).await {
-                            Ok(result) => TranscriptionResult::Success(result.text),
+                            Ok(result) => {
+                                // Filter common Whisper hallucinations on near-silence
+                                let text = result.text.trim().to_lowercase();
+                                let hallucinations = [
+                                    "you", "thank you", "thanks", "thank you.",
+                                    "thanks for watching", "bye", "goodbye",
+                                    "thank you for watching", "see you next time",
+                                    "subscribe", "like and subscribe",
+                                ];
+                                if hallucinations.iter().any(|h| text == *h) {
+                                    *state_handle.lock() = OverlayState::idle();
+                                    continue;
+                                }
+                                TranscriptionResult::Success(result.text)
+                            },
                             Err(_) => {
                                 TranscriptionResult::Error("Transcription failed".to_string())
                             },

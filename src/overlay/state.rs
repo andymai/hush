@@ -10,6 +10,8 @@ pub enum OverlayState {
         start_time: Instant,
         /// Current audio amplitude (0.0 to 1.0)
         amplitude: f32,
+        /// Smoothed amplitude for animation (with decay)
+        smoothed_amplitude: f32,
     },
     /// Processing - transcribing the audio
     Processing { message: String },
@@ -35,24 +37,39 @@ impl OverlayState {
         Self::Recording {
             start_time: Instant::now(),
             amplitude: 0.0,
+            smoothed_amplitude: 0.0,
         }
     }
 
     /// Update recording amplitude (immutable - creates new state)
     pub fn with_amplitude(self, new_amplitude: f32) -> Self {
         match self {
-            Self::Recording { start_time, .. } => Self::Recording {
+            Self::Recording { start_time, smoothed_amplitude, .. } => Self::Recording {
                 start_time,
                 amplitude: new_amplitude.clamp(0.0, 1.0),
+                smoothed_amplitude,
             },
             _ => self,
         }
     }
 
     /// Update recording amplitude in-place (more efficient - avoids clone)
+    /// Also updates smoothed_amplitude with attack/decay for smooth animations
     pub fn update_amplitude(&mut self, new_amplitude: f32) {
-        if let Self::Recording { amplitude, .. } = self {
-            *amplitude = new_amplitude.clamp(0.0, 1.0);
+        if let Self::Recording { amplitude, smoothed_amplitude, .. } = self {
+            let clamped = new_amplitude.clamp(0.0, 1.0);
+            *amplitude = clamped;
+
+            // Apply asymmetric smoothing: fast attack, slow decay
+            // Attack factor ~0.4 (responds quickly to increases)
+            // Decay factor ~0.85 (falls off slowly for smooth animation)
+            if clamped > *smoothed_amplitude {
+                // Fast attack
+                *smoothed_amplitude = *smoothed_amplitude * 0.6 + clamped * 0.4;
+            } else {
+                // Slow decay
+                *smoothed_amplitude = *smoothed_amplitude * 0.85 + clamped * 0.15;
+            }
         }
     }
 
@@ -60,6 +77,14 @@ impl OverlayState {
     pub fn recording_duration(&self) -> Option<Duration> {
         match self {
             Self::Recording { start_time, .. } => Some(start_time.elapsed()),
+            _ => None,
+        }
+    }
+
+    /// Get smoothed amplitude for animation (if recording)
+    pub fn smoothed_amplitude(&self) -> Option<f32> {
+        match self {
+            Self::Recording { smoothed_amplitude, .. } => Some(*smoothed_amplitude),
             _ => None,
         }
     }
@@ -146,6 +171,8 @@ pub struct OverlayConfig {
     pub show_button_when_idle: bool,
     /// Theme
     pub theme: OverlayTheme,
+    /// Hotkey combination to display
+    pub hotkey: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -174,6 +201,7 @@ impl Default for OverlayConfig {
             auto_hide_duration: Duration::from_secs(2),
             show_button_when_idle: true,
             theme: OverlayTheme::Dark,
+            hotkey: "Ctrl+Alt+V".to_string(),
         }
     }
 }
