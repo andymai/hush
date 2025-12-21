@@ -86,7 +86,7 @@ impl ModelManager {
                 size: ModelSize::Tiny,
                 repo_id: "openai/whisper-tiny".to_string(),
                 filename: "model.safetensors".to_string(),
-                expected_size: 39_000_000, // ~39MB
+                expected_size: 151_000_000, // ~151MB
                 sha256: Some(
                     "7ebd0e69e78190ffe1438491fa05cc1f5c1aa3a4c4db3bc1723adbb551ea2395".to_string(),
                 ),
@@ -100,7 +100,7 @@ impl ModelManager {
                 size: ModelSize::Base,
                 repo_id: "openai/whisper-base".to_string(),
                 filename: "model.safetensors".to_string(),
-                expected_size: 74_000_000, // ~74MB
+                expected_size: 290_000_000, // ~290MB
                 sha256: Some(
                     "07cadb9f25677c8d50df603e66a98fbd842cce45047139baeb16e6219a1e807b".to_string(),
                 ),
@@ -114,7 +114,7 @@ impl ModelManager {
                 size: ModelSize::Small,
                 repo_id: "openai/whisper-small".to_string(),
                 filename: "model.safetensors".to_string(),
-                expected_size: 244_000_000, // ~244MB
+                expected_size: 967_000_000, // ~967MB
                 sha256: Some(
                     "1d7734884874f1a1513ed9aa760a4f8e97aaa02fd6d93a3a85d27b2ae9ca596b".to_string(),
                 ),
@@ -128,7 +128,7 @@ impl ModelManager {
                 size: ModelSize::Medium,
                 repo_id: "openai/whisper-medium".to_string(),
                 filename: "model.safetensors".to_string(),
-                expected_size: 769_000_000, // ~769MB
+                expected_size: 3_055_000_000, // ~3GB
                 sha256: Some(
                     "62f73550fa6db24b0c6f6c5962bd0dae80fa644e93cde9cd9c3792971b47fd28".to_string(),
                 ),
@@ -142,7 +142,7 @@ impl ModelManager {
                 size: ModelSize::Large,
                 repo_id: "openai/whisper-large".to_string(),
                 filename: "model.safetensors".to_string(),
-                expected_size: 1_550_000_000, // ~1.55GB
+                expected_size: 6_173_000_000, // ~6.17GB
                 sha256: Some(
                     "27d753181b54178da228555dbc57fe639f6624ca470d83d35e500b22df0ab7e6".to_string(),
                 ),
@@ -156,7 +156,7 @@ impl ModelManager {
                 size: ModelSize::LargeV3,
                 repo_id: "openai/whisper-large-v3".to_string(),
                 filename: "model.safetensors".to_string(),
-                expected_size: 1_550_000_000, // ~1.55GB
+                expected_size: 6_173_000_000, // ~6.17GB
                 sha256: Some(
                     "a8e94b85976e5864ba3e9525c7e6c83b2a1eca42d4b797a0c7c24d778e40fd95".to_string(),
                 ),
