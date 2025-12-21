@@ -79,7 +79,9 @@ impl Config {
         }
 
         // Validate transcription configuration
-        let valid_models = ["tiny", "base", "small", "medium", "large"];
+        let valid_models = [
+            "tiny", "base", "small", "medium", "large", "large-v2", "large-v3",
+        ];
         if !valid_models.contains(&self.transcription.model_size.as_str()) {
             return Err(anyhow::anyhow!(
                 "Invalid model size: must be one of {:?}",
@@ -98,6 +100,34 @@ impl Config {
                 "Hotkey combination cannot be empty when hotkey is enabled"
             ));
         }
+
+        Ok(())
+    }
+
+    /// Save configuration to the default config file
+    pub fn save(&self) -> Result<()> {
+        self.save_to_file("config/default.toml")
+    }
+
+    /// Save configuration to a specific file path
+    pub fn save_to_file<P: AsRef<std::path::Path>>(&self, path: P) -> Result<()> {
+        use std::fs;
+
+        // Validate before saving
+        self.validate()?;
+
+        // Serialize to TOML
+        let toml_string = toml::to_string_pretty(self)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize config: {}", e))?;
+
+        // Write to file
+        fs::write(path.as_ref(), toml_string).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to write config file {}: {}",
+                path.as_ref().display(),
+                e
+            )
+        })?;
 
         Ok(())
     }
