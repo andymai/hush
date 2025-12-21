@@ -43,10 +43,7 @@ use tracing::error;
 ///
 /// # Cache Location
 ///
-/// Models are stored in the system cache directory:
-/// - Linux: `~/.cache/hush/models/`
-/// - macOS: `~/Library/Caches/hush/models/`
-/// - Windows: `%LOCALAPPDATA%\hush\models\`
+/// Models are stored in `~/.cache/hush/models/`
 pub async fn handle_models(model_command: ModelCommands) -> Result<()> {
     match model_command {
         ModelCommands::List {

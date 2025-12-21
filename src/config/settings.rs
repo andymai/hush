@@ -144,9 +144,6 @@ impl Config {
             },
             hotkey: HotkeyConfig {
                 enabled: true,
-                #[cfg(target_os = "macos")]
-                combination: "Cmd+Shift+V".to_string(),
-                #[cfg(not(target_os = "macos"))]
                 combination: "Ctrl+Alt+V".to_string(),
             },
             wakeword: WakeWordConfig {

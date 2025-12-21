@@ -1,6 +1,6 @@
 # Hush
 
-**Local voice-to-text for Linux and macOS developers**
+**Local voice-to-text for Linux developers**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
@@ -30,24 +30,16 @@ For other distributions, see [INSTALL.md](INSTALL.md).
 
 ## Features
 
-- **Local Whisper transcription** with CUDA (Linux) or Metal (macOS) acceleration
+- **Local Whisper transcription** with optional CUDA acceleration
 - **Hardware-level text insertion** via UInput—works in VMs, SSH, games, secure contexts
 - **Push-to-talk hotkey** with visual overlay feedback
 - **Filler word removal** ("um", "uh", "like")
 - **Voice commands**: "undo", "new paragraph", "new line"
 - **Optional LLM polishing** via Claude API
 
-## Platform Support
-
-| Platform | GPU Acceleration | Status |
-|----------|------------------|--------|
-| Linux | CUDA (NVIDIA) | Fully supported |
-| macOS | Metal (Apple Silicon) | Fully supported |
-| Windows | — | Not yet implemented |
-
 ## Usage
 
-### Listen Mode (Recommended)
+### Listen Mode
 
 ```bash
 ./hush listen
@@ -105,14 +97,8 @@ echo "ANTHROPIC_API_KEY=your_key" > .env
 
 ## Requirements
 
-**Linux:**
 - ALSA development libraries
 - For GPU: NVIDIA GPU with CUDA 12.0+
-
-**macOS:**
-- macOS 11.0+
-- Accessibility permissions for text insertion
-- Apple Silicon recommended for Metal acceleration
 
 ## Troubleshooting
 

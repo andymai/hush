@@ -21,12 +21,6 @@ cuda = [
     "whisper-rs/cuda"
 ]
 
-# Metal for Apple Silicon/Intel Macs (macOS only)
-metal = [
-    "candle-core/metal",
-    "candle-nn/metal",
-    "candle-transformers/metal",
-]
 
 [dependencies]
 # Audio capture and processing
@@ -115,12 +109,6 @@ x11rb = "0.13"
 # Kernel-level keyboard emulation (uinput)
 input-linux = "0.7"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-# macOS system frameworks
-cocoa = "0.25"              # AppKit/Cocoa bindings
-core-graphics = "0.23"      # CGEvent API for keyboard simulation
-core-foundation = "0.9"     # CoreFoundation framework
-objc = "0.2"                # Objective-C runtime
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }

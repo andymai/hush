@@ -5,76 +5,6 @@ use std::collections::HashMap;
 use tracing::Level;
 use tracing::{error, info, warn};
 
-// On macOS, we need to ensure hotkey-related operations happen on the main thread
-// before starting the tokio runtime. This is a platform requirement due to AppKit/Cocoa.
-#[cfg(target_os = "macos")]
-fn main() -> Result<()> {
-    // Parse command line arguments on the main thread
-    let cli = Cli::parse_args();
-
-    // Initialize logging on the main thread
-    let logging_result = initialize_logging(&cli);
-    match logging_result {
-        Ok(_logging_system) => {
-            info!("🤫 Hush - Voice-to-Text - Logging Initialized");
-        },
-        Err(e) => {
-            eprintln!("⚠️  Failed to initialize comprehensive logging: {}", e);
-            eprintln!("   Falling back to basic logging...");
-            cli.init_logging();
-            warn!(
-                "Comprehensive logging initialization failed, using fallback: {}",
-                e
-            );
-        },
-    }
-
-    info!(
-        session_id = %LoggingSystem::session_id(),
-        verbose_level = %cli.verbose,
-        config_file = ?cli.config_file,
-        notifications_enabled = %(!cli.no_notifications),
-        "🚀 Hush application starting (macOS main thread mode)"
-    );
-
-    // Create tokio runtime manually (not using #[tokio::main])
-    // This ensures we're on the true OS main thread
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to create tokio runtime");
-
-    // Run the async code on the runtime, but main thread is preserved
-    let result = runtime.block_on(async {
-        // Create command dispatcher with global configuration
-        let dispatcher = CommandDispatcher::new(cli.config_file.clone(), !cli.no_notifications);
-
-        // Dispatch the command with error handling
-        dispatcher.dispatch(cli.command).await
-    });
-
-    match &result {
-        Ok(()) => {
-            info!(
-                session_id = %LoggingSystem::session_id(),
-                "✅ Hush application completed successfully"
-            );
-        },
-        Err(e) => {
-            error!(
-                session_id = %LoggingSystem::session_id(),
-                error = %e,
-                error_chain = ?e.chain().collect::<Vec<_>>(),
-                "❌ Hush application failed"
-            );
-        },
-    }
-
-    result
-}
-
-// On Linux, we can use the standard tokio::main approach
-#[cfg(not(target_os = "macos"))]
 #[tokio::main]
 async fn main() -> Result<()> {
     // Parse command line arguments
@@ -84,12 +14,12 @@ async fn main() -> Result<()> {
     let logging_result = initialize_logging(&cli);
     match logging_result {
         Ok(_logging_system) => {
-            info!("🤫 Hush - Voice-to-Text for Linux Developers - Logging Initialized");
+            info!("Hush - Voice-to-Text for Linux Developers - Logging Initialized");
         },
         Err(e) => {
             // Fall back to simple logging if comprehensive logging fails
-            eprintln!("⚠️  Failed to initialize comprehensive logging: {}", e);
-            eprintln!("   Falling back to basic logging...");
+            eprintln!("Failed to initialize comprehensive logging: {}", e);
+            eprintln!("Falling back to basic logging...");
             cli.init_logging();
             warn!(
                 "Comprehensive logging initialization failed, using fallback: {}",
@@ -104,7 +34,7 @@ async fn main() -> Result<()> {
         verbose_level = %cli.verbose,
         config_file = ?cli.config_file,
         notifications_enabled = %(!cli.no_notifications),
-        "🚀 Hush application starting"
+        "Hush application starting"
     );
 
     // Create command dispatcher with global configuration
@@ -117,7 +47,7 @@ async fn main() -> Result<()> {
         Ok(()) => {
             info!(
                 session_id = %LoggingSystem::session_id(),
-                "✅ Hush application completed successfully"
+                "Hush application completed successfully"
             );
         },
         Err(e) => {
@@ -125,7 +55,7 @@ async fn main() -> Result<()> {
                 session_id = %LoggingSystem::session_id(),
                 error = %e,
                 error_chain = ?e.chain().collect::<Vec<_>>(),
-                "❌ Hush application failed"
+                "Hush application failed"
             );
         },
     }
