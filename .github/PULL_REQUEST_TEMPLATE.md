@@ -25,7 +25,7 @@
 - [ ] Tested on target Linux distribution
 
 ## Code Quality Checklist
-- [ ] Code follows project conventions (see `.ai/knowledge/conventions.md`)
+- [ ] Code follows project conventions
 - [ ] No clippy warnings (`cargo clippy --all-targets --all-features -- -D warnings`)
 - [ ] Code is formatted (`cargo fmt`)
 - [ ] Documentation updated (README, doc comments, etc.)

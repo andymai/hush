@@ -53,12 +53,3 @@ pub async fn handle_manual(count: u32) -> Result<()> {
     println!("✅ All recordings completed!");
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Note: Full integration test would require mocking the recording pipeline
-    // Unit testing the loop logic is straightforward, but the actual recording
-    // requires hardware (microphone, transcription model, text insertion)
-}

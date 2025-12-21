@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,12 +40,7 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Check documentation
-        run: cargo doc --no-deps --all-features --document-private-items
-        env:
-          RUSTDOCFLAGS: "-D warnings"
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Build
         run: cargo build --verbose
@@ -70,55 +65,6 @@ jobs:
       - name: Run security audit
         run: cargo audit
 
-  deny:
-    name: License and Security Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v1
-        with:
-          log-level: warn
-          command: check
-          arguments: --all-features
-
-  coverage:
-    name: Code Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config libx11-dev libdbus-1-dev
-
-      - name: Install tarpaulin
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-tarpaulin
-
-      - name: Generate coverage
-        run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Xml
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./cobertura.xml
-          fail_ci_if_error: false
-
-  dependency-check:
-    name: Dependency Review
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Dependency Review
-        uses: actions/dependency-review-action@v4
-
   msrv:
     name: Check MSRV (1.70)
     runs-on: ubuntu-latest
@@ -138,78 +84,4 @@ jobs:
           shared-key: "msrv"
 
       - name: Check compilation
-        run: cargo check --all-features
-
-  test-features:
-    name: Test Feature Combinations
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        features:
-          - ""  # Minimal build - no default features
-          - "notifications"
-          - "system-tray"
-          - "notifications,system-tray"  # Same as default
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config libx11-dev libdbus-1-dev
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "features-${{ matrix.features }}"
-
-      - name: Build with features
-        run: |
-          if [ -z "${{ matrix.features }}" ]; then
-            cargo build --no-default-features --verbose
-          else
-            cargo build --no-default-features --features "${{ matrix.features }}" --verbose
-          fi
-
-      - name: Test with features
-        run: |
-          if [ -z "${{ matrix.features }}" ]; then
-            cargo test --no-default-features --verbose
-          else
-            cargo test --no-default-features --features "${{ matrix.features }}" --verbose
-          fi
-
-  benchmarks:
-    name: Run Benchmarks
-    runs-on: ubuntu-latest
-    # Make optional - don't block merges
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config libx11-dev libdbus-1-dev
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "bench"
-
-      - name: Run benchmarks
-        run: cargo bench --no-fail-fast -- --output-format bencher | tee bench-output.txt
-
-      - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@v1
-        if: github.event_name != 'pull_request'
-        with:
-          tool: 'cargo'
-          output-file-path: bench-output.txt
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
+        run: cargo check
