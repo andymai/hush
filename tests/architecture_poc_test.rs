@@ -6,7 +6,7 @@ use hush::core::mocks::{MockAudioSource, MockTextOutput, MockTranscriber};
 /// 2. Unit testing without hardware dependencies
 /// 3. Easy component substitution
 /// 4. Clear separation of concerns
-use hush::core::traits::{AudioBuffer, AudioSource, TextOutput, Transcriber, TranscriptionResult};
+use hush::core::traits::{AudioBuffer, AudioSource, TextOutput, Transcriber};
 use hush::Result;
 use std::time::Duration;
 
