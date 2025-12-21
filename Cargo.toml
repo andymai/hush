@@ -120,10 +120,6 @@ panic = "abort"
 opt-level = 0
 debug = true
 
-# Patch cudarc to support CUDA 12.9
-[patch.crates-io]
-cudarc = { git = "https://github.com/coreylowman/cudarc" }
-
 # Main application
 [[bin]]
 name = "hush"
