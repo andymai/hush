@@ -1,12 +1,8 @@
 use anyhow::Result;
 
-#[cfg(not(target_os = "macos"))]
 use egui_overlay::{
     egui_render_three_d::ThreeDBackend, egui_window_glfw_passthrough::GlfwBackend, EguiOverlay,
 };
-
-#[cfg(target_os = "macos")]
-use egui_overlay::{egui_window_glfw_passthrough::GlfwBackend, EguiOverlay};
 
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -18,7 +14,6 @@ use super::state::{OverlayConfig, OverlayState, OverlayTheme};
 use super::ui::{render_overlay, OverlayAction};
 
 // Cache primary monitor info for faster overlay startup
-// Monitors rarely change during application runtime
 static PRIMARY_MONITOR_INFO: Lazy<([u32; 2], [i32; 2])> = Lazy::new(|| {
     get_primary_monitor_info().unwrap_or_else(|| {
         warn!("Failed to detect primary monitor, using fallback 1920x1080 at (0, 0)");
@@ -32,7 +27,6 @@ struct OverlayApp {
     config: Arc<Mutex<OverlayConfig>>,
 }
 
-#[cfg(not(target_os = "macos"))]
 impl EguiOverlay for OverlayApp {
     fn gui_run(
         &mut self,
@@ -56,10 +50,10 @@ impl EguiOverlay for OverlayApp {
         // Get config for visibility check
         let current_config = self.config.lock().clone();
 
-        // Hide/show window based on state - this prevents taskbar appearance
+        // Hide/show window based on state
         let should_be_visible = match &current_state {
             OverlayState::Idle => current_config.show_button_when_idle,
-            _ => true, // Show for recording, processing, success, error, settings
+            _ => true,
         };
 
         if should_be_visible {
@@ -72,8 +66,6 @@ impl EguiOverlay for OverlayApp {
         let action = render_overlay(egui_context, &current_state, &current_config);
 
         // Toggle passthrough based on whether mouse is over UI
-        // If egui is using the pointer (hovering over widgets), disable passthrough
-        // so we can interact with the overlay. Otherwise, enable passthrough.
         let is_pointer_over_area = egui_context.is_pointer_over_area();
         glfw_backend
             .window
@@ -100,13 +92,13 @@ impl EguiOverlay for OverlayApp {
             OverlayAction::None => {},
         }
 
-        // Adaptive repaint rate based on state for better performance
+        // Adaptive repaint rate based on state
         let repaint_interval = match &current_state {
-            OverlayState::Recording { .. } => Duration::from_millis(50), // 20 FPS for smooth waveform animation
-            OverlayState::Settings => Duration::from_millis(100), // 10 FPS for settings UI (interactive)
-            OverlayState::Idle if current_config.show_button_when_idle => Duration::from_secs(1), // 1 FPS when showing idle button
-            OverlayState::Idle => Duration::from_secs(5), // Very slow when completely hidden
-            _ => Duration::from_millis(500), // 2 FPS for static states (processing/success/error)
+            OverlayState::Recording { .. } => Duration::from_millis(50),
+            OverlayState::Settings => Duration::from_millis(100),
+            OverlayState::Idle if current_config.show_button_when_idle => Duration::from_secs(1),
+            OverlayState::Idle => Duration::from_secs(5),
+            _ => Duration::from_millis(500),
         };
         egui_context.request_repaint_after(repaint_interval);
     }
@@ -140,36 +132,25 @@ impl OverlayWindow {
     }
 
     /// Run the overlay window (blocking)
-    #[cfg(not(target_os = "macos"))]
     pub fn run(self) -> Result<()> {
         info!("Starting overlay window event loop");
 
-        // Create the app that implements EguiOverlay
         let app = OverlayApp {
             state: self.state,
             config: self.config,
         };
 
-        // Start the overlay with custom fullscreen configuration
         start_fullscreen_overlay(app);
 
         info!("Overlay window closed");
         Ok(())
     }
-
-    #[cfg(target_os = "macos")]
-    pub fn run(self) -> Result<()> {
-        Err(anyhow::anyhow!("Overlay is not supported on macOS yet"))
-    }
 }
 
 /// Custom start function that creates a fullscreen overlay
-/// This is based on egui_overlay::start but with monitor-sized window
-#[cfg(not(target_os = "macos"))]
 fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
     use egui_overlay::egui_window_glfw_passthrough::{glfw, GlfwBackend, GlfwConfig};
 
-    // Get cached primary monitor size and position
     let (monitor_size, monitor_pos) = *PRIMARY_MONITOR_INFO;
     info!(
         "Creating fullscreen overlay window: {}x{} at ({}, {})",
@@ -179,36 +160,23 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
     let mut glfw_backend = GlfwBackend::new(GlfwConfig {
         size: monitor_size,
         glfw_callback: Box::new(|gtx| {
-            // Scale window based on monitor scale
             gtx.window_hint(glfw::WindowHint::ScaleToMonitor(true));
-            // Set window to be always on top (floating)
             gtx.window_hint(glfw::WindowHint::Floating(true));
-            // Remove decorations (titlebar, borders)
             gtx.window_hint(glfw::WindowHint::Decorated(false));
-            // Don't take focus when shown
             gtx.window_hint(glfw::WindowHint::FocusOnShow(false));
-            // Don't auto-iconify when focus lost (for fullscreen)
             gtx.window_hint(glfw::WindowHint::AutoIconify(false));
         }),
-        #[cfg(not(target_os = "macos"))]
-        opengl_window: Some(true), // OpenGL for non-macOS
-        #[cfg(target_os = "macos")]
-        opengl_window: Some(false), // macOS doesn't support OpenGL
+        opengl_window: Some(true),
         transparent_window: Some(true),
         window_title: "hush overlay".to_string(),
         ..Default::default()
     });
 
-    // Ensure window is always on top (redundant but helps on some window managers)
     glfw_backend.window.set_floating(true);
-    // Disable borders/titlebar (redundant but ensures it's applied)
     glfw_backend.window.set_decorated(false);
-
-    // Position at primary monitor's offset to cover that screen
     glfw_backend.window.set_pos(monitor_pos[0], monitor_pos[1]);
 
-    // Hide from taskbar on X11 by setting _NET_WM_STATE_SKIP_TASKBAR
-    #[cfg(target_os = "linux")]
+    // Hide from taskbar on X11
     {
         use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
         if let RawWindowHandle::Xlib(handle) = glfw_backend.window.raw_window_handle() {
@@ -220,14 +188,9 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
         }
     }
 
-    // Note: Mouse passthrough is toggled dynamically in gui_run()
-    // based on whether the mouse is over the overlay widget
-
     let latest_size = glfw_backend.window.get_framebuffer_size();
     let latest_size = [latest_size.0 as u32, latest_size.1 as u32];
 
-    // Create graphics backend (ThreeDBackend for OpenGL on non-macOS)
-    #[cfg(not(target_os = "macos"))]
     let default_gfx_backend = {
         use raw_window_handle::HasRawWindowHandle;
         let handle = glfw_backend.window.raw_window_handle();
@@ -241,20 +204,6 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
         )
     };
 
-    // macOS uses wgpu/metal
-    #[cfg(target_os = "macos")]
-    let default_gfx_backend = {
-        use egui_overlay::egui_render_wgpu::WgpuBackend;
-        WgpuBackend::new(
-            egui_overlay::egui_render_wgpu::WgpuConfig {
-                ..Default::default()
-            },
-            Some(&glfw_backend.window),
-            latest_size,
-        )
-    };
-
-    // Create the overlay app and run event loop
     let overlay_app = egui_overlay::OverlayApp {
         user_data,
         egui_context: Default::default(),
@@ -271,7 +220,6 @@ fn get_primary_monitor_info() -> Option<([u32; 2], [i32; 2])> {
 
     let mut glfw_context = glfw::init(glfw::FAIL_ON_ERRORS).ok()?;
 
-    // Get all monitors and log them
     glfw_context.with_connected_monitors(|_, monitors| {
         info!("Detected {} monitor(s)", monitors.len());
         for (i, monitor) in monitors.iter().enumerate() {
@@ -285,7 +233,6 @@ fn get_primary_monitor_info() -> Option<([u32; 2], [i32; 2])> {
         }
     });
 
-    // Get primary monitor
     glfw_context.with_primary_monitor(|_, m| {
         m.and_then(|mon| {
             let mode = mon.get_video_mode()?;
@@ -305,56 +252,47 @@ pub struct OverlayWindowBuilder {
 }
 
 impl OverlayWindowBuilder {
-    /// Create a new builder with default config
     pub fn new() -> Self {
         Self {
             config: OverlayConfig::default(),
         }
     }
 
-    /// Set the window width
     pub fn width(mut self, width: f32) -> Self {
         self.config.width = width;
         self
     }
 
-    /// Set the window height
     pub fn height(mut self, height: f32) -> Self {
         self.config.height = height;
         self
     }
 
-    /// Set the window position
     pub fn position(mut self, position: super::state::OverlayPosition) -> Self {
         self.config.position = position;
         self
     }
 
-    /// Set the opacity
     pub fn opacity(mut self, opacity: f32) -> Self {
         self.config.opacity = opacity.clamp(0.0, 1.0);
         self
     }
 
-    /// Set whether to show button when idle
     pub fn show_button_when_idle(mut self, show: bool) -> Self {
         self.config.show_button_when_idle = show;
         self
     }
 
-    /// Set the theme
     pub fn theme(mut self, theme: super::state::OverlayTheme) -> Self {
         self.config.theme = theme;
         self
     }
 
-    /// Set the hotkey combination to display
     pub fn hotkey(mut self, hotkey: impl Into<String>) -> Self {
         self.config.hotkey = hotkey.into();
         self
     }
 
-    /// Build the overlay window
     pub fn build(self) -> OverlayWindow {
         OverlayWindow::new(self.config)
     }
@@ -367,8 +305,6 @@ impl Default for OverlayWindowBuilder {
 }
 
 /// Set X11 window properties to hide from taskbar
-/// Uses override_redirect to bypass window manager entirely
-#[cfg(target_os = "linux")]
 fn set_skip_taskbar_x11(window_id: u32) -> anyhow::Result<()> {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt};
@@ -376,7 +312,6 @@ fn set_skip_taskbar_x11(window_id: u32) -> anyhow::Result<()> {
 
     let (conn, _screen_num) = RustConnection::connect(None)?;
 
-    // Set override_redirect to bypass window manager (no taskbar, no decorations)
     let values = ChangeWindowAttributesAux::new().override_redirect(1);
     conn.change_window_attributes(window_id, &values)?;
 

@@ -40,8 +40,6 @@ impl CommandDispatcher {
             Commands::Status { .. } => "status",
             Commands::Install { .. } => "install",
             Commands::Uninstall { .. } => "uninstall",
-            #[cfg(target_os = "macos")]
-            Commands::CheckPermissions => "check_permissions",
         };
 
         let ctx = RequestContext::new(&format!("command_{}", command_name))
@@ -121,8 +119,6 @@ impl CommandDispatcher {
                 desktop,
                 system,
             } => self.handle_uninstall(autostart, desktop, system).await,
-            #[cfg(target_os = "macos")]
-            Commands::CheckPermissions => self.handle_check_permissions().await,
         };
 
         match &result {
@@ -391,50 +387,6 @@ impl CommandDispatcher {
         }
 
         println!("✅ Uninstallation complete!");
-        Ok(())
-    }
-
-    /// Check macOS system permissions (Accessibility, Microphone)
-    #[cfg(target_os = "macos")]
-    async fn handle_check_permissions(&self) -> Result<()> {
-        println!("🔐 macOS Permission Status\n");
-
-        // Check Accessibility permissions
-        #[cfg(feature = "default")]
-        {
-            use crate::adapters::text::macos_adapter::check_accessibility_permissions;
-
-            let accessibility = check_accessibility_permissions();
-            if accessibility {
-                println!("✅ Accessibility: Granted");
-            } else {
-                println!("❌ Accessibility: Not granted");
-                println!("   Required for text insertion");
-                println!("   Settings → Privacy & Security → Accessibility");
-            }
-        }
-
-        // Check Microphone permissions
-        println!("\n🎤 Microphone: Checking...");
-
-        // Try to create audio capture to check microphone access
-        match crate::AudioCapture::new(None) {
-            Ok(_) => {
-                println!("✅ Microphone: Accessible");
-            },
-            Err(e) => {
-                let err_str = e.to_string();
-                if err_str.contains("permission") || err_str.contains("access") {
-                    println!("❌ Microphone: Access denied");
-                    println!("   Settings → Privacy & Security → Microphone");
-                } else {
-                    println!("⚠️  Microphone: Check failed");
-                    println!("   Error: {}", e);
-                }
-            },
-        }
-
-        println!();
         Ok(())
     }
 }

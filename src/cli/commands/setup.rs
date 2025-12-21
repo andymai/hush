@@ -62,7 +62,6 @@ pub async fn handle_setup(setup_command: SetupCommands) -> Result<()> {
             #[cfg(not(target_os = "linux"))]
             {
                 eprintln!("UInput setup is only available on Linux");
-                eprintln!("On macOS, text insertion uses the CGEvent API");
                 Ok(())
             }
         },
@@ -209,19 +208,9 @@ async fn run_setup_wizard(auto: bool) -> Result<()> {
             .context("Failed to read user input")?;
     }
 
-    // Step 1: UInput setup (Linux only)
-    #[cfg(target_os = "linux")]
-    {
-        println!("📋 Step 1: UInput Setup");
-        crate::text::print_uinput_setup_guidance();
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        println!("📋 Step 1: Accessibility Permissions");
-        println!("macOS requires Accessibility permissions for text insertion.");
-        println!("You will be prompted when you first use voice-to-text features.");
-    }
+    // Step 1: UInput setup
+    println!("📋 Step 1: UInput Setup");
+    crate::text::print_uinput_setup_guidance();
 
     if !auto {
         println!("\nHave you completed the UInput setup? (y/N)");

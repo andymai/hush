@@ -143,10 +143,6 @@ pub enum Commands {
         #[arg(long)]
         system: bool,
     },
-
-    /// Check system permissions (macOS)
-    #[cfg(target_os = "macos")]
-    CheckPermissions,
 }
 
 #[derive(Subcommand)]
