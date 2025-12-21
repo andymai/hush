@@ -597,8 +597,8 @@ pub async fn test_transcription_system(
 
 pub async fn test_text_insertion_system(
     text: String,
-    _all_methods: bool,
-    _uinput: bool,
+    all_methods: bool,
+    uinput: bool,
 ) -> Result<()> {
     println!("⌨️ Testing text insertion system...");
     println!("Text to insert: '{}'", text);
@@ -706,10 +706,10 @@ pub async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()>
             config.transcription.use_cuda,
         )
         .await?;
-        let _text_inserter;
+        let mut text_inserter;
         #[cfg(target_os = "linux")]
         {
-            _text_inserter = if transcribe_only {
+            text_inserter = if transcribe_only {
                 None
             } else {
                 Some(crate::TextInserter::new()?)
@@ -718,7 +718,7 @@ pub async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()>
 
         #[cfg(not(target_os = "linux"))]
         {
-            _text_inserter = None::<()>;
+            text_inserter = None::<()>;
             if !transcribe_only {
                 println!("ℹ️  Text insertion not available on this platform");
             }
