@@ -1,3 +1,4 @@
+use crate::text_processing::{EditingMode, LlmProvider, ProcessingConfig, TextProcessor};
 use crate::{AudioCapture, Config, WhisperTranscriber};
 
 #[cfg(target_os = "linux")]
@@ -9,7 +10,7 @@ use anyhow::Result;
 use hound;
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tracing::info;
+use tracing::{info, warn};
 
 /// Handle the record command
 ///
@@ -93,12 +94,57 @@ pub async fn handle_record(
         )
         .await?;
 
+        // Initialize text processor
+        let text_processor = {
+            let _ = dotenvy::dotenv();
+            let llm_provider = if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
+                if !api_key.is_empty() {
+                    info!("Using Anthropic Claude API for text polishing");
+                    LlmProvider::Anthropic {
+                        api_key: Some(api_key),
+                        model: "claude-3-haiku-20240307".to_string(),
+                    }
+                } else {
+                    LlmProvider::None
+                }
+            } else {
+                LlmProvider::None
+            };
+
+            let processing_config = ProcessingConfig {
+                mode: EditingMode::Medium,
+                llm_provider,
+                max_tokens: 200,
+                temperature: 0.3,
+            };
+
+            TextProcessor::new(processing_config).ok()
+        };
+
         match transcriber
             .transcribe_async(&audio_data, config.audio.sample_rate)
             .await
         {
             Ok(result) => {
-                println!("✅ Transcription: '{}'", result.text);
+                println!("✅ Raw transcription: '{}'", result.text);
+
+                // Apply text processing
+                let processed_text = if let Some(ref processor) = text_processor {
+                    match processor.process(&result.text).await {
+                        Ok(polished) => {
+                            if polished != result.text {
+                                println!("✨ Processed text: '{}'", polished);
+                            }
+                            polished
+                        },
+                        Err(e) => {
+                            warn!("Text processing failed: {}", e);
+                            result.text.clone()
+                        },
+                    }
+                } else {
+                    result.text.clone()
+                };
 
                 // Insert text
                 #[cfg(target_os = "linux")]
@@ -107,7 +153,7 @@ pub async fn handle_record(
                     println!("⌨️ Inserting text (3 second delay)...");
                     tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
-                    match text_inserter.insert_text(&result.text) {
+                    match text_inserter.insert_text(&processed_text) {
                         Ok(()) => println!("✅ Text inserted successfully"),
                         Err(e) => println!("❌ Text insertion failed: {}", e),
                     }

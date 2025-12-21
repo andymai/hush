@@ -1,9 +1,33 @@
 use anyhow::{Context, Result};
+use once_cell::sync::Lazy;
+use parking_lot::RwLock;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 /// Domain-specific vocabulary management
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
+
+/// Global regex cache to avoid recompiling patterns
+static REGEX_CACHE: Lazy<RwLock<HashMap<String, Regex>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+/// Get or compile a regex pattern from cache
+fn get_cached_regex(pattern: &str) -> Option<Regex> {
+    // Try read lock first
+    if let Some(re) = REGEX_CACHE.read().get(pattern) {
+        return Some(re.clone());
+    }
+
+    // Compile and cache
+    match Regex::new(pattern) {
+        Ok(re) => {
+            REGEX_CACHE.write().insert(pattern.to_string(), re.clone());
+            Some(re)
+        },
+        Err(_) => None,
+    }
+}
 
 /// Domain-specific vocabulary configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -75,23 +99,23 @@ impl DomainVocabulary {
     pub fn apply(&self, text: &str) -> String {
         let mut result = text.to_string();
 
-        // Apply abbreviation expansions
+        // Apply abbreviation expansions (using cached regex)
         for (abbrev, expansion) in &self.abbreviations {
             let pattern = format!(r"\b{}\b", regex::escape(abbrev));
-            if let Ok(re) = regex::Regex::new(&pattern) {
+            if let Some(re) = get_cached_regex(&pattern) {
                 result = re.replace_all(&result, expansion.as_str()).to_string();
             }
         }
 
-        // Apply phrase replacements
+        // Apply phrase replacements (simple string replace, no regex needed)
         for (phrase, replacement) in &self.phrases {
             result = result.replace(phrase, replacement);
         }
 
-        // Apply technical term capitalization
+        // Apply technical term capitalization (using cached regex)
         for (lowercase, proper) in &self.technical_terms {
             let pattern = format!(r"(?i)\b{}\b", regex::escape(lowercase));
-            if let Ok(re) = regex::Regex::new(&pattern) {
+            if let Some(re) = get_cached_regex(&pattern) {
                 result = re.replace_all(&result, proper.as_str()).to_string();
             }
         }

@@ -3,26 +3,50 @@ use crate::core::traits::{InputTrigger, TriggerEvent};
 use crate::hotkey::{HotkeyEvent, HotkeyManager};
 use crate::Result;
 use async_trait::async_trait;
-use parking_lot::Mutex;
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
+use tokio::sync::mpsc as tokio_mpsc;
 
 /// Adapter that wraps HotkeyManager to implement InputTrigger trait
-/// Uses Arc<Mutex<>> for thread safety since mpsc::Receiver is not Sync
+/// Uses tokio channels for proper async event handling without busy-waiting
 pub struct HotkeyTriggerAdapter {
     manager: HotkeyManager,
-    receiver: Arc<Mutex<mpsc::Receiver<HotkeyEvent>>>,
+    async_receiver: tokio_mpsc::UnboundedReceiver<HotkeyEvent>,
     combination: String,
 }
 
 impl HotkeyTriggerAdapter {
     /// Create new adapter wrapping a HotkeyManager
     pub fn new(combination: &str) -> Result<Self> {
-        let (manager, receiver) = HotkeyManager::new(combination)?;
+        let (manager, sync_receiver) = HotkeyManager::new(combination)?;
+
+        // Create async channel for proper async/await support
+        let (async_tx, async_rx) = tokio_mpsc::unbounded_channel();
+
+        // Bridge sync channel to async channel in background thread
+        std::thread::spawn(move || {
+            Self::bridge_sync_to_async(sync_receiver, async_tx);
+        });
+
         Ok(Self {
             manager,
-            receiver: Arc::new(Mutex::new(receiver)),
+            async_receiver: async_rx,
             combination: combination.to_string(),
         })
+    }
+
+    /// Bridge events from sync mpsc to async tokio channel
+    fn bridge_sync_to_async(
+        sync_rx: mpsc::Receiver<HotkeyEvent>,
+        async_tx: tokio_mpsc::UnboundedSender<HotkeyEvent>,
+    ) {
+        // Block on sync channel and forward to async channel
+        // This thread sleeps when waiting for events (no busy-wait)
+        while let Ok(event) = sync_rx.recv() {
+            if async_tx.send(event).is_err() {
+                // Receiver dropped, exit bridge
+                break;
+            }
+        }
     }
 
     /// Get reference to inner HotkeyManager (for migration period)
@@ -42,32 +66,16 @@ impl InputTrigger for HotkeyTriggerAdapter {
     }
 
     async fn next_event(&mut self) -> Option<TriggerEvent> {
-        // Convert HotkeyEvent to TriggerEvent
-        // Note: This is a blocking receive, which isn't ideal for async
-        // In a future version, we should make HotkeyManager use async channels
-
-        // Don't hold the lock across await points
-        let recv_result = self.receiver.lock().try_recv();
-        match recv_result {
-            Ok(HotkeyEvent::Pressed) => Some(TriggerEvent::StartRecording),
-            Ok(HotkeyEvent::Released) => Some(TriggerEvent::StopRecording),
-            Err(mpsc::TryRecvError::Empty) => {
-                // No event ready, yield to allow other tasks to run
-                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-                None
-            },
-            Err(mpsc::TryRecvError::Disconnected) => None,
+        // Properly async receive - no polling, no busy-wait
+        match self.async_receiver.recv().await {
+            Some(HotkeyEvent::Pressed) => Some(TriggerEvent::StartRecording),
+            Some(HotkeyEvent::Released) => Some(TriggerEvent::StopRecording),
+            None => None, // Channel closed
         }
     }
 
     fn description(&self) -> String {
         self.combination.clone()
-    }
-}
-
-impl Drop for HotkeyTriggerAdapter {
-    fn drop(&mut self) {
-        // HotkeyManager will clean up in its own Drop
     }
 }
 
