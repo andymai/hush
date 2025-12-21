@@ -1,4 +1,4 @@
-.PHONY: build check clean dev release release-cpu install link help
+.PHONY: build check clean dev release release-cpu production install link help
 
 # Default target
 help:
@@ -10,6 +10,7 @@ help:
 	@echo "  dev         - Same as build (alias)"
 	@echo "  release     - Build release version with CUDA GPU acceleration"
 	@echo "  release-cpu - Build release version (CPU only, no GPU)"
+	@echo "  production  - Build max-optimized version (full LTO, slow compile)"
 	@echo "  clean       - Clean build artifacts and remove symlink"
 	@echo "  link        - Create/update symlink to binary"
 	@echo "  install     - Build release and install to ~/.cargo/bin"
@@ -42,6 +43,13 @@ release-cpu:
 	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH cargo build --release
 	@ln -sf target/release/hush ./hush
 	@echo "✅ Release build complete (CPU only). Use ./hush to run."
+
+# Maximum optimization build (full LTO, slow compile)
+production:
+	@echo "🏭 Building production version (full LTO, this will take a while)..."
+	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH cargo build --profile production --features cuda
+	@ln -sf target/production/hush ./hush
+	@echo "✅ Production build complete. Use ./hush to run."
 
 # Clean everything
 clean:
