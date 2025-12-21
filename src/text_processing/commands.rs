@@ -70,6 +70,23 @@ impl ParsedCommand {
             .collect::<Vec<_>>()
             .join(" ")
     }
+
+    /// Get all segments as raw text (including command words)
+    pub fn get_raw_text(&self) -> String {
+        self.segments
+            .iter()
+            .map(|seg| match seg {
+                VoiceCommand::Text(text) => text.as_str(),
+                VoiceCommand::NewParagraph => "new paragraph",
+                VoiceCommand::NewLine => "new line",
+                VoiceCommand::Undo => "undo",
+                VoiceCommand::DeleteThat => "delete that",
+                VoiceCommand::CapitalizeThat => "cap that",
+                VoiceCommand::AllCaps => "all caps",
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 /// Patterns for detecting voice commands
@@ -84,13 +101,13 @@ static COMMAND_PATTERNS: Lazy<Vec<(Regex, VoiceCommand)>> = Lazy::new(|| {
             Regex::new(r"\b(new line|next line)\b").unwrap(),
             VoiceCommand::NewLine,
         ),
-        // Undo/delete
+        // Undo/delete (longer matches first)
         (
-            Regex::new(r"\b(undo|undo that)\b").unwrap(),
+            Regex::new(r"\b(undo that|undo)\b").unwrap(),
             VoiceCommand::Undo,
         ),
         (
-            Regex::new(r"\b(delete that|scratch that)\b").unwrap(),
+            Regex::new(r"\b(scratch that|delete that)\b").unwrap(),
             VoiceCommand::DeleteThat,
         ),
         // Capitalization
