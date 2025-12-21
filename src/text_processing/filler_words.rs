@@ -137,13 +137,14 @@ impl FillerWordRemover {
         result = REPEATED_EXCLAMATION.replace_all(&result, "!").to_string();
         result = REPEATED_QUESTION.replace_all(&result, "?").to_string();
 
+        // Trim before capitalizing so first char is actually a letter
+        result = result.trim().to_string();
+
         // Capitalize first letter
         result = Self::capitalize_first(&result);
 
         // Ensure ends with punctuation
-        result = Self::ensure_ending_punctuation(&result);
-
-        result.trim().to_string()
+        Self::ensure_ending_punctuation(&result)
     }
 
     fn capitalize_first(text: &str) -> String {

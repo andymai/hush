@@ -69,8 +69,8 @@ impl CommandExecutor {
     /// Execute parsed commands and build the output
     pub fn execute(&self, parsed: &ParsedCommand) -> ExecutionResult {
         if !self.enabled {
-            // If disabled, just return the raw text
-            let text = parsed.get_text();
+            // If disabled, return all text including command words
+            let text = parsed.get_raw_text();
             return if text.is_empty() {
                 ExecutionResult::no_action()
             } else {

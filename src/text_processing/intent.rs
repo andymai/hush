@@ -129,13 +129,21 @@ impl IntentDetector {
             return UserIntent::Command { shell: None };
         }
 
+        // Check for comment-style text (e.g. "comment: this needs work")
+        if COMMENT_PATTERNS.is_match(&text_lower) {
+            debug!("Detected intent: Code (comment: true)");
+            return UserIntent::Code {
+                language: None,
+                is_comment: true,
+            };
+        }
+
         // Check for code
         if CODE_PATTERNS.is_match(&text_lower) {
-            let is_comment = COMMENT_PATTERNS.is_match(&text_lower);
-            debug!("Detected intent: Code (comment: {})", is_comment);
+            debug!("Detected intent: Code (comment: false)");
             return UserIntent::Code {
                 language: self.detect_language(&text_lower),
-                is_comment,
+                is_comment: false,
             };
         }
 
