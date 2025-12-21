@@ -3,18 +3,46 @@
 **/*.rs.bk
 Cargo.lock
 
-# IDE
+# IDE / Editors
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.zed/
+.helix/
+.fleet/
+
+# Rust tooling
+rust-project.json
+.cargo/config.toml
 
 # OS
 .DS_Store
 Thumbs.db
+*.bak
 
 # Logs
 *.log
+logs/
+
+# Debug / Profiling
+*.pdb
+perf.data
+perf.data.old
+flamegraph.svg
+cachegrind.out.*
+callgrind.out.*
+
+# Coverage
+*.profraw
+*.profdata
+coverage/
+lcov.info
+tarpaulin-report.html
+
+# Benchmarks
+criterion/
 
 # AI Models and large files
 # Whisper model files
@@ -57,9 +85,12 @@ assets/sounds/*.wav
 
 # Config files with secrets
 config/local.toml
-/hush
-.env
-# API keys and secrets
 .env
 .env.*
 !.env.example
+
+# Build artifacts
+/hush
+
+# Claude Code
+.claude/settings.local.json
