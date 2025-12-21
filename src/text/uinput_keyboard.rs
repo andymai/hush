@@ -102,15 +102,6 @@ impl UinputKeyboard {
         self.send_key(Key::Backspace, false)
     }
 
-    /// Send an escape keystroke to cancel any pending menu activation
-    pub fn send_escape(&mut self) -> Result<()> {
-        if !self.ready {
-            return Err(anyhow::anyhow!("Uinput keyboard not ready"));
-        }
-
-        self.send_key(Key::Esc, false)
-    }
-
     pub fn get_device_info(&self) -> String {
         if self.ready {
             "Linux uinput (kernel-level)".to_string()
@@ -209,7 +200,6 @@ impl UinputKeyboard {
             Key::RightCtrl,
             Key::LeftAlt,
             Key::RightAlt,
-            Key::Esc,
         ];
 
         for &key in &keys_to_enable {

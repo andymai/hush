@@ -249,9 +249,6 @@ impl TextInserter {
         debug!("Inserting text via uinput (kernel-level)");
 
         if let Some(uinput) = &mut self.uinput_keyboard {
-            // Cancel any Alt-triggered menu focus (common issue with Ctrl+Alt hotkeys on GTK/KDE)
-            let _ = uinput.send_escape();
-
             // Set the typing delay to match our configured delay
             uinput.set_typing_delay(self.typing_delay_ms);
 
