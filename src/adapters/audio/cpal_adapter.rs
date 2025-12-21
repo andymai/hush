@@ -3,7 +3,7 @@
 /// This adapter wraps the existing AudioCapture implementation,
 /// allowing it to be used with the new trait-based architecture.
 use crate::audio::AudioCapture;
-use crate::core::traits::{AudioBuffer, AudioConfig, AudioSource};
+use crate::core::traits::{AudioBuffer, AudioSource};
 use crate::Result;
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -85,15 +85,6 @@ impl AudioSource for CpalAudioAdapter {
     fn device_name(&self) -> &str {
         &self.device_name
     }
-
-    fn config(&self) -> AudioConfig {
-        use crate::core::types::*;
-        AudioConfig {
-            sample_rate: SampleRate::WHISPER_OPTIMAL,
-            channels: Channels::MONO,
-            buffer_size: BufferSize::STANDARD,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -105,17 +96,6 @@ mod tests {
     fn test_cpal_adapter_implements_trait() {
         let _can_create_boxed_trait_object: Box<dyn AudioSource> =
             Box::new(CpalAudioAdapter::new(None).unwrap());
-    }
-
-    #[test]
-    fn test_adapter_config() {
-        use crate::core::types::*;
-        let adapter = CpalAudioAdapter::new(None).unwrap();
-        let config = adapter.config();
-
-        assert_eq!(config.sample_rate, SampleRate::WHISPER_OPTIMAL);
-        assert_eq!(config.channels, Channels::MONO);
-        assert_eq!(config.buffer_size, BufferSize::STANDARD);
     }
 
     #[test]
