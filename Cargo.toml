@@ -110,13 +110,6 @@ x11rb = "0.13"
 input-linux = "0.7"
 
 
-[dev-dependencies]
-criterion = { version = "0.5", features = ["async_tokio"] }
-
-[[bench]]
-name = "architecture_benchmarks"
-harness = false
-
 [profile.release]
 opt-level = 3
 lto = true

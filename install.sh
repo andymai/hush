@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Hush Voice-to-Text Installation Script
-# This script builds and installs Hush as a production-ready application
+# Builds and installs Hush to ~/.local/bin
 
 set -e
 
@@ -15,22 +15,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Function to print colored output
-print_status() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-print_header() {
-    echo -e "${BLUE}$1${NC}"
-}
+print_status() { echo -e "${GREEN}[INFO]${NC} $1"; }
+print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+print_header() { echo -e "${BLUE}$1${NC}"; }
 
 # Check if we're in the right directory
 if [ ! -f "Cargo.toml" ] || [ ! -d "src" ]; then
@@ -38,50 +26,40 @@ if [ ! -f "Cargo.toml" ] || [ ! -d "src" ]; then
     exit 1
 fi
 
-print_header "🤫 Hush Voice-to-Text Installation Script"
-print_header "========================================"
-
-# Check dependencies
-print_status "Checking system dependencies..."
+print_header "Hush Voice-to-Text Installation Script"
+print_header "======================================"
 
 # Check for Rust/Cargo
+print_status "Checking dependencies..."
 if ! command -v cargo &> /dev/null; then
     print_error "Cargo is not installed. Please install Rust from https://rustup.rs/"
     exit 1
 fi
 
 # Check for required system packages
-missing_packages=()
-
 if ! pkg-config --exists alsa; then
-    missing_packages+=("libasound2-dev")
-fi
-
-if [ ${#missing_packages[@]} -ne 0 ]; then
-    print_error "Missing required system packages: ${missing_packages[*]}"
-    print_status "Install them with: sudo apt install ${missing_packages[*]}"
+    print_error "Missing required package: libasound2-dev"
+    print_status "Install with: sudo apt install libasound2-dev"
     exit 1
 fi
 
-print_status "All system dependencies are available"
+print_status "All dependencies available"
 
 # Build the application
 print_status "Building Hush in release mode..."
-./scripts/build.sh --release --bin hush-mvp
+make release
 
 if [ $? -ne 0 ]; then
     print_error "Build failed"
     exit 1
 fi
 
-# Create installation directories
-print_status "Setting up installation directories..."
+# Install the binary
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
 
-# Install the binary
 print_status "Installing hush binary to $BIN_DIR..."
-cp target/release/hush-mvp "$BIN_DIR/hush"
+cp target/release/hush "$BIN_DIR/hush"
 chmod +x "$BIN_DIR/hush"
 
 # Check if ~/.local/bin is in PATH
@@ -94,73 +72,36 @@ fi
 # Test the installation
 print_status "Testing installation..."
 if "$BIN_DIR/hush" --version > /dev/null 2>&1; then
-    print_status "✅ Binary installation successful"
+    print_status "Binary installation successful"
 else
-    print_error "Binary installation failed - hush command not working"
+    print_error "Binary installation failed"
     exit 1
 fi
 
-# Install desktop integration
-print_status "Installing desktop integration..."
-"$BIN_DIR/hush" install
-
 # Create configuration directory
-print_status "Setting up configuration..."
 CONFIG_DIR="$HOME/.config/hush"
 mkdir -p "$CONFIG_DIR"
 
-# Copy default configuration if it doesn't exist
-if [ ! -f "$CONFIG_DIR/config.toml" ]; then
-    if [ -f "config/default.toml" ]; then
-        cp "config/default.toml" "$CONFIG_DIR/config.toml"
-        print_status "Created default configuration at $CONFIG_DIR/config.toml"
-    else
-        print_warning "Default configuration file not found, skipping config setup"
-    fi
-fi
-
-# Download a basic Whisper model if models directory doesn't exist
-MODELS_DIR="$PWD/models"
-if [ ! -d "$MODELS_DIR" ] || [ -z "$(ls -A "$MODELS_DIR")" ]; then
-    print_status "Setting up Whisper models..."
-    ./scripts/download-models.sh tiny
+if [ ! -f "$CONFIG_DIR/config.toml" ] && [ -f "config/default.toml" ]; then
+    cp "config/default.toml" "$CONFIG_DIR/config.toml"
+    print_status "Created default configuration at $CONFIG_DIR/config.toml"
 fi
 
 print_header ""
-print_header "🎉 Installation Complete!"
-print_header "========================"
-print_status "Hush has been installed successfully!"
-echo ""
-print_status "Available commands:"
-echo "  hush daemon           - Run with global hotkeys (requires setup)"
-echo "  hush manual           - Manual recording mode (no hotkeys needed)"
-echo "  hush one-shot         - Single recording mode (for GNOME shortcuts)"
-echo "  hush status           - Show system status"
-echo "  hush install          - Setup desktop integration"
+print_header "Installation Complete!"
+print_header "====================="
 echo ""
 print_status "Next steps:"
-echo "1. 🎹 Set up keyboard shortcut in GNOME Settings (recommended)"
-echo "   - Open Settings → Keyboard → Keyboard Shortcuts"
-echo "   - Add custom shortcut: 'hush one-shot --duration 10'"
-echo "   - Assign to Ctrl+Shift+Space"
+echo "1. Download a Whisper model:"
+echo "   hush models download base"
 echo ""
-echo "2. 🔧 Or try manual mode: hush manual"
+echo "2. Setup text insertion:"
+echo "   hush setup uinput --quick"
 echo ""
-echo "3. 📊 Check status anytime: hush status"
+echo "3. Start using Hush:"
+echo "   hush listen"
 echo ""
-print_status "For troubleshooting, run: hush status -v"
-
-# Check GNOME environment
-if [ "$XDG_CURRENT_DESKTOP" = "GNOME" ]; then
-    print_status ""
-    print_status "🔧 GNOME detected! You can now:"
-    echo "   - Open Settings → Keyboard → Keyboard Shortcuts"
-    echo "   - Find 'Custom Shortcuts' and add a new one"
-    echo "   - Command: hush one-shot --duration 10"
-    echo "   - Shortcut: Ctrl+Shift+Space"
-fi
-
-print_status ""
+echo "Hold Ctrl+Alt+V to dictate."
+echo ""
 print_status "Installation location: $BIN_DIR/hush"
 print_status "Configuration: $CONFIG_DIR/config.toml"
-print_status "Models: $MODELS_DIR/"
