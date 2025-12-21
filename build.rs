@@ -5,9 +5,9 @@
 use std::process::Command;
 
 fn main() {
-    println!("cargo:warning=");
-    println!("cargo:warning=Hush Build System");
-    println!("cargo:warning=");
+    eprintln!();
+    eprintln!("Hush Build System");
+    eprintln!();
 
     check_linux_dependencies();
     check_gpu_support();
@@ -17,10 +17,11 @@ fn main() {
 }
 
 fn check_linux_dependencies() {
-    println!("cargo:warning=Checking Linux dependencies...");
+    eprintln!("Checking Linux dependencies...");
 
     // Check for pkg-config
     if !check_command_exists("pkg-config", &["--version"]) {
+        println!("cargo:warning=pkg-config not found - required to build Hush");
         eprintln!("\nERROR: pkg-config not found\n");
         eprintln!("pkg-config is required to build Hush.\n");
         eprintln!("Install it using:\n");
@@ -33,6 +34,7 @@ fn check_linux_dependencies() {
 
     // Check for ALSA (required for audio capture)
     if !check_pkg_config_package("alsa") {
+        println!("cargo:warning=ALSA development libraries not found - required for audio capture");
         eprintln!("\nERROR: ALSA development libraries not found\n");
         eprintln!("ALSA is required for audio capture.\n");
         eprintln!("Install it using:\n");
@@ -45,6 +47,7 @@ fn check_linux_dependencies() {
 
     // Check for X11 (required for window management)
     if !check_pkg_config_package("x11") {
+        println!("cargo:warning=X11 development libraries not found - some features may not work");
         eprintln!("\nWARNING: X11 development libraries not found\n");
         eprintln!("X11 is recommended for full functionality.\n");
         eprintln!("Install it using:\n");
@@ -54,44 +57,41 @@ fn check_linux_dependencies() {
         eprintln!("\nContinuing build, but some features may not work.\n");
     }
 
-    println!("cargo:warning=Linux dependencies OK");
-    println!("cargo:warning=");
+    eprintln!("Linux dependencies OK");
 }
 
 fn check_gpu_support() {
     // Check for CUDA (optional - for GPU acceleration)
     if check_command_exists("nvcc", &["--version"]) {
-        println!("cargo:warning=CUDA toolkit detected - GPU acceleration available");
+        eprintln!("CUDA toolkit detected - GPU acceleration available");
 
         if let Ok(output) = Command::new("nvcc").arg("--version").output() {
             if let Ok(version_str) = String::from_utf8(output.stdout) {
                 if let Some(version_line) = version_str.lines().find(|l| l.contains("release")) {
-                    println!("cargo:warning=   CUDA version: {}", version_line.trim());
+                    eprintln!("  CUDA version: {}", version_line.trim());
                 }
             }
         }
     } else if check_command_exists("nvidia-smi", &[]) {
-        println!("cargo:warning=NVIDIA GPU detected but CUDA toolkit not found");
-        println!("cargo:warning=   Install CUDA 12.0+ for GPU acceleration");
-        println!("cargo:warning=   See INSTALL.md for CUDA installation instructions");
+        println!("cargo:warning=NVIDIA GPU detected but CUDA toolkit not found - install CUDA 12.0+ for GPU acceleration");
+        eprintln!("NVIDIA GPU detected but CUDA toolkit not found");
+        eprintln!("  Install CUDA 12.0+ for GPU acceleration");
+        eprintln!("  See INSTALL.md for CUDA installation instructions");
     }
 }
 
 fn print_build_summary() {
-    println!("cargo:warning=");
-    println!("cargo:warning=Build Configuration:");
-    println!("cargo:warning=   Platform: Linux");
+    eprintln!();
+    eprintln!("Build Configuration:");
+    eprintln!("  Platform: Linux");
 
     #[cfg(feature = "cuda")]
-    println!("cargo:warning=   GPU: CUDA enabled");
+    eprintln!("  GPU: CUDA enabled");
 
     #[cfg(not(feature = "cuda"))]
-    println!("cargo:warning=   GPU: CPU only (use --features cuda for GPU)");
+    eprintln!("  GPU: CPU only (use --features cuda for GPU)");
 
-    println!("cargo:warning=");
-    println!("cargo:warning=Build dependency check complete");
-    println!("cargo:warning=   For installation help, see: INSTALL.md");
-    println!("cargo:warning=");
+    eprintln!();
 }
 
 fn check_command_exists(command: &str, args: &[&str]) -> bool {

@@ -21,7 +21,7 @@ impl CudaAvailability {
             {
                 // Try to create a CUDA device to check availability
                 match candle_core::Device::cuda_if_available(0) {
-                    Ok(device) => {
+                    Ok(_device) => {
                         // CUDA is available
                         // Note: Device count and detailed info are not easily accessible
                         // from candle_core's public API in newer versions
