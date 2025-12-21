@@ -8,6 +8,7 @@ use crate::TextInserter;
 use anyhow::Result;
 use hound;
 use std::path::PathBuf;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::info;
 
 /// Handle the record command
@@ -61,14 +62,22 @@ pub async fn handle_record(
     );
     audio_capture.start_recording()?;
 
-    // Wait for either timeout or user input
-    let start_time = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(duration);
+    // Wait for either timeout or user input (Enter key)
+    let timeout = tokio::time::Duration::from_secs(duration);
+    let stdin = tokio::io::stdin();
+    let mut reader = BufReader::new(stdin);
+    let mut line = String::new();
 
-    while start_time.elapsed() < timeout {
-        // Check for user input to stop early
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        // TODO: Add non-blocking stdin check for early stop
+    tokio::select! {
+        _ = tokio::time::sleep(timeout) => {
+            info!("Recording timeout reached");
+        }
+        result = reader.read_line(&mut line) => {
+            match result {
+                Ok(_) => info!("Recording stopped by user"),
+                Err(e) => info!("Stdin error (stopping recording): {}", e),
+            }
+        }
     }
 
     // Stop recording and get samples

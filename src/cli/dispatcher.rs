@@ -1,19 +1,14 @@
 use crate::cli::commands::{
-    handle_listen, handle_manual, handle_models, handle_setup, handle_test,
+    handle_listen, handle_manual, handle_models, handle_record, handle_setup, handle_status,
+    handle_test,
 };
-use crate::cli::{Commands, ModelCommands};
+use crate::cli::Commands;
 use crate::logging::RequestContext;
 use anyhow::{Context as AnyhowContext, Result};
 use hound;
 use std::path::PathBuf;
 use std::{env, fs};
 use tracing::{debug, error, info};
-
-// Import Hush components
-use crate::{hotkey, AudioCapture, Config, WhisperTranscriber};
-
-#[cfg(target_os = "linux")]
-use crate::TextInserter;
 
 pub struct CommandDispatcher {
     _config_path: Option<PathBuf>,
@@ -30,7 +25,6 @@ impl CommandDispatcher {
 
     pub async fn dispatch(&self, command: Commands) -> Result<()> {
         let command_name = match &command {
-            Commands::Start { .. } => "start",
             Commands::Record { .. } => "record",
             Commands::Manual { .. } => "manual",
             Commands::Listen { .. } => "listen",
@@ -52,11 +46,6 @@ impl CommandDispatcher {
         );
 
         let result = match command {
-            Commands::Start {
-                daemon,
-                elevated,
-                cli,
-            } => self.handle_start(daemon, elevated, cli).await,
             Commands::Record {
                 duration,
                 print_only,
@@ -68,7 +57,7 @@ impl CommandDispatcher {
                     print_only = %print_only,
                     "Record command parameters"
                 );
-                self.handle_record(duration, print_only, save_audio).await
+                handle_record(duration, print_only, save_audio).await
             },
             Commands::Manual { count } => {
                 debug!(
@@ -94,7 +83,7 @@ impl CommandDispatcher {
             },
             Commands::Setup { setup_command } => handle_setup(setup_command).await,
             Commands::Test { test_command } => handle_test(test_command).await,
-            Commands::Models { model_command } => self.handle_models(model_command).await,
+            Commands::Models { model_command } => handle_models(model_command).await,
             Commands::Status {
                 config,
                 devices,
@@ -107,7 +96,7 @@ impl CommandDispatcher {
                     full = %full,
                     "Status command parameters"
                 );
-                self.handle_status(config, devices, full).await
+                handle_status(config, devices, full).await
             },
             Commands::Install {
                 autostart,
@@ -142,206 +131,6 @@ impl CommandDispatcher {
         }
 
         result
-    }
-
-    async fn handle_start(&self, _daemon: bool, _elevated: bool, cli: bool) -> Result<()> {
-        info!("🚀 Starting Hush voice-to-text");
-
-        if cli {
-            // Use CLI/hotkey mode (legacy mode)
-            info!("Starting CLI/hotkey mode...");
-            println!("🚧 Direct hotkey mode not yet implemented in new CLI system.");
-            println!("Please use one of these alternatives:");
-            println!("  • cargo run --bin hush-mvp daemon  - Use original daemon mode");
-            println!("  • ./hush record          - Single recording mode");
-            Ok(())
-        } else {
-            // TUI has been removed
-            println!("❌ TUI interface has been removed from this project.");
-            println!("Please use one of these alternatives:");
-            println!("  • ./hush start --cli      - Start with CLI/hotkey mode");
-            println!("  • ./hush record           - Single recording mode");
-            println!("  • ./hush manual           - Manual recording mode");
-            Ok(())
-        }
-    }
-
-    async fn handle_record(
-        &self,
-        duration: u64,
-        print_only: bool,
-        save_audio: Option<PathBuf>,
-    ) -> Result<()> {
-        info!("🎙️ Starting single recording (max {}s)", duration);
-
-        // Simple recording implementation
-        let config = Config::load()?;
-        let mut audio_capture = AudioCapture::new(config.audio.device.as_deref())?;
-
-        println!("Press Enter to start recording...");
-        std::io::stdin()
-            .read_line(&mut String::new())
-            .context("Failed to read user input")?;
-
-        println!(
-            "🎤 Recording... (will auto-stop in {}s or press Enter to stop earlier)",
-            duration
-        );
-        audio_capture.start_recording()?;
-
-        // Wait for either timeout or user input
-        let start_time = std::time::Instant::now();
-        let timeout = std::time::Duration::from_secs(duration);
-
-        while start_time.elapsed() < timeout {
-            // Check for user input to stop early
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            // TODO: Add non-blocking stdin check
-        }
-
-        let audio_data = audio_capture.stop_recording()?;
-        println!("✅ Recording stopped ({} samples)", audio_data.len());
-
-        // Transcribe if not print-only mode
-        if !print_only {
-            println!("🗣️ Transcribing...");
-            let transcriber = WhisperTranscriber::new(
-                &config.transcription.model_path,
-                config.transcription.use_cuda,
-            )
-            .await?;
-
-            match transcriber
-                .transcribe_async(&audio_data, config.audio.sample_rate)
-                .await
-            {
-                Ok(result) => {
-                    println!("✅ Transcription: '{}'", result.text);
-
-                    // Insert text
-                    #[cfg(target_os = "linux")]
-                    {
-                        let mut text_inserter = TextInserter::new()?;
-                        println!("⌨️ Inserting text (3 second delay)...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-
-                        match text_inserter.insert_text(&result.text) {
-                            Ok(()) => println!("✅ Text inserted successfully"),
-                            Err(e) => println!("❌ Text insertion failed: {}", e),
-                        }
-                    }
-
-                    #[cfg(not(target_os = "linux"))]
-                    {
-                        println!("ℹ️  Text insertion not available on this platform");
-                    }
-                },
-                Err(e) => println!("❌ Transcription failed: {}", e),
-            }
-        } else {
-            println!("Print-only mode: audio recorded but not transcribed");
-        }
-
-        // Save audio to file if requested
-        if let Some(path) = save_audio {
-            Self::save_audio_to_file(&audio_data, &path, config.audio.sample_rate)?;
-        }
-
-        Ok(())
-    }
-
-    async fn handle_models(&self, model_command: ModelCommands) -> Result<()> {
-        handle_models(model_command).await
-    }
-
-    /// Save audio data to a WAV file
-    fn save_audio_to_file(audio_data: &[f32], path: &PathBuf, sample_rate: u32) -> Result<()> {
-        info!("💾 Saving audio to: {}", path.display());
-
-        let spec = hound::WavSpec {
-            channels: 1,
-            sample_rate,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-
-        let mut writer = hound::WavWriter::create(path, spec)
-            .with_context(|| format!("Failed to create WAV file: {}", path.display()))?;
-
-        // Convert f32 samples to i16
-        for &sample in audio_data {
-            let sample_i16 = (sample * i16::MAX as f32) as i16;
-            writer
-                .write_sample(sample_i16)
-                .with_context(|| "Failed to write audio sample")?;
-        }
-
-        writer
-            .finalize()
-            .with_context(|| "Failed to finalize WAV file")?;
-
-        println!("✅ Audio saved to: {}", path.display());
-        info!(
-            "Audio file saved: {} samples @ {}Hz",
-            audio_data.len(),
-            sample_rate
-        );
-        Ok(())
-    }
-
-    async fn handle_status(&self, _config: bool, _devices: bool, full: bool) -> Result<()> {
-        println!("🤫 Hush System Status");
-        println!();
-
-        // Always show basic status
-        show_config_status().await?;
-        println!();
-        show_device_status().await?;
-
-        if full {
-            println!();
-            println!("⚙️ System Components:");
-
-            // Test each component
-            print!("Audio Capture: ");
-            match AudioCapture::new(None) {
-                Ok(_) => println!("✅ Available"),
-                Err(e) => println!("❌ Failed ({})", e),
-            }
-
-            print!("Text Insertion: ");
-            #[cfg(target_os = "linux")]
-            {
-                match TextInserter::new() {
-                    Ok(_) => println!("✅ Available"),
-                    Err(e) => println!("❌ Failed ({})", e),
-                }
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                println!("ℹ️  Platform-specific (use trait-based adapters)");
-            }
-
-            print!("Hotkey System: ");
-            let config = Config::load()?;
-            match hotkey::HotkeyManager::new(&config.hotkey.combination) {
-                Ok(_) => println!("✅ Available"),
-                Err(e) => println!("❌ Failed ({})", e),
-            }
-
-            print!("Whisper Transcriber: ");
-            match WhisperTranscriber::new(
-                &config.transcription.model_path,
-                config.transcription.use_cuda,
-            )
-            .await
-            {
-                Ok(_) => println!("✅ Available"),
-                Err(e) => println!("❌ Failed ({})", e),
-            }
-        }
-
-        Ok(())
     }
 
     async fn handle_install(&self, autostart: bool, desktop: bool, system: bool) -> Result<()> {
@@ -391,6 +180,35 @@ impl CommandDispatcher {
     }
 }
 
+/// Save audio data to a WAV file
+fn save_audio_to_file(audio_data: &[f32], path: &PathBuf, sample_rate: u32) -> Result<()> {
+    info!("💾 Saving audio to: {}", path.display());
+
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+
+    let mut writer = hound::WavWriter::create(path, spec)
+        .with_context(|| format!("Failed to create WAV file: {}", path.display()))?;
+
+    for &sample in audio_data {
+        let sample_i16 = (sample * i16::MAX as f32) as i16;
+        writer
+            .write_sample(sample_i16)
+            .with_context(|| "Failed to write audio sample")?;
+    }
+
+    writer
+        .finalize()
+        .with_context(|| "Failed to finalize WAV file")?;
+
+    println!("✅ Audio saved to: {}", path.display());
+    Ok(())
+}
+
 // Test functions (these would call existing test binaries)
 pub async fn test_audio_system(
     duration: u64,
@@ -427,7 +245,7 @@ pub async fn test_audio_system(
                         println!("   Samples: {}", audio_data.len());
 
                         if let Some(save_path) = save {
-                            CommandDispatcher::save_audio_to_file(&audio_data, &save_path, 16000)?;
+                            save_audio_to_file(&audio_data, &save_path, 16000)?;
                         }
                     },
                     Err(e) => println!("❌ Failed to stop recording: {}", e),
@@ -755,40 +573,6 @@ pub async fn run_all_tests(benchmarks: bool, output: Option<PathBuf>) -> Result<
     }
 
     println!("\n✅ All tests completed!");
-    Ok(())
-}
-
-// Status functions
-async fn show_config_status() -> Result<()> {
-    println!("⚙️ Configuration Status:");
-    match crate::Config::load() {
-        Ok(config) => {
-            println!("✅ Configuration loaded successfully");
-            println!("   Audio device: {:?}", config.audio.device);
-            println!("   Sample rate: {}", config.audio.sample_rate);
-            println!("   Hotkey: {}", config.hotkey.combination);
-            println!(
-                "   Model path: {}",
-                config.transcription.model_path.display()
-            );
-            println!("   CUDA enabled: {}", config.transcription.use_cuda);
-        },
-        Err(e) => println!("❌ Configuration error: {}", e),
-    }
-    Ok(())
-}
-
-async fn show_device_status() -> Result<()> {
-    println!("🎵 Device Status:");
-    match crate::AudioCapture::list_devices() {
-        Ok(devices) => {
-            println!("Available audio devices:");
-            for (i, device) in devices.iter().enumerate() {
-                println!("  {}. {}", i + 1, device);
-            }
-        },
-        Err(e) => println!("❌ Failed to list devices: {}", e),
-    }
     Ok(())
 }
 

@@ -596,26 +596,6 @@ pub mod text_insertion {
     }
 }
 
-pub mod ui {
-    use tracing::info;
-
-    pub fn log_command_executed(command: &str, args: &[String]) {
-        info!(
-            command = %command,
-            args = ?args,
-            "🖥️ Command executed"
-        );
-    }
-
-    pub fn log_tui_event(event_type: &str, details: Option<&str>) {
-        info!(
-            event_type = %event_type,
-            details = ?details,
-            "📺 TUI event processed"
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

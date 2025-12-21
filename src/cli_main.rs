@@ -29,21 +29,6 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Start voice-to-text with TUI interface (default mode)
-    Start {
-        /// Run in background as daemon
-        #[arg(short, long)]
-        daemon: bool,
-
-        /// Try to run with elevated privileges for better hotkey access
-        #[arg(long)]
-        elevated: bool,
-
-        /// Use CLI/hotkey mode instead of TUI interface
-        #[arg(long)]
-        cli: bool,
-    },
-
     /// Record once and exit (no hotkeys)
     Record {
         /// Maximum recording duration in seconds

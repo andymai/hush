@@ -1,5 +1,6 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
+use serde_json::Value;
 use std::process::Command;
 /// Application context detection for adaptive text processing
 use tracing::{debug, warn};
@@ -183,18 +184,49 @@ impl ContextDetector {
         // Wayland: Try swaymsg for Sway/i3
         if let Ok(output) = Command::new("swaymsg").args(["-t", "get_tree"]).output() {
             if output.status.success() {
-                // Parse JSON to find focused window
-                // This is complex, so we'll just return the raw output for now
-                let info = String::from_utf8_lossy(&output.stdout);
-                if info.contains("focused") {
-                    debug!("Active window (swaymsg): detected");
-                    // TODO: Proper JSON parsing
-                    return Some(info.to_string());
+                let json_str = String::from_utf8_lossy(&output.stdout);
+                if let Ok(tree) = serde_json::from_str::<Value>(&json_str) {
+                    if let Some(title) = Self::find_focused_window(&tree) {
+                        debug!("Active window (swaymsg): {}", title);
+                        return Some(title);
+                    }
                 }
             }
         }
 
         warn!("Could not detect active window (install xdotool, wmctrl, or use Sway)");
+        None
+    }
+
+    /// Recursively find the focused window in a swaymsg tree
+    fn find_focused_window(node: &Value) -> Option<String> {
+        // Check if this node is focused and has a name (window title)
+        if node.get("focused").and_then(|v| v.as_bool()) == Some(true) {
+            if let Some(name) = node.get("name").and_then(|v| v.as_str()) {
+                if !name.is_empty() {
+                    return Some(name.to_string());
+                }
+            }
+        }
+
+        // Recursively search child nodes
+        if let Some(nodes) = node.get("nodes").and_then(|v| v.as_array()) {
+            for child in nodes {
+                if let Some(title) = Self::find_focused_window(child) {
+                    return Some(title);
+                }
+            }
+        }
+
+        // Also check floating_nodes
+        if let Some(nodes) = node.get("floating_nodes").and_then(|v| v.as_array()) {
+            for child in nodes {
+                if let Some(title) = Self::find_focused_window(child) {
+                    return Some(title);
+                }
+            }
+        }
+
         None
     }
 

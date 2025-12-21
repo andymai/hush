@@ -40,17 +40,3 @@ pub use test::handle_test;
 
 // Re-export utilities for use by other commands
 pub use utils::*;
-
-// TODO: Extract remaining commands from dispatcher.rs (REFACTORING_PLAN.md)
-// High Priority (frequently used):
-// ✅ handle_listen (extracted)
-// ✅ handle_setup (extracted)
-//
-// Medium Priority:
-// ✅ handle_test (extracted)
-// ✅ handle_models (extracted)
-//
-// Low Priority (less frequently used):
-// - handle_install
-// - handle_uninstall
-// - handle_start
