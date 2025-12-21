@@ -1,5 +1,7 @@
 use std::sync::OnceLock;
 use tracing::info;
+#[cfg(feature = "cuda")]
+use tracing::warn;
 
 static CUDA_AVAILABLE: OnceLock<CudaAvailability> = OnceLock::new();
 
