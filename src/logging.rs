@@ -29,7 +29,7 @@ static SESSION_ID: once_cell::sync::Lazy<String> = once_cell::sync::Lazy::new(||
         "hush_{}",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or(Duration::ZERO)
             .as_secs()
     )
 });
@@ -194,7 +194,7 @@ where
         let metadata = event.metadata();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or(Duration::ZERO)
             .as_millis();
 
         // Get span context for request correlation
@@ -448,7 +448,7 @@ fn generate_request_id() -> String {
         "req_{:08x}_{:04x}",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or(Duration::ZERO)
             .as_secs(),
         COUNTER.fetch_add(1, Ordering::SeqCst) % 0xFFFF
     )

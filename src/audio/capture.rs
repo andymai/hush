@@ -304,12 +304,11 @@ impl AudioCapture {
             );
         }
 
-        // Extract recorded data from buffer
+        // Extract recorded data from buffer using take() to avoid clone
         let recorded_data = {
             let mut buffer = self.buffer.lock();
-            let data = buffer.clone();
             let buffer_size = buffer.len();
-            buffer.clear();
+            let data = std::mem::take(&mut *buffer);
 
             trace!(
                 request_id = %ctx.request_id,
