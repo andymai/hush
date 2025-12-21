@@ -45,7 +45,7 @@ use crate::TextInserter;
 ///
 /// 1. **Initialization**
 ///    - Parse editing mode (light/medium/aggressive)
-///    - Initialize hotkey manager (Ctrl+Alt+V)
+///    - Initialize hotkey manager (Ctrl+Shift+Space)
 ///    - Setup audio capture with amplitude monitoring
 ///    - Load Whisper transcriber model
 ///    - Initialize text processor with LLM (if enabled)
@@ -54,7 +54,7 @@ use crate::TextInserter;
 ///    - Create overlay window with tiny design
 ///
 /// 2. **Multi-threaded Execution**
-///    - **Hotkey Thread**: Listens for Ctrl+Alt+V press/release
+///    - **Hotkey Thread**: Listens for Ctrl+Shift+Space press/release
 ///      - On press: Start recording, update overlay
 ///      - On release: Stop recording
 ///    - **Result Handler Thread**: Processes transcription results

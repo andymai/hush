@@ -17,7 +17,7 @@ no_speech_threshold = 0.6  # Silence detection
 
 [hotkey]
 enabled = true
-combination = "Ctrl+Alt+V"  # Default hotkey combination
+combination = "Ctrl+Shift+Space"  # Default hotkey combination
 
 [feedback]
 audio_enabled = false  # Sound files not yet included

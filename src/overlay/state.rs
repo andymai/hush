@@ -207,7 +207,7 @@ impl Default for OverlayConfig {
             auto_hide_duration: Duration::from_secs(2),
             show_button_when_idle: true,
             theme: OverlayTheme::Dark,
-            hotkey: "Ctrl+Alt+V".to_string(),
+            hotkey: "Ctrl+Shift+Space".to_string(),
         }
     }
 }

@@ -24,7 +24,7 @@
 /// use_gpu = true
 ///
 /// [hotkeys]
-/// record = "Ctrl+Alt+V"
+/// record = "Ctrl+Shift+Space"
 ///
 /// [text_processing]
 /// editing_mode = "medium"
