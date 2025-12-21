@@ -5,6 +5,7 @@ use candle_core::{Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::whisper::{self as m, Config};
 use hf_hub::api::tokio::Api;
+use rubato::{FftFixedInOut, Resampler};
 use serde_json;
 use std::path::Path;
 use tokenizers::Tokenizer;
@@ -64,28 +65,31 @@ impl WhisperTranscriber {
             Device::Cpu
         };
 
-        // Try to load real model - first try whisper-rs for PyTorch models
+        // Load model - ggml .bin files use whisper-rs (recommended path)
         let (model, tokenizer, config, whisper_context, simulated_mode) = if model_path.exists()
             && model_path.extension().and_then(|s| s.to_str()) == Some("bin")
         {
-            // Try whisper-rs for .bin files (PyTorch format)
-            info!("Detected PyTorch .bin file, attempting to load with whisper-rs");
-            match Self::load_pytorch_model(model_path).await {
+            // Use whisper-rs for ggml .bin files (whisper.cpp format)
+            info!("Detected ggml .bin file, loading with whisper-rs");
+            match Self::load_ggml_model(model_path).await {
                 Ok(ctx) => {
-                    info!("✅ PyTorch Whisper model loaded successfully with whisper-rs");
+                    info!("✅ Whisper model loaded successfully with whisper-rs");
                     (None, None, None, Some(ctx), false)
                 },
                 Err(e) => {
-                    warn!("Failed to load PyTorch model with whisper-rs: {}", e);
+                    warn!("Failed to load ggml model with whisper-rs: {}", e);
                     warn!("Falling back to simulation mode");
                     (None, None, None, None, true)
                 },
             }
-        } else {
-            // Try candle for safetensors/other formats
+        } else if model_path.exists() {
+            // Safetensors models - candle path (experimental, decoder incomplete)
+            warn!(
+                "Safetensors model detected. Note: ggml .bin format is recommended for full functionality"
+            );
             match Self::load_model(model_path, &device).await {
                 Ok((model, tokenizer, config)) => {
-                    info!("✅ Real Whisper model loaded successfully with candle");
+                    warn!("Candle model loaded but decoder is incomplete - transcription may fail");
                     (
                         Some(std::sync::Mutex::new(model)),
                         Some(tokenizer),
@@ -96,14 +100,14 @@ impl WhisperTranscriber {
                 },
                 Err(e) => {
                     warn!("Failed to load model with candle: {}", e);
-                    warn!("Falling back to simulation mode for development/testing");
-                    info!(
-                        "To use real transcription, ensure model files are available at: {:?}",
-                        model_path
-                    );
+                    info!("Use 'hush models download <size>' to get a compatible ggml model");
                     (None, None, None, None, true)
                 },
             }
+        } else {
+            warn!("Model not found at {:?}", model_path);
+            info!("Use 'hush models download <size>' to download a model");
+            (None, None, None, None, true)
         };
 
         // Initialize mel-spectrogram filters
@@ -346,9 +350,9 @@ impl WhisperTranscriber {
         ))
     }
 
-    /// Load PyTorch model using whisper-rs
-    async fn load_pytorch_model(model_path: &Path) -> Result<WhisperContext> {
-        info!("Loading PyTorch model with whisper-rs: {:?}", model_path);
+    /// Load ggml model using whisper-rs (whisper.cpp format)
+    async fn load_ggml_model(model_path: &Path) -> Result<WhisperContext> {
+        info!("Loading ggml model with whisper-rs: {:?}", model_path);
 
         let model_path_str = model_path
             .to_str()
@@ -359,19 +363,19 @@ impl WhisperTranscriber {
         let mut params = WhisperContextParameters::default();
         params.use_gpu(cuda.available);
         if cuda.available {
-            info!("GPU acceleration enabled for PyTorch model loading");
+            info!("GPU acceleration enabled for whisper-rs");
         } else {
-            info!("Using CPU for PyTorch model loading");
+            info!("Using CPU for whisper-rs inference");
         }
 
         let context = WhisperContext::new_with_params(model_path_str, params)
             .map_err(|e| anyhow::anyhow!("Failed to create WhisperContext: {}", e))?;
 
-        info!("✅ Successfully loaded PyTorch model with whisper-rs");
+        info!("✅ Successfully loaded ggml model with whisper-rs");
         Ok(context)
     }
 
-    /// Transcribe using whisper-rs for PyTorch models
+    /// Transcribe using whisper-rs for ggml models
     async fn transcribe_with_whisper_rs(
         &self,
         ctx: &WhisperContext,
@@ -655,32 +659,58 @@ impl WhisperTranscriber {
         ))
     }
 
-    /// Audio preprocessing methods
+    /// Audio preprocessing methods - uses high-quality sinc resampling
     fn resample_audio(&self, audio: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>> {
         if from_rate == to_rate {
             return Ok(audio.to_vec());
         }
 
-        // Simple resampling (linear interpolation)
-        // In production, you'd want to use a proper resampling library
-        let ratio = to_rate as f64 / from_rate as f64;
-        let new_length = (audio.len() as f64 * ratio) as usize;
-        let mut resampled = Vec::with_capacity(new_length);
+        // Use rubato for high-quality sinc resampling
+        // FftFixedInOut provides excellent quality with reasonable performance
+        let chunk_size = 1024;
+        let mut resampler = FftFixedInOut::<f32>::new(
+            from_rate as usize,
+            to_rate as usize,
+            chunk_size,
+            1, // mono audio
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to create resampler: {}", e))?;
 
-        for i in 0..new_length {
-            let pos = i as f64 / ratio;
-            let idx = pos.floor() as usize;
-            let frac = pos - pos.floor();
+        let input_frames_next = resampler.input_frames_next();
+        let output_frames_max = resampler.output_frames_max();
 
-            if idx + 1 < audio.len() {
-                let val = audio[idx] * (1.0 - frac) as f32 + audio[idx + 1] * frac as f32;
-                resampled.push(val);
-            } else if idx < audio.len() {
-                resampled.push(audio[idx]);
+        // Pad input to be a multiple of the required chunk size
+        let mut padded_input = audio.to_vec();
+        let remainder = padded_input.len() % input_frames_next;
+        if remainder != 0 {
+            padded_input.extend(vec![0.0f32; input_frames_next - remainder]);
+        }
+
+        let mut output = Vec::with_capacity(
+            (audio.len() as f64 * to_rate as f64 / from_rate as f64) as usize + output_frames_max,
+        );
+
+        // Process in chunks
+        for chunk in padded_input.chunks(input_frames_next) {
+            let input_chunk = vec![chunk.to_vec()];
+            let mut output_buffer = resampler.output_buffer_allocate(true);
+
+            match resampler.process_into_buffer(&input_chunk, &mut output_buffer, None) {
+                Ok(_) => {
+                    output.extend_from_slice(&output_buffer[0]);
+                },
+                Err(e) => {
+                    warn!("Resampling error: {}, falling back to passthrough", e);
+                    return Ok(audio.to_vec());
+                },
             }
         }
 
-        Ok(resampled)
+        // Trim to expected length
+        let expected_len = (audio.len() as f64 * to_rate as f64 / from_rate as f64) as usize;
+        output.truncate(expected_len);
+
+        Ok(output)
     }
 
     fn normalize_audio(&self, audio: &[f32]) -> Vec<f32> {

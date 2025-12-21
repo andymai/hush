@@ -79,16 +79,17 @@ impl ModelManager {
     fn init_available_models() -> HashMap<ModelSize, ModelInfo> {
         let mut models = HashMap::new();
 
+        // Using ggml format from ggerganov/whisper.cpp - compatible with whisper-rs
         models.insert(
             ModelSize::Tiny,
             ModelInfo {
                 name: "whisper-tiny".to_string(),
                 size: ModelSize::Tiny,
-                repo_id: "openai/whisper-tiny".to_string(),
-                filename: "model.safetensors".to_string(),
-                expected_size: 151_000_000, // ~151MB
+                repo_id: "ggerganov/whisper.cpp".to_string(),
+                filename: "ggml-tiny.bin".to_string(),
+                expected_size: 77_700_000, // ~77.7MB
                 sha256: Some(
-                    "7ebd0e69e78190ffe1438491fa05cc1f5c1aa3a4c4db3bc1723adbb551ea2395".to_string(),
+                    "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21".to_string(),
                 ),
             },
         );
@@ -98,11 +99,11 @@ impl ModelManager {
             ModelInfo {
                 name: "whisper-base".to_string(),
                 size: ModelSize::Base,
-                repo_id: "openai/whisper-base".to_string(),
-                filename: "model.safetensors".to_string(),
-                expected_size: 290_000_000, // ~290MB
+                repo_id: "ggerganov/whisper.cpp".to_string(),
+                filename: "ggml-base.bin".to_string(),
+                expected_size: 147_000_000, // ~147MB
                 sha256: Some(
-                    "07cadb9f25677c8d50df603e66a98fbd842cce45047139baeb16e6219a1e807b".to_string(),
+                    "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe".to_string(),
                 ),
             },
         );
@@ -112,11 +113,11 @@ impl ModelManager {
             ModelInfo {
                 name: "whisper-small".to_string(),
                 size: ModelSize::Small,
-                repo_id: "openai/whisper-small".to_string(),
-                filename: "model.safetensors".to_string(),
-                expected_size: 967_000_000, // ~967MB
+                repo_id: "ggerganov/whisper.cpp".to_string(),
+                filename: "ggml-small.bin".to_string(),
+                expected_size: 488_000_000, // ~488MB
                 sha256: Some(
-                    "1d7734884874f1a1513ed9aa760a4f8e97aaa02fd6d93a3a85d27b2ae9ca596b".to_string(),
+                    "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b".to_string(),
                 ),
             },
         );
@@ -126,11 +127,11 @@ impl ModelManager {
             ModelInfo {
                 name: "whisper-medium".to_string(),
                 size: ModelSize::Medium,
-                repo_id: "openai/whisper-medium".to_string(),
-                filename: "model.safetensors".to_string(),
-                expected_size: 3_055_000_000, // ~3GB
+                repo_id: "ggerganov/whisper.cpp".to_string(),
+                filename: "ggml-medium.bin".to_string(),
+                expected_size: 1_533_000_000, // ~1.53GB
                 sha256: Some(
-                    "62f73550fa6db24b0c6f6c5962bd0dae80fa644e93cde9cd9c3792971b47fd28".to_string(),
+                    "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208".to_string(),
                 ),
             },
         );
@@ -140,11 +141,25 @@ impl ModelManager {
             ModelInfo {
                 name: "whisper-large".to_string(),
                 size: ModelSize::Large,
-                repo_id: "openai/whisper-large".to_string(),
-                filename: "model.safetensors".to_string(),
-                expected_size: 6_173_000_000, // ~6.17GB
+                repo_id: "ggerganov/whisper.cpp".to_string(),
+                filename: "ggml-large-v1.bin".to_string(),
+                expected_size: 3_094_000_000, // ~3.09GB
                 sha256: Some(
-                    "27d753181b54178da228555dbc57fe639f6624ca470d83d35e500b22df0ab7e6".to_string(),
+                    "0f4c8c42c8b00e600cfe32f73b8e53fdffc92cc91a2e5abdf6e13ae6d1ed9d44".to_string(),
+                ),
+            },
+        );
+
+        models.insert(
+            ModelSize::LargeV2,
+            ModelInfo {
+                name: "whisper-large-v2".to_string(),
+                size: ModelSize::LargeV2,
+                repo_id: "ggerganov/whisper.cpp".to_string(),
+                filename: "ggml-large-v2.bin".to_string(),
+                expected_size: 3_094_000_000, // ~3.09GB
+                sha256: Some(
+                    "81f94ac64f4d28d8d2264b9d3823d5d0c9a8bdcd8e80baff97c1eed1cee8c549".to_string(),
                 ),
             },
         );
@@ -154,11 +169,11 @@ impl ModelManager {
             ModelInfo {
                 name: "whisper-large-v3".to_string(),
                 size: ModelSize::LargeV3,
-                repo_id: "openai/whisper-large-v3".to_string(),
-                filename: "model.safetensors".to_string(),
-                expected_size: 6_173_000_000, // ~6.17GB
+                repo_id: "ggerganov/whisper.cpp".to_string(),
+                filename: "ggml-large-v3.bin".to_string(),
+                expected_size: 3_094_000_000, // ~3.09GB
                 sha256: Some(
-                    "a8e94b85976e5864ba3e9525c7e6c83b2a1eca42d4b797a0c7c24d778e40fd95".to_string(),
+                    "ad82bf6a9043ceed055076d0fd39f5f186ff8062f19f9e9c50c5c8fb3a9a6e9f".to_string(),
                 ),
             },
         );
