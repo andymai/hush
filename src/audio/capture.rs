@@ -3,6 +3,7 @@ use crate::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Host, SampleRate, Stream, StreamConfig};
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use tracing::{debug, error, info, trace, warn};
@@ -18,7 +19,7 @@ pub struct AudioCapture {
     config: StreamConfig,
     stream: Option<Stream>,
     buffer: Arc<Mutex<Vec<f32>>>,
-    is_recording: Arc<Mutex<bool>>,
+    is_recording: Arc<AtomicBool>,
     simulated_mode: bool,
     amplitude_tx: Option<mpsc::Sender<f32>>,
 }
@@ -148,7 +149,7 @@ impl AudioCapture {
                             },
                             stream: None,
                             buffer: Arc::new(Mutex::new(Vec::with_capacity(PREALLOCATED_SAMPLES))),
-                            is_recording: Arc::new(Mutex::new(false)),
+                            is_recording: Arc::new(AtomicBool::new(false)),
                             simulated_mode: true,
                             amplitude_tx: None,
                         });
@@ -172,7 +173,7 @@ impl AudioCapture {
 
         // Pre-allocate buffer to avoid reallocations during recording
         let buffer = Arc::new(Mutex::new(Vec::with_capacity(PREALLOCATED_SAMPLES)));
-        let is_recording = Arc::new(Mutex::new(false));
+        let is_recording = Arc::new(AtomicBool::new(false));
 
         Ok(AudioCapture {
             device,
@@ -203,7 +204,7 @@ impl AudioCapture {
         // Clear the buffer and mark as recording
         let buffer_len_before = self.buffer.lock().len();
         self.buffer.lock().clear();
-        *self.is_recording.lock() = true;
+        self.is_recording.store(true, Ordering::Release);
 
         debug!(
             request_id = %ctx.request_id,
@@ -230,7 +231,7 @@ impl AudioCapture {
             .build_input_stream(
                 &self.config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if *is_recording_clone.lock() {
+                    if is_recording_clone.load(Ordering::Acquire) {
                         buffer_clone.lock().extend_from_slice(data);
 
                         // Calculate and send amplitude for waveform visualization
@@ -268,7 +269,7 @@ impl AudioCapture {
             "🛑 Stopping audio recording"
         );
 
-        *self.is_recording.lock() = false;
+        self.is_recording.store(false, Ordering::Release);
 
         // Handle simulated mode with fake audio data
         if self.simulated_mode {
@@ -335,7 +336,7 @@ impl AudioCapture {
     }
 
     pub fn is_recording(&self) -> bool {
-        *self.is_recording.lock()
+        self.is_recording.load(Ordering::Acquire)
     }
 
     pub fn get_device_name(&self) -> String {
