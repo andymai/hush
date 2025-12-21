@@ -3,11 +3,6 @@ use tracing::warn;
 
 use crate::cli::SetupCommands;
 
-/// Setup command implementation
-///
-/// Handles system setup and configuration for Hush components including
-/// UInput permissions, audio devices, hotkeys, and the setup wizard.
-
 /// Handle the setup command
 ///
 /// Manages setup and configuration of Hush system components.
@@ -81,7 +76,7 @@ pub async fn handle_setup(setup_command: SetupCommands) -> Result<()> {
                 eprintln!("UInput diagnostics are only available on Linux");
                 Ok(())
             }
-        }
+        },
         SetupCommands::Audio { list, test } => setup_audio(list, test).await,
         SetupCommands::Hotkeys { test, list } => setup_hotkeys(test, list).await,
         SetupCommands::Wizard { auto } => run_setup_wizard(auto).await,

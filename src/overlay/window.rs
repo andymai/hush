@@ -85,10 +85,6 @@ impl EguiOverlay for OverlayApp {
                 info!("User clicked to start recording");
                 *self.state.lock() = OverlayState::start_recording();
             },
-            OverlayAction::Settings => {
-                info!("User opened settings");
-                *self.state.lock() = OverlayState::settings();
-            },
             OverlayAction::CloseSettings => {
                 info!("User closed settings");
                 *self.state.lock() = OverlayState::Idle;
@@ -209,9 +205,7 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
     glfw_backend.window.set_decorated(false);
 
     // Position at primary monitor's offset to cover that screen
-    glfw_backend
-        .window
-        .set_pos(monitor_pos[0] as i32, monitor_pos[1] as i32);
+    glfw_backend.window.set_pos(monitor_pos[0], monitor_pos[1]);
 
     // Hide from taskbar on X11 by setting _NET_WM_STATE_SKIP_TASKBAR
     #[cfg(target_os = "linux")]

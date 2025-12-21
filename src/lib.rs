@@ -7,19 +7,14 @@ pub mod core;
 pub mod audio;
 pub mod config;
 pub mod hotkey;
-pub mod model_downloader;
 pub mod text;
 pub mod transcription;
-pub mod wakeword;
 
 // Overlay module (Wispr Flow-style floating window)
 pub mod overlay;
 
 // Text processing module (intelligent auto-editing)
 pub mod text_processing;
-
-// System tray integration (temporarily disabled due to compilation issues)
-// pub mod tray;
 
 // CLI module (new unified command system)
 pub mod cli;
@@ -37,7 +32,6 @@ pub use hotkey::{HotkeyEvent, HotkeyManager};
 pub use text::TextInserter;
 
 pub use transcription::{TranscriptionResult as LegacyTranscriptionResult, WhisperTranscriber};
-pub use wakeword::WakeWordDetector;
 
 // Re-export new core types
 pub use core::{

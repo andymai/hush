@@ -1,5 +1,3 @@
-use once_cell::sync::Lazy;
-use regex::Regex;
 /// Entity recognition for proper capitalization
 use std::collections::{HashMap, HashSet};
 use tracing::debug;
@@ -76,11 +74,6 @@ static COMMON_TECH_TERMS: &[(&str, &str)] = &[
     ("oauth", "OAuth"),
     ("jwt", "JWT"),
 ];
-
-/// Regex for detecting potential acronyms (2+ capital letters)
-/// Note: Uses expect() since the pattern is a hardcoded compile-time constant
-static ACRONYM_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\b[A-Z]{2,}\b").expect("ACRONYM_PATTERN regex is valid"));
 
 /// Entity recognizer for smart capitalization
 pub struct EntityRecognizer {

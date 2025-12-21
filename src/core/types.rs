@@ -36,7 +36,7 @@ impl SampleRate {
 
     /// Create a new sample rate with validation
     pub fn new(hz: u32) -> Result<Self, HushError> {
-        if hz < Self::MIN || hz > Self::MAX {
+        if !(Self::MIN..=Self::MAX).contains(&hz) {
             return Err(HushError::Audio(AudioError::InvalidSampleRate {
                 hz,
                 min: Self::MIN,

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 
 /// Domain-specific vocabulary configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DomainVocabulary {
     /// Abbreviations and their expansions
     #[serde(default)]
@@ -27,18 +27,6 @@ pub struct DomainVocabulary {
     /// Common phrases/idioms to preserve
     #[serde(default)]
     pub phrases: HashMap<String, String>,
-}
-
-impl Default for DomainVocabulary {
-    fn default() -> Self {
-        Self {
-            abbreviations: HashMap::new(),
-            preserve_exact: Vec::new(),
-            technical_terms: HashMap::new(),
-            entities: HashMap::new(),
-            phrases: HashMap::new(),
-        }
-    }
 }
 
 impl DomainVocabulary {

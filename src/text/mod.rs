@@ -53,8 +53,7 @@
 /// - ✅ Virtual machines (VMware, VirtualBox, QEMU)
 /// - ✅ Games and fullscreen applications
 /// - ✅ SSH sessions and remote terminals
-/// - ✅ X11 and Wayland applications
-
+/// - X11 and Wayland applications
 #[cfg(target_os = "linux")]
 pub mod insertion;
 #[cfg(target_os = "linux")]

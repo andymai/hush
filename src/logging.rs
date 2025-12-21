@@ -455,7 +455,6 @@ fn generate_request_id() -> String {
 }
 
 /// Convenience macros for structured logging
-
 #[macro_export]
 macro_rules! log_request_start {
     ($ctx:expr, $msg:literal $(, $field:ident = $value:expr)*) => {
@@ -502,7 +501,6 @@ macro_rules! log_request_error {
 }
 
 /// Component-specific logging helpers
-
 pub mod audio {
     use crate::logging::RequestContext;
     use tracing::info;

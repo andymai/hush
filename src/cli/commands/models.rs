@@ -124,25 +124,32 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
 }
 
 /// Download a Whisper model
-///
-/// Downloads the specified model from the internet to the local cache.
-/// Uses the model downloader functionality from `crate::model_downloader`.
-///
-/// # Arguments
-///
-/// * `model_size` - Model name to download (tiny, base, small, medium, large)
-/// * `force` - If true, re-download even if the model already exists
-///
-/// # Returns
-///
-/// Returns `Ok(())` on successful download, or an error if download fails.
 pub async fn download_model(model_size: &str, force: bool) -> Result<()> {
+    use crate::transcription::models::{ModelManager, ModelSize};
+
     println!("📥 Downloading model: {}", model_size);
 
-    // Use model downloader functionality
-    match crate::model_downloader::download_model_by_name(model_size, force).await {
-        Ok(_) => {
-            println!("✅ Model '{}' downloaded successfully", model_size);
+    let size: ModelSize = model_size
+        .parse()
+        .context(format!("Invalid model size: {}", model_size))?;
+
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("hush")
+        .join("models");
+
+    // If force, remove existing model first
+    if force {
+        let model_path = cache_dir.join(format!("ggml-{}.bin", model_size));
+        if model_path.exists() {
+            std::fs::remove_file(&model_path).ok();
+        }
+    }
+
+    let manager = ModelManager::new(&cache_dir)?;
+    match manager.ensure_model_downloaded(&size).await {
+        Ok(path) => {
+            println!("✅ Model '{}' downloaded to {:?}", model_size, path);
             Ok(())
         },
         Err(e) => {

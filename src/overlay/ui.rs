@@ -4,11 +4,11 @@ use egui::{Color32, Context, Frame, RichText, Sense, Stroke};
 // Overlay dimensions
 const IDLE_WIDTH: f32 = 60.0;
 const IDLE_HEIGHT: f32 = 4.0;
-const RECORDING_WIDTH: f32 = 60.0;  // Same width as idle for clean expansion
+const RECORDING_WIDTH: f32 = 60.0; // Same width as idle for clean expansion
 const RECORDING_HEIGHT: f32 = 30.0; // Compact height
 
 // Transition animation
-const TRANSITION_SPEED: f32 = 16.0;  // Higher = faster transition (snappy response)
+const TRANSITION_SPEED: f32 = 16.0; // Higher = faster transition (snappy response)
 
 // Theme colors - alpha values
 const BG_ALPHA_DARK: u8 = 200; // ~78% opacity
@@ -20,12 +20,10 @@ const WAVEFORM_NUM_BARS: usize = 7;
 const WAVEFORM_BAR_SPACING: f32 = 2.5;
 const WAVEFORM_BAR_WIDTH: f32 = 3.0;
 const WAVEFORM_BASE_HEIGHT: f32 = 3.0;
-const WAVEFORM_MAX_HEIGHT: f32 = 24.0;  // Compact waveform
+const WAVEFORM_MAX_HEIGHT: f32 = 24.0; // Compact waveform
 
 // Pre-computed random phase offsets for each bar (breaks uniformity)
-const BAR_PHASES: [f32; 7] = [
-    0.0, 0.8, 0.3, 1.1, 0.5, 0.9, 0.2
-];
+const BAR_PHASES: [f32; 7] = [0.0, 0.8, 0.3, 1.1, 0.5, 0.9, 0.2];
 
 /// Render the overlay UI based on current state
 pub fn render_overlay(
@@ -67,8 +65,7 @@ pub fn render_overlay(
 
     // Get screen dimensions and calculate base position (for idle state)
     let screen_rect = ctx.screen_rect();
-    let (base_x, base_y) =
-        config.get_window_position(screen_rect.width(), screen_rect.height());
+    let (base_x, base_y) = config.get_window_position(screen_rect.width(), screen_rect.height());
 
     // Adjust position so overlay expands from center point
     // As height increases, move y up by half the difference to keep center stable
@@ -117,7 +114,7 @@ pub fn render_overlay(
                     }
                 }
             });
-        }).inner;
+        });
 
     action
 }
@@ -127,7 +124,6 @@ pub fn render_overlay(
 pub enum OverlayAction {
     None,
     StartRecording,
-    Settings,
     CloseSettings,
     ToggleTheme,
 }
@@ -222,10 +218,7 @@ fn render_recording_state(
     // Bar opacity fades in with transition
     let bar_alpha = (eased_progress * 255.0) as u8;
 
-    for i in 0..WAVEFORM_NUM_BARS {
-        // Use pre-computed random phase offset for this bar
-        let phase = BAR_PHASES[i];
-
+    for (i, &phase) in BAR_PHASES.iter().enumerate().take(WAVEFORM_NUM_BARS) {
         // Stagger bar appearance: center bars appear first, edges last
         let dist_from_center = (i as f32 - CENTER_BAR).abs() / CENTER_BAR;
         let bar_delay = dist_from_center * 0.3; // 0-30% delay based on distance from center
@@ -249,7 +242,8 @@ fn render_recording_state(
         // Use sqrt to make low amplitudes more visible
         // Scale height by bar_progress for grow-in effect
         let boosted_amp = (amp * bar_weight).sqrt().min(1.0);
-        let target_height = WAVEFORM_BASE_HEIGHT + (boosted_amp * time_factor * WAVEFORM_MAX_HEIGHT);
+        let target_height =
+            WAVEFORM_BASE_HEIGHT + (boosted_amp * time_factor * WAVEFORM_MAX_HEIGHT);
         let height = WAVEFORM_BASE_HEIGHT + (target_height - WAVEFORM_BASE_HEIGHT) * bar_progress;
 
         // Calculate bar position (horizontally spaced, vertically centered)
@@ -267,7 +261,11 @@ fn render_recording_state(
                 egui::pos2(x - glow_expand / 2.0, y - glow_expand / 2.0),
                 egui::vec2(WAVEFORM_BAR_WIDTH + glow_expand, height + glow_expand),
             );
-            painter.rect_filled(glow_rect, ROUNDING + 1.0, Color32::from_white_alpha(glow_alpha));
+            painter.rect_filled(
+                glow_rect,
+                ROUNDING + 1.0,
+                Color32::from_white_alpha(glow_alpha),
+            );
         }
 
         // Draw the main bar with rounded ends, fading in with transition
@@ -366,7 +364,9 @@ fn render_settings_state(ui: &mut egui::Ui, config: &OverlayConfig) -> OverlayAc
 
             ui.add_space(4.0);
 
-            let hotkey_text = RichText::new(&config.hotkey).size(10.0).color(Color32::WHITE);
+            let hotkey_text = RichText::new(&config.hotkey)
+                .size(10.0)
+                .color(Color32::WHITE);
             ui.label(hotkey_text);
         });
 

@@ -32,22 +32,17 @@ impl Default for LlmProvider {
 }
 
 /// Processing mode determining aggressiveness of editing
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum EditingMode {
     /// Minimal editing - only remove obvious filler words
     Light,
 
     /// Balanced editing - remove fillers, fix basic grammar
+    #[default]
     Medium,
 
     /// Aggressive editing - heavy rewriting for professional output
     Aggressive,
-}
-
-impl Default for EditingMode {
-    fn default() -> Self {
-        Self::Medium
-    }
 }
 
 /// Configuration for text processing

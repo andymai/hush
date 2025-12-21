@@ -434,37 +434,9 @@ impl HushApp {
         }
     }
 
-    /// Show desktop notification
-    fn show_notification(&self, title: &str, message: &str, urgency: NotificationUrgency) {
-        #[cfg(feature = "notifications")]
-        {
-            use notify_rust::Notification;
-
-            #[cfg(target_os = "linux")]
-            use notify_rust::Urgency;
-
-            #[cfg(target_os = "linux")]
-            let rust_urgency = match urgency {
-                NotificationUrgency::Low => Urgency::Low,
-                NotificationUrgency::Normal => Urgency::Normal,
-                NotificationUrgency::Critical => Urgency::Critical,
-            };
-
-            let mut notification = Notification::new();
-            notification.summary(title).body(message).timeout(3000);
-
-            #[cfg(target_os = "linux")]
-            notification.urgency(rust_urgency);
-
-            if let Err(e) = notification.show() {
-                warn!("Failed to show notification: {:?}", e);
-            }
-        }
-
-        #[cfg(not(feature = "notifications"))]
-        {
-            info!("📢 {} - {}", title, message);
-        }
+    /// Show notification (logs to console)
+    fn show_notification(&self, title: &str, message: &str, _urgency: NotificationUrgency) {
+        info!("📢 {} - {}", title, message);
     }
 
     /// Get application statistics

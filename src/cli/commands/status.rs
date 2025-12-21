@@ -12,9 +12,14 @@ use anyhow::Result;
 ///
 /// # Arguments
 ///
-/// * `_config` - Show configuration details (currently unused, always shown)
-/// * `_devices` - Show device details (currently unused, always shown)
+/// * `_config` - Reserved for future use to show only configuration details
+/// * `_devices` - Reserved for future use to show only device details
 /// * `full` - Show full system component status
+///
+/// # Note
+///
+/// Currently, config and device status are always shown. The `_config` and `_devices`
+/// parameters are reserved for future enhancement to allow selective display.
 ///
 /// # Examples
 ///

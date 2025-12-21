@@ -22,6 +22,12 @@ pub struct MockAudioSource {
     simulate_duration: Duration,
 }
 
+impl Default for MockAudioSource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockAudioSource {
     pub fn new() -> Self {
         Self::with_config(AudioConfig {
@@ -102,6 +108,12 @@ pub struct MockTranscriber {
     response_index: Arc<Mutex<usize>>,
     confidence: f32,
     processing_delay: Duration,
+}
+
+impl Default for MockTranscriber {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockTranscriber {
@@ -186,6 +198,12 @@ pub struct MockTextOutput {
     should_fail: bool,
 }
 
+impl Default for MockTextOutput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockTextOutput {
     pub fn new() -> Self {
         Self {
@@ -250,6 +268,12 @@ pub struct MockInputTrigger {
     event_sender: mpsc::UnboundedSender<TriggerEvent>,
     event_receiver: Arc<Mutex<Option<mpsc::UnboundedReceiver<TriggerEvent>>>>,
     description: String,
+}
+
+impl Default for MockInputTrigger {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockInputTrigger {

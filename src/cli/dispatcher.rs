@@ -1,13 +1,13 @@
 use crate::cli::commands::{
     handle_listen, handle_manual, handle_models, handle_setup, handle_test,
 };
-use crate::cli::{Commands, ModelCommands, SetupCommands, TestCommands};
+use crate::cli::{Commands, ModelCommands};
 use crate::logging::RequestContext;
 use anyhow::{Context as AnyhowContext, Result};
 use hound;
 use std::path::PathBuf;
 use std::{env, fs};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 // Import Hush components
 use crate::{hotkey, AudioCapture, Config, WhisperTranscriber};
@@ -421,7 +421,7 @@ impl CommandDispatcher {
         match crate::AudioCapture::new(None) {
             Ok(_) => {
                 println!("✅ Microphone: Accessible");
-            }
+            },
             Err(e) => {
                 let err_str = e.to_string();
                 if err_str.contains("permission") || err_str.contains("access") {
@@ -431,7 +431,7 @@ impl CommandDispatcher {
                     println!("⚠️  Microphone: Check failed");
                     println!("   Error: {}", e);
                 }
-            }
+            },
         }
 
         println!();
