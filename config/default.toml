@@ -19,13 +19,5 @@ no_speech_threshold = 0.6  # Silence detection
 enabled = true
 combination = "Ctrl+Alt+V"  # Default hotkey combination
 
-[wakeword]
-enabled = false
-phrase = "Hey Hush"
-sensitivity = 0.8
-
 [feedback]
-audio_enabled = true
-start_sound = "assets/sounds/start.wav"
-stop_sound = "assets/sounds/stop.wav"
-error_sound = "assets/sounds/error.wav"
+audio_enabled = false  # Sound files not yet included

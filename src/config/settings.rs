@@ -7,7 +7,6 @@ pub struct Config {
     pub audio: AudioConfig,
     pub transcription: TranscriptionConfig,
     pub hotkey: HotkeyConfig,
-    pub wakeword: WakeWordConfig,
     pub feedback: FeedbackConfig,
 }
 
@@ -36,18 +35,8 @@ pub struct HotkeyConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct WakeWordConfig {
-    pub enabled: bool,
-    pub phrase: String,
-    pub sensitivity: f32,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FeedbackConfig {
     pub audio_enabled: bool,
-    pub start_sound: PathBuf,
-    pub stop_sound: PathBuf,
-    pub error_sound: PathBuf,
 }
 
 impl Config {
@@ -110,18 +99,6 @@ impl Config {
             ));
         }
 
-        // Validate wakeword configuration
-        if self.wakeword.enabled && self.wakeword.phrase.is_empty() {
-            return Err(anyhow::anyhow!(
-                "Wake phrase cannot be empty when wake word is enabled"
-            ));
-        }
-        if self.wakeword.sensitivity < 0.0 || self.wakeword.sensitivity > 1.0 {
-            return Err(anyhow::anyhow!(
-                "Wake word sensitivity must be between 0.0 and 1.0"
-            ));
-        }
-
         Ok(())
     }
 
@@ -146,16 +123,8 @@ impl Config {
                 enabled: true,
                 combination: "Ctrl+Alt+V".to_string(),
             },
-            wakeword: WakeWordConfig {
-                enabled: false,
-                phrase: "Hey Hush".to_string(),
-                sensitivity: 0.8,
-            },
             feedback: FeedbackConfig {
                 audio_enabled: true,
-                start_sound: PathBuf::from("assets/sounds/start.wav"),
-                stop_sound: PathBuf::from("assets/sounds/stop.wav"),
-                error_sound: PathBuf::from("assets/sounds/error.wav"),
             },
         }
     }
