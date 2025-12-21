@@ -1,4 +1,4 @@
-.PHONY: build clean dev release release-cpu install link help
+.PHONY: build check clean dev release release-cpu install link help
 
 # Default target
 help:
@@ -6,6 +6,7 @@ help:
 	@echo ""
 	@echo "Available targets:"
 	@echo "  build       - Build debug version and create symlink"
+	@echo "  check       - Run cargo check (fast type checking)"
 	@echo "  dev         - Same as build (alias)"
 	@echo "  release     - Build release version with CUDA GPU acceleration"
 	@echo "  release-cpu - Build release version (CPU only, no GPU)"
@@ -21,6 +22,12 @@ build: link
 	@$(MAKE) -s link
 
 dev: build
+
+# Fast type checking
+check:
+	@echo "🔍 Running cargo check..."
+	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH cargo check
+	@echo "✅ Check complete."
 
 # Release build (with CUDA GPU acceleration)
 release:

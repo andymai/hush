@@ -12,6 +12,7 @@ Hush is a local voice-to-text application for Linux developers. It runs OpenAI's
 make release           # GPU build with CUDA
 make release-cpu       # CPU-only build
 make build             # Debug build
+make check             # Fast type checking
 cargo test             # Run tests
 cargo clippy -- -D warnings  # Lint
 cargo fmt              # Format
@@ -77,7 +78,6 @@ These versions are pinned due to breaking changes in newer releases:
 - global-hotkey 0.6 (0.7 may break)
 - dirs 5.0 (6.0 breaking API)
 - egui 0.23 (must match egui_overlay 0.5)
-- cudarc patched via git for CUDA 12.9
 
 ## Configuration
 
