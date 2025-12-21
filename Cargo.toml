@@ -33,10 +33,10 @@ rodio = { version = "0.19", default-features = false, features = ["wav"] }
 candle-core = { version = "0.9" }
 candle-nn = { version = "0.9" }
 candle-transformers = { version = "0.9" }
-tokenizers = "0.19"
-hf-hub = { version = "0.3", features = ["tokio"] }
+tokenizers = "0.22"
+hf-hub = { version = "0.4", features = ["tokio"] }
 byteorder = "1.5"
-safetensors = "0.4"
+safetensors = "0.6"
 sha2 = "0.10"  # SHA256 checksum validation for model integrity
 raw-cpuid = "11"  # CPU feature detection
 
