@@ -5,6 +5,8 @@ use candle_core::{Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::whisper::{self as m, Config};
 use hf_hub::api::tokio::Api;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use rubato::{FftFixedInOut, Resampler};
 use serde_json;
 use std::path::Path;
@@ -12,6 +14,14 @@ use tokenizers::Tokenizer;
 use tracing::{debug, info, warn};
 // For PyTorch model loading
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+/// Shared runtime for sync transcription fallback (avoids creating runtime per call)
+static SYNC_RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create sync runtime for whisper")
+});
 
 #[derive(Debug, Clone)]
 pub struct TranscriptionResult {
@@ -22,7 +32,7 @@ pub struct TranscriptionResult {
 
 pub struct WhisperTranscriber {
     device: Device,
-    model: Option<std::sync::Mutex<m::model::Whisper>>,
+    model: Option<Mutex<m::model::Whisper>>,
     tokenizer: Option<Tokenizer>,
     config: Option<Config>,
     // Alternative: whisper-rs context for PyTorch models
@@ -91,7 +101,7 @@ impl WhisperTranscriber {
                 Ok((model, tokenizer, config)) => {
                     warn!("Candle model loaded but decoder is incomplete - transcription may fail");
                     (
-                        Some(std::sync::Mutex::new(model)),
+                        Some(Mutex::new(model)),
                         Some(tokenizer),
                         Some(config),
                         None,
@@ -145,9 +155,9 @@ impl WhisperTranscriber {
                 Ok(result.text)
             },
             Err(_) => {
-                // No current runtime, create one
-                let rt = tokio::runtime::Runtime::new()?;
-                let result = rt.block_on(self.transcribe_with_sample_rate(audio_data, 16000))?;
+                // No current runtime, use shared static runtime (avoids per-call overhead)
+                let result =
+                    SYNC_RUNTIME.block_on(self.transcribe_with_sample_rate(audio_data, 16000))?;
                 Ok(result.text)
             },
         }
@@ -557,9 +567,7 @@ impl WhisperTranscriber {
 
         // Run the encoder (lock the model for thread safety)
         let _encoder_output = {
-            let mut model = model_mutex
-                .lock()
-                .map_err(|e| anyhow::anyhow!("Model mutex lock poisoned: {}", e))?;
+            let mut model = model_mutex.lock();
             model.encoder.forward(&mel_tensor, true)?
         };
 

@@ -264,20 +264,19 @@ impl HotkeyManager {
         let receiver = global_hotkey::GlobalHotKeyEvent::receiver();
         info!("Got global hotkey receiver for '{}'", combination);
 
-        // Create a simple event loop that checks for hotkey events
+        // Event loop using blocking recv with timeout (no busy-wait)
         loop {
-            let is_running = running.load(Ordering::Relaxed);
-            if !is_running {
+            if !running.load(Ordering::Relaxed) {
                 info!(
-                    "Hotkey event loop stopping for '{}' (running = {})",
-                    combination, is_running
+                    "Hotkey event loop stopping for '{}' (running = false)",
+                    combination
                 );
                 break;
             }
 
-            // Check for global hotkey events
-            if let Ok(event) = receiver.try_recv() {
-                match event.state {
+            // Block on recv with timeout - no busy-wait, CPU sleeps until event or timeout
+            match receiver.recv_timeout(Duration::from_millis(100)) {
+                Ok(event) => match event.state {
                     global_hotkey::HotKeyState::Pressed => {
                         info!("Hotkey '{}' pressed", combination);
                         if tx.send(HotkeyEvent::Pressed).is_err() {
@@ -292,11 +291,17 @@ impl HotkeyManager {
                             break;
                         }
                     },
-                }
+                },
+                Err(e) => {
+                    // Check if it's a timeout (continue) or disconnect (break)
+                    if e.is_timeout() {
+                        continue;
+                    } else {
+                        info!("Hotkey receiver disconnected for '{}'", combination);
+                        break;
+                    }
+                },
             }
-
-            // Small sleep to prevent busy waiting
-            thread::sleep(Duration::from_millis(10));
         }
 
         info!("Hotkey event loop terminated for '{}'", combination);

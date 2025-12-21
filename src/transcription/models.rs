@@ -450,19 +450,19 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let manager = ModelManager::new(temp_dir.path()).unwrap();
 
-        // Verify that Base and LargeV3 models have checksums
+        // Verify that Base and LargeV3 models have checksums (ggml format from whisper.cpp)
         let base_info = manager.get_model_info(&ModelSize::Base).unwrap();
         assert!(base_info.sha256.is_some());
         assert_eq!(
             base_info.sha256.as_ref().unwrap(),
-            "07cadb9f25677c8d50df603e66a98fbd842cce45047139baeb16e6219a1e807b"
+            "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
         );
 
         let large_v3_info = manager.get_model_info(&ModelSize::LargeV3).unwrap();
         assert!(large_v3_info.sha256.is_some());
         assert_eq!(
             large_v3_info.sha256.as_ref().unwrap(),
-            "a8e94b85976e5864ba3e9525c7e6c83b2a1eca42d4b797a0c7c24d778e40fd95"
+            "ad82bf6a9043ceed055076d0fd39f5f186ff8062f19f9e9c50c5c8fb3a9a6e9f"
         );
     }
 }
