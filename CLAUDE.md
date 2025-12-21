@@ -25,7 +25,7 @@ The Makefile creates a `./hush` symlink to the built binary.
 ```bash
 ./hush models download base   # Download Whisper model (~145MB)
 ./hush setup uinput --quick   # Enable kernel-level text insertion
-./hush listen                 # Hold Ctrl+Alt+V to dictate
+./hush listen                 # Hold Ctrl+Shift+Space to dictate
 ./hush record --duration 5    # Record for N seconds
 ./hush status --full          # System diagnostics
 ```
@@ -81,7 +81,7 @@ These versions are pinned due to breaking changes in newer releases:
 
 ## Configuration
 
-- **`config/default.toml`** - App defaults (16kHz sample rate, "base" model, Ctrl+Alt+V hotkey)
+- **`config/default.toml`** - App defaults (16kHz sample rate, "base" model, Ctrl+Shift+Space hotkey)
 - **`.env`** - LLM keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
 - **Logging verbosity**: `-v` (INFO), `-vv` (DEBUG), `-vvv` (TRACE)
 

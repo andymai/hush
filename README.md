@@ -23,7 +23,7 @@ make release                      # GPU build (or `make release-cpu` for CPU-onl
 ./hush setup uinput --quick       # Enable text insertion
 
 # Run
-./hush listen                     # Hold Ctrl+Alt+V to dictate
+./hush listen                     # Hold Ctrl+Shift+Space to dictate
 ```
 
 For other distributions, see [INSTALL.md](INSTALL.md).
@@ -45,7 +45,7 @@ For other distributions, see [INSTALL.md](INSTALL.md).
 ./hush listen
 ```
 
-Hold `Ctrl+Alt+V`, speak, release. Text appears at your cursor.
+Hold `Ctrl+Shift+Space`, speak, release. Text appears at your cursor.
 
 Options:
 ```bash

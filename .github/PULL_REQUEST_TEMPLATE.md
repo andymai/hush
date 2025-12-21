@@ -20,7 +20,7 @@
 ### Hardware Testing (if applicable)
 - [ ] Tested with actual audio input (microphone)
 - [ ] Tested text insertion via UInput/X11
-- [ ] Tested hotkey capture (Ctrl+Alt+V or configured keys)
+- [ ] Tested hotkey capture (Ctrl+Shift+Space or configured keys)
 - [ ] Tested with CUDA/GPU acceleration (if available)
 - [ ] Tested on target Linux distribution
 

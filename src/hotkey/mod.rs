@@ -10,7 +10,7 @@
 ///
 /// # Default Hotkeys
 ///
-/// - **Ctrl+Alt+V** - Push-to-talk recording in listen mode
+/// - **Ctrl+Shift+Space** - Push-to-talk recording in listen mode
 /// - **F11** - Alternative recording hotkey (configurable)
 ///
 /// # Examples
@@ -21,8 +21,8 @@
 /// // Create hotkey manager
 /// let manager = HotkeyManager::new().expect("Failed to create manager");
 ///
-/// // Register Ctrl+Alt+V
-/// manager.register("Ctrl+Alt+V").expect("Failed to register hotkey");
+/// // Register Ctrl+Shift+Space
+/// manager.register("Ctrl+Shift+Space").expect("Failed to register hotkey");
 ///
 /// // Handle events
 /// while let Some(event) = manager.poll_event() {

@@ -121,7 +121,7 @@ impl Config {
             },
             hotkey: HotkeyConfig {
                 enabled: true,
-                combination: "Ctrl+Alt+V".to_string(),
+                combination: "Ctrl+Shift+Space".to_string(),
             },
             feedback: FeedbackConfig {
                 audio_enabled: true,
