@@ -87,8 +87,9 @@ impl ModelManager {
                 repo_id: "openai/whisper-tiny".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 39_000_000, // ~39MB
-                // TODO: Verify SHA256 checksum when downloading
-                sha256: None,
+                sha256: Some(
+                    "7ebd0e69e78190ffe1438491fa05cc1f5c1aa3a4c4db3bc1723adbb551ea2395".to_string(),
+                ),
             },
         );
 
@@ -114,8 +115,9 @@ impl ModelManager {
                 repo_id: "openai/whisper-small".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 244_000_000, // ~244MB
-                // TODO: Verify SHA256 checksum when downloading
-                sha256: None,
+                sha256: Some(
+                    "1d7734884874f1a1513ed9aa760a4f8e97aaa02fd6d93a3a85d27b2ae9ca596b".to_string(),
+                ),
             },
         );
 
@@ -127,8 +129,9 @@ impl ModelManager {
                 repo_id: "openai/whisper-medium".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 769_000_000, // ~769MB
-                // TODO: Verify SHA256 checksum when downloading
-                sha256: None,
+                sha256: Some(
+                    "62f73550fa6db24b0c6f6c5962bd0dae80fa644e93cde9cd9c3792971b47fd28".to_string(),
+                ),
             },
         );
 
@@ -140,8 +143,9 @@ impl ModelManager {
                 repo_id: "openai/whisper-large".to_string(),
                 filename: "model.safetensors".to_string(),
                 expected_size: 1_550_000_000, // ~1.55GB
-                // TODO: Verify SHA256 checksum when downloading
-                sha256: None,
+                sha256: Some(
+                    "27d753181b54178da228555dbc57fe639f6624ca470d83d35e500b22df0ab7e6".to_string(),
+                ),
             },
         );
 
