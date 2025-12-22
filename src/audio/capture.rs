@@ -21,7 +21,8 @@ pub struct AudioCapture {
     buffer: Arc<Mutex<Vec<f32>>>,
     is_recording: Arc<AtomicBool>,
     simulated_mode: bool,
-    amplitude_tx: Option<mpsc::Sender<f32>>,
+    /// Shared sender for amplitude updates - set via enable_amplitude_monitoring()
+    amplitude_tx: Arc<Mutex<Option<mpsc::Sender<f32>>>>,
 }
 
 /// Calculate RMS (Root Mean Square) amplitude from audio samples
@@ -151,7 +152,7 @@ impl AudioCapture {
                             buffer: Arc::new(Mutex::new(Vec::with_capacity(PREALLOCATED_SAMPLES))),
                             is_recording: Arc::new(AtomicBool::new(false)),
                             simulated_mode: true,
-                            amplitude_tx: None,
+                            amplitude_tx: Arc::new(Mutex::new(None)),
                         });
                     },
                 }
@@ -174,15 +175,52 @@ impl AudioCapture {
         // Pre-allocate buffer to avoid reallocations during recording
         let buffer = Arc::new(Mutex::new(Vec::with_capacity(PREALLOCATED_SAMPLES)));
         let is_recording = Arc::new(AtomicBool::new(false));
+        let amplitude_tx: Arc<Mutex<Option<mpsc::Sender<f32>>>> = Arc::new(Mutex::new(None));
+
+        // Pre-create the audio stream for faster recording start
+        // Stream starts paused and is resumed on start_recording()
+        let buffer_clone = Arc::clone(&buffer);
+        let is_recording_clone = Arc::clone(&is_recording);
+        let amplitude_tx_clone = Arc::clone(&amplitude_tx);
+
+        let stream = device
+            .build_input_stream(
+                &config,
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    if is_recording_clone.load(Ordering::Acquire) {
+                        buffer_clone.lock().extend_from_slice(data);
+
+                        // Calculate and send amplitude for waveform visualization
+                        // Clone sender outside lock to avoid holding lock during send
+                        let tx_opt = amplitude_tx_clone.lock().clone();
+                        if let Some(tx) = tx_opt {
+                            let amplitude = calculate_rms_amplitude(data);
+                            let _ = tx.send(amplitude); // Ignore send errors (non-blocking)
+                        }
+                    }
+                },
+                |err| {
+                    error!("Audio stream error: {}", err);
+                },
+                None,
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to build input stream: {}", e))?;
+
+        // Start paused - will be resumed on first start_recording() call
+        stream
+            .pause()
+            .map_err(|e| anyhow::anyhow!("Failed to pause initial stream: {}", e))?;
+
+        info!("Audio stream pre-created (paused) for faster recording start");
 
         Ok(AudioCapture {
             device,
             config,
-            stream: None,
+            stream: Some(stream),
             buffer,
             is_recording,
             simulated_mode: false,
-            amplitude_tx: None,
+            amplitude_tx,
         })
     }
 
@@ -193,7 +231,8 @@ impl AudioCapture {
 
         logging::log_recording_started(&ctx, &self.get_device_name());
 
-        if self.stream.is_some() {
+        // Check if already recording
+        if self.is_recording.load(Ordering::Acquire) {
             warn!(
                 request_id = %ctx.request_id,
                 "Recording already in progress, ignoring start request"
@@ -201,9 +240,13 @@ impl AudioCapture {
             return Ok(());
         }
 
-        // Clear the buffer and mark as recording
-        let buffer_len_before = self.buffer.lock().len();
-        self.buffer.lock().clear();
+        // Clear the buffer and mark as recording (single lock acquisition)
+        let buffer_len_before = {
+            let mut buffer = self.buffer.lock();
+            let len = buffer.len();
+            buffer.clear();
+            len
+        };
         self.is_recording.store(true, Ordering::Release);
 
         debug!(
@@ -221,40 +264,16 @@ impl AudioCapture {
             return Ok(());
         }
 
-        let buffer_clone = Arc::clone(&self.buffer);
-        let is_recording_clone = Arc::clone(&self.is_recording);
-        let amplitude_tx_clone = self.amplitude_tx.clone();
+        // Resume the pre-created stream (fast path - no stream creation needed)
+        if let Some(ref stream) = self.stream {
+            stream
+                .play()
+                .map_err(|e| anyhow::anyhow!("Failed to resume audio stream: {}", e))?;
+            info!("Audio recording started (stream resumed)");
+        } else {
+            return Err(anyhow::anyhow!("No audio stream available"));
+        }
 
-        // Build the input stream
-        let stream = self
-            .device
-            .build_input_stream(
-                &self.config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if is_recording_clone.load(Ordering::Acquire) {
-                        buffer_clone.lock().extend_from_slice(data);
-
-                        // Calculate and send amplitude for waveform visualization
-                        if let Some(ref tx) = amplitude_tx_clone {
-                            let amplitude = calculate_rms_amplitude(data);
-                            let _ = tx.send(amplitude); // Ignore send errors (non-blocking)
-                        }
-                    }
-                },
-                |err| {
-                    error!("Audio stream error: {}", err);
-                },
-                None,
-            )
-            .map_err(|e| anyhow::anyhow!("Failed to build input stream: {}", e))?;
-
-        // Start the stream
-        stream
-            .play()
-            .map_err(|e| anyhow::anyhow!("Failed to start audio stream: {}", e))?;
-
-        self.stream = Some(stream);
-        info!("Audio recording started successfully");
         Ok(())
     }
 
@@ -288,20 +307,20 @@ impl AudioCapture {
             return Ok(simulated_data);
         }
 
-        // Stop the actual audio stream
-        if let Some(stream) = self.stream.take() {
+        // Pause the audio stream (keep it alive for fast resume on next recording)
+        if let Some(ref stream) = self.stream {
             if let Err(e) = stream.pause() {
                 error!(
                     request_id = %ctx.request_id,
                     error = %e,
-                    "Failed to stop audio stream cleanly"
+                    "Failed to pause audio stream"
                 );
-                return Err(anyhow::anyhow!("Failed to stop audio stream: {}", e));
+                return Err(anyhow::anyhow!("Failed to pause audio stream: {}", e));
             }
 
             debug!(
                 request_id = %ctx.request_id,
-                "Audio stream stopped successfully"
+                "Audio stream paused (kept alive for fast resume)"
             );
         }
 
@@ -347,7 +366,7 @@ impl AudioCapture {
     /// Call this before start_recording() to receive amplitude updates
     pub fn enable_amplitude_monitoring(&mut self) -> mpsc::Receiver<f32> {
         let (tx, rx) = mpsc::channel();
-        self.amplitude_tx = Some(tx);
+        *self.amplitude_tx.lock() = Some(tx);
         rx
     }
 
