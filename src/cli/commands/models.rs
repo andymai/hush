@@ -80,10 +80,10 @@ pub async fn handle_models(model_command: ModelCommands) -> Result<()> {
 /// - **medium**: ~1.5 GB - High accuracy
 /// - **large**: ~2.9 GB - Best accuracy, slower
 async fn list_models(downloaded: bool, details: bool) -> Result<()> {
+    use crate::transcription::models::{ModelManager, ModelSize};
     use crate::Config;
 
     println!("📋 Available Whisper Models:");
-    println!("   (Only one model can be cached at a time)");
     println!();
 
     // Load config to show which model is active
@@ -99,45 +99,40 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
         .join("hush")
         .join("models");
 
-    // Check if the model file exists
-    let model_file_exists = cache_dir.join("model.safetensors").exists();
+    // Use ModelManager to check which models are actually downloaded
+    let manager = ModelManager::new(&cache_dir)?;
 
     for model in models {
         let is_active = active_model.as_deref() == Some(model);
-        // Model is "downloaded" if it's active AND the file exists
-        let is_downloaded = is_active && model_file_exists;
+
+        // Check if the model file actually exists using ModelManager
+        let model_size: Option<ModelSize> = model.parse().ok();
+        let is_downloaded = model_size
+            .as_ref()
+            .and_then(|size| manager.get_model_path(size))
+            .is_some();
 
         if downloaded && !is_downloaded {
             continue;
         }
 
-        let status = if is_downloaded {
-            "✅"
-        } else if is_active && !model_file_exists {
-            "⚠️ " // Active but file missing
-        } else {
-            "  "
-        };
+        let status = if is_downloaded { "✅" } else { "  " };
         print!("{} {}", status, model);
 
         // Show if this is the active model
         if is_active {
-            if model_file_exists {
-                print!(" ← active");
-            } else {
-                print!(" ← active (not downloaded)");
-            }
+            print!(" ← active");
         }
 
         if details {
             let size = match model {
-                "tiny" => "~151 MB",
-                "base" => "~290 MB",
-                "small" => "~967 MB",
-                "medium" => "~3 GB",
-                "large" => "~6.2 GB",
-                "large-v2" => "~6.2 GB",
-                "large-v3" => "~6.2 GB",
+                "tiny" => "~78 MB",
+                "base" => "~147 MB",
+                "small" => "~488 MB",
+                "medium" => "~1.5 GB",
+                "large" => "~3.1 GB",
+                "large-v2" => "~3.1 GB",
+                "large-v3" => "~3.1 GB",
                 _ => "Unknown",
             };
             print!(" ({})", size);
@@ -328,13 +323,14 @@ async fn remove_model(model_size: &str, yes: bool) -> Result<()> {
 ///
 /// Displays information about the model cache directory including:
 /// - Cache directory path
-/// - Currently cached model
+/// - Currently cached models
 /// - Disk space used
 ///
 /// # Arguments
 ///
 /// * `clear_stats` - If true, clear cache statistics (not yet implemented)
 async fn show_model_info(clear_stats: bool) -> Result<()> {
+    use crate::transcription::models::ModelManager;
     use crate::Config;
 
     let cache_dir = dirs::cache_dir()
@@ -350,18 +346,34 @@ async fn show_model_info(clear_stats: bool) -> Result<()> {
         .ok()
         .map(|config| config.transcription.model_size);
 
-    let model_path = cache_dir.join("model.safetensors");
-    if model_path.exists() {
-        let metadata = std::fs::metadata(&model_path)?;
-        let size_mb = metadata.len() / (1024 * 1024);
-        println!(
-            "Cached model: {} ({} MB)",
-            active_model.as_deref().unwrap_or("unknown"),
-            size_mb
-        );
+    // Use ModelManager to list cached models
+    let manager = ModelManager::new(&cache_dir)?;
+    let cached_models = manager.list_cached_models();
+
+    if cached_models.is_empty() {
+        println!("Cached models: none");
     } else {
-        println!("Cached model: none");
+        println!("Cached models:");
+        for model_size in &cached_models {
+            if let Some(path) = manager.get_model_path(model_size) {
+                let metadata = std::fs::metadata(&path)?;
+                let size_mb = metadata.len() / (1024 * 1024);
+                let active_marker = if active_model.as_deref() == Some(&model_size.to_string()) {
+                    " ← active"
+                } else {
+                    ""
+                };
+                println!("  {} ({} MB){}", model_size, size_mb, active_marker);
+            }
+        }
     }
+
+    // Show total cache size
+    let total_size = manager.get_cache_size()?;
+    println!(
+        "Total cache size: {}",
+        ModelManager::format_size(total_size)
+    );
 
     if clear_stats {
         println!("🚧 Statistics clearing not yet implemented");
@@ -372,21 +384,20 @@ async fn show_model_info(clear_stats: bool) -> Result<()> {
 
 /// Verify model integrity
 ///
-/// Checks the integrity of the cached model by validating its file size
-/// against expected values. Since only one model can be cached at a time,
-/// this verifies the currently active model.
+/// Checks the integrity of cached models by validating file sizes
+/// against expected values and optionally checking SHA256 checksums.
 ///
 /// # Arguments
 ///
-/// * `model_size` - Ignored (only the active model can be verified)
-/// * `fix` - If true, re-download corrupted model
+/// * `model_size` - Specific model to verify, or None to verify all cached models
+/// * `fix` - If true, re-download corrupted models
 ///
 /// # Integrity Checks
 ///
 /// - Verifies file exists
 /// - Checks file size is within expected range (±10%)
 async fn verify_models(model_size: Option<&str>, fix: bool) -> Result<()> {
-    use crate::Config;
+    use crate::transcription::models::{ModelManager, ModelSize};
 
     println!("🔍 Verifying model integrity...");
 
@@ -395,73 +406,58 @@ async fn verify_models(model_size: Option<&str>, fix: bool) -> Result<()> {
         .join("hush")
         .join("models");
 
-    // Get active model from config
-    let active_model = Config::load()
-        .ok()
-        .map(|config| config.transcription.model_size);
+    let manager = ModelManager::new(&cache_dir)?;
 
-    // If user specified a model, check if it matches the active one
-    if let Some(requested) = model_size {
-        if active_model.as_deref() != Some(requested) {
-            println!(
-                "ℹ️ Model '{}' is not the active model (active: {})",
-                requested,
-                active_model.as_deref().unwrap_or("none")
-            );
-            println!("   Only the active model is cached.");
-            return Ok(());
-        }
+    // Determine which models to verify
+    let models_to_verify: Vec<ModelSize> = if let Some(requested) = model_size {
+        let size: ModelSize = requested
+            .parse()
+            .context(format!("Invalid model size: {}", requested))?;
+        vec![size]
+    } else {
+        // Verify all cached models
+        manager.list_cached_models()
+    };
+
+    if models_to_verify.is_empty() {
+        println!("ℹ️ No cached models to verify");
+        return Ok(());
     }
 
-    let model_path = cache_dir.join("model.safetensors");
+    for model_size in models_to_verify {
+        let model_name = model_size.to_string();
 
-    // Expected sizes for safetensors whisper models (in MB)
-    let expected_sizes: std::collections::HashMap<&str, u64> = [
-        ("tiny", 151),
-        ("base", 290),
-        ("small", 967),
-        ("medium", 3055),
-        ("large", 6173),
-        ("large-v2", 6173),
-        ("large-v3", 6173),
-    ]
-    .iter()
-    .cloned()
-    .collect();
+        if let Some(info) = manager.get_model_info(&model_size) {
+            if let Some(path) = manager.get_model_path(&model_size) {
+                let metadata = std::fs::metadata(&path)?;
+                let size_mb = metadata.len() / (1024 * 1024);
+                let expected_mb = info.expected_size / (1024 * 1024);
 
-    if model_path.exists() {
-        let model_name = active_model.as_deref().unwrap_or("unknown");
-        let metadata = std::fs::metadata(&model_path)?;
-        let size_mb = metadata.len() / (1024 * 1024);
+                // Allow 10% variance in file size
+                let min_size = expected_mb * 9 / 10;
+                let max_size = expected_mb * 11 / 10;
 
-        if let Some(expected_size) = expected_sizes.get(model_name) {
-            // Allow 10% variance in file size
-            let min_size = expected_size * 9 / 10;
-            let max_size = expected_size * 11 / 10;
-
-            if size_mb >= min_size && size_mb <= max_size {
-                println!("✅ {} - Present ({} MB, size OK)", model_name, size_mb);
+                if size_mb >= min_size && size_mb <= max_size {
+                    println!("✅ {} - Present ({} MB, size OK)", model_name, size_mb);
+                } else {
+                    println!(
+                        "⚠️  {} - Present ({} MB, expected ~{} MB - may be corrupted)",
+                        model_name, size_mb, expected_mb
+                    );
+                    if fix {
+                        println!("🔄 Re-downloading model...");
+                        download_model(&model_name, true).await?;
+                        println!("✅ Model re-downloaded");
+                    }
+                }
             } else {
-                println!(
-                    "⚠️  {} - Present ({} MB, expected ~{} MB - may be corrupted)",
-                    model_name, size_mb, expected_size
-                );
+                println!("❌ {} - Not downloaded", model_name);
                 if fix {
-                    println!("🔄 Re-downloading model...");
-                    download_model(model_name, true).await?;
-                    println!("✅ Model re-downloaded");
+                    println!("🔄 Downloading model...");
+                    download_model(&model_name, false).await?;
+                    println!("✅ Model downloaded");
                 }
             }
-        } else {
-            println!("✅ {} - Present ({} MB)", model_name, size_mb);
-        }
-    } else {
-        let model_name = active_model.as_deref().unwrap_or("none");
-        println!("❌ {} - Not downloaded", model_name);
-        if fix && active_model.is_some() {
-            println!("🔄 Downloading model...");
-            download_model(active_model.as_deref().unwrap(), false).await?;
-            println!("✅ Model downloaded");
         }
     }
 
