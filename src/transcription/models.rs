@@ -145,7 +145,7 @@ impl ModelManager {
                 filename: "ggml-large-v1.bin".to_string(),
                 expected_size: 3_094_000_000, // ~3.09GB
                 sha256: Some(
-                    "0f4c8c42c8b00e600cfe32f73b8e53fdffc92cc91a2e5abdf6e13ae6d1ed9d44".to_string(),
+                    "7d99f41a10525d0206bddadd86760181fa920438b6b33237e3118ff6c83bb53d".to_string(),
                 ),
             },
         );
@@ -159,7 +159,7 @@ impl ModelManager {
                 filename: "ggml-large-v2.bin".to_string(),
                 expected_size: 3_094_000_000, // ~3.09GB
                 sha256: Some(
-                    "81f94ac64f4d28d8d2264b9d3823d5d0c9a8bdcd8e80baff97c1eed1cee8c549".to_string(),
+                    "9a423fe4d40c82774b6af34115b8b935f34152246eb19e80e376071d3f999487".to_string(),
                 ),
             },
         );
@@ -173,7 +173,7 @@ impl ModelManager {
                 filename: "ggml-large-v3.bin".to_string(),
                 expected_size: 3_094_000_000, // ~3.09GB
                 sha256: Some(
-                    "ad82bf6a9043ceed055076d0fd39f5f186ff8062f19f9e9c50c5c8fb3a9a6e9f".to_string(),
+                    "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2".to_string(),
                 ),
             },
         );
