@@ -3,9 +3,10 @@ use global_hotkey::{
     hotkey::{Code, HotKey, Modifiers},
     GlobalHotKeyManager,
 };
+use parking_lot::{Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -87,7 +88,7 @@ impl HotkeyManager {
 
         // Signal the waiting thread to start
         let (lock, cvar) = &*self.start_signal;
-        let mut started = lock.lock().unwrap();
+        let mut started = lock.lock();
         *started = true;
         cvar.notify_one();
 
@@ -101,7 +102,7 @@ impl HotkeyManager {
 
         // If the thread is still waiting for start signal, wake it up so it can exit
         let (lock, cvar) = &*self.start_signal;
-        let mut started = lock.lock().unwrap();
+        let mut started = lock.lock();
         *started = true; // Set to true so the waiting thread wakes up
         cvar.notify_one();
 
@@ -253,10 +254,10 @@ impl HotkeyManager {
 
         // Wait for the start signal from start_listening()
         let (lock, cvar) = &*start_signal;
-        let mut started = lock.lock().unwrap();
+        let mut started = lock.lock();
         while !*started {
             info!("Event loop waiting for start signal for '{}'", combination);
-            started = cvar.wait(started).unwrap();
+            cvar.wait(&mut started);
         }
         info!("Event loop received start signal for '{}'", combination);
 

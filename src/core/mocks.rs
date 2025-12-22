@@ -51,6 +51,13 @@ impl MockAudioSource {
     pub fn set_duration(&mut self, duration: Duration) {
         self.simulate_duration = duration;
     }
+
+    /// Create mock audio source that produces empty audio (0 samples)
+    pub fn with_empty_audio() -> Self {
+        let mut source = Self::new();
+        source.simulate_duration = Duration::from_secs(0);
+        source
+    }
 }
 
 impl AudioSource for MockAudioSource {
@@ -104,6 +111,8 @@ pub struct MockTranscriber {
     response_index: Arc<Mutex<usize>>,
     confidence: f32,
     processing_delay: Duration,
+    should_fail: bool,
+    error_message: String,
 }
 
 impl Default for MockTranscriber {
@@ -119,6 +128,8 @@ impl MockTranscriber {
             response_index: Arc::new(Mutex::new(0)),
             confidence: 0.95,
             processing_delay: Duration::from_millis(100),
+            should_fail: false,
+            error_message: "Mock transcription error".to_string(),
         }
     }
 
@@ -129,6 +140,8 @@ impl MockTranscriber {
             response_index: Arc::new(Mutex::new(0)),
             confidence: 0.95,
             processing_delay: Duration::from_millis(100),
+            should_fail: false,
+            error_message: "Mock transcription error".to_string(),
         }
     }
 
@@ -143,6 +156,30 @@ impl MockTranscriber {
         self.processing_delay = delay;
         self
     }
+
+    /// Make transcription fail with an error
+    pub fn with_error() -> Self {
+        Self {
+            responses: Arc::new(Mutex::new(vec![])),
+            response_index: Arc::new(Mutex::new(0)),
+            confidence: 0.0,
+            processing_delay: Duration::from_millis(100),
+            should_fail: true,
+            error_message: "Mock transcription error".to_string(),
+        }
+    }
+
+    /// Make transcription fail with a custom error message
+    pub fn with_custom_error(message: String) -> Self {
+        Self {
+            responses: Arc::new(Mutex::new(vec![])),
+            response_index: Arc::new(Mutex::new(0)),
+            confidence: 0.0,
+            processing_delay: Duration::from_millis(100),
+            should_fail: true,
+            error_message: message,
+        }
+    }
 }
 
 #[async_trait]
@@ -152,6 +189,11 @@ impl Transcriber for MockTranscriber {
 
         // Simulate processing delay
         tokio::time::sleep(self.processing_delay).await;
+
+        // Return error if configured to fail
+        if self.should_fail {
+            return Err(anyhow::anyhow!("{}", self.error_message));
+        }
 
         // Get next response
         let responses = self.responses.lock();

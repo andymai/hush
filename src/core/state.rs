@@ -175,3 +175,476 @@ pub struct StateTransition {
     pub to: AppState,
     pub timestamp: Instant,
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    // Shared state for mock observer
+    #[derive(Clone)]
+    struct MockObserverState {
+        call_count: Arc<AtomicUsize>,
+        last_transition: Arc<RwLock<Option<(AppState, AppState)>>>,
+    }
+
+    impl MockObserverState {
+        fn new() -> Self {
+            Self {
+                call_count: Arc::new(AtomicUsize::new(0)),
+                last_transition: Arc::new(RwLock::new(None)),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.call_count.load(Ordering::SeqCst)
+        }
+
+        fn last_transition(&self) -> Option<(AppState, AppState)> {
+            *self.last_transition.read()
+        }
+    }
+
+    // Mock observer for testing notifications
+    struct MockObserver {
+        state: MockObserverState,
+    }
+
+    impl MockObserver {
+        fn new(state: MockObserverState) -> Self {
+            Self { state }
+        }
+    }
+
+    impl StateObserver for MockObserver {
+        fn on_state_change(&self, old_state: AppState, new_state: AppState) {
+            self.state.call_count.fetch_add(1, Ordering::SeqCst);
+            *self.state.last_transition.write() = Some((old_state, new_state));
+        }
+    }
+
+    // ========================================================================
+    // Valid State Transitions
+    // ========================================================================
+
+    #[test]
+    fn test_idle_to_recording() {
+        let sm = StateMachine::new();
+        assert_eq!(sm.current(), AppState::Idle);
+
+        let result = sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        });
+        assert!(result.is_ok());
+        assert!(sm.current().is_recording());
+    }
+
+    #[test]
+    fn test_recording_to_transcribing() {
+        let sm = StateMachine::new();
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+
+        let result = sm.transition(AppState::Transcribing {
+            audio_duration: Duration::from_secs(3),
+        });
+        assert!(result.is_ok());
+        assert_eq!(sm.current().name(), "Transcribing");
+    }
+
+    #[test]
+    fn test_transcribing_to_inserting() {
+        let sm = StateMachine::new();
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+        sm.transition(AppState::Transcribing {
+            audio_duration: Duration::from_secs(3),
+        })
+        .unwrap();
+
+        let result = sm.transition(AppState::Inserting { text_length: 42 });
+        assert!(result.is_ok());
+        assert_eq!(sm.current().name(), "Inserting");
+    }
+
+    #[test]
+    fn test_inserting_to_idle() {
+        let sm = StateMachine::new();
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+        sm.transition(AppState::Transcribing {
+            audio_duration: Duration::from_secs(3),
+        })
+        .unwrap();
+        sm.transition(AppState::Inserting { text_length: 42 })
+            .unwrap();
+
+        let result = sm.transition(AppState::Idle);
+        assert!(result.is_ok());
+        assert!(sm.current().is_idle());
+    }
+
+    #[test]
+    fn test_error_recovery() {
+        let sm = StateMachine::new();
+
+        // Any state can transition to Error
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+        let result = sm.transition(AppState::Error { recoverable: true });
+        assert!(result.is_ok());
+        assert_eq!(sm.current().name(), "Error");
+
+        // Error can transition back to Idle
+        let result = sm.transition(AppState::Idle);
+        assert!(result.is_ok());
+        assert!(sm.current().is_idle());
+    }
+
+    #[test]
+    fn test_recording_to_idle_shortcut() {
+        let sm = StateMachine::new();
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+
+        // Recording can go directly back to Idle (user released hotkey early)
+        let result = sm.transition(AppState::Idle);
+        assert!(result.is_ok());
+        assert!(sm.current().is_idle());
+    }
+
+    #[test]
+    fn test_transcribing_to_idle_shortcut() {
+        let sm = StateMachine::new();
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+        sm.transition(AppState::Transcribing {
+            audio_duration: Duration::from_secs(3),
+        })
+        .unwrap();
+
+        // Transcribing can go directly to Idle (no text to insert)
+        let result = sm.transition(AppState::Idle);
+        assert!(result.is_ok());
+        assert!(sm.current().is_idle());
+    }
+
+    // ========================================================================
+    // Invalid Transitions (should be rejected)
+    // ========================================================================
+
+    #[test]
+    fn test_idle_to_inserting_rejected() {
+        let sm = StateMachine::new();
+        assert_eq!(sm.current(), AppState::Idle);
+
+        let result = sm.transition(AppState::Inserting { text_length: 42 });
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            StateError::InvalidTransition { .. }
+        ));
+        // State should remain unchanged
+        assert!(sm.current().is_idle());
+    }
+
+    #[test]
+    fn test_recording_to_inserting_rejected() {
+        let sm = StateMachine::new();
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+
+        let result = sm.transition(AppState::Inserting { text_length: 42 });
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            StateError::InvalidTransition { .. }
+        ));
+        // State should remain unchanged
+        assert!(sm.current().is_recording());
+    }
+
+    #[test]
+    fn test_idle_to_transcribing_rejected() {
+        let sm = StateMachine::new();
+        assert_eq!(sm.current(), AppState::Idle);
+
+        let result = sm.transition(AppState::Transcribing {
+            audio_duration: Duration::from_secs(3),
+        });
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            StateError::InvalidTransition { .. }
+        ));
+        // State should remain unchanged
+        assert!(sm.current().is_idle());
+    }
+
+    #[test]
+    fn test_inserting_to_recording_rejected() {
+        let sm = StateMachine::new();
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+        sm.transition(AppState::Transcribing {
+            audio_duration: Duration::from_secs(3),
+        })
+        .unwrap();
+        sm.transition(AppState::Inserting { text_length: 42 })
+            .unwrap();
+
+        let result = sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        });
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            StateError::InvalidTransition { .. }
+        ));
+    }
+
+    // ========================================================================
+    // Observer Notifications
+    // ========================================================================
+
+    #[test]
+    fn test_observer_notified_on_transition() {
+        let sm = StateMachine::new();
+        let observer_state = MockObserverState::new();
+        let observer = MockObserver::new(observer_state.clone());
+
+        sm.add_observer(Box::new(observer));
+
+        // Perform a transition
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+
+        // Observer should have been called once
+        assert_eq!(observer_state.calls(), 1);
+
+        // Check the transition details
+        let (old, new) = observer_state.last_transition().unwrap();
+        assert!(old.is_idle());
+        assert!(new.is_recording());
+    }
+
+    #[test]
+    fn test_observer_not_notified_on_failed_transition() {
+        let sm = StateMachine::new();
+        let observer_state = MockObserverState::new();
+        let observer = MockObserver::new(observer_state.clone());
+
+        sm.add_observer(Box::new(observer));
+
+        // Attempt an invalid transition
+        let _ = sm.transition(AppState::Inserting { text_length: 42 });
+
+        // Observer should not have been called
+        assert_eq!(observer_state.calls(), 0);
+    }
+
+    #[test]
+    fn test_multiple_observers() {
+        let sm = StateMachine::new();
+        let observer1_state = MockObserverState::new();
+        let observer1 = MockObserver::new(observer1_state.clone());
+        let observer2_state = MockObserverState::new();
+        let observer2 = MockObserver::new(observer2_state.clone());
+
+        sm.add_observer(Box::new(observer1));
+        sm.add_observer(Box::new(observer2));
+
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+
+        assert_eq!(observer1_state.calls(), 1);
+        assert_eq!(observer2_state.calls(), 1);
+    }
+
+    // ========================================================================
+    // History Recording
+    // ========================================================================
+
+    #[test]
+    fn test_history_records_transitions() {
+        let sm = StateMachine::new();
+
+        // Initial state - no history
+        assert_eq!(sm.history().len(), 0);
+
+        // First transition
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+        assert_eq!(sm.history().len(), 1);
+
+        // Second transition
+        sm.transition(AppState::Transcribing {
+            audio_duration: Duration::from_secs(3),
+        })
+        .unwrap();
+        assert_eq!(sm.history().len(), 2);
+
+        // Verify history order
+        let history = sm.history();
+        assert!(history[0].from.is_idle());
+        assert!(history[0].to.is_recording());
+        assert_eq!(history[1].from.name(), "Recording");
+        assert_eq!(history[1].to.name(), "Transcribing");
+    }
+
+    #[test]
+    fn test_history_not_recorded_on_failed_transition() {
+        let sm = StateMachine::new();
+
+        // Attempt an invalid transition
+        let _ = sm.transition(AppState::Inserting { text_length: 42 });
+
+        // History should remain empty
+        assert_eq!(sm.history().len(), 0);
+    }
+
+    // ========================================================================
+    // Recording Duration
+    // ========================================================================
+
+    #[test]
+    fn test_recording_duration() {
+        let sm = StateMachine::new();
+
+        // No duration when idle
+        assert_eq!(sm.current().recording_duration(), None);
+
+        // Start recording
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+
+        // Should have a duration (might be very small)
+        let duration = sm.current().recording_duration();
+        assert!(duration.is_some());
+        assert!(duration.unwrap() >= Duration::from_secs(0));
+
+        // No duration after transitioning away
+        sm.transition(AppState::Transcribing {
+            audio_duration: Duration::from_secs(3),
+        })
+        .unwrap();
+        assert_eq!(sm.current().recording_duration(), None);
+    }
+
+    // ========================================================================
+    // State Query Methods
+    // ========================================================================
+
+    #[test]
+    fn test_is_idle() {
+        let sm = StateMachine::new();
+        assert!(sm.current().is_idle());
+
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+        assert!(!sm.current().is_idle());
+
+        sm.transition(AppState::Idle).unwrap();
+        assert!(sm.current().is_idle());
+    }
+
+    #[test]
+    fn test_is_recording() {
+        let sm = StateMachine::new();
+        assert!(!sm.current().is_recording());
+
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+        assert!(sm.current().is_recording());
+
+        sm.transition(AppState::Transcribing {
+            audio_duration: Duration::from_secs(3),
+        })
+        .unwrap();
+        assert!(!sm.current().is_recording());
+    }
+
+    #[test]
+    fn test_current_state() {
+        let sm = StateMachine::new();
+
+        // Test each state
+        assert_eq!(sm.current().name(), "Idle");
+
+        sm.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+        assert_eq!(sm.current().name(), "Recording");
+
+        sm.transition(AppState::Transcribing {
+            audio_duration: Duration::from_secs(3),
+        })
+        .unwrap();
+        assert_eq!(sm.current().name(), "Transcribing");
+
+        sm.transition(AppState::Inserting { text_length: 42 })
+            .unwrap();
+        assert_eq!(sm.current().name(), "Inserting");
+
+        sm.transition(AppState::Error { recoverable: true })
+            .unwrap();
+        assert_eq!(sm.current().name(), "Error");
+    }
+
+    #[test]
+    fn test_state_machine_clone() {
+        let sm1 = StateMachine::new();
+        sm1.transition(AppState::Recording {
+            started_at: Instant::now(),
+        })
+        .unwrap();
+
+        // Clone shares state (Arc-based)
+        let sm2 = sm1.clone();
+        assert!(sm2.current().is_recording());
+
+        // Transitions in one affect the other
+        sm2.transition(AppState::Idle).unwrap();
+        assert!(sm1.current().is_idle());
+    }
+
+    #[test]
+    fn test_state_machine_default() {
+        let sm = StateMachine::default();
+        assert!(sm.current().is_idle());
+    }
+}

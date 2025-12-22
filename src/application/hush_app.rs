@@ -530,4 +530,175 @@ mod tests {
         assert_eq!(stats.transcriber_name, "MockTranscriber");
         assert_eq!(stats.text_output_method, "Mock");
     }
+
+    // ============================================================================
+    // Error Handling Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_transcription_failure_recovery() {
+        // Create app with failing transcriber
+        let mut app = HushApp::new(
+            Box::new(MockAudioSource::new()),
+            Box::new(MockTranscriber::with_error()),
+            Box::new(MockTextOutput::new()),
+            Box::new(MockInputTrigger::new()),
+            AppMode::Manual,
+            false,
+        );
+
+        // Start recording
+        app.handle_recording_start().await.unwrap();
+        assert!(app.is_recording());
+
+        // Stop recording - should fail during transcription but recover to Idle
+        let result = app.handle_recording_stop().await;
+        assert!(result.is_err(), "Expected transcription to fail");
+
+        // App should recover to Idle state after error
+        app.handle_error(result.unwrap_err()).await;
+        assert_eq!(app.current_state(), AppState::Idle);
+        assert!(!app.is_recording());
+    }
+
+    #[tokio::test]
+    async fn test_empty_audio_handling() {
+        // Create app with audio source that produces empty buffer
+        let mut app = HushApp::new(
+            Box::new(MockAudioSource::with_empty_audio()),
+            Box::new(MockTranscriber::new()),
+            Box::new(MockTextOutput::new()),
+            Box::new(MockInputTrigger::new()),
+            AppMode::Manual,
+            false,
+        );
+
+        // Start recording
+        app.handle_recording_start().await.unwrap();
+        assert!(app.is_recording());
+
+        // Stop recording with empty audio - should handle gracefully
+        app.handle_recording_stop().await.unwrap();
+
+        // Should transition back to Idle without attempting transcription
+        assert_eq!(app.current_state(), AppState::Idle);
+        assert!(!app.is_recording());
+    }
+
+    #[tokio::test]
+    async fn test_double_recording_start_ignored() {
+        let mut app = create_test_app();
+
+        // Start recording first time
+        app.handle_recording_start().await.unwrap();
+        assert!(app.is_recording());
+        let first_start_state = app.current_state();
+
+        // Try to start recording again while already recording
+        let result = app.handle_recording_start().await;
+
+        // Should succeed but be a no-op (returns Ok but doesn't change state)
+        assert!(result.is_ok());
+        assert_eq!(app.current_state(), first_start_state);
+        assert!(app.is_recording());
+    }
+
+    #[tokio::test]
+    async fn test_stop_without_start() {
+        let mut app = create_test_app();
+
+        // Verify we're in Idle state
+        assert_eq!(app.current_state(), AppState::Idle);
+        assert!(!app.is_recording());
+
+        // Try to stop recording without starting
+        let result = app.handle_recording_stop().await;
+
+        // Should succeed but be a no-op (logs warning)
+        assert!(result.is_ok());
+        assert_eq!(app.current_state(), AppState::Idle);
+        assert!(!app.is_recording());
+    }
+
+    #[tokio::test]
+    async fn test_state_after_error() {
+        // Create app with failing transcriber
+        let mut app = HushApp::new(
+            Box::new(MockAudioSource::new()),
+            Box::new(MockTranscriber::with_custom_error(
+                "Simulated transcription failure".to_string(),
+            )),
+            Box::new(MockTextOutput::new()),
+            Box::new(MockInputTrigger::new()),
+            AppMode::Manual,
+            false,
+        );
+
+        // Normal workflow: start recording
+        app.handle_recording_start().await.unwrap();
+        assert!(app.is_recording());
+
+        // Attempt to stop - will fail during transcription
+        let result = app.handle_recording_stop().await;
+        assert!(result.is_err());
+
+        // Manually trigger error handling
+        app.handle_error(result.unwrap_err()).await;
+
+        // Verify error state was entered and recovered to Idle
+        assert_eq!(app.current_state(), AppState::Idle);
+
+        // Verify app can start recording again after error recovery
+        let second_start = app.handle_recording_start().await;
+        assert!(
+            second_start.is_ok(),
+            "Should be able to start recording after error recovery"
+        );
+        assert!(app.is_recording());
+    }
+
+    #[tokio::test]
+    async fn test_text_insertion_failure_recovery() {
+        // Create app with failing text output
+        let mut app = HushApp::new(
+            Box::new(MockAudioSource::new()),
+            Box::new(MockTranscriber::new()),
+            Box::new(MockTextOutput::new().with_failure()),
+            Box::new(MockInputTrigger::new()),
+            AppMode::Manual,
+            false,
+        );
+
+        // Start and stop recording (transcription should succeed)
+        app.handle_recording_start().await.unwrap();
+        let result = app.handle_recording_stop().await;
+
+        // Text insertion should fail
+        assert!(result.is_err(), "Expected text insertion to fail");
+
+        // Handle the error and verify recovery
+        app.handle_error(result.unwrap_err()).await;
+        assert_eq!(app.current_state(), AppState::Idle);
+    }
+
+    #[tokio::test]
+    async fn test_empty_transcription_result() {
+        // Create app with transcriber that returns empty string
+        let mut app = HushApp::new(
+            Box::new(MockAudioSource::new()),
+            Box::new(MockTranscriber::with_responses(vec![String::new()])),
+            Box::new(MockTextOutput::new()),
+            Box::new(MockInputTrigger::new()),
+            AppMode::Manual,
+            false,
+        );
+
+        // Start and stop recording
+        app.handle_recording_start().await.unwrap();
+        app.handle_recording_stop().await.unwrap();
+
+        // Should handle empty transcription gracefully and return to Idle
+        assert_eq!(app.current_state(), AppState::Idle);
+        assert!(!app.is_recording());
+    }
 }
