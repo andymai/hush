@@ -27,12 +27,6 @@ pub enum HushError {
 /// Audio-specific errors
 #[derive(Error, Debug)]
 pub enum AudioError {
-    #[error("No audio device available")]
-    NoDeviceAvailable,
-
-    #[error("Audio stream error: {0}")]
-    StreamError(String),
-
     #[error("Invalid sample rate: {hz}Hz (must be between {min}Hz and {max}Hz)")]
     InvalidSampleRate { hz: u32, min: u32, max: u32 },
 
@@ -57,12 +51,6 @@ pub enum TranscriptionError {
 
     #[error("Transcription failed: {0}")]
     TranscriptionFailed(String),
-
-    #[error("Audio too short (minimum {min}s, got {actual}s)")]
-    AudioTooShort { min: f32, actual: f32 },
-
-    #[error("No speech detected in audio")]
-    NoSpeechDetected,
 }
 
 /// Text output errors
@@ -70,9 +58,6 @@ pub enum TranscriptionError {
 pub enum TextOutputError {
     #[error("Display server not available: {0}")]
     DisplayServerUnavailable(String),
-
-    #[error("No focused window found")]
-    NoFocusedWindow,
 
     #[error("Text insertion failed: {0}")]
     InsertionFailed(String),

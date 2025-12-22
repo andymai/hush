@@ -6,24 +6,28 @@ use serde::{Deserialize, Serialize};
 /// Domain-specific vocabulary management
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tracing::{debug, info};
 
 /// Global regex cache to avoid recompiling patterns
-static REGEX_CACHE: Lazy<RwLock<HashMap<String, Regex>>> =
+static REGEX_CACHE: Lazy<RwLock<HashMap<String, Arc<Regex>>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Get or compile a regex pattern from cache
-fn get_cached_regex(pattern: &str) -> Option<Regex> {
+fn get_cached_regex(pattern: &str) -> Option<Arc<Regex>> {
     // Try read lock first
     if let Some(re) = REGEX_CACHE.read().get(pattern) {
-        return Some(re.clone());
+        return Some(Arc::clone(re));
     }
 
     // Compile and cache
     match Regex::new(pattern) {
         Ok(re) => {
-            REGEX_CACHE.write().insert(pattern.to_string(), re.clone());
-            Some(re)
+            let arc_re = Arc::new(re);
+            REGEX_CACHE
+                .write()
+                .insert(pattern.to_string(), Arc::clone(&arc_re));
+            Some(arc_re)
         },
         Err(_) => None,
     }

@@ -2,6 +2,7 @@ use super::config::EditingMode;
 use once_cell::sync::Lazy;
 /// Rule-based filler word removal
 use regex::Regex;
+use std::borrow::Cow;
 
 /// Common filler words and phrases to remove
 static LIGHT_FILLERS: &[&str] = &["um", "uh", "hmm", "er", "ah"];
@@ -109,7 +110,7 @@ impl FillerWordRemover {
 
     /// Remove filler words based on editing mode
     pub fn remove(&self, text: &str, mode: EditingMode) -> String {
-        let mut result = text.to_string();
+        let mut result: Cow<str> = Cow::Borrowed(text);
 
         // Select patterns based on mode
         let patterns = match mode {
@@ -118,30 +119,51 @@ impl FillerWordRemover {
             EditingMode::Aggressive => &self.aggressive_patterns,
         };
 
-        // Remove filler words
+        // Remove filler words - only allocate if there's a match
         for pattern in patterns {
-            result = pattern.replace_all(&result, " ").to_string();
+            if pattern.is_match(&result) {
+                result = Cow::Owned(pattern.replace_all(&result, " ").into_owned());
+            }
         }
 
-        // Normalize whitespace
-        result = MULTIPLE_SPACES.replace_all(&result, " ").to_string();
+        // Normalize whitespace - only allocate if there's a match
+        if MULTIPLE_SPACES.is_match(&result) {
+            result = Cow::Owned(MULTIPLE_SPACES.replace_all(&result, " ").into_owned());
+        }
 
-        // Fix punctuation spacing
-        result = SPACE_BEFORE_PUNCTUATION
-            .replace_all(&result, "$1")
-            .to_string();
+        // Fix punctuation spacing - only allocate if there's a match
+        if SPACE_BEFORE_PUNCTUATION.is_match(&result) {
+            result = Cow::Owned(
+                SPACE_BEFORE_PUNCTUATION
+                    .replace_all(&result, "$1")
+                    .into_owned(),
+            );
+        }
 
-        // Remove repeated punctuation (each type separately)
-        result = REPEATED_PERIODS.replace_all(&result, ".").to_string();
-        result = REPEATED_COMMAS.replace_all(&result, ",").to_string();
-        result = REPEATED_EXCLAMATION.replace_all(&result, "!").to_string();
-        result = REPEATED_QUESTION.replace_all(&result, "?").to_string();
+        // Remove repeated punctuation (each type separately) - only allocate if there's a match
+        if REPEATED_PERIODS.is_match(&result) {
+            result = Cow::Owned(REPEATED_PERIODS.replace_all(&result, ".").into_owned());
+        }
+        if REPEATED_COMMAS.is_match(&result) {
+            result = Cow::Owned(REPEATED_COMMAS.replace_all(&result, ",").into_owned());
+        }
+        if REPEATED_EXCLAMATION.is_match(&result) {
+            result = Cow::Owned(REPEATED_EXCLAMATION.replace_all(&result, "!").into_owned());
+        }
+        if REPEATED_QUESTION.is_match(&result) {
+            result = Cow::Owned(REPEATED_QUESTION.replace_all(&result, "?").into_owned());
+        }
 
         // Trim before capitalizing so first char is actually a letter
-        result = result.trim().to_string();
+        let trimmed = result.trim();
+        let result = if trimmed.len() != result.len() {
+            trimmed.to_string()
+        } else {
+            result.into_owned()
+        };
 
         // Capitalize first letter
-        result = Self::capitalize_first(&result);
+        let result = Self::capitalize_first(&result);
 
         // Ensure ends with punctuation
         Self::ensure_ending_punctuation(&result)

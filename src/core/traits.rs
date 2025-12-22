@@ -47,14 +47,6 @@ impl AudioBuffer {
     }
 }
 
-/// Audio device information
-#[derive(Debug, Clone)]
-pub struct AudioDeviceInfo {
-    pub id: String,
-    pub name: String,
-    pub is_default: bool,
-}
-
 /// Audio configuration with type-safe newtypes
 #[derive(Debug, Clone, Copy)]
 pub struct AudioConfig {
