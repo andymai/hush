@@ -296,15 +296,21 @@ pub async fn handle_listen(
         .build();
 
     let state_handle = overlay.state();
+    let egui_context_handle = overlay.egui_context();
 
     // Hotkey handler thread
     let audio_cmd_tx_clone = audio_cmd_tx.clone();
     let state_handle_clone = state_handle.clone();
+    let egui_context_clone = egui_context_handle.clone();
     let hotkey_thread = thread::spawn(move || {
         loop {
             match hotkey_rx.recv() {
                 Ok(HotkeyEvent::Pressed) => {
                     *state_handle_clone.lock() = OverlayState::start_recording();
+                    // Request immediate overlay repaint to show recording state
+                    if let Some(ctx) = egui_context_clone.lock().as_ref() {
+                        ctx.request_repaint();
+                    }
                     let _ = audio_cmd_tx_clone.send(AudioCommand::StartRecording);
                 },
                 Ok(HotkeyEvent::Released) => {
@@ -477,7 +483,8 @@ pub async fn handle_listen(
     let mut amplitude_threads: Vec<thread::JoinHandle<()>> = Vec::new();
 
     loop {
-        let command = match audio_cmd_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+        // Use short timeout for responsive hotkey handling (16ms ≈ 60Hz)
+        let command = match audio_cmd_rx.recv_timeout(std::time::Duration::from_millis(16)) {
             Ok(cmd) => cmd,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,

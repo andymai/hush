@@ -25,6 +25,8 @@ static PRIMARY_MONITOR_INFO: Lazy<([u32; 2], [i32; 2])> = Lazy::new(|| {
 struct OverlayApp {
     state: Arc<Mutex<OverlayState>>,
     config: Arc<Mutex<OverlayConfig>>,
+    /// Shared storage for egui context - populated on first gui_run call
+    egui_context_storage: Arc<Mutex<Option<egui::Context>>>,
 }
 
 impl EguiOverlay for OverlayApp {
@@ -34,6 +36,15 @@ impl EguiOverlay for OverlayApp {
         _default_gfx_backend: &mut ThreeDBackend,
         glfw_backend: &mut GlfwBackend,
     ) {
+        // Store egui context for external repaint requests (first call only)
+        {
+            let mut ctx_storage = self.egui_context_storage.lock();
+            if ctx_storage.is_none() {
+                debug!("Storing egui context for external repaint requests");
+                *ctx_storage = Some(egui_context.clone());
+            }
+        }
+
         // Single lock for reading state and checking auto-hide condition
         let (current_state, should_transition_to_idle) = {
             let state = self.state.lock();
@@ -108,6 +119,8 @@ impl EguiOverlay for OverlayApp {
 pub struct OverlayWindow {
     state: Arc<Mutex<OverlayState>>,
     config: Arc<Mutex<OverlayConfig>>,
+    /// Shared storage for egui context - allows external repaint requests
+    egui_context: Arc<Mutex<Option<egui::Context>>>,
 }
 
 impl OverlayWindow {
@@ -117,12 +130,26 @@ impl OverlayWindow {
         Self {
             state: Arc::new(Mutex::new(OverlayState::default())),
             config: Arc::new(Mutex::new(config)),
+            egui_context: Arc::new(Mutex::new(None)),
         }
     }
 
     /// Get a clone of the state Arc for external access
     pub fn state(&self) -> Arc<Mutex<OverlayState>> {
         self.state.clone()
+    }
+
+    /// Get a clone of the egui context Arc for external repaint requests
+    pub fn egui_context(&self) -> Arc<Mutex<Option<egui::Context>>> {
+        self.egui_context.clone()
+    }
+
+    /// Request an immediate repaint of the overlay
+    /// Call this after updating state to avoid waiting for the next scheduled repaint
+    pub fn request_repaint(&self) {
+        if let Some(ctx) = self.egui_context.lock().as_ref() {
+            ctx.request_repaint();
+        }
     }
 
     /// Update the overlay state
@@ -138,6 +165,7 @@ impl OverlayWindow {
         let app = OverlayApp {
             state: self.state,
             config: self.config,
+            egui_context_storage: self.egui_context,
         };
 
         start_fullscreen_overlay(app);
