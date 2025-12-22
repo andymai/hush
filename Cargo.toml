@@ -55,7 +55,7 @@ enigo = "0.2"  # Keep at 0.2 - 0.6 has major breaking changes
 libc = "0.2"
 
 # Hotkey management
-global-hotkey = "0.6"  # Keep at 0.6 - 0.7 may have breaking changes
+global-hotkey = "0.6"  # Keep at 0.7 - 0.7 may have breaking changes
 winit = "0.29"
 
 # Configuration
