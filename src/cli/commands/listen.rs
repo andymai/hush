@@ -13,6 +13,7 @@ use crate::text_processing::{
     CommandExecutor, CommandParser, EditingMode, InsertionHistory, LlmProvider, ProcessingConfig,
     TextProcessor,
 };
+use crate::transcription::models::{ModelManager, ModelSize};
 use crate::transcription::SimpleWhisperTranscriber;
 use crate::AudioCapture;
 
@@ -167,10 +168,37 @@ pub async fn handle_listen(
         audio_capture.get_device_name()
     );
 
-    // Initialize transcriber
-    let model_path = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".hush/models/ggml-base.en.bin");
+    // Initialize transcriber - try config first, then fall back to ModelManager
+    let model_path = {
+        let config_path = &config.transcription.model_path;
+
+        // If config has a valid path, use it
+        if config_path.exists() {
+            config_path.clone()
+        } else {
+            // Fall back to ModelManager to find the model in cache
+            let cache_dir = dirs::cache_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("hush/models");
+
+            let model_size: ModelSize = config
+                .transcription
+                .model_size
+                .parse()
+                .unwrap_or(ModelSize::Base);
+
+            if let Ok(manager) = ModelManager::new(&cache_dir) {
+                manager.get_model_path(&model_size).unwrap_or_else(|| {
+                    // Last resort: default base model path
+                    cache_dir.join("ggml-base.bin")
+                })
+            } else {
+                cache_dir.join("ggml-base.bin")
+            }
+        }
+    };
+
+    info!("Using model path: {:?}", model_path);
 
     let transcriber = match SimpleWhisperTranscriber::new(&model_path).await {
         Ok(t) => {

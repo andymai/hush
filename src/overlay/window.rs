@@ -304,16 +304,51 @@ impl Default for OverlayWindowBuilder {
     }
 }
 
-/// Set X11 window properties to hide from taskbar
+/// Set X11 window properties to hide from taskbar and prevent focus stealing
 fn set_skip_taskbar_x11(window_id: u32) -> anyhow::Result<()> {
     use x11rb::connection::Connection;
-    use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt};
+    use x11rb::protocol::xproto::{AtomEnum, ChangeWindowAttributesAux, ConnectionExt, PropMode};
     use x11rb::rust_connection::RustConnection;
+    use x11rb::wrapper::ConnectionExt as WrapperConnectionExt;
 
     let (conn, _screen_num) = RustConnection::connect(None)?;
 
+    // Set override_redirect to bypass window manager decorations
     let values = ChangeWindowAttributesAux::new().override_redirect(1);
     conn.change_window_attributes(window_id, &values)?;
+
+    // Set window type to NOTIFICATION - this tells the WM to never focus this window
+    let wm_window_type = conn
+        .intern_atom(false, b"_NET_WM_WINDOW_TYPE")?
+        .reply()?
+        .atom;
+    let type_notification = conn
+        .intern_atom(false, b"_NET_WM_WINDOW_TYPE_NOTIFICATION")?
+        .reply()?
+        .atom;
+
+    conn.change_property32(
+        PropMode::REPLACE,
+        window_id,
+        wm_window_type,
+        AtomEnum::ATOM,
+        &[type_notification],
+    )?;
+
+    // Set _NET_WM_STATE_ABOVE for always-on-top without focus issues
+    let wm_state = conn.intern_atom(false, b"_NET_WM_STATE")?.reply()?.atom;
+    let state_above = conn
+        .intern_atom(false, b"_NET_WM_STATE_ABOVE")?
+        .reply()?
+        .atom;
+
+    conn.change_property32(
+        PropMode::REPLACE,
+        window_id,
+        wm_state,
+        AtomEnum::ATOM,
+        &[state_above],
+    )?;
 
     conn.flush()?;
     Ok(())
