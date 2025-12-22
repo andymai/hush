@@ -54,7 +54,7 @@ pub enum Commands {
     /// Start intelligent listening mode with overlay (Wispr Flow-style)
     Listen {
         /// Editing mode for text processing
-        #[arg(short, long, default_value = "medium")]
+        #[arg(short, long, default_value = "light")]
         editing_mode: String,
 
         /// Disable text processing (use raw transcription)
