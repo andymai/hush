@@ -15,12 +15,15 @@ All processing happens on your machine. Your voice data never leaves your comput
 # Install dependencies (Ubuntu/Debian)
 sudo apt install libasound2-dev pkg-config libx11-dev
 
-# Build and setup
+# Build
 git clone https://github.com/andymai/hush.git
 cd hush
 make release                      # GPU build (or `make release-cpu` for CPU-only)
+
+# Setup
+./hush setup init                 # Interactive configuration setup
 ./hush models download base       # Download Whisper model (~145MB)
-./hush setup uinput --quick       # Enable text insertion
+./hush setup uinput --quick       # Enable text insertion (then log out/in)
 
 # Run
 ./hush listen                     # Hold Ctrl+Shift+Space to dictate
@@ -36,6 +39,30 @@ For other distributions, see [INSTALL.md](INSTALL.md).
 - **Filler word removal** ("um", "uh", "like")
 - **Voice commands**: "undo", "new paragraph", "new line"
 - **Optional LLM polishing** via Claude API
+
+## Configuration
+
+Initialize your configuration interactively:
+
+```bash
+./hush setup init           # Guided setup (recommended)
+./hush setup init --defaults  # Use defaults without prompts
+```
+
+Or copy the example and edit manually:
+
+```bash
+cp config/default.toml.example config/default.toml
+# Edit config/default.toml with your preferences
+```
+
+### Key Settings
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `transcription.model_size` | Whisper model (tiny/base/small/medium/large) | base |
+| `transcription.use_cuda` | Enable GPU acceleration | true |
+| `hotkey.combination` | Push-to-talk key | Ctrl+Shift+Space |
 
 ## Usage
 

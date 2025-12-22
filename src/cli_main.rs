@@ -132,6 +132,17 @@ pub enum Commands {
 
 #[derive(Subcommand)]
 pub enum SetupCommands {
+    /// Initialize configuration file
+    Init {
+        /// Use defaults without prompting
+        #[arg(long)]
+        defaults: bool,
+
+        /// Force overwrite existing config
+        #[arg(short, long)]
+        force: bool,
+    },
+
     /// Show UInput setup guide for optimal text insertion
     Uinput {
         /// Show quick setup commands only
