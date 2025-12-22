@@ -37,9 +37,7 @@ pub struct WhisperTranscriber {
     config: Option<Config>,
     // Alternative: whisper-rs context for PyTorch models
     whisper_context: Option<WhisperContext>,
-    _model_path: std::path::PathBuf,
     simulated_mode: bool,
-    _mel_filters: Option<Vec<f32>>,
 }
 
 impl WhisperTranscriber {
@@ -120,13 +118,6 @@ impl WhisperTranscriber {
             (None, None, None, None, true)
         };
 
-        // Initialize mel-spectrogram filters
-        let mel_filters = if !simulated_mode {
-            Some(Self::init_mel_filters())
-        } else {
-            None
-        };
-
         info!(
             "Whisper transcriber initialized successfully (simulated: {})",
             simulated_mode
@@ -138,9 +129,7 @@ impl WhisperTranscriber {
             tokenizer,
             config,
             whisper_context,
-            _model_path: model_path.to_path_buf(),
             simulated_mode,
-            _mel_filters: mel_filters,
         })
     }
 
@@ -264,17 +253,13 @@ impl WhisperTranscriber {
         matches!(self.device, Device::Cuda(_))
     }
 
-    pub fn device_info(&self) -> String {
+    pub fn get_device_info(&self) -> String {
         let cuda = CudaAvailability::detect();
         if cuda.available && matches!(self.device, Device::Cuda(_)) {
             format!("GPU: {}", cuda.device_name.as_deref().unwrap_or("Unknown"))
         } else {
             "CPU".to_string()
         }
-    }
-
-    pub fn get_device_info(&self) -> String {
-        self.device_info()
     }
 
     /// Load Whisper model from local files or HuggingFace
@@ -593,36 +578,6 @@ impl WhisperTranscriber {
             _ if filename.contains("tiny") => "tiny".to_string(),
             _ => "tiny".to_string(),
         }
-    }
-
-    fn init_mel_filters() -> Vec<f32> {
-        // Initialize mel-scale filter banks for converting audio to mel-spectrogram
-        let n_mels = 80;
-        let n_fft = 400;
-        let sample_rate = 16000.0;
-
-        // Create mel filter bank
-        let mut filters = Vec::with_capacity(n_mels * (n_fft / 2 + 1));
-
-        for mel_idx in 0..n_mels {
-            let mel_freq = 2595.0
-                * ((700.0 + (sample_rate / 2.0) * mel_idx as f32 / n_mels as f32) / 700.0).ln();
-            for fft_idx in 0..(n_fft / 2 + 1) {
-                let freq = fft_idx as f32 * sample_rate / n_fft as f32;
-                let mel_val = 2595.0 * ((700.0 + freq) / 700.0).ln();
-
-                // Triangular mel filter
-                let filter_val = if (mel_val - mel_freq).abs() < 200.0 {
-                    1.0 - (mel_val - mel_freq).abs() / 200.0
-                } else {
-                    0.0
-                };
-
-                filters.push(filter_val);
-            }
-        }
-
-        filters
     }
 
     /// Create a default Whisper config based on model size
