@@ -51,7 +51,7 @@ regex = "1.12"  # Pattern matching for filler words
 dotenvy = "0.15"  # Environment variable loading
 
 # System integration (cross-platform)
-enigo = "0.2"  # Keep at 0.2 - 0.6 has major breaking changes
+enigo = "0.2"  # Keep at 0.6 - 0.6 has major breaking changes
 libc = "0.2"
 
 # Hotkey management
