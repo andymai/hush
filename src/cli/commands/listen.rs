@@ -161,7 +161,7 @@ pub async fn handle_listen(
     info!("✅ Hotkey '{}' registered", hotkey_combination);
 
     // Initialize audio capture (main thread - !Send)
-    let mut audio_capture = AudioCapture::new(None)?;
+    let mut audio_capture = AudioCapture::new(config.audio.device.as_deref())?;
     let amplitude_rx = Arc::new(Mutex::new(audio_capture.enable_amplitude_monitoring()));
     info!(
         "✅ Audio capture initialized: {}",
