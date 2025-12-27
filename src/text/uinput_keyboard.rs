@@ -1,6 +1,7 @@
 /// Linux uinput-based keyboard emulation using input-linux crate
 /// This provides hardware-level keyboard emulation that works with all applications
 use crate::Result;
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::fs::File;
 use std::thread;
@@ -11,9 +12,121 @@ use input_linux::{
     sys, EventKind, EventTime, InputId, Key, KeyState, SynchronizeKind, UInputHandle,
 };
 
+/// Static character to key mapping for efficient lookup
+/// Built once on first access and reused for all keyboard instances
+static CHAR_TO_KEY_MAP: Lazy<HashMap<char, (Key, bool)>> = Lazy::new(|| {
+    let mut map = HashMap::with_capacity(100);
+
+    // Lowercase letters
+    map.insert('a', (Key::A, false));
+    map.insert('b', (Key::B, false));
+    map.insert('c', (Key::C, false));
+    map.insert('d', (Key::D, false));
+    map.insert('e', (Key::E, false));
+    map.insert('f', (Key::F, false));
+    map.insert('g', (Key::G, false));
+    map.insert('h', (Key::H, false));
+    map.insert('i', (Key::I, false));
+    map.insert('j', (Key::J, false));
+    map.insert('k', (Key::K, false));
+    map.insert('l', (Key::L, false));
+    map.insert('m', (Key::M, false));
+    map.insert('n', (Key::N, false));
+    map.insert('o', (Key::O, false));
+    map.insert('p', (Key::P, false));
+    map.insert('q', (Key::Q, false));
+    map.insert('r', (Key::R, false));
+    map.insert('s', (Key::S, false));
+    map.insert('t', (Key::T, false));
+    map.insert('u', (Key::U, false));
+    map.insert('v', (Key::V, false));
+    map.insert('w', (Key::W, false));
+    map.insert('x', (Key::X, false));
+    map.insert('y', (Key::Y, false));
+    map.insert('z', (Key::Z, false));
+
+    // Uppercase letters (same keys with shift)
+    map.insert('A', (Key::A, true));
+    map.insert('B', (Key::B, true));
+    map.insert('C', (Key::C, true));
+    map.insert('D', (Key::D, true));
+    map.insert('E', (Key::E, true));
+    map.insert('F', (Key::F, true));
+    map.insert('G', (Key::G, true));
+    map.insert('H', (Key::H, true));
+    map.insert('I', (Key::I, true));
+    map.insert('J', (Key::J, true));
+    map.insert('K', (Key::K, true));
+    map.insert('L', (Key::L, true));
+    map.insert('M', (Key::M, true));
+    map.insert('N', (Key::N, true));
+    map.insert('O', (Key::O, true));
+    map.insert('P', (Key::P, true));
+    map.insert('Q', (Key::Q, true));
+    map.insert('R', (Key::R, true));
+    map.insert('S', (Key::S, true));
+    map.insert('T', (Key::T, true));
+    map.insert('U', (Key::U, true));
+    map.insert('V', (Key::V, true));
+    map.insert('W', (Key::W, true));
+    map.insert('X', (Key::X, true));
+    map.insert('Y', (Key::Y, true));
+    map.insert('Z', (Key::Z, true));
+
+    // Numbers
+    map.insert('1', (Key::Num1, false));
+    map.insert('2', (Key::Num2, false));
+    map.insert('3', (Key::Num3, false));
+    map.insert('4', (Key::Num4, false));
+    map.insert('5', (Key::Num5, false));
+    map.insert('6', (Key::Num6, false));
+    map.insert('7', (Key::Num7, false));
+    map.insert('8', (Key::Num8, false));
+    map.insert('9', (Key::Num9, false));
+    map.insert('0', (Key::Num0, false));
+
+    // Basic symbols
+    map.insert(' ', (Key::Space, false));
+    map.insert('.', (Key::Dot, false));
+    map.insert(',', (Key::Comma, false));
+    map.insert(';', (Key::Semicolon, false));
+    map.insert('\'', (Key::Apostrophe, false));
+    map.insert('/', (Key::Slash, false));
+    map.insert('\\', (Key::Backslash, false));
+    map.insert('-', (Key::Minus, false));
+    map.insert('=', (Key::Equal, false));
+    map.insert('[', (Key::LeftBrace, false));
+    map.insert(']', (Key::RightBrace, false));
+    map.insert('`', (Key::Grave, false));
+
+    // Symbols with shift
+    map.insert('!', (Key::Num1, true));
+    map.insert('@', (Key::Num2, true));
+    map.insert('#', (Key::Num3, true));
+    map.insert('$', (Key::Num4, true));
+    map.insert('%', (Key::Num5, true));
+    map.insert('^', (Key::Num6, true));
+    map.insert('&', (Key::Num7, true));
+    map.insert('*', (Key::Num8, true));
+    map.insert('(', (Key::Num9, true));
+    map.insert(')', (Key::Num0, true));
+    map.insert('_', (Key::Minus, true));
+    map.insert('+', (Key::Equal, true));
+    map.insert('{', (Key::LeftBrace, true));
+    map.insert('}', (Key::RightBrace, true));
+    map.insert('|', (Key::Backslash, true));
+    map.insert(':', (Key::Semicolon, true));
+    map.insert('"', (Key::Apostrophe, true));
+    map.insert('<', (Key::Comma, true));
+    map.insert('>', (Key::Dot, true));
+    map.insert('?', (Key::Slash, true));
+    map.insert('~', (Key::Grave, true));
+
+    map
+});
+
 pub struct UinputKeyboard {
     device: Option<UInputHandle<File>>,
-    char_to_key: HashMap<char, (Key, bool)>, // (key, needs_shift)
     typing_delay_ms: u64,
     ready: bool,
 }
@@ -24,13 +137,9 @@ impl UinputKeyboard {
 
         let mut keyboard = UinputKeyboard {
             device: None,
-            char_to_key: HashMap::new(),
             typing_delay_ms: 20,
             ready: false,
         };
-
-        // Build character mapping
-        keyboard.build_char_mapping();
 
         // Try to create the device
         match keyboard.create_device() {
@@ -221,7 +330,7 @@ impl UinputKeyboard {
     }
 
     fn type_character(&mut self, ch: char) -> Result<()> {
-        if let Some((key, needs_shift)) = self.char_to_key.get(&ch) {
+        if let Some((key, needs_shift)) = CHAR_TO_KEY_MAP.get(&ch) {
             self.send_key(*key, *needs_shift)?;
         } else {
             debug!("Character '{}' not in basic mapping, skipping", ch);
@@ -300,131 +409,6 @@ impl UinputKeyboard {
         }
         Ok(())
     }
-
-    fn build_char_mapping(&mut self) {
-        // Lowercase letters
-        let lowercase = [
-            ('a', Key::A),
-            ('b', Key::B),
-            ('c', Key::C),
-            ('d', Key::D),
-            ('e', Key::E),
-            ('f', Key::F),
-            ('g', Key::G),
-            ('h', Key::H),
-            ('i', Key::I),
-            ('j', Key::J),
-            ('k', Key::K),
-            ('l', Key::L),
-            ('m', Key::M),
-            ('n', Key::N),
-            ('o', Key::O),
-            ('p', Key::P),
-            ('q', Key::Q),
-            ('r', Key::R),
-            ('s', Key::S),
-            ('t', Key::T),
-            ('u', Key::U),
-            ('v', Key::V),
-            ('w', Key::W),
-            ('x', Key::X),
-            ('y', Key::Y),
-            ('z', Key::Z),
-        ];
-
-        for (ch, key) in &lowercase {
-            self.char_to_key.insert(*ch, (*key, false));
-        }
-
-        // Uppercase letters (same keys with shift)
-        let uppercase = [
-            ('A', Key::A),
-            ('B', Key::B),
-            ('C', Key::C),
-            ('D', Key::D),
-            ('E', Key::E),
-            ('F', Key::F),
-            ('G', Key::G),
-            ('H', Key::H),
-            ('I', Key::I),
-            ('J', Key::J),
-            ('K', Key::K),
-            ('L', Key::L),
-            ('M', Key::M),
-            ('N', Key::N),
-            ('O', Key::O),
-            ('P', Key::P),
-            ('Q', Key::Q),
-            ('R', Key::R),
-            ('S', Key::S),
-            ('T', Key::T),
-            ('U', Key::U),
-            ('V', Key::V),
-            ('W', Key::W),
-            ('X', Key::X),
-            ('Y', Key::Y),
-            ('Z', Key::Z),
-        ];
-
-        for (ch, key) in &uppercase {
-            self.char_to_key.insert(*ch, (*key, true));
-        }
-
-        // Numbers
-        let numbers = [
-            ('1', Key::Num1),
-            ('2', Key::Num2),
-            ('3', Key::Num3),
-            ('4', Key::Num4),
-            ('5', Key::Num5),
-            ('6', Key::Num6),
-            ('7', Key::Num7),
-            ('8', Key::Num8),
-            ('9', Key::Num9),
-            ('0', Key::Num0),
-        ];
-
-        for (ch, key) in &numbers {
-            self.char_to_key.insert(*ch, (*key, false));
-        }
-
-        // Basic symbols
-        self.char_to_key.insert(' ', (Key::Space, false));
-        self.char_to_key.insert('.', (Key::Dot, false));
-        self.char_to_key.insert(',', (Key::Comma, false));
-        self.char_to_key.insert(';', (Key::Semicolon, false));
-        self.char_to_key.insert('\'', (Key::Apostrophe, false));
-        self.char_to_key.insert('/', (Key::Slash, false));
-        self.char_to_key.insert('\\', (Key::Backslash, false));
-        self.char_to_key.insert('-', (Key::Minus, false));
-        self.char_to_key.insert('=', (Key::Equal, false));
-        self.char_to_key.insert('[', (Key::LeftBrace, false));
-        self.char_to_key.insert(']', (Key::RightBrace, false));
-        self.char_to_key.insert('`', (Key::Grave, false));
-
-        // Symbols with shift
-        self.char_to_key.insert('!', (Key::Num1, true));
-        self.char_to_key.insert('@', (Key::Num2, true));
-        self.char_to_key.insert('#', (Key::Num3, true));
-        self.char_to_key.insert('$', (Key::Num4, true));
-        self.char_to_key.insert('%', (Key::Num5, true));
-        self.char_to_key.insert('^', (Key::Num6, true));
-        self.char_to_key.insert('&', (Key::Num7, true));
-        self.char_to_key.insert('*', (Key::Num8, true));
-        self.char_to_key.insert('(', (Key::Num9, true));
-        self.char_to_key.insert(')', (Key::Num0, true));
-        self.char_to_key.insert('_', (Key::Minus, true));
-        self.char_to_key.insert('+', (Key::Equal, true));
-        self.char_to_key.insert('{', (Key::LeftBrace, true));
-        self.char_to_key.insert('}', (Key::RightBrace, true));
-        self.char_to_key.insert('|', (Key::Backslash, true));
-        self.char_to_key.insert(':', (Key::Semicolon, true));
-        self.char_to_key.insert('"', (Key::Apostrophe, true));
-        self.char_to_key.insert('<', (Key::Comma, true));
-        self.char_to_key.insert('>', (Key::Dot, true));
-        self.char_to_key.insert('?', (Key::Slash, true));
-        self.char_to_key.insert('~', (Key::Grave, true));
-    }
 }
 
 impl Drop for UinputKeyboard {
@@ -461,19 +445,11 @@ mod tests {
 
     #[test]
     fn test_char_mapping() {
-        let mut keyboard = UinputKeyboard {
-            device: None,
-            char_to_key: HashMap::new(),
-            typing_delay_ms: 0,
-            ready: false,
-        };
-
-        keyboard.build_char_mapping();
-
-        assert_eq!(keyboard.char_to_key.get(&'a'), Some(&(Key::A, false)));
-        assert_eq!(keyboard.char_to_key.get(&'A'), Some(&(Key::A, true)));
-        assert_eq!(keyboard.char_to_key.get(&'1'), Some(&(Key::Num1, false)));
-        assert_eq!(keyboard.char_to_key.get(&'!'), Some(&(Key::Num1, true)));
-        assert_eq!(keyboard.char_to_key.get(&' '), Some(&(Key::Space, false)));
+        // Test static character mapping
+        assert_eq!(CHAR_TO_KEY_MAP.get(&'a'), Some(&(Key::A, false)));
+        assert_eq!(CHAR_TO_KEY_MAP.get(&'A'), Some(&(Key::A, true)));
+        assert_eq!(CHAR_TO_KEY_MAP.get(&'1'), Some(&(Key::Num1, false)));
+        assert_eq!(CHAR_TO_KEY_MAP.get(&'!'), Some(&(Key::Num1, true)));
+        assert_eq!(CHAR_TO_KEY_MAP.get(&' '), Some(&(Key::Space, false)));
     }
 }

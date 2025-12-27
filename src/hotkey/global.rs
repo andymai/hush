@@ -84,7 +84,7 @@ impl HotkeyManager {
         info!("Starting hotkey listener for '{}'", self.combination);
 
         // Set the running flag to true
-        self.running.store(true, Ordering::Relaxed);
+        self.running.store(true, Ordering::Release);
 
         // Signal the waiting thread to start
         let (lock, cvar) = &*self.start_signal;
@@ -98,7 +98,7 @@ impl HotkeyManager {
 
     pub fn stop_listening(&self) -> Result<()> {
         info!("Stopping hotkey listener for '{}'", self.combination);
-        self.running.store(false, Ordering::Relaxed);
+        self.running.store(false, Ordering::Release);
 
         // If the thread is still waiting for start signal, wake it up so it can exit
         let (lock, cvar) = &*self.start_signal;
@@ -267,7 +267,7 @@ impl HotkeyManager {
 
         // Event loop using blocking recv with timeout (no busy-wait)
         loop {
-            if !running.load(Ordering::Relaxed) {
+            if !running.load(Ordering::Acquire) {
                 info!(
                     "Hotkey event loop stopping for '{}' (running = false)",
                     combination

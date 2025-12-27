@@ -1,4 +1,5 @@
 /// Entity recognition for proper capitalization
+use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
 use tracing::debug;
 
@@ -75,14 +76,21 @@ static COMMON_TECH_TERMS: &[(&str, &str)] = &[
     ("jwt", "JWT"),
 ];
 
+/// Static brand mapping built once on first access
+static BRAND_MAP: Lazy<HashMap<String, String>> = Lazy::new(|| {
+    TECH_BRANDS
+        .iter()
+        .chain(COMMON_TECH_TERMS.iter())
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+});
+
+/// Static acronym set built once on first access
+static ACRONYM_SET: Lazy<HashSet<String>> =
+    Lazy::new(|| ACRONYMS.iter().map(|s| s.to_string()).collect());
+
 /// Entity recognizer for smart capitalization
 pub struct EntityRecognizer {
-    /// Tech brands/products and their proper capitalization
-    brands: HashMap<String, String>,
-
-    /// Known acronyms
-    acronyms: HashSet<String>,
-
     /// User-defined custom entities (can be loaded from config)
     custom_entities: HashMap<String, String>,
 }
@@ -90,19 +98,7 @@ pub struct EntityRecognizer {
 impl EntityRecognizer {
     /// Create a new entity recognizer with default lists
     pub fn new() -> Self {
-        let mut brands = HashMap::new();
-        for (lowercase, proper) in TECH_BRANDS {
-            brands.insert(lowercase.to_string(), proper.to_string());
-        }
-        for (lowercase, proper) in COMMON_TECH_TERMS {
-            brands.insert(lowercase.to_string(), proper.to_string());
-        }
-
-        let acronyms: HashSet<String> = ACRONYMS.iter().map(|s| s.to_string()).collect();
-
         Self {
-            brands,
-            acronyms,
             custom_entities: HashMap::new(),
         }
     }
@@ -141,15 +137,15 @@ impl EntityRecognizer {
                 continue;
             }
 
-            // Check tech brands
-            if let Some(proper) = self.brands.get(&lowercase) {
+            // Check tech brands (static map)
+            if let Some(proper) = BRAND_MAP.get(&lowercase) {
                 debug!("Capitalizing '{}' → '{}' (brand)", word, proper);
                 result.push(proper.clone());
                 continue;
             }
 
-            // Check if it's a known acronym (case-insensitive match)
-            if self.acronyms.iter().any(|a| a.to_lowercase() == lowercase) {
+            // Check if it's a known acronym (static set)
+            if ACRONYM_SET.iter().any(|a| a.to_lowercase() == lowercase) {
                 let proper = lowercase.to_uppercase();
                 debug!("Capitalizing '{}' → '{}' (acronym)", word, proper);
                 result.push(proper);
@@ -167,8 +163,8 @@ impl EntityRecognizer {
     pub fn is_entity(&self, word: &str) -> bool {
         let lowercase = word.to_lowercase();
         self.custom_entities.contains_key(&lowercase)
-            || self.brands.contains_key(&lowercase)
-            || self.acronyms.iter().any(|a| a.to_lowercase() == lowercase)
+            || BRAND_MAP.contains_key(&lowercase)
+            || ACRONYM_SET.iter().any(|a| a.to_lowercase() == lowercase)
     }
 }
 

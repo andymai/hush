@@ -2,40 +2,62 @@ use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Main configuration structure for the Hush application
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
+    /// Audio capture settings
     pub audio: AudioConfig,
+    /// Whisper transcription settings
     pub transcription: TranscriptionConfig,
+    /// Global hotkey configuration
     pub hotkey: HotkeyConfig,
+    /// User feedback settings (audio cues, notifications)
     pub feedback: FeedbackConfig,
 }
 
+/// Audio capture configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AudioConfig {
+    /// Sample rate in Hz (8000-48000, default 16000 for Whisper)
     pub sample_rate: u32,
+    /// Number of audio channels (1=mono, 2=stereo)
     pub channels: u16,
+    /// Audio buffer size in samples (power of 2, 64-8192)
     pub buffer_size: usize,
+    /// Optional specific audio device name (None uses system default)
     pub device: Option<String>,
 }
 
+/// Whisper transcription model configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TranscriptionConfig {
+    /// Path to the Whisper model binary file
     pub model_path: PathBuf,
+    /// Model size identifier (tiny, base, small, medium, large, large-v2, large-v3)
     pub model_size: String,
+    /// Language code for transcription (e.g., "en" for English)
     pub language: String,
+    /// Enable CUDA GPU acceleration (requires CUDA-enabled build)
     pub use_cuda: bool,
+    /// Beam search width (1-20, higher = more accurate but slower)
     pub beam_size: usize,
+    /// Threshold for detecting silence/no speech (0.0-1.0)
     pub no_speech_threshold: f32,
 }
 
+/// Global hotkey listener configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct HotkeyConfig {
+    /// Whether hotkey listening is enabled
     pub enabled: bool,
+    /// Hotkey combination string (e.g., "Ctrl+Shift+Space")
     pub combination: String,
 }
 
+/// User feedback and notification settings
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FeedbackConfig {
+    /// Enable audio feedback sounds (beeps, clicks)
     pub audio_enabled: bool,
 }
 

@@ -311,12 +311,22 @@ pub async fn handle_listen(
                     if let Some(ctx) = egui_context_clone.lock().as_ref() {
                         ctx.request_repaint();
                     }
-                    let _ = audio_cmd_tx_clone.send(AudioCommand::StartRecording);
+                    if audio_cmd_tx_clone
+                        .send(AudioCommand::StartRecording)
+                        .is_err()
+                    {
+                        warn!("Channel send failed - receiver dropped");
+                    }
                 },
                 Ok(HotkeyEvent::Released) => {
                     // Stop recording - state transitions handled by result handler thread
                     // Visual state remains in Recording until transcription completes
-                    let _ = audio_cmd_tx_clone.send(AudioCommand::StopRecording);
+                    if audio_cmd_tx_clone
+                        .send(AudioCommand::StopRecording)
+                        .is_err()
+                    {
+                        warn!("Channel send failed - receiver dropped");
+                    }
                 },
                 Err(_) => break,
             }
@@ -359,14 +369,14 @@ pub async fn handle_listen(
                             let mut history = insertion_history_clone.lock();
 
                             if let Some(last_entry) = history.pop_last() {
+                                let preview = if last_entry.text.chars().count() > 50 {
+                                    last_entry.text.chars().take(50).collect::<String>()
+                                } else {
+                                    last_entry.text.clone()
+                                };
                                 info!(
                                     "Undoing last insertion: '{}' ({} chars)",
-                                    if last_entry.text.len() > 50 {
-                                        &last_entry.text[..50]
-                                    } else {
-                                        &last_entry.text
-                                    },
-                                    last_entry.char_count
+                                    preview, last_entry.char_count
                                 );
 
                                 #[cfg(target_os = "linux")]
@@ -454,8 +464,9 @@ pub async fn handle_listen(
                     }
 
                     // Update overlay
-                    let _display_text = if processed_text.len() > 50 {
-                        format!("{}...", &processed_text[..47])
+                    let _display_text = if processed_text.chars().count() > 50 {
+                        let truncated: String = processed_text.chars().take(47).collect();
+                        format!("{}...", truncated)
                     } else {
                         processed_text
                     };
@@ -493,9 +504,14 @@ pub async fn handle_listen(
             AudioCommand::StartRecording => {
                 if let Err(e) = audio_capture.start_recording() {
                     error!("Failed to start recording: {}", e);
-                    let _ = transcription_tx.send(TranscriptionResult::Error(
-                        "Failed to start recording".to_string(),
-                    ));
+                    if transcription_tx
+                        .send(TranscriptionResult::Error(
+                            "Failed to start recording".to_string(),
+                        ))
+                        .is_err()
+                    {
+                        warn!("Channel send failed - receiver dropped");
+                    }
                 } else {
                     // Start polling amplitude updates with batching for performance
                     let state_handle_amp = state_handle.clone();
@@ -552,16 +568,25 @@ pub async fn handle_listen(
                     Ok(data) => data,
                     Err(e) => {
                         error!("Failed to stop recording: {}", e);
-                        let _ = transcription_tx.send(TranscriptionResult::Error(
-                            "Failed to stop recording".to_string(),
-                        ));
+                        if transcription_tx
+                            .send(TranscriptionResult::Error(
+                                "Failed to stop recording".to_string(),
+                            ))
+                            .is_err()
+                        {
+                            warn!("Channel send failed - receiver dropped");
+                        }
                         continue;
                     },
                 };
 
                 if audio_data.is_empty() {
-                    let _ = transcription_tx
-                        .send(TranscriptionResult::Error("No audio recorded".to_string()));
+                    if transcription_tx
+                        .send(TranscriptionResult::Error("No audio recorded".to_string()))
+                        .is_err()
+                    {
+                        warn!("Channel send failed - receiver dropped");
+                    }
                     continue;
                 }
 
@@ -620,7 +645,9 @@ pub async fn handle_listen(
                     ))
                 };
 
-                let _ = transcription_tx.send(transcription_result);
+                if transcription_tx.send(transcription_result).is_err() {
+                    warn!("Channel send failed - receiver dropped");
+                }
             },
         }
     }

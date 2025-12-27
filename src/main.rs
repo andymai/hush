@@ -1,9 +1,58 @@
 use anyhow::Result;
 use hush::cli::{Cli, CommandDispatcher};
 use hush::logging::{LoggingConfig, LoggingSystem};
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use tracing::Level;
 use tracing::{error, info, warn};
+
+/// Static logging levels for production mode (v=0)
+static PRODUCTION_LEVELS: Lazy<HashMap<String, Level>> = Lazy::new(|| {
+    [
+        ("audio".to_string(), Level::WARN),
+        ("transcription".to_string(), Level::WARN),
+        ("text".to_string(), Level::WARN),
+        ("cli".to_string(), Level::INFO),
+    ]
+    .into_iter()
+    .collect()
+});
+
+/// Static logging levels for normal verbose mode (v=1)
+static VERBOSE_LEVELS: Lazy<HashMap<String, Level>> = Lazy::new(|| {
+    [
+        ("audio".to_string(), Level::INFO),
+        ("transcription".to_string(), Level::INFO),
+        ("text".to_string(), Level::INFO),
+        ("cli".to_string(), Level::INFO),
+    ]
+    .into_iter()
+    .collect()
+});
+
+/// Static logging levels for debug mode (v=2)
+static DEBUG_LEVELS: Lazy<HashMap<String, Level>> = Lazy::new(|| {
+    [
+        ("audio".to_string(), Level::DEBUG),
+        ("transcription".to_string(), Level::DEBUG),
+        ("text".to_string(), Level::DEBUG),
+        ("cli".to_string(), Level::DEBUG),
+    ]
+    .into_iter()
+    .collect()
+});
+
+/// Static logging levels for trace mode (v>=3)
+static TRACE_LEVELS: Lazy<HashMap<String, Level>> = Lazy::new(|| {
+    [
+        ("audio".to_string(), Level::TRACE),
+        ("transcription".to_string(), Level::TRACE),
+        ("text".to_string(), Level::TRACE),
+        ("cli".to_string(), Level::TRACE),
+    ]
+    .into_iter()
+    .collect()
+});
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -64,40 +113,13 @@ async fn main() -> Result<()> {
 }
 
 fn initialize_logging(cli: &Cli) -> Result<LoggingSystem> {
-    // Create logging configuration based on CLI arguments
-    let mut component_levels = HashMap::new();
-
-    // Set component-specific log levels based on verbosity
-    match cli.verbose {
-        0 => {
-            // Production mode: minimal logging
-            component_levels.insert("audio".to_string(), Level::WARN);
-            component_levels.insert("transcription".to_string(), Level::WARN);
-            component_levels.insert("text".to_string(), Level::WARN);
-            component_levels.insert("cli".to_string(), Level::INFO);
-        },
-        1 => {
-            // Normal verbose: key operations
-            component_levels.insert("audio".to_string(), Level::INFO);
-            component_levels.insert("transcription".to_string(), Level::INFO);
-            component_levels.insert("text".to_string(), Level::INFO);
-            component_levels.insert("cli".to_string(), Level::INFO);
-        },
-        2 => {
-            // Debug mode: detailed information
-            component_levels.insert("audio".to_string(), Level::DEBUG);
-            component_levels.insert("transcription".to_string(), Level::DEBUG);
-            component_levels.insert("text".to_string(), Level::DEBUG);
-            component_levels.insert("cli".to_string(), Level::DEBUG);
-        },
-        _ => {
-            // Trace mode: everything
-            component_levels.insert("audio".to_string(), Level::TRACE);
-            component_levels.insert("transcription".to_string(), Level::TRACE);
-            component_levels.insert("text".to_string(), Level::TRACE);
-            component_levels.insert("cli".to_string(), Level::TRACE);
-        },
-    }
+    // Select static component levels based on verbosity
+    let component_levels = match cli.verbose {
+        0 => PRODUCTION_LEVELS.clone(),
+        1 => VERBOSE_LEVELS.clone(),
+        2 => DEBUG_LEVELS.clone(),
+        _ => TRACE_LEVELS.clone(),
+    };
 
     let config = LoggingConfig {
         component_levels,
