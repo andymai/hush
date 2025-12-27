@@ -31,9 +31,15 @@ check:
 	@echo "✅ Check complete."
 
 # Release build (with CUDA GPU acceleration)
+# Note: Uses GNU ld instead of mold for CUDA builds (mold can't handle CUDA stub libraries)
+# The empty libcuda.so stub at /usr/lib/x86_64-linux-gnu must be bypassed
 release:
 	@echo "🚀 Building release version with CUDA..."
-	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH cargo build --release --features cuda
+	@sudo rm -f /usr/lib/x86_64-linux-gnu/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so 2>/dev/null || true
+	@sudo ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so
+	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH \
+		RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=bfd" \
+		cargo build --release --features cuda
 	@ln -sf target/release/hush ./hush
 	@echo "✅ Release build complete (CUDA enabled). Use ./hush to run."
 
@@ -45,9 +51,14 @@ release-cpu:
 	@echo "✅ Release build complete (CPU only). Use ./hush to run."
 
 # Maximum optimization build (full LTO, slow compile)
+# Note: Uses GNU ld instead of mold for CUDA builds (mold can't handle CUDA stub libraries)
 production:
 	@echo "🏭 Building production version (full LTO, this will take a while)..."
-	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH cargo build --profile production --features cuda
+	@sudo rm -f /usr/lib/x86_64-linux-gnu/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so 2>/dev/null || true
+	@sudo ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so
+	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH \
+		RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=bfd" \
+		cargo build --profile production --features cuda
 	@ln -sf target/production/hush ./hush
 	@echo "✅ Production build complete. Use ./hush to run."
 
