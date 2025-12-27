@@ -4,11 +4,35 @@ use crate::cli::commands::{
 };
 use crate::cli::Commands;
 use crate::logging::RequestContext;
-use anyhow::{Context as AnyhowContext, Result};
+use anyhow::{Context, Result};
 use hound;
 use std::path::PathBuf;
 use std::{env, fs};
 use tracing::{debug, error, info};
+
+/// Get XDG config home path, falling back to ~/.config
+fn get_xdg_config_home() -> Option<PathBuf> {
+    std::env::var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| {
+            std::env::var("HOME")
+                .map(|home| PathBuf::from(home).join(".config"))
+                .ok()
+        })
+}
+
+/// Get XDG data home path, falling back to ~/.local/share
+fn get_xdg_data_home() -> Option<PathBuf> {
+    std::env::var("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| {
+            std::env::var("HOME")
+                .map(|home| PathBuf::from(home).join(".local/share"))
+                .ok()
+        })
+}
 
 pub struct CommandDispatcher {
     _config_path: Option<PathBuf>,
@@ -581,12 +605,9 @@ async fn install_autostart() -> Result<()> {
     println!("📥 Installing autostart entry...");
 
     // Get XDG autostart directory
-    let config_home = env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
-        env::var("HOME")
-            .map(|home| format!("{}/.config", home))
-            .unwrap_or_else(|_| ".config".to_string())
-    });
-    let autostart_dir = PathBuf::from(config_home).join("autostart");
+    let config_home = get_xdg_config_home()
+        .ok_or_else(|| anyhow::anyhow!("Failed to determine config directory"))?;
+    let autostart_dir = config_home.join("autostart");
 
     // Create autostart directory if it doesn't exist
     fs::create_dir_all(&autostart_dir).with_context(|| {
@@ -634,12 +655,9 @@ async fn install_desktop_entry() -> Result<()> {
     println!("📥 Installing desktop entry...");
 
     // Get XDG data directory
-    let data_home = env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
-        env::var("HOME")
-            .map(|home| format!("{}/.local/share", home))
-            .unwrap_or_else(|_| ".local/share".to_string())
-    });
-    let applications_dir = PathBuf::from(data_home).join("applications");
+    let data_home =
+        get_xdg_data_home().ok_or_else(|| anyhow::anyhow!("Failed to determine data directory"))?;
+    let applications_dir = data_home.join("applications");
 
     // Create applications directory if it doesn't exist
     fs::create_dir_all(&applications_dir).with_context(|| {
@@ -770,14 +788,9 @@ async fn install_system_wide() -> Result<()> {
 async fn remove_autostart() -> Result<()> {
     println!("🗑️  Removing autostart entry...");
 
-    let config_home = env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
-        env::var("HOME")
-            .map(|home| format!("{}/.config", home))
-            .unwrap_or_else(|_| ".config".to_string())
-    });
-    let autostart_file = PathBuf::from(config_home)
-        .join("autostart")
-        .join("hush.desktop");
+    let config_home = get_xdg_config_home()
+        .ok_or_else(|| anyhow::anyhow!("Failed to determine config directory"))?;
+    let autostart_file = config_home.join("autostart").join("hush.desktop");
 
     if autostart_file.exists() {
         fs::remove_file(&autostart_file).with_context(|| {
@@ -800,14 +813,9 @@ async fn remove_autostart() -> Result<()> {
 async fn remove_desktop_entry() -> Result<()> {
     println!("🗑️  Removing desktop entry...");
 
-    let data_home = env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
-        env::var("HOME")
-            .map(|home| format!("{}/.local/share", home))
-            .unwrap_or_else(|_| ".local/share".to_string())
-    });
-    let desktop_file = PathBuf::from(&data_home)
-        .join("applications")
-        .join("hush.desktop");
+    let data_home =
+        get_xdg_data_home().ok_or_else(|| anyhow::anyhow!("Failed to determine data directory"))?;
+    let desktop_file = data_home.join("applications").join("hush.desktop");
 
     if desktop_file.exists() {
         fs::remove_file(&desktop_file).with_context(|| {
@@ -816,7 +824,7 @@ async fn remove_desktop_entry() -> Result<()> {
         println!("   ✅ Desktop entry removed: {}", desktop_file.display());
 
         // Try to update desktop database
-        let applications_dir = PathBuf::from(&data_home).join("applications");
+        let applications_dir = data_home.join("applications");
         if let Ok(output) = std::process::Command::new("update-desktop-database")
             .arg(&applications_dir)
             .output()
