@@ -27,7 +27,7 @@ cuda = [
 cpal = "0.15"  # Keep at 0.15 - 0.16 has breaking changes
 hound = "3.5"
 rodio = { version = "0.19", default-features = false, features = ["wav"] }
-rubato = "0.16"  # High-quality audio resampling with sinc interpolation
+rubato = "1.0"  # High-quality audio resampling with sinc interpolation
 
 # Whisper integration (using candle for pure Rust)
 # CUDA features are optional via the "cuda" feature flag
