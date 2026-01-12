@@ -364,10 +364,20 @@ impl AudioCapture {
 
     /// Enable amplitude monitoring and return the receiver channel
     /// Call this before start_recording() to receive amplitude updates
+    ///
+    /// IMPORTANT: Each call creates a new channel, replacing any previous one.
+    /// The receiver should be consumed and dropped after stop_recording() to
+    /// avoid resource leaks.
     pub fn enable_amplitude_monitoring(&mut self) -> mpsc::Receiver<f32> {
         let (tx, rx) = mpsc::channel();
         *self.amplitude_tx.lock() = Some(tx);
         rx
+    }
+
+    /// Disable amplitude monitoring and drop the sender
+    /// This closes the channel and allows amplitude monitoring threads to exit cleanly
+    pub fn disable_amplitude_monitoring(&mut self) {
+        *self.amplitude_tx.lock() = None;
     }
 
     fn find_device_by_name(host: &Host, name: &str) -> Result<Device> {
