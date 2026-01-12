@@ -1,6 +1,7 @@
 use anyhow::Result;
 use parking_lot::Mutex;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
 use tracing::{error, info, warn};
@@ -162,7 +163,7 @@ pub async fn handle_listen(
 
     // Initialize audio capture (main thread - !Send)
     let mut audio_capture = AudioCapture::new(config.audio.device.as_deref())?;
-    let amplitude_rx = Arc::new(Mutex::new(audio_capture.enable_amplitude_monitoring()));
+    // Note: amplitude monitoring is now enabled per-recording session to avoid thread accumulation
     info!(
         "✅ Audio capture initialized: {}",
         audio_capture.get_device_name()
@@ -490,8 +491,10 @@ pub async fn handle_listen(
     // Main thread: audio handling
     info!("🚀 Audio handler ready");
 
-    // Track amplitude monitoring threads for cleanup
-    let mut amplitude_threads: Vec<thread::JoinHandle<()>> = Vec::new();
+    // Track current amplitude monitoring thread (only one at a time)
+    let mut current_amplitude_thread: Option<thread::JoinHandle<()>> = None;
+    // Stop signal for amplitude thread - shared between main loop and amplitude thread
+    let amplitude_stop_signal = Arc::new(AtomicBool::new(false));
 
     loop {
         // Use short timeout for responsive hotkey handling (16ms ≈ 60Hz)
@@ -502,8 +505,15 @@ pub async fn handle_listen(
         };
         match command {
             AudioCommand::StartRecording => {
+                // Reset stop signal for new recording
+                amplitude_stop_signal.store(false, Ordering::Release);
+
+                // Create fresh amplitude channel for this recording session
+                let amplitude_rx = audio_capture.enable_amplitude_monitoring();
+
                 if let Err(e) = audio_capture.start_recording() {
                     error!("Failed to start recording: {}", e);
+                    audio_capture.disable_amplitude_monitoring();
                     if transcription_tx
                         .send(TranscriptionResult::Error(
                             "Failed to start recording".to_string(),
@@ -515,7 +525,7 @@ pub async fn handle_listen(
                 } else {
                     // Start polling amplitude updates with batching for performance
                     let state_handle_amp = state_handle.clone();
-                    let amplitude_rx_clone = amplitude_rx.clone();
+                    let stop_signal = amplitude_stop_signal.clone();
 
                     // Batch amplitude updates to match overlay repaint rate (20 FPS during recording)
                     // This reduces mutex contention and provides smoother averaged values
@@ -525,8 +535,12 @@ pub async fn handle_listen(
                         let mut last_update = std::time::Instant::now();
 
                         loop {
-                            let amp_result = amplitude_rx_clone.lock().try_recv();
-                            match amp_result {
+                            // Check stop signal first for clean shutdown
+                            if stop_signal.load(Ordering::Acquire) {
+                                break;
+                            }
+
+                            match amplitude_rx.try_recv() {
                                 Ok(amplitude) => {
                                     amplitude_buffer.push(amplitude);
 
@@ -542,9 +556,8 @@ pub async fn handle_listen(
                                         let mut state = state_handle_amp.lock();
                                         if state.is_recording() {
                                             state.update_amplitude(avg_amplitude);
-                                        } else {
-                                            break; // Stop when no longer recording
                                         }
+                                        // Don't break here - let stop_signal control exit
 
                                         amplitude_buffer.clear();
                                         last_update = std::time::Instant::now();
@@ -560,10 +573,21 @@ pub async fn handle_listen(
                             }
                         }
                     });
-                    amplitude_threads.push(amplitude_thread);
+                    current_amplitude_thread = Some(amplitude_thread);
                 }
             },
             AudioCommand::StopRecording => {
+                // Signal amplitude thread to stop and clean up immediately
+                amplitude_stop_signal.store(true, Ordering::Release);
+                audio_capture.disable_amplitude_monitoring();
+
+                // Join the amplitude thread with timeout to avoid blocking
+                if let Some(thread) = current_amplitude_thread.take() {
+                    // Give the thread a moment to notice the stop signal
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    let _ = thread.join();
+                }
+
                 let audio_data = match audio_capture.stop_recording() {
                     Ok(data) => data,
                     Err(e) => {
@@ -655,14 +679,16 @@ pub async fn handle_listen(
     // Cleanup
     drop(hotkey_manager);
     drop(audio_cmd_tx);
+
+    // Signal any remaining amplitude thread to stop
+    amplitude_stop_signal.store(true, Ordering::Release);
+    if let Some(thread) = current_amplitude_thread.take() {
+        let _ = thread.join();
+    }
+
     let _ = hotkey_thread.join();
     let _ = result_thread.join();
     let _ = overlay_thread.join();
-
-    // Join all amplitude monitoring threads
-    for thread in amplitude_threads {
-        let _ = thread.join();
-    }
 
     info!("Listen mode ended");
     Ok(())

@@ -2,9 +2,12 @@ use crate::transcription::cuda::CudaAvailability;
 /// Simple working Whisper implementation using whisper-rs
 /// This provides real speech-to-text without the complexity of PyTorch model conversion
 use crate::Result;
+use parking_lot::Mutex;
 use std::path::Path;
 use tracing::{info, warn};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
+};
 
 #[derive(Debug, Clone)]
 pub struct SimpleTranscriptionResult {
@@ -13,8 +16,35 @@ pub struct SimpleTranscriptionResult {
     pub processing_time: std::time::Duration,
 }
 
+/// Holds both the WhisperContext and WhisperState together.
+/// The context is kept alive to support the state. The state is cached and reused
+/// across transcriptions to avoid GPU memory allocation per call.
+struct WhisperContextWithState {
+    /// The whisper context - kept alive to support state operations.
+    #[allow(dead_code)]
+    context: WhisperContext,
+    /// Cached state - reused across transcriptions to avoid GPU memory allocation.
+    /// Wrapped in Mutex because WhisperState::full() requires &mut self.
+    state: Mutex<WhisperState>,
+}
+
+impl WhisperContextWithState {
+    fn new(context: WhisperContext) -> Result<Self> {
+        // Create state from the context - this pre-allocates GPU buffers
+        let state = context
+            .create_state()
+            .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
+
+        Ok(Self {
+            context,
+            state: Mutex::new(state),
+        })
+    }
+}
+
 pub struct SimpleWhisperTranscriber {
-    context: Option<WhisperContext>,
+    /// Combined context and cached state for GPU memory efficiency.
+    context_with_state: Option<WhisperContextWithState>,
     model_path: std::path::PathBuf,
     ready: bool,
 }
@@ -26,7 +56,7 @@ impl SimpleWhisperTranscriber {
         info!("Model path: {:?}", model_path);
 
         let mut transcriber = SimpleWhisperTranscriber {
-            context: None,
+            context_with_state: None,
             model_path: model_path.to_path_buf(),
             ready: false,
         };
@@ -47,7 +77,7 @@ impl SimpleWhisperTranscriber {
         Ok(transcriber)
     }
 
-    /// Load the Whisper model
+    /// Load the Whisper model and pre-create the state for GPU memory efficiency
     async fn load_model(&mut self) -> Result<()> {
         // Check if model file exists
         if !self.model_path.exists() {
@@ -73,8 +103,11 @@ impl SimpleWhisperTranscriber {
             WhisperContext::new_with_params(self.model_path.to_string_lossy().as_ref(), ctx_params)
                 .map_err(|e| anyhow::anyhow!("Failed to create Whisper context: {}", e))?;
 
-        self.context = Some(context);
-        info!("✅ Whisper model loaded successfully");
+        // Create combined context and state - this pre-allocates GPU buffers once
+        let context_with_state = WhisperContextWithState::new(context)?;
+        self.context_with_state = Some(context_with_state);
+
+        info!("✅ Whisper model and state loaded successfully (GPU buffers pre-allocated)");
 
         Ok(())
     }
@@ -85,6 +118,9 @@ impl SimpleWhisperTranscriber {
     }
 
     /// Transcribe audio samples (16kHz, mono, f32)
+    ///
+    /// Uses a cached WhisperState to avoid GPU memory allocation per transcription.
+    /// The state is reused across calls, significantly reducing GPU memory pressure.
     pub async fn transcribe(&self, audio_data: &[f32]) -> Result<SimpleTranscriptionResult> {
         let start_time = std::time::Instant::now();
 
@@ -92,12 +128,15 @@ impl SimpleWhisperTranscriber {
             return Err(anyhow::anyhow!("Transcriber not ready"));
         }
 
-        let context = self
-            .context
+        let ctx_with_state = self
+            .context_with_state
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Whisper context not initialized"))?;
 
-        info!("🎤 Transcribing {} samples of audio", audio_data.len());
+        info!(
+            "🎤 Transcribing {} samples of audio (using cached state)",
+            audio_data.len()
+        );
 
         // Create parameters for transcription - using Greedy sampling for speed
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 0 });
@@ -108,10 +147,8 @@ impl SimpleWhisperTranscriber {
         params.set_print_timestamps(false);
         params.set_n_threads(1); // Use single thread for now
 
-        // Create a mutable state (whisper-rs requires this)
-        let mut state = context
-            .create_state()
-            .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
+        // Reuse the cached state - this avoids GPU memory allocation per transcription
+        let mut state = ctx_with_state.state.lock();
 
         // Run the transcription
         state
@@ -133,6 +170,9 @@ impl SimpleWhisperTranscriber {
                 segment_count += 1;
             }
         }
+
+        // Drop the lock before logging to minimize lock hold time
+        drop(state);
 
         // Simple confidence estimation based on whether we got meaningful text
         let confidence = if full_text.trim().is_empty() {
