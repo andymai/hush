@@ -75,7 +75,7 @@ Transcribed text flows through: filler word removal → vocabulary expansion →
 These versions are pinned due to breaking changes in newer releases:
 - cpal 0.15 (0.16 breaking)
 - dirs 5.0 (6.0 breaking API)
-- egui 0.23 (must match egui_overlay 0.5)
+- egui 0.29 (must match egui_overlay 0.9)
 
 ## Configuration
 

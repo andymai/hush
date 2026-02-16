@@ -163,7 +163,9 @@ fn create_frame(config: &OverlayConfig, height: f32) -> Frame {
         .rounding(height / 2.0)  // Perfect pill shape (height/2)
         .inner_margin(0.0)  // No padding - keep it tight
         .shadow(egui::epaint::Shadow {
-            extrusion: 4.0,
+            offset: egui::Vec2::ZERO,
+            blur: 8.0,
+            spread: 2.0,
             color: Color32::from_black_alpha(100),
         })
 }

@@ -206,12 +206,14 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
 
     // Hide from taskbar on X11
     {
-        use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
-        if let RawWindowHandle::Xlib(handle) = glfw_backend.window.raw_window_handle() {
-            if let Err(e) = set_skip_taskbar_x11(handle.window as u32) {
-                warn!("Failed to set skip taskbar hint: {}", e);
-            } else {
-                info!("Window hidden from taskbar");
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(handle) = glfw_backend.window.window_handle() {
+            if let RawWindowHandle::Xlib(xlib_handle) = handle.as_raw() {
+                if let Err(e) = set_skip_taskbar_x11(xlib_handle.window as u32) {
+                    warn!("Failed to set skip taskbar hint: {}", e);
+                } else {
+                    info!("Window hidden from taskbar");
+                }
             }
         }
     }
@@ -219,18 +221,13 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
     let latest_size = glfw_backend.window.get_framebuffer_size();
     let latest_size = [latest_size.0 as u32, latest_size.1 as u32];
 
-    let default_gfx_backend = {
-        use raw_window_handle::HasRawWindowHandle;
-        let handle = glfw_backend.window.raw_window_handle();
-        ThreeDBackend::new(
-            egui_overlay::egui_render_three_d::ThreeDConfig {
-                ..Default::default()
-            },
-            |s| glfw_backend.get_proc_address(s),
-            handle,
-            latest_size,
-        )
-    };
+    let default_gfx_backend = ThreeDBackend::new(
+        egui_overlay::egui_render_three_d::ThreeDConfig {
+            ..Default::default()
+        },
+        |s| glfw_backend.get_proc_address(s),
+        latest_size,
+    );
 
     let overlay_app = egui_overlay::OverlayApp {
         user_data,
