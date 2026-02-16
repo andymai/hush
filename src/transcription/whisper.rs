@@ -7,7 +7,7 @@ use candle_transformers::models::whisper::{self as m, Config};
 use hf_hub::api::tokio::Api;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use rubato::{FftFixedInOut, Resampler};
+use rubato::{Fft, FixedSync, Indexing, Resampler};
 use serde_json;
 use std::path::Path;
 use tokenizers::Tokenizer;
@@ -629,18 +629,21 @@ impl WhisperTranscriber {
         }
 
         // Use rubato for high-quality sinc resampling
-        // FftFixedInOut provides excellent quality with reasonable performance
+        // Fft with FixedSync::Both provides excellent quality with reasonable performance
+        use audioadapter_buffers::direct::SequentialSlice;
+
         let chunk_size = 1024;
-        let mut resampler = FftFixedInOut::<f32>::new(
+        let mut resampler = Fft::<f32>::new(
             from_rate as usize,
             to_rate as usize,
             chunk_size,
+            1, // sub_chunks
             1, // mono audio
+            FixedSync::Both,
         )
         .map_err(|e| anyhow::anyhow!("Failed to create resampler: {}", e))?;
 
         let input_frames_next = resampler.input_frames_next();
-        let output_frames_max = resampler.output_frames_max();
 
         // Pad input to be a multiple of the required chunk size
         let mut padded_input = audio.to_vec();
@@ -649,18 +652,30 @@ impl WhisperTranscriber {
             padded_input.extend(vec![0.0f32; input_frames_next - remainder]);
         }
 
-        let mut output = Vec::with_capacity(
-            (audio.len() as f64 * to_rate as f64 / from_rate as f64) as usize + output_frames_max,
-        );
+        let expected_len = (audio.len() as f64 * to_rate as f64 / from_rate as f64) as usize;
+        let output_frames_max = resampler.output_frames_max();
+        let mut output = Vec::with_capacity(expected_len + output_frames_max);
 
-        // Process in chunks
+        // Process in chunks using audioadapter
+        let output_chunk_max = resampler.output_frames_max();
         for chunk in padded_input.chunks(input_frames_next) {
-            let input_chunk = vec![chunk.to_vec()];
-            let mut output_buffer = resampler.output_buffer_allocate(true);
+            let input_adapter = SequentialSlice::new(chunk, 1, chunk.len())
+                .map_err(|e| anyhow::anyhow!("Failed to create input adapter: {}", e))?;
 
-            match resampler.process_into_buffer(&input_chunk, &mut output_buffer, None) {
-                Ok(_) => {
-                    output.extend_from_slice(&output_buffer[0]);
+            let mut output_buf = vec![0.0f32; output_chunk_max];
+            let mut output_adapter = SequentialSlice::new_mut(&mut output_buf, 1, output_chunk_max)
+                .map_err(|e| anyhow::anyhow!("Failed to create output adapter: {}", e))?;
+
+            let indexing = Indexing {
+                input_offset: 0,
+                output_offset: 0,
+                active_channels_mask: None,
+                partial_len: None,
+            };
+
+            match resampler.process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing)) {
+                Ok((_read, written)) => {
+                    output.extend_from_slice(&output_buf[..written]);
                 },
                 Err(e) => {
                     warn!("Resampling error: {}, falling back to passthrough", e);
@@ -670,7 +685,6 @@ impl WhisperTranscriber {
         }
 
         // Trim to expected length
-        let expected_len = (audio.len() as f64 * to_rate as f64 / from_rate as f64) as usize;
         output.truncate(expected_len);
 
         Ok(output)
