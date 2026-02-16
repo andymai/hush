@@ -1,6 +1,6 @@
 use crate::Result;
 use anyhow::Context;
-use rodio::{OutputStream, Sink, Source};
+use rodio::{OutputStream, OutputStreamBuilder, Sink, Source};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::warn;
@@ -16,8 +16,8 @@ impl AudioFeedback {
     #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> Result<Self> {
         // Try to initialize audio output, but don't fail if unavailable
-        let (_stream, enabled) = match OutputStream::try_default() {
-            Ok((stream, _handle)) => (Some(Arc::new(stream)), true),
+        let (_stream, enabled) = match OutputStreamBuilder::open_default_stream() {
+            Ok(stream) => (Some(Arc::new(stream)), true),
             Err(e) => {
                 warn!(
                     "Audio feedback unavailable: {}. Continuing without sound feedback.",
@@ -106,10 +106,10 @@ impl Default for AudioFeedback {
 
 /// Play a single tone at the specified frequency and duration
 fn play_tone(frequency: f32, duration_ms: u64) -> Result<()> {
-    let (_stream, stream_handle) =
-        OutputStream::try_default().context("Failed to get audio output stream")?;
+    let stream = OutputStreamBuilder::open_default_stream()
+        .context("Failed to get audio output stream")?;
 
-    let sink = Sink::try_new(&stream_handle).context("Failed to create audio sink")?;
+    let sink = Sink::connect_new(&stream.mixer());
 
     let source = SineWave::new(frequency)
         .take_duration(Duration::from_millis(duration_ms))
@@ -123,10 +123,10 @@ fn play_tone(frequency: f32, duration_ms: u64) -> Result<()> {
 
 /// Play two tones in sequence (for error sound)
 fn play_double_beep(frequency: f32, duration_ms: u64, gap_ms: u64) -> Result<()> {
-    let (_stream, stream_handle) =
-        OutputStream::try_default().context("Failed to get audio output stream")?;
+    let stream = OutputStreamBuilder::open_default_stream()
+        .context("Failed to get audio output stream")?;
 
-    let sink = Sink::try_new(&stream_handle).context("Failed to create audio sink")?;
+    let sink = Sink::connect_new(&stream.mixer());
 
     // First beep
     let source1 = SineWave::new(frequency)
@@ -180,7 +180,7 @@ impl Iterator for SineWave {
 }
 
 impl Source for SineWave {
-    fn current_frame_len(&self) -> Option<usize> {
+    fn current_span_len(&self) -> Option<usize> {
         None
     }
 
