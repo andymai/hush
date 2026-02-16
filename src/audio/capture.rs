@@ -1,7 +1,7 @@
 use crate::logging::{audio as logging, RequestContext};
 use crate::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Host, SampleRate, Stream, StreamConfig};
+use cpal::{Device, Host, Stream, StreamConfig};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -103,7 +103,7 @@ impl AudioCapture {
             },
         };
 
-        let device_name_str = device.name().unwrap_or("Unknown".to_string());
+        let device_name_str = device.description().unwrap_or("Unknown".to_string());
         logging::log_device_initialization(&device_name_str, 16000, 1);
 
         info!(
@@ -121,7 +121,7 @@ impl AudioCapture {
             Err(e) => {
                 warn!(
                     "Failed to get default input config from {}: {}",
-                    device.name().unwrap_or("Unknown".to_string()),
+                    device.description().unwrap_or("Unknown".to_string()),
                     e
                 );
                 warn!("Trying to find alternative working device...");
@@ -133,7 +133,7 @@ impl AudioCapture {
                             .map_err(|e| anyhow::anyhow!("Working device config failed: {}", e))?;
                         info!(
                             "Found working device: {}",
-                            working_device.name().unwrap_or("Unknown".to_string())
+                            working_device.description().unwrap_or("Unknown".to_string())
                         );
                         info!("Working device config: {:?}", config);
                         (working_device, config)
@@ -145,7 +145,7 @@ impl AudioCapture {
                             device,
                             config: StreamConfig {
                                 channels: 1,
-                                sample_rate: SampleRate(16000),
+                                sample_rate: 16000,
                                 buffer_size: cpal::BufferSize::Fixed(1024),
                             },
                             stream: None,
@@ -162,7 +162,7 @@ impl AudioCapture {
         // Create our desired config (16kHz mono for Whisper)
         let config = StreamConfig {
             channels: 1,                    // Mono for speech recognition
-            sample_rate: SampleRate(16000), // Optimal for Whisper
+            sample_rate: 16000, // Optimal for Whisper
             buffer_size: cpal::BufferSize::Fixed(1024),
         };
 
@@ -293,7 +293,7 @@ impl AudioCapture {
         // Handle simulated mode with fake audio data
         if self.simulated_mode {
             // Generate 3 seconds of simulated audio data (silence for now)
-            let duration_samples = (3.0 * self.config.sample_rate.0 as f32) as usize;
+            let duration_samples = (3.0 * self.config.sample_rate as f32) as usize;
             let simulated_data = vec![0.0f32; duration_samples];
 
             info!(
@@ -339,7 +339,7 @@ impl AudioCapture {
             data
         };
 
-        let duration_sec = recorded_data.len() as f32 / self.config.sample_rate.0 as f32;
+        let duration_sec = recorded_data.len() as f32 / self.config.sample_rate as f32;
 
         logging::log_recording_stopped(&ctx, recorded_data.len(), duration_sec);
 
@@ -347,7 +347,7 @@ impl AudioCapture {
             request_id = %ctx.request_id,
             samples = %recorded_data.len(),
             duration_sec = %duration_sec,
-            sample_rate = %self.config.sample_rate.0,
+            sample_rate = %self.config.sample_rate,
             "✅ Audio recording completed successfully"
         );
 
@@ -359,7 +359,7 @@ impl AudioCapture {
     }
 
     pub fn get_device_name(&self) -> String {
-        self.device.name().unwrap_or("Unknown Device".to_string())
+        self.device.description().unwrap_or("Unknown Device".to_string())
     }
 
     /// Enable amplitude monitoring and return the receiver channel
@@ -386,7 +386,7 @@ impl AudioCapture {
             .map_err(|e| anyhow::anyhow!("Failed to enumerate input devices: {}", e))?;
 
         for device in devices {
-            if let Ok(device_name) = device.name() {
+            if let Ok(device_name) = device.description() {
                 if device_name.contains(name) {
                     return Ok(device);
                 }
@@ -408,7 +408,7 @@ impl AudioCapture {
         // First, try preferred devices
         for preferred in &preferred_devices {
             for device in &devices {
-                if let Ok(device_name) = device.name() {
+                if let Ok(device_name) = device.description() {
                     if device_name
                         .to_lowercase()
                         .contains(&preferred.to_lowercase())
@@ -424,7 +424,7 @@ impl AudioCapture {
         // If no preferred devices work, try any device that has a working config
         for device in &devices {
             if device.default_input_config().is_ok() {
-                let device_name = device.name().unwrap_or("Unknown".to_string());
+                let device_name = device.description().unwrap_or("Unknown".to_string());
                 info!("Found alternative working device: {}", device_name);
                 return Ok(device.clone());
             }
@@ -455,7 +455,7 @@ impl AudioCapture {
 
         let mut device_names = Vec::new();
         for device in devices {
-            if let Ok(name) = device.name() {
+            if let Ok(name) = device.description() {
                 device_names.push(name);
             }
         }
