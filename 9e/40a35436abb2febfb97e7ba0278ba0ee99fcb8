@@ -1,0 +1,28 @@
+src/audio/capture.rs
+  s_3c11a98f595983::t_2c163f1dd464c7 140-141
+  s_3c11a98f595983::t_39e1914c75e62c 110
+  s_3c11a98f595983::t_d0d657f9a7becf 367
+  s_3c11a98f595983::t_c65893ae94aa3c 394
+  s_3c11a98f595983::t_86b952fa5aaf6a 128
+  s_3c11a98f595983::t_b23128000d5f5e 169
+  s_3c11a98f595983::t_8975eece2ff068 432
+  s_3c11a98f595983::t_3e9d36456331fe 416
+  s_3c11a98f595983::t_7754f681ba1c76 28-31
+  s_3c11a98f595983::t_59a6a7850878f7 463
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "9e40a35436abb2febfb97e7ba0278ba0ee99fcb8",
+  "prompts": {},
+  "sessions": {
+    "s_3c11a98f595983": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "10351c42-1cb0-4ec1-8069-6d8740b6a068",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
