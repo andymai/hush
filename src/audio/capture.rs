@@ -25,6 +25,10 @@ pub struct AudioCapture {
     amplitude_tx: Arc<Mutex<Option<mpsc::Sender<f32>>>>,
 }
 
+fn device_name_of(device: &Device) -> Option<String> {
+    device.description().ok().map(|d| d.name().to_string())
+}
+
 /// Calculate RMS (Root Mean Square) amplitude from audio samples
 /// Returns a value between 0.0 and 1.0
 fn calculate_rms_amplitude(samples: &[f32]) -> f32 {
@@ -103,7 +107,7 @@ impl AudioCapture {
             },
         };
 
-        let device_name_str = device.description().unwrap_or("Unknown".to_string());
+        let device_name_str = device_name_of(&device).unwrap_or_else(|| "Unknown".to_string());
         logging::log_device_initialization(&device_name_str, 16000, 1);
 
         info!(
@@ -121,7 +125,7 @@ impl AudioCapture {
             Err(e) => {
                 warn!(
                     "Failed to get default input config from {}: {}",
-                    device.description().unwrap_or("Unknown".to_string()),
+                    device_name_of(&device).unwrap_or_else(|| "Unknown".to_string()),
                     e
                 );
                 warn!("Trying to find alternative working device...");
@@ -133,7 +137,8 @@ impl AudioCapture {
                             .map_err(|e| anyhow::anyhow!("Working device config failed: {}", e))?;
                         info!(
                             "Found working device: {}",
-                            working_device.description().unwrap_or("Unknown".to_string())
+                            device_name_of(&working_device)
+                                .unwrap_or_else(|| "Unknown".to_string())
                         );
                         info!("Working device config: {:?}", config);
                         (working_device, config)
@@ -161,7 +166,7 @@ impl AudioCapture {
 
         // Create our desired config (16kHz mono for Whisper)
         let config = StreamConfig {
-            channels: 1,                    // Mono for speech recognition
+            channels: 1,        // Mono for speech recognition
             sample_rate: 16000, // Optimal for Whisper
             buffer_size: cpal::BufferSize::Fixed(1024),
         };
@@ -359,7 +364,7 @@ impl AudioCapture {
     }
 
     pub fn get_device_name(&self) -> String {
-        self.device.description().unwrap_or("Unknown Device".to_string())
+        device_name_of(&self.device).unwrap_or_else(|| "Unknown Device".to_string())
     }
 
     /// Enable amplitude monitoring and return the receiver channel
@@ -386,7 +391,7 @@ impl AudioCapture {
             .map_err(|e| anyhow::anyhow!("Failed to enumerate input devices: {}", e))?;
 
         for device in devices {
-            if let Ok(device_name) = device.description() {
+            if let Some(device_name) = device_name_of(&device) {
                 if device_name.contains(name) {
                     return Ok(device);
                 }
@@ -408,7 +413,7 @@ impl AudioCapture {
         // First, try preferred devices
         for preferred in &preferred_devices {
             for device in &devices {
-                if let Ok(device_name) = device.description() {
+                if let Some(device_name) = device_name_of(device) {
                     if device_name
                         .to_lowercase()
                         .contains(&preferred.to_lowercase())
@@ -424,7 +429,7 @@ impl AudioCapture {
         // If no preferred devices work, try any device that has a working config
         for device in &devices {
             if device.default_input_config().is_ok() {
-                let device_name = device.description().unwrap_or("Unknown".to_string());
+                let device_name = device_name_of(device).unwrap_or_else(|| "Unknown".to_string());
                 info!("Found alternative working device: {}", device_name);
                 return Ok(device.clone());
             }
@@ -455,7 +460,7 @@ impl AudioCapture {
 
         let mut device_names = Vec::new();
         for device in devices {
-            if let Ok(name) = device.description() {
+            if let Some(name) = device_name_of(&device) {
                 device_names.push(name);
             }
         }
