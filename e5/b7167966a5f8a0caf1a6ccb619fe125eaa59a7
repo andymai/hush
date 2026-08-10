@@ -1,0 +1,21 @@
+Cargo.toml
+  s_3c11a98f595983::t_925534a00c6bce 31
+src/transcription/whisper.rs
+  s_3c11a98f595983::t_b23128000d5f5e 676-680
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "e5b7167966a5f8a0caf1a6ccb619fe125eaa59a7",
+  "prompts": {},
+  "sessions": {
+    "s_3c11a98f595983": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "10351c42-1cb0-4ec1-8069-6d8740b6a068",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
