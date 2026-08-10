@@ -106,10 +106,10 @@ impl Default for AudioFeedback {
 
 /// Play a single tone at the specified frequency and duration
 fn play_tone(frequency: f32, duration_ms: u64) -> Result<()> {
-    let stream = OutputStreamBuilder::open_default_stream()
-        .context("Failed to get audio output stream")?;
+    let stream =
+        OutputStreamBuilder::open_default_stream().context("Failed to get audio output stream")?;
 
-    let sink = Sink::connect_new(&stream.mixer());
+    let sink = Sink::connect_new(stream.mixer());
 
     let source = SineWave::new(frequency)
         .take_duration(Duration::from_millis(duration_ms))
@@ -123,10 +123,10 @@ fn play_tone(frequency: f32, duration_ms: u64) -> Result<()> {
 
 /// Play two tones in sequence (for error sound)
 fn play_double_beep(frequency: f32, duration_ms: u64, gap_ms: u64) -> Result<()> {
-    let stream = OutputStreamBuilder::open_default_stream()
-        .context("Failed to get audio output stream")?;
+    let stream =
+        OutputStreamBuilder::open_default_stream().context("Failed to get audio output stream")?;
 
-    let sink = Sink::connect_new(&stream.mixer());
+    let sink = Sink::connect_new(stream.mixer());
 
     // First beep
     let source1 = SineWave::new(frequency)
@@ -135,8 +135,7 @@ fn play_double_beep(frequency: f32, duration_ms: u64, gap_ms: u64) -> Result<()>
     sink.append(source1);
 
     // Gap (silence)
-    let silence =
-        rodio::source::Zero::<f32>::new(1, 48000).take_duration(Duration::from_millis(gap_ms));
+    let silence = rodio::source::Zero::new(1, 48000).take_duration(Duration::from_millis(gap_ms));
     sink.append(silence);
 
     // Second beep
