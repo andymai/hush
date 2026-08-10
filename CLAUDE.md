@@ -20,6 +20,12 @@ cargo fmt              # Format
 
 The Makefile creates a `./hush` symlink to the built binary.
 
+`make release` needs the CUDA toolkit (`nvcc`), not just the NVIDIA driver. On a
+host that ships driver-only (Fedora Atomic and similar), run it inside a CUDA
+container; `cuda-preflight` fails early with instructions when `nvcc` is absent.
+CUDA targets also drop sccache from `PATH`, because ggml's CMake auto-detects it
+and deadlocks on the CUDA kernel fan-out.
+
 ## Running
 
 ```bash
@@ -72,9 +78,13 @@ Transcribed text flows through: filler word removal → vocabulary expansion →
 
 ## Pinned Dependencies
 
-These versions are pinned due to breaking changes in newer releases:
+These versions are constrained:
 - dirs 5.0 (6.0 breaking API)
 - egui 0.29 (must match egui_overlay 0.9)
+- audioadapter-buffers 2.0 (must match the version rubato depends on; a mismatch
+  makes `SequentialSlice` fail rubato's `Adapter`/`AdapterMut` bounds)
+- rodio needs the `playback` feature explicitly, since it uses
+  `default-features = false` and `playback` gates `OutputStream`
 
 ## Configuration
 
@@ -84,7 +94,7 @@ These versions are pinned due to breaking changes in newer releases:
 
 ## Testing
 
-Unit tests are embedded in modules via `#[cfg(test)] mod tests`. Use mock implementations from `core/mocks.rs` for trait testing. CI runs format check, clippy, build, test, and cargo-audit.
+Unit tests are embedded in modules via `#[cfg(test)] mod tests`. Use mock implementations from `core/mocks.rs` for trait testing. `.github/workflows/ci.yml` runs format check, clippy, a CPU release build, tests, and cargo-audit on every PR. CUDA builds are not covered by CI, so verify those locally.
 
 ## Platform
 
