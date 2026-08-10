@@ -1,4 +1,12 @@
-.PHONY: build check clean dev release release-cpu production install link help
+.PHONY: build check clean dev release release-cpu production install link help cuda-preflight
+
+# ggml's CMake auto-detects sccache from PATH and deadlocks on the CUDA kernel
+# fan-out, so CUDA builds drop it from PATH entirely; unsetting RUSTC_WRAPPER
+# alone only covers rustc, not nvcc.
+CUDA_ENV = PATH="$$(dirname $$(rustup which cargo)):$$(echo $$PATH | tr ':' '\n' | grep -v '\.cargo/bin' | paste -sd:)" \
+	RUSTC_WRAPPER= \
+	PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH \
+	RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=bfd"
 
 # Default target
 help:
@@ -30,16 +38,27 @@ check:
 	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH cargo check
 	@echo "✅ Check complete."
 
+# Verify the CUDA toolkit is present and the link-time stub is in place.
+# Only libcuda.so (the stub) is ever created here. libcuda.so.1 is the real
+# driver, which is bind-mounted in containers; deleting it breaks CUDA at runtime.
+cuda-preflight:
+	@command -v nvcc >/dev/null 2>&1 || { \
+		echo "❌ nvcc not found: CUDA builds need the CUDA toolkit, not just the driver."; \
+		echo "   If your host only ships the NVIDIA driver (e.g. Fedora Atomic/ostree),"; \
+		echo "   build inside a CUDA container, then re-run this target there."; \
+		echo "   For a CPU-only build instead, run: make release-cpu"; \
+		exit 1; \
+	}
+	@if [ ! -e /usr/lib/x86_64-linux-gnu/libcuda.so ]; then \
+		echo "🔗 Creating CUDA stub symlink (one-time, needs sudo)..."; \
+		sudo ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so; \
+	fi
+
 # Release build (with CUDA GPU acceleration)
 # Note: Uses GNU ld instead of mold for CUDA builds (mold can't handle CUDA stub libraries)
-# The empty libcuda.so stub at /usr/lib/x86_64-linux-gnu must be bypassed
-release:
+release: cuda-preflight
 	@echo "🚀 Building release version with CUDA..."
-	@sudo rm -f /usr/lib/x86_64-linux-gnu/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so 2>/dev/null || true
-	@sudo ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so
-	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH \
-		RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=bfd" \
-		cargo build --release --features cuda
+	@$(CUDA_ENV) cargo build --release --features cuda
 	@ln -sf target/release/hush ./hush
 	@echo "✅ Release build complete (CUDA enabled). Use ./hush to run."
 
@@ -52,13 +71,9 @@ release-cpu:
 
 # Maximum optimization build (full LTO, slow compile)
 # Note: Uses GNU ld instead of mold for CUDA builds (mold can't handle CUDA stub libraries)
-production:
+production: cuda-preflight
 	@echo "🏭 Building production version (full LTO, this will take a while)..."
-	@sudo rm -f /usr/lib/x86_64-linux-gnu/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so 2>/dev/null || true
-	@sudo ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so
-	@PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:$$PKG_CONFIG_PATH \
-		RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=bfd" \
-		cargo build --profile production --features cuda
+	@$(CUDA_ENV) cargo build --profile production --features cuda
 	@ln -sf target/production/hush ./hush
 	@echo "✅ Production build complete. Use ./hush to run."
 
