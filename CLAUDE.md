@@ -94,7 +94,7 @@ These versions are constrained:
 
 ## Testing
 
-Unit tests are embedded in modules via `#[cfg(test)] mod tests`. Use mock implementations from `core/mocks.rs` for trait testing. `.github/workflows/ci.yml` runs format check, clippy, a CPU release build, tests, and cargo-audit on every PR. CUDA builds are not covered by CI, so verify those locally.
+Unit tests are embedded in modules via `#[cfg(test)] mod tests`. Use mock implementations from `core/mocks.rs` for trait testing. `.github/workflows/ci.yml` runs format check, clippy, a CPU release build, `cargo test --lib --bins`, and cargo-audit on every PR. Doctests are excluded because the module-level examples have drifted from the API. CUDA builds are not covered by CI, so verify those locally.
 
 ## Platform
 
