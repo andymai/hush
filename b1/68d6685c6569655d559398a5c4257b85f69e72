@@ -1,0 +1,22 @@
+Makefile
+  s_3c11a98f595983::t_a2b0b5846b15ec 6
+  s_3c11a98f595983::t_bfd72595954e53 41-56,59,61
+  s_3c11a98f595983::t_0468c8434276c6 74,76
+  s_3c11a98f595983::t_27e108f3fdc6be 1-5,7-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "b168d6685c6569655d559398a5c4257b85f69e72",
+  "prompts": {},
+  "sessions": {
+    "s_3c11a98f595983": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "10351c42-1cb0-4ec1-8069-6d8740b6a068",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
