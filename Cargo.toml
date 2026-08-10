@@ -28,7 +28,7 @@ cpal = "0.17"
 hound = "3.5"
 rodio = { version = "0.21", default-features = false, features = ["playback", "wav"] }
 rubato = "1.0"
-audioadapter-buffers = "1.0"  # Buffer adapters for rubato resampler
+audioadapter-buffers = "2.0"  # Buffer adapters for rubato resampler; must match rubato's own version
 
 # Whisper integration (using candle for pure Rust)
 # CUDA features are optional via the "cuda" feature flag
