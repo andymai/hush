@@ -159,7 +159,7 @@ fn create_frame(config: &OverlayConfig, height: f32) -> Frame {
 
     Frame::none()
         .fill(bg_color)
-        .stroke(Stroke::new(1.0, border_color))  // 1px subtle border
+        .stroke(Stroke::new(1.0_f32, border_color))  // 1px subtle border
         .rounding(height / 2.0)  // Perfect pill shape (height/2)
         .inner_margin(0.0)  // No padding - keep it tight
         .shadow(egui::epaint::Shadow {

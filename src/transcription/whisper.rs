@@ -673,7 +673,11 @@ impl WhisperTranscriber {
                 partial_len: None,
             };
 
-            match resampler.process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing)) {
+            match resampler.process_into_buffer(
+                &input_adapter,
+                &mut output_adapter,
+                Some(&indexing),
+            ) {
                 Ok((_read, written)) => {
                     output.extend_from_slice(&output_buf[..written]);
                 },

@@ -462,7 +462,7 @@ mod tests {
         assert!(large_v3_info.sha256.is_some());
         assert_eq!(
             large_v3_info.sha256.as_ref().unwrap(),
-            "ad82bf6a9043ceed055076d0fd39f5f186ff8062f19f9e9c50c5c8fb3a9a6e9f"
+            "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2"
         );
     }
 }

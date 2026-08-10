@@ -243,7 +243,7 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
 fn get_primary_monitor_info() -> Option<([u32; 2], [i32; 2])> {
     use egui_overlay::egui_window_glfw_passthrough::glfw;
 
-    let mut glfw_context = glfw::init(glfw::FAIL_ON_ERRORS).ok()?;
+    let mut glfw_context = glfw::init(glfw::fail_on_errors).ok()?;
 
     glfw_context.with_connected_monitors(|_, monitors| {
         info!("Detected {} monitor(s)", monitors.len());
