@@ -49,6 +49,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Cargo.lock is gitignored, and audit-check reads ./Cargo.lock.
+      - name: Generate lockfile
+        run: cargo generate-lockfile
+
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
