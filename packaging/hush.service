@@ -1,0 +1,13 @@
+[Unit]
+Description=Hush voice-to-text daemon
+Documentation=https://github.com/andymai/hush
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/hush daemon start --foreground
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

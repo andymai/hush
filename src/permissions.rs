@@ -213,6 +213,12 @@ mod tests {
     }
 
     #[test]
+    fn packaged_rule_matches_the_constant() {
+        let packaged = include_str!("../packaging/70-hush.rules");
+        assert_eq!(packaged, UDEV_RULE);
+    }
+
+    #[test]
     fn status_is_consistent() {
         let status = status();
         assert!(status.readable_event_nodes <= status.event_nodes);

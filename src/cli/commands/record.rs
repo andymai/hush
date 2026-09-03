@@ -97,6 +97,7 @@ pub async fn handle_record(
 
         // Initialize text processor
         let text_processor = {
+            let _ = dotenvy::from_path(crate::config::paths::config_dir().join(".env"));
             let _ = dotenvy::dotenv();
             let llm_provider = if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
                 if !api_key.is_empty() {

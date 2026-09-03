@@ -2,7 +2,7 @@
 name = "hush"
 version = "0.1.0"
 edition = "2021"
-description = "Fast, accurate voice-to-text for Linux developers"
+description = "Local voice-to-text for Linux desktops"
 authors = ["Andy Aragon"]
 license = "MIT"
 repository = "https://github.com/andymai/hush"
@@ -11,6 +11,69 @@ rust-version = "1.88"
 keywords = ["voice", "speech-to-text", "whisper", "linux"]
 categories = ["multimedia::audio", "accessibility"]
 default-run = "hush"
+
+# Packaging: cargo deb and cargo generate-rpm read these; the release workflow
+# runs both against the vulkan build.
+[package.metadata.deb]
+maintainer = "Andy Aragon"
+copyright = "2025-2026, Andy Aragon"
+license-file = ["LICENSE", "0"]
+extended-description = """Hush runs OpenAI's Whisper models locally, on the GPU through Vulkan when \
+one is present, and types the result at the cursor through uinput, so it works \
+in every application, VM, and password field on X11 and Wayland."""
+section = "utils"
+priority = "optional"
+depends = "$auto"
+assets = [
+  [
+    "target/release/hush",
+    "usr/bin/",
+    "755",
+  ],
+  [
+    "packaging/io.github.andymai.hush.desktop",
+    "usr/share/applications/",
+    "644",
+  ],
+  [
+    "packaging/io.github.andymai.hush.svg",
+    "usr/share/icons/hicolor/scalable/apps/",
+    "644",
+  ],
+  [
+    "packaging/70-hush.rules",
+    "usr/lib/udev/rules.d/",
+    "644",
+  ],
+  [
+    "packaging/hush.service",
+    "usr/lib/systemd/user/",
+    "644",
+  ],
+  [
+    "README.md",
+    "usr/share/doc/hush/README.md",
+    "644",
+  ],
+]
+
+[package.metadata.generate-rpm]
+license = "MIT"
+summary = "Local voice-to-text for Linux desktops"
+auto-req = "disabled"
+assets = [
+  { source = "target/release/hush", dest = "/usr/bin/hush", mode = "755" },
+  { source = "packaging/io.github.andymai.hush.desktop", dest = "/usr/share/applications/io.github.andymai.hush.desktop", mode = "644" },
+  { source = "packaging/io.github.andymai.hush.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.andymai.hush.svg", mode = "644" },
+  { source = "packaging/70-hush.rules", dest = "/usr/lib/udev/rules.d/70-hush.rules", mode = "644" },
+  { source = "packaging/hush.service", dest = "/usr/lib/systemd/user/hush.service", mode = "644" },
+  { source = "README.md", dest = "/usr/share/doc/hush/README.md", mode = "644", doc = true },
+]
+
+[package.metadata.generate-rpm.requires]
+vulkan-loader = "*"
+alsa-lib = "*"
+libX11 = "*"
 
 [features]
 default = []

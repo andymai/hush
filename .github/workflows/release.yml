@@ -1,0 +1,163 @@
+name: Release
+
+# Builds the packages for a published release, or on demand for an existing
+# tag. A dry run keeps the artifacts on the workflow run instead of uploading
+# them to the release, which is how the packaging gets exercised before a
+# real release.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build, e.g. v0.2.0"
+        required: true
+        type: string
+      dry_run:
+        description: "Keep the artifacts on this run instead of uploading to the release"
+        type: boolean
+        default: true
+
+permissions: {}
+
+# Never cancel a release build part-way through an upload.
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  package:
+    name: Build packages
+    # ubuntu-22.04 sets the glibc floor (2.35) for the tarball and AppImage.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      # dpkg-shlibdeps fills in the .deb's Depends from the linked libraries.
+      - name: Install packaging tools
+        run: sudo apt-get install -y --no-install-recommends dpkg-dev
+      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.62.30
+        with:
+          tool: cargo-deb@3.8.0
+      - run: cargo install --locked cargo-generate-rpm@0.21.0
+
+      - name: Verify the tag matches Cargo.toml
+        id: version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Cargo.toml is at $version but the tag is $TAG"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - run: cargo build --release --features vulkan
+
+      - name: Build .deb, .rpm, and tarball
+        run: |
+          set -euo pipefail
+          mkdir -p target/dist
+          cargo deb --no-build --output target/dist/
+          cargo generate-rpm --output target/dist/
+          stage="target/stage/hush-${VERSION}-x86_64-linux"
+          mkdir -p "$stage"
+          cp target/release/hush LICENSE README.md INSTALL.md \
+             packaging/io.github.andymai.hush.desktop packaging/io.github.andymai.hush.svg \
+             packaging/70-hush.rules packaging/hush.service "$stage/"
+          tar -C target/stage -czf "target/dist/hush-${VERSION}-x86_64-linux.tar.gz" \
+             "hush-${VERSION}-x86_64-linux"
+
+      - name: Build AppImage
+        env:
+          APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+        run: |
+          set -euo pipefail
+          curl -fsSL -o appimagetool "$APPIMAGETOOL_URL"
+          echo "$APPIMAGETOOL_SHA256  appimagetool" | sha256sum -c -
+          chmod +x appimagetool
+          appdir=target/AppDir
+          mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" \
+                   "$appdir/usr/share/icons/hicolor/scalable/apps"
+          cp target/release/hush "$appdir/usr/bin/"
+          cp packaging/io.github.andymai.hush.desktop "$appdir/" "$appdir/usr/share/applications/"
+          cp packaging/io.github.andymai.hush.svg "$appdir/" "$appdir/usr/share/icons/hicolor/scalable/apps/"
+          cp packaging/AppRun "$appdir/AppRun"
+          # The runner has no FUSE for the tool's own image; extracting it avoids that.
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$appdir" \
+            "target/dist/hush-${VERSION}-x86_64.AppImage"
+
+      - name: Checksums
+        run: |
+          cd target/dist
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hush-${{ env.VERSION }}
+          path: target/dist/*
+          retention-days: 14
+
+      - name: Upload to the release
+        if: github.event_name == 'release' || !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" target/dist/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Publishes hush-bin once AUR_SSH_PRIVATE_KEY exists; skips quietly until then.
+  aur:
+    name: Publish to AUR
+    needs: package
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      HAS_AUR_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.HAS_AUR_KEY == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: env.HAS_AUR_KEY == 'true'
+        with:
+          name: hush-${{ needs.package.outputs.version }}
+          path: dist
+      - name: Fill in the PKGBUILD
+        if: env.HAS_AUR_KEY == 'true'
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          sha=$(grep " hush-${VERSION}-x86_64-linux.tar.gz\$" dist/SHA256SUMS | cut -d' ' -f1)
+          sed -e "s/@VERSION@/${VERSION}/" -e "s/@SHA256@/${sha}/" packaging/aur/PKGBUILD.template > PKGBUILD
+          cat PKGBUILD
+      - uses: KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050 # v4.2.0
+        if: env.HAS_AUR_KEY == 'true'
+        with:
+          pkgname: hush-bin
+          pkgbuild: ./PKGBUILD
+          commit_username: Andy Aragon
+          commit_email: hi@andymai.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: Update to ${{ needs.package.outputs.version }}
+          ssh_keyscan_types: ed25519

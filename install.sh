@@ -1,107 +1,96 @@
-#!/bin/bash
+#!/bin/sh
+# Installs the latest Hush release for this machine.
+#
+#   curl -fsSL https://raw.githubusercontent.com/andymai/hush/main/install.sh | sh
+#
+# Debian and Ubuntu get the .deb, Fedora and openSUSE the .rpm (both through
+# the package manager, so removal is `apt remove hush` or `dnf remove hush`),
+# Arch is pointed at the AUR, and everything else gets the tarball under
+# ~/.local. Set HUSH_VERSION to install a specific tag.
+set -eu
 
-# Hush Voice-to-Text Installation Script
-# Builds and installs Hush to ~/.local/bin
+REPO="andymai/hush"
+VERSION="${HUSH_VERSION:-latest}"
+ARCH="$(uname -m)"
 
-set -e
+say() { printf '%s\n' "$*"; }
+die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+need curl
+[ "$(uname -s)" = "Linux" ] || die "Hush runs on Linux only"
+[ "$ARCH" = "x86_64" ] || die "no prebuilt package for $ARCH yet; build from source (see INSTALL.md)"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-print_status() { echo -e "${GREEN}[INFO]${NC} $1"; }
-print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
-print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
-print_header() { echo -e "${BLUE}$1${NC}"; }
-
-# Check if we're in the right directory
-if [ ! -f "Cargo.toml" ] || [ ! -d "src" ]; then
-    print_error "This script must be run from the Hush project root directory"
-    exit 1
-fi
-
-print_header "Hush Voice-to-Text Installation Script"
-print_header "======================================"
-
-# Check for Rust/Cargo
-print_status "Checking dependencies..."
-if ! command -v cargo &> /dev/null; then
-    print_error "Cargo is not installed. Please install Rust from https://rustup.rs/"
-    exit 1
-fi
-
-# Check for required system packages
-if ! pkg-config --exists alsa; then
-    print_error "Missing required package: libasound2-dev"
-    print_status "Install with: sudo apt install libasound2-dev"
-    exit 1
-fi
-
-print_status "All dependencies available"
-
-# Build the application
-print_status "Building Hush in release mode..."
-make release
-
-if [ $? -ne 0 ]; then
-    print_error "Build failed"
-    exit 1
-fi
-
-# Install the binary
-BIN_DIR="$HOME/.local/bin"
-mkdir -p "$BIN_DIR"
-
-print_status "Installing hush binary to $BIN_DIR..."
-cp target/release/hush "$BIN_DIR/hush"
-chmod +x "$BIN_DIR/hush"
-
-# Check if ~/.local/bin is in PATH
-if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-    print_warning "~/.local/bin is not in your PATH"
-    print_status "Add this line to your ~/.bashrc or ~/.zshrc:"
-    echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
-fi
-
-# Test the installation
-print_status "Testing installation..."
-if "$BIN_DIR/hush" --version > /dev/null 2>&1; then
-    print_status "Binary installation successful"
+if [ "$VERSION" = "latest" ]; then
+  api="https://api.github.com/repos/$REPO/releases/latest"
 else
-    print_error "Binary installation failed"
-    exit 1
+  api="https://api.github.com/repos/$REPO/releases/tags/$VERSION"
 fi
+tag="$(curl -fsSL "$api" | sed -n 's/^ *"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
+[ -n "$tag" ] || die "could not find a release ($api)"
+version="${tag#v}"
+base="https://github.com/$REPO/releases/download/$tag"
 
-# Create configuration directory
-CONFIG_DIR="$HOME/.config/hush"
-mkdir -p "$CONFIG_DIR"
+. /etc/os-release 2>/dev/null || true
+id="${ID:-}"
+like="${ID_LIKE:-}"
+case " $id $like " in
+  *" debian "*|*" ubuntu "*) kind=deb ;;
+  *" fedora "*|*" rhel "*|*" centos "*|*" suse "*|*" opensuse "*) kind=rpm ;;
+  *" arch "*) kind=arch ;;
+  *) kind=tar ;;
+esac
 
-if [ ! -f "$CONFIG_DIR/config.toml" ] && [ -f "config/default.toml" ]; then
-    cp "config/default.toml" "$CONFIG_DIR/config.toml"
-    print_status "Created default configuration at $CONFIG_DIR/config.toml"
-fi
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 
-print_header ""
-print_header "Installation Complete!"
-print_header "====================="
-echo ""
-print_status "Next steps:"
-echo "1. Download a Whisper model:"
-echo "   hush models download base"
-echo ""
-echo "2. Setup text insertion:"
-echo "   hush setup uinput --quick"
-echo ""
-echo "3. Start using Hush:"
-echo "   hush listen"
-echo ""
-echo "Hold Ctrl+Alt+V to dictate."
-echo ""
-print_status "Installation location: $BIN_DIR/hush"
-print_status "Configuration: $CONFIG_DIR/config.toml"
+fetch() {
+  say "Downloading $1"
+  curl -fsSL -o "$tmp/$1" "$base/$1"
+  curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"
+  (cd "$tmp" && grep " $1\$" SHA256SUMS | sha256sum -c --quiet -) || die "checksum mismatch for $1"
+}
+
+sudo_cmd() {
+  if [ "$(id -u)" -eq 0 ]; then "$@"; else need sudo; sudo "$@"; fi
+}
+
+case "$kind" in
+  deb)
+    file="hush_${version}-1_amd64.deb"
+    fetch "$file"
+    sudo_cmd apt-get install -y "$tmp/$file"
+    ;;
+  rpm)
+    file="hush-${version}-1.x86_64.rpm"
+    fetch "$file"
+    if command -v dnf >/dev/null 2>&1; then sudo_cmd dnf install -y "$tmp/$file"
+    elif command -v zypper >/dev/null 2>&1; then sudo_cmd zypper --non-interactive install "$tmp/$file"
+    else sudo_cmd rpm -i "$tmp/$file"; fi
+    ;;
+  arch)
+    say "On Arch, install from the AUR instead:"
+    say "  paru -S hush-bin    # or: yay -S hush-bin"
+    exit 0
+    ;;
+  tar)
+    file="hush-${version}-x86_64-linux.tar.gz"
+    fetch "$file"
+    bin="${XDG_BIN_HOME:-$HOME/.local/bin}"
+    data="${XDG_DATA_HOME:-$HOME/.local/share}"
+    mkdir -p "$bin" "$data/applications" "$data/icons/hicolor/scalable/apps"
+    tar -xzf "$tmp/$file" -C "$tmp"
+    dir="$tmp/hush-${version}-x86_64-linux"
+    install -m 755 "$dir/hush" "$bin/hush"
+    sed "s|^Exec=hush|Exec=$bin/hush|" "$dir/io.github.andymai.hush.desktop" > "$data/applications/io.github.andymai.hush.desktop"
+    install -m 644 "$dir/io.github.andymai.hush.svg" "$data/icons/hicolor/scalable/apps/"
+    say "Installed $bin/hush"
+    case ":$PATH:" in *":$bin:"*) ;; *) say "Add $bin to your PATH." ;; esac
+    ;;
+esac
+
+say ""
+say "Hush $version is installed. Next:"
+say "  hush setup permissions      # one polkit prompt for keyboard and uinput access"
+say "  hush models download base   # or: hush setup init"
+say "  hush daemon start           # then hold Ctrl+Shift+Space in any window"

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "hush")]
-#[command(about = "🤫 Hush - Voice-to-Text for Linux Developers")]
+#[command(about = "🤫 Hush - local voice-to-text for Linux")]
 #[command(version = "0.1.0")]
 #[command(author = "Andy")]
 #[command(
