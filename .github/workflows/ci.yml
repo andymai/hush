@@ -103,20 +103,22 @@ jobs:
           persist-credentials: false
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
 
+  # A prebuilt cargo-audit: compiling it from source on the runner pulls the
+  # newest releases of its dependencies, and one bad upstream publish then
+  # fails every run.
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: write
-      checks: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.62.30
         with:
-          token: ${{ github.token }}
+          tool: cargo-audit
+      - run: cargo audit
 
   machete:
     name: Unused Dependencies
