@@ -1,0 +1,36 @@
+name: Bug Report
+description: Something is broken
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Paste the output of `hush status --full`, or fill in the fields
+      placeholder: |
+        Distro: Fedora 42 / Ubuntu 24.04 / Arch
+        Desktop and compositor: KDE Plasma 6 Wayland / GNOME 48 / Hyprland / X11
+        GPU and driver: RTX 4080 (nvidia 580) / RX 7800 (mesa) / none
+        Install method: .deb / .rpm / AppImage / AUR / COPR / source
+        Hush version: output of `hush --version`
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output of `hush -vv daemon start --foreground` around the failure, if relevant
+      render: shell

@@ -5,60 +5,159 @@ on:
     branches: [main]
   pull_request:
 
+# Supersede in-flight runs on a PR; let every push to main finish.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+# Least privilege by default; each job opts into exactly what it needs.
+permissions: {}
+
+# rust-toolchain.toml pins the Rust version and includes rustfmt and clippy,
+# so rustup installs the right toolchain without a setup action.
 
 jobs:
-  build:
-    name: Format, lint, build, test
+  fmt:
+    name: Format
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-
-      # .cargo/config.toml links with clang + mold, so both must exist here
-      # or every link step fails.
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang mold cmake pkg-config \
-            libasound2-dev \
-            libx11-dev libxi-dev libxtst-dev libxcursor-dev \
-            libxrandr-dev libxinerama-dev libgl1-mesa-dev
-
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          components: rustfmt, clippy
+          persist-credentials: false
+      - run: cargo fmt --all -- --check
 
-      - uses: Swatinem/rust-cache@v2
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: cargo clippy --all-targets -- -D warnings
 
-      - name: Format check
-        run: cargo fmt --check
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.62.30
+        with:
+          tool: nextest
+      # Doctests run once the module-level examples compile again (#91).
+      - run: cargo nextest run --lib --bins
 
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+  msrv:
+    name: MSRV (1.88)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Override rust-toolchain.toml to test the declared minimum version.
+      # Action SHA stays pinned; the Rust version is set explicitly below.
+      - uses: dtolnay/rust-toolchain@c93f4f9c67595668add93d3d6895795ce52d8c2d # 1.85.0
+        with:
+          toolchain: "1.88.0"
+      - uses: ./.github/actions/setup
+      - run: cargo +1.88.0 check --all-targets
 
-      - name: Build
-        run: cargo build --release
+  docs:
+    name: Rustdoc
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
 
-      # Doctests are excluded: 11 module-level examples predate any CI and have
-      # drifted from the API they document (calling private handlers, awaiting
-      # outside async, referencing removed variants). Tracked separately.
-      - name: Test
-        run: cargo test --lib --bins
+  deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
 
   audit:
-    name: Security audit
+    name: Security Audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      checks: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ github.token }}
+
+  machete:
+    name: Unused Dependencies
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.62.30
+        with:
+          tool: cargo-machete@0.9.2
+      - run: cargo machete
+
+  taplo:
+    name: TOML Format
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install taplo
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/tamasfe/taplo/releases/download/0.9.3/taplo-full-linux-x86_64.gz \
+            | gunzip > "$HOME/.local/bin/taplo"
+          chmod +x "$HOME/.local/bin/taplo"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: taplo fmt --check
+
+  ci-pass:
+    name: CI Pass
+    if: always()
+    needs: [fmt, clippy, test, msrv, docs, deny, audit, machete, taplo]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      # Cargo.lock is gitignored, and audit-check reads ./Cargo.lock.
-      - name: Generate lockfile
-        run: cargo generate-lockfile
-
-      - uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check all jobs
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -e 'to_entries | all(.value.result == "success" or .value.result == "skipped")' > /dev/null

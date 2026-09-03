@@ -1,0 +1,98 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+# Never cancel an in-flight release run: a half-finished release PR update
+# would leave the manifest and changelog out of step.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      # The release-kun App identity makes release PRs trigger CI (PRs opened
+      # with the default GITHUB_TOKEN never do, by GitHub's anti-loop rule) and
+      # lets the pipeline approve and merge them. Until the App secrets are
+      # present, the workflow still opens the release PR with GITHUB_TOKEN and
+      # leaves the merge to a human.
+      HAS_APP: ${{ secrets.RELEASE_KUN_APP_ID != '' && secrets.RELEASE_KUN_APP_PRIVATE_KEY != '' }}
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Mint release-kun App token
+        id: app-token
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_KUN_APP_ID }}
+          private-key: ${{ secrets.RELEASE_KUN_APP_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+          manifest-file: .release-please-manifest.json
+          config-file: release-please-config.json
+
+      # release-please edits the version line in Cargo.toml and Cargo.lock's
+      # entry for this package, but never runs cargo. Regenerate the lock on
+      # the release PR branch so anything cargo would also touch lands with the
+      # bump, and CI on the PR re-runs against the refreshed lock.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.release.outputs.pr && env.HAS_APP == 'true'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Refresh Cargo.lock on the release PR
+        if: steps.release.outputs.pr && env.HAS_APP == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Env expressions resolve at step prep, before `if` is evaluated, so
+          # an empty pr output must short-circuit rather than reach fromJSON.
+          PR_NUMBER: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr_branch=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefName --jq .headRefName)
+          git fetch origin "$pr_branch"
+          git checkout "$pr_branch"
+          cargo update --workspace
+          if git diff --quiet Cargo.lock; then
+            echo "::notice::Cargo.lock is already in sync."
+            exit 0
+          fi
+          git config user.name "release-kun[bot]"
+          git config user.email "release-kun[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git commit -m "chore: refresh Cargo.lock for release"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:${pr_branch}"
+
+      # Approval uses GITHUB_TOKEN (github-actions[bot]), a different actor from
+      # the App that authored the PR, because GitHub forbids self-review. The
+      # merge uses the App token so branch protection sees an approved PR.
+      - name: Auto-approve release PR
+        if: steps.release.outputs.pr && env.HAS_APP == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}
+          REPO: ${{ github.repository }}
+        run: gh pr review "$PR_NUMBER" --approve --body "Auto-approved by the release pipeline." --repo "$REPO"
+      - name: Auto-merge release PR
+        if: steps.release.outputs.pr && env.HAS_APP == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}
+          REPO: ${{ github.repository }}
+        run: gh pr merge "$PR_NUMBER" --auto --squash --repo "$REPO"

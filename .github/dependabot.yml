@@ -1,34 +1,40 @@
 version: 2
 updates:
-  # Rust dependencies
-  - package-ecosystem: "cargo"
-    directory: "/"
+  - package-ecosystem: cargo
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-    # Group related dependencies to reduce PR noise
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
     groups:
-      candle:
-        patterns:
-          - "candle-*"
-      egui:
-        patterns:
-          - "egui*"
-      tracing:
-        patterns:
-          - "tracing*"
-      tokio:
-        patterns:
-          - "tokio*"
-    # Keep existing version constraints
-    open-pull-requests-limit: 10
+      minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
 
-  # GitHub Actions
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: npm
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      npm:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    ignore:
+      # The @version tag specifies the Rust version to install, not the
+      # action version. Dependabot incorrectly treats it as a version bump.
+      - dependency-name: dtolnay/rust-toolchain
     open-pull-requests-limit: 5

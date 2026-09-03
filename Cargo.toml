@@ -5,6 +5,9 @@ edition = "2021"
 description = "Fast, accurate voice-to-text for Linux developers"
 authors = ["Andy Aragon"]
 license = "MIT"
+repository = "https://github.com/andymai/hush"
+readme = "README.md"
+rust-version = "1.88"
 keywords = ["voice", "speech-to-text", "whisper", "linux"]
 categories = ["multimedia::audio", "accessibility"]
 default-run = "hush"
@@ -15,10 +18,10 @@ default = []
 # GPU acceleration features (mutually exclusive)
 # CUDA for NVIDIA GPUs (Linux/Windows)
 cuda = [
-    "candle-core/cuda",
-    "candle-nn/cuda",
-    "candle-transformers/cuda",
-    "whisper-rs/cuda"
+  "candle-core/cuda",
+  "candle-nn/cuda",
+  "candle-transformers/cuda",
+  "whisper-rs/cuda",
 ]
 
 
@@ -26,9 +29,12 @@ cuda = [
 # Audio capture and processing
 cpal = "0.17"
 hound = "3.5"
-rodio = { version = "0.21", default-features = false, features = ["playback", "wav"] }
+rodio = { version = "0.21", default-features = false, features = [
+  "playback",
+  "wav",
+] }
 rubato = "1.0"
-audioadapter-buffers = "2.0"  # Buffer adapters for rubato resampler; must match rubato's own version
+audioadapter-buffers = "2.0" # Buffer adapters for rubato resampler; must match rubato's own version
 
 # Whisper integration (using candle for pure Rust)
 # CUDA features are optional via the "cuda" feature flag
@@ -36,28 +42,27 @@ candle-core = { version = "0.9" }
 candle-nn = { version = "0.9" }
 candle-transformers = { version = "0.9" }
 tokenizers = "0.22"
-hf-hub = { version = "0.4", features = ["tokio"] }
-byteorder = "1.5"
-safetensors = "0.7"
-sha2 = "0.10"  # SHA256 checksum validation for model integrity
-raw-cpuid = "11"  # CPU feature detection
+hf-hub = { version = "0.4", default-features = false, features = [
+  "tokio",
+  "rustls-tls",
+] }
+sha2 = "0.10" # SHA256 checksum validation for model integrity
+raw-cpuid = "11" # CPU feature detection
 
 # Alternative whisper implementation
 whisper-rs = { version = "0.15", features = ["tracing_backend"] }
 
 # Text processing
-regex = "1.12"  # Pattern matching for filler words
+regex = "1.12" # Pattern matching for filler words
 
 # LLM integration for text polishing
-dotenvy = "0.15"  # Environment variable loading
+dotenvy = "0.15" # Environment variable loading
 
 # System integration (cross-platform)
 enigo = "0.6"
-libc = "0.2"
 
 # Hotkey management
 global-hotkey = "0.7"
-winit = "0.29"
 
 # Configuration
 toml = "0.9"
@@ -69,12 +74,8 @@ egui = "0.29"
 egui_overlay = "0.9"
 raw-window-handle = "0.6"
 
-
-# Clipboard (cross-platform)
-arboard = "3.6"
-
 # Application directories (XDG)
-dirs = "5.0"  # Keep at 5.0 - 6.0 has breaking API changes
+dirs = "5.0" # Keep at 5.0 - 6.0 has breaking API changes
 
 # Async runtime
 tokio = { version = "1.48", features = ["full"] }
@@ -86,13 +87,15 @@ thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
-tracing-error = "0.2"
-sysinfo = "0.32"  # Conservative update, 0.37 has breaking changes
+sysinfo = "0.32"                                                            # Conservative update, 0.37 has breaking changes
 chrono = { version = "0.4", features = ["serde"] }
 
 # HTTP client for downloading models
-reqwest = { version = "0.12", features = ["stream", "json"] }
-futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+  "stream",
+  "json",
+] }
 
 # Utilities
 once_cell = "1.19"
@@ -132,4 +135,3 @@ debug = true
 [[bin]]
 name = "hush"
 path = "src/main.rs"
-

@@ -13,10 +13,12 @@ make release           # GPU build with CUDA
 make release-cpu       # CPU-only build
 make build             # Debug build
 make check             # Fast type checking
-cargo test             # Run tests
-cargo clippy -- -D warnings  # Lint
+cargo nextest run --lib --bins  # Run tests
+cargo clippy --all-targets -- -D warnings  # Lint
 cargo fmt              # Format
 ```
+
+`npm install` once to enable the husky hooks: commit-msg runs commitlint, pre-commit runs fmt, clippy, taplo, and cargo-machete.
 
 The Makefile creates a `./hush` symlink to the built binary.
 
@@ -94,7 +96,11 @@ These versions are constrained:
 
 ## Testing
 
-Unit tests are embedded in modules via `#[cfg(test)] mod tests`. Use mock implementations from `core/mocks.rs` for trait testing. `.github/workflows/ci.yml` runs format check, clippy, a CPU release build, `cargo test --lib --bins`, and cargo-audit on every PR. Doctests are excluded because the module-level examples have drifted from the API. CUDA builds are not covered by CI, so verify those locally.
+Unit tests are embedded in modules via `#[cfg(test)] mod tests`. Use mock implementations from `core/mocks.rs` for trait testing. `.github/workflows/ci.yml` runs fmt, clippy, nextest, MSRV (1.88), rustdoc, cargo-deny, cargo-audit, cargo-machete, and taplo as parallel jobs behind a required `CI Pass` check; `osv-scan.yml` scans both lockfiles. Doctests are excluded until the module-level examples compile again (#91). CUDA builds are not covered by CI, so verify those locally.
+
+## Commits and Releases
+
+Commit messages and PR titles follow Conventional Commits (commitlint locally, `pr-title.yml` on PRs). release-please opens the release PR and bumps `Cargo.toml` and `CHANGELOG.md`; never edit those by hand. Branch names are `<type>/<kebab-description>`.
 
 ## Platform
 
