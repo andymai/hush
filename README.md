@@ -1,184 +1,89 @@
 # Hush
 
-**Local voice-to-text for Linux developers**
+**Local voice-to-text for Linux.** Hold a key, speak, release. Your words appear at the cursor, in any app.
 
+[![CI](https://github.com/andymai/hush/actions/workflows/ci.yml/badge.svg)](https://github.com/andymai/hush/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 
-Hush runs OpenAI's Whisper models locally with GPU acceleration. Hold a hotkey, speak, release—your text appears at the cursor. Works everywhere: terminals, VMs, games, password fields.
+Hush runs OpenAI's Whisper models on your machine, on the GPU through Vulkan when you have one, and types the result through the kernel's input layer. That means it works in terminals, browsers, editors, VMs, games, and password fields, on Wayland and X11. Audio never leaves your computer.
 
-All processing happens on your machine. Your voice data never leaves your computer.
+## Install
 
-## Quick Start
+| Distro | Command |
+|---|---|
+| Ubuntu, Debian, Fedora, openSUSE, anything else | `curl -fsSL https://raw.githubusercontent.com/andymai/hush/main/install.sh \| sh` |
+| Arch | `paru -S hush-bin` |
+| Manual | Grab the `.deb`, `.rpm`, AppImage, or tarball from the [latest release](https://github.com/andymai/hush/releases/latest) |
 
-```bash
-# Install dependencies (Ubuntu/Debian)
-sudo apt install cmake pkg-config libasound2-dev libx11-dev libxi-dev libxtst-dev libxcursor-dev libxrandr-dev libxinerama-dev libgl1-mesa-dev glslc libvulkan-dev
+The installer picks the package for your distro, verifies its checksum, and installs it through your package manager. It needs only your normal graphics driver: NVIDIA, AMD, and Intel all work through Vulkan, and everything falls back to the CPU.
 
-# Build
-git clone https://github.com/andymai/hush.git
-cd hush
-make release                      # Vulkan GPU build (`make release-cuda` for CUDA, `make release-cpu` for CPU-only)
+To build from source instead, see [INSTALL.md](INSTALL.md).
 
-# Setup
-./hush setup init                 # Interactive configuration setup
-./hush models download base       # Download Whisper model (~145MB)
-./hush setup permissions          # One polkit prompt: keyboard and uinput access
-
-# Run
-./hush daemon start               # Runs in the background; hold Ctrl+Shift+Space to dictate
-```
-
-For other distributions, see [INSTALL.md](INSTALL.md).
-
-## Features
-
-- **Local Whisper transcription** with Vulkan or CUDA acceleration
-- **Hardware-level text insertion** via UInput—works in VMs, SSH, games, secure contexts
-- **Push-to-talk hotkey** with visual overlay feedback
-- **Filler word removal** ("um", "uh", "like")
-- **Voice commands**: "undo", "new paragraph", "new line"
-- **Optional LLM polishing** via Claude API
-
-## Configuration
-
-Initialize your configuration interactively:
+## Set up
 
 ```bash
-./hush setup init           # Guided setup (recommended)
-./hush setup init --defaults  # Use defaults without prompts
+hush setup permissions        # one polkit prompt: keyboard and uinput access, no logout
+hush models download base     # ~145 MB; large-v3-turbo is the accurate choice on a GPU
+hush daemon start             # runs in the background
 ```
 
-The file lands in `~/.config/hush/config.toml` (or `$XDG_CONFIG_HOME/hush/config.toml`) and only needs the keys you change; everything else comes from the built-in defaults in `config/default.toml`. Point at another file with `--config-file <path>` or `HUSH_CONFIG=<path>`. Models live in `~/.local/share/hush/models`.
+Hold `Ctrl+Shift+Space`, speak, release. Done.
 
-### Key Settings
+`hush setup init` walks through model, GPU, and hotkey choices and writes `~/.config/hush/config.toml`. `hush install --autostart` starts the daemon at login.
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `transcription.model_size` | Whisper model (tiny/base/small/medium/large) | base |
-| `transcription.use_gpu` | Enable GPU acceleration | true |
-| `hotkey.combination` | Push-to-talk key | Ctrl+Shift+Space |
-| `hotkey.mode` | `hold` (record while held) or `toggle` (press to start and stop) | hold |
+## Use
+
+- **Hold to talk** is the default. Set `mode = "toggle"` under `[hotkey]` for press-to-start, press-to-stop.
+- **Any keybind can drive it.** `hush toggle`, `hush start`, `hush stop`, and `hush cancel` talk to the daemon over its socket. Hyprland: `bind = , F9, exec, hush toggle`. Sway: `bindsym F9 exec hush toggle`.
+- **Voice commands**: "new line", "new paragraph", "undo" or "scratch that".
+- **Filler words** ("um", "uh", "like") are removed. Optional polishing through Claude when `ANTHROPIC_API_KEY` is set in `~/.config/hush/.env` or the environment; only text is sent, never audio.
+- `hush daemon status`, `hush daemon stop`, `hush listen` (same session, attached to the terminal).
+
+## Configure
+
+`~/.config/hush/config.toml` only needs the keys you change; defaults come from [`config/default.toml`](config/default.toml).
+
+| Key | Meaning | Default |
+|---|---|---|
+| `transcription.model_size` | tiny, base, small, medium, large, large-v2, large-v3 | base |
+| `transcription.language` | Whisper language code, or `auto` | en |
+| `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
+| `hotkey.combination` | The key | Ctrl+Shift+Space |
+| `hotkey.mode` | `hold` or `toggle` | hold |
 | `hotkey.backend` | `auto`, `evdev`, or `x11` | auto |
 | `insertion.method` | `auto` (type, paste what uinput cannot type), `uinput`, or `clipboard` | auto |
+| `audio.device` | Microphone name from `hush status --devices` | system default |
 
-## Usage
-
-### Daemon
-
-```bash
-hush daemon start          # Background daemon: hotkey works in any window
-hush daemon status
-hush daemon stop
-hush listen                # Same session, attached to the terminal
-```
-
-Hold `Ctrl+Shift+Space`, speak, release. Text appears at your cursor. With `hotkey.mode = "toggle"` one press starts and the next stops.
-
-Any key bound in your compositor can drive the daemon over its socket:
-
-```bash
-hush toggle                # Start recording, or stop and transcribe
-hush start / hush stop
-hush cancel                # Stop and discard
-```
-
-Hyprland: `bind = , F9, exec, hush toggle`. Sway: `bindsym F9 exec hush toggle`.
-
-Options:
-```bash
-./hush listen --editing-mode aggressive  # Heavier text cleanup
-./hush listen --no-processing            # Raw transcription only
-```
-
-### Quick Recording
-
-```bash
-./hush record --duration 10              # Record for 10 seconds
-./hush record --duration 5 --print-only  # Print without inserting
-```
-
-### Voice Commands
-
-| Command | Effect |
-|---------|--------|
-| "new paragraph" | Insert double newline |
-| "new line" | Insert single newline |
-| "undo" / "undo that" | Remove last insertion |
-| "cap that" | Capitalize preceding word |
+`hush -c other.toml …` or `HUSH_CONFIG=other.toml` point at a different file.
 
 ## Models
 
-| Model | Size | GPU Speed | CPU Speed |
-|-------|------|-----------|-----------|
-| tiny | 75 MB | ~0.3s | ~2-3s |
-| **base** | **145 MB** | **~0.5s** | **~4-6s** |
-| small | 466 MB | ~0.8s | ~8-12s |
-| medium | 1.5 GB | ~1.5s | ~15-25s |
-| large | 2.9 GB | ~2.5s | ~30-45s |
+| Model | Download | Speed on GPU | Speed on CPU |
+|---|---|---|---|
+| tiny | 75 MB | instant | ~2 s |
+| **base** | **145 MB** | **instant** | **~5 s** |
+| small | 466 MB | <1 s | ~10 s |
+| medium | 1.5 GB | ~1 s | ~20 s |
+| large-v3 | 2.9 GB | ~2 s | ~40 s |
 
-Base model is recommended for most use cases.
-
-```bash
-./hush models download base
-./hush models list
-```
-
-## LLM Integration (Optional)
-
-For text polishing with Claude:
-
-```bash
-echo "ANTHROPIC_API_KEY=your_key" > .env
-./hush listen
-```
-
-## Requirements
-
-- ALSA development libraries
-- For GPU: a Vulkan-capable graphics driver (NVIDIA, AMD, Intel). The CUDA build needs CUDA 12.0+.
+`hush models list`, `hush models download <size>`, `hush models set <size>`. Downloads come from the whisper.cpp catalogue and are checksum-verified.
 
 ## Troubleshooting
 
-**Text not inserting:**
 ```bash
-./hush setup permissions --check
-./hush setup permissions
+hush status --full               # every component, with the device ggml found
+hush setup permissions --check   # keyboard and uinput access
+hush status --devices            # microphones
+hush test audio --duration 3
+hush -vv daemon start --foreground
 ```
 
-**Audio issues:**
-```bash
-./hush status --devices
-./hush test audio --duration 3
-```
+If `hush setup permissions` cannot be run where you are (a container, an SSH session), `hush setup permissions --print` prints the udev rule to apply as root.
 
-**GPU not detected:**
-```bash
-./hush status --full
-vulkaninfo --summary  # Check the Vulkan driver
-```
+## Privacy and security
 
-## Building
-
-```bash
-make release      # GPU-accelerated (Vulkan)
-make release-cuda # GPU-accelerated (CUDA)
-make release-cpu  # CPU-only
-cargo test        # Run tests
-```
+Everything runs locally. The only network traffic is the model download, and text polishing if you turn it on. Hush reads keyboard events and types through `/dev/input` and `/dev/uinput`; one udev rule grants the logged-in user access to those for the length of the session. Details in [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-1. Fork the repo
-2. Create a feature branch
-3. Run `cargo test && cargo clippy && cargo fmt`
-4. Open a PR
-
-## License
-
-MIT. See [LICENSE](LICENSE).
-
-## Acknowledgments
-
-- [OpenAI Whisper](https://github.com/openai/whisper)
-- [whisper-rs](https://github.com/tazz4843/whisper-rs)
+See [CONTRIBUTING.md](CONTRIBUTING.md). Hush is MIT licensed and built on [whisper.cpp](https://github.com/ggerganov/whisper.cpp) through [whisper-rs](https://github.com/tazz4843/whisper-rs).
