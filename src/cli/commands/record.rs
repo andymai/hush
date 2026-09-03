@@ -25,11 +25,16 @@ use tracing::{info, warn};
 /// # Examples
 ///
 /// ```no_run
+/// # use hush::cli::commands::handle_record;
+/// # use std::path::PathBuf;
+/// # async fn example() -> anyhow::Result<()> {
 /// // Record for 10 seconds and insert text
 /// handle_record(10, false, None).await?;
 ///
 /// // Record for 5 seconds, print only, save to file
 /// handle_record(5, true, Some(PathBuf::from("output.wav"))).await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # Workflow

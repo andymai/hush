@@ -18,11 +18,15 @@ use super::handle_record;
 /// # Examples
 ///
 /// ```no_run
+/// # use hush::cli::commands::handle_manual;
+/// # async fn example() -> anyhow::Result<()> {
 /// // Perform 3 sequential recordings
 /// handle_manual(3).await?;
 ///
 /// // Perform single manual recording
 /// handle_manual(1).await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # Workflow

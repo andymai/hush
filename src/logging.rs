@@ -330,11 +330,18 @@ impl LoggingSystem {
         std::fs::create_dir_all(&self.config.log_dir)?;
 
         // Build component-specific filter
-        let mut filter = EnvFilter::from_default_env().add_directive("hush=info".parse().unwrap());
-
-        for (component, level) in &self.config.component_levels {
-            let directive = format!("hush::{}={}", component, level);
-            filter = filter.add_directive(directive.parse().unwrap());
+        let mut filter = EnvFilter::from_default_env();
+        let directives = std::iter::once("hush=info".to_string()).chain(
+            self.config
+                .component_levels
+                .iter()
+                .map(|(component, level)| format!("hush::{}={}", component, level)),
+        );
+        for directive in directives {
+            match directive.parse() {
+                Ok(parsed) => filter = filter.add_directive(parsed),
+                Err(e) => eprintln!("Ignoring invalid log directive '{}': {}", directive, e),
+            }
         }
 
         // Initialize file appender for structured logging

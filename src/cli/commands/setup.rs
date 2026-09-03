@@ -32,14 +32,19 @@ use crate::Config;
 /// # Examples
 ///
 /// ```no_run
-/// // Show quick UInput setup commands
-/// handle_setup(SetupCommands::Uinput { quick: true, auto_fix: false }).await?;
+/// # use hush::cli::commands::handle_setup;
+/// # use hush::cli::SetupCommands;
+/// # async fn example() -> anyhow::Result<()> {
+/// // Grant keyboard and uinput access through the udev rule
+/// handle_setup(SetupCommands::Permissions { check: false, print: false }).await?;
 ///
 /// // List available audio devices
 /// handle_setup(SetupCommands::Audio { list: true, test: None }).await?;
 ///
 /// // Run setup wizard
 /// handle_setup(SetupCommands::Wizard { auto: false }).await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # Workflow

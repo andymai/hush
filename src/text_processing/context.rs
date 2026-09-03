@@ -426,6 +426,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn static_patterns_compile() {
+        let _ = &*FILE_EXTENSION_RE;
+    }
+
+    #[test]
     fn test_parse_vscode_window() {
         let detector = ContextDetector::new();
         let context = detector.parse_window_info("main.rs - Visual Studio Code");

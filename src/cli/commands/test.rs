@@ -22,23 +22,19 @@ use crate::cli::dispatcher::{
 /// # Examples
 ///
 /// ```no_run
-/// use hush::cli_main::TestCommands;
-///
+/// # use hush::cli::commands::handle_test;
+/// # use hush::cli::TestCommands;
+/// # async fn example() -> anyhow::Result<()> {
 /// // Test audio capture for 3 seconds
-/// let cmd = TestCommands::Audio {
+/// handle_test(TestCommands::Audio {
 ///     duration: 3,
 ///     list_devices: false,
 ///     device: None,
 ///     save: None,
-/// };
-/// handle_test(cmd).await?;
-///
-/// // Run all tests
-/// let cmd = TestCommands::All {
-///     benchmarks: false,
-///     output: None,
-/// };
-/// handle_test(cmd).await?;
+/// })
+/// .await?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # Test Types
