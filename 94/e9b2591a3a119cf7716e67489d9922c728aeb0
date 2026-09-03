@@ -1,0 +1,19 @@
+docs/plans/2026-09-03-open-source-launch.md
+  s_229a35bbae3466::t_cf86132696649f 1-159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "94e9b2591a3a119cf7716e67489d9922c728aeb0",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
