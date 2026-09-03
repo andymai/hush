@@ -68,7 +68,8 @@ jobs:
         run: |
           set -euo pipefail
           pr_branch=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefName --jq .headRefName)
-          git fetch origin "$pr_branch"
+          # The checkout keeps no credentials, so fetch through the App token too.
+          git fetch "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$pr_branch:$pr_branch"
           git checkout "$pr_branch"
           cargo update --workspace
           if git diff --quiet Cargo.lock; then
