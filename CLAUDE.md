@@ -9,7 +9,8 @@ Hush is a local voice-to-text application for Linux developers. It runs OpenAI's
 ## Build Commands
 
 ```bash
-make release           # GPU build with CUDA
+make release           # GPU build with Vulkan
+make release-cuda      # GPU build with CUDA
 make release-cpu       # CPU-only build
 make build             # Debug build
 make check             # Fast type checking
@@ -22,11 +23,13 @@ cargo fmt              # Format
 
 The Makefile creates a `./hush` symlink to the built binary.
 
-`make release` needs the CUDA toolkit (`nvcc`), not just the NVIDIA driver. On a
-host that ships driver-only (Fedora Atomic and similar), run it inside a CUDA
-container; `cuda-preflight` fails early with instructions when `nvcc` is absent.
-CUDA targets also drop sccache from `PATH`, because ggml's CMake auto-detects it
-and deadlocks on the CUDA kernel fan-out.
+`make release` builds the Vulkan backend and needs `glslc` plus the Vulkan
+headers at build time; at runtime only the graphics driver is required, on any
+vendor. `make release-cuda` needs the CUDA toolkit (`nvcc`), not just the NVIDIA
+driver. On a host that ships driver-only (Fedora Atomic and similar), run it
+inside a CUDA container; `cuda-preflight` fails early with instructions when
+`nvcc` is absent. CUDA targets also drop sccache from `PATH`, because ggml's
+CMake auto-detects it and deadlocks on the CUDA kernel fan-out.
 
 ## Running
 

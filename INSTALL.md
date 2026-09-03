@@ -4,17 +4,23 @@
 
 ### Ubuntu / Debian
 ```bash
-sudo apt install build-essential pkg-config libasound2-dev libx11-dev
+sudo apt install build-essential cmake pkg-config libasound2-dev \
+  libx11-dev libxi-dev libxtst-dev libxcursor-dev libxrandr-dev libxinerama-dev libgl1-mesa-dev \
+  glslc libvulkan-dev
 ```
 
 ### Fedora
 ```bash
-sudo dnf install gcc gcc-c++ pkg-config make alsa-lib-devel libX11-devel
+sudo dnf install gcc gcc-c++ cmake make pkgconf-pkg-config alsa-lib-devel \
+  libX11-devel libXi-devel libXtst-devel libXcursor-devel libXrandr-devel libXinerama-devel mesa-libGL-devel \
+  glslc vulkan-headers vulkan-loader-devel
 ```
 
 ### Arch Linux
 ```bash
-sudo pacman -S base-devel pkg-config alsa-lib libx11
+sudo pacman -S base-devel cmake pkgconf alsa-lib \
+  libx11 libxi libxtst libxcursor libxrandr libxinerama mesa \
+  shaderc vulkan-headers vulkan-icd-loader
 ```
 
 ## Build
@@ -23,44 +29,41 @@ sudo pacman -S base-devel pkg-config alsa-lib libx11
 git clone https://github.com/andymai/hush.git
 cd hush
 
-# GPU-accelerated build (requires CUDA 12.0+)
-make release
-
-# Or CPU-only build
-make release-cpu
+make release        # Vulkan GPU build: NVIDIA, AMD, and Intel with the stock driver
+make release-cuda   # CUDA build, needs the CUDA toolkit (nvcc)
+make release-cpu    # CPU only
 ```
 
 ## Setup
 
 ```bash
-# Download Whisper model
-./hush models download base
-
-# Enable text insertion
-./hush setup uinput --quick
-
-# Verify
-./hush status --full
+./hush setup init             # Write ~/.config/hush/config.toml
+./hush models download base   # Download a Whisper model
+./hush setup uinput --quick   # Enable text insertion
+./hush status --full          # Verify
 ```
 
-## GPU Acceleration (Optional)
+## GPU Acceleration
 
-GPU provides ~10x faster transcription. Requires NVIDIA GPU with CUDA 12.0+.
+The Vulkan build needs `glslc` and the Vulkan headers at build time and only the
+graphics driver at runtime. `./hush status` shows the device ggml found.
 
-### Install CUDA
+### CUDA
+
+`make release-cuda` needs CUDA 12.0+ with `nvcc` on `PATH`.
 
 **Ubuntu:**
 ```bash
-wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
 sudo dpkg -i cuda-keyring_1.1-1_all.deb
-sudo apt update && sudo apt install cuda-toolkit-12-3
+sudo apt update && sudo apt install cuda-toolkit-12-6
 export PATH=/usr/local/cuda/bin:$PATH
 ```
 
 **Fedora:**
 ```bash
-sudo dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/fedora37/x86_64/cuda-fedora37.repo
-sudo dnf install cuda
+sudo dnf config-manager addrepo --from-repofile=https://developer.download.nvidia.com/compute/cuda/repos/fedora41/x86_64/cuda-fedora41.repo
+sudo dnf install cuda-toolkit
 ```
 
 **Arch:**
@@ -68,16 +71,10 @@ sudo dnf install cuda
 sudo pacman -S cuda
 ```
 
-Verify with `nvidia-smi` and `nvcc --version`, then rebuild.
-
 ## Troubleshooting
 
-**Build fails with missing library:**
-```bash
-# Check which package is missing from the error message
-# Ubuntu: sudo apt install <package>-dev
-# Fedora: sudo dnf install <package>-devel
-```
+**Build fails with missing library:** the error names the header; install the
+matching `-dev` (Ubuntu) or `-devel` (Fedora) package from the lists above.
 
 **Text insertion not working:**
 ```bash
@@ -93,7 +90,7 @@ Verify with `nvidia-smi` and `nvcc --version`, then rebuild.
 
 **GPU not detected:**
 ```bash
-nvidia-smi                    # Check driver
-nvcc --version                # Check CUDA
-cargo clean && make release   # Rebuild
+vulkaninfo --summary          # Vulkan driver present?
+./hush status                 # Device ggml found
+nvidia-smi && nvcc --version  # CUDA build only
 ```

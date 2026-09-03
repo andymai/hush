@@ -533,10 +533,10 @@ pub mod transcription {
     use crate::logging::RequestContext;
     use tracing::info;
 
-    pub fn log_model_loading(model_path: &str, use_cuda: bool) {
+    pub fn log_model_loading(model_path: &str, use_gpu: bool) {
         info!(
             model_path = %model_path,
-            use_cuda = %use_cuda,
+            use_gpu = %use_gpu,
             "🧠 Loading Whisper model"
         );
     }

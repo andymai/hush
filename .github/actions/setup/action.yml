@@ -4,8 +4,9 @@ description: Install the system libraries hush links against and restore the car
 runs:
   using: composite
   steps:
-    # whisper-rs-sys builds whisper.cpp with cmake; cpal needs ALSA headers;
-    # the overlay's GLFW build and x11rb need the X11 and GL development files.
+    # whisper-rs-sys builds whisper.cpp with cmake and, for the vulkan feature,
+    # compiles its shaders with glslc against the Vulkan headers; cpal needs ALSA
+    # headers; the overlay's GLFW build and x11rb need the X11 and GL files.
     - name: Install system dependencies
       shell: bash
       run: |
@@ -14,7 +15,8 @@ runs:
           cmake pkg-config \
           libasound2-dev \
           libx11-dev libxi-dev libxtst-dev libxcursor-dev \
-          libxrandr-dev libxinerama-dev libgl1-mesa-dev
+          libxrandr-dev libxinerama-dev libgl1-mesa-dev \
+          glslc libvulkan-dev
     - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}

@@ -329,7 +329,7 @@ pub async fn test_transcription_system(
         // Transcribe
         let transcriber = crate::WhisperTranscriber::new(
             &config.transcription.model_path(),
-            config.transcription.use_cuda,
+            config.transcription.use_gpu,
         )
         .await?;
 
@@ -353,7 +353,7 @@ pub async fn test_transcription_system(
         // Test with generated audio
         match crate::WhisperTranscriber::new(
             &config.transcription.model_path(),
-            config.transcription.use_cuda,
+            config.transcription.use_gpu,
         )
         .await
         {
@@ -497,7 +497,7 @@ pub async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()>
         let mut audio_capture = crate::AudioCapture::new(config.audio.device.as_deref())?;
         let transcriber = crate::WhisperTranscriber::new(
             &config.transcription.model_path(),
-            config.transcription.use_cuda,
+            config.transcription.use_gpu,
         )
         .await?;
         let mut text_inserter;

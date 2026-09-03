@@ -3,6 +3,7 @@ use std::io::{self, Write};
 use tracing::warn;
 
 use crate::cli::SetupCommands;
+use crate::transcription::GpuAvailability;
 use crate::Config;
 
 /// Handle the setup command
@@ -273,17 +274,21 @@ async fn init_config(defaults: bool, force: bool) -> Result<()> {
         }
     }
 
-    let has_cuda = detect_cuda();
+    let gpu = GpuAvailability::detect();
 
-    let (model_size, use_cuda, hotkey) = if defaults {
-        ("base".to_string(), has_cuda, "Ctrl+Shift+Space".to_string())
+    let (model_size, use_gpu, hotkey) = if defaults {
+        (
+            "base".to_string(),
+            gpu.available,
+            "Ctrl+Shift+Space".to_string(),
+        )
     } else {
-        collect_user_settings(has_cuda)?
+        collect_user_settings(gpu)?
     };
 
     let mut config = Config::defaults()?;
     config.transcription.model_size = model_size.clone();
-    config.transcription.use_cuda = use_cuda;
+    config.transcription.use_gpu = use_gpu;
     config.hotkey.combination = hotkey.clone();
     config.save().context("Failed to write config file")?;
 
@@ -293,8 +298,12 @@ async fn init_config(defaults: bool, force: bool) -> Result<()> {
     println!("\nSettings:");
     println!("   Model: {} ({})", model_size, model_path.display());
     println!(
-        "   CUDA:  {}",
-        if use_cuda { "enabled" } else { "disabled" }
+        "   GPU:   {}",
+        if use_gpu {
+            gpu.device_name.as_str()
+        } else {
+            "disabled"
+        }
     );
     println!("   Hotkey: {}", hotkey);
 
@@ -316,7 +325,7 @@ async fn init_config(defaults: bool, force: bool) -> Result<()> {
 }
 
 /// Collect user settings interactively
-fn collect_user_settings(has_cuda: bool) -> Result<(String, bool, String)> {
+fn collect_user_settings(gpu: &GpuAvailability) -> Result<(String, bool, String)> {
     // Model size
     println!("📦 Select Whisper model size:");
     println!("   1. tiny   (75 MB)  - Fastest, lower accuracy");
@@ -339,17 +348,19 @@ fn collect_user_settings(has_cuda: bool) -> Result<(String, bool, String)> {
     }
     .to_string();
 
-    // CUDA
-    let use_cuda = if has_cuda {
-        println!("\n🎮 CUDA GPU detected. Enable GPU acceleration?");
-        print!("Use CUDA? [Y/n]: ");
+    let use_gpu = if gpu.available {
+        println!(
+            "\n🎮 GPU detected: {}. Enable GPU acceleration?",
+            gpu.device_name
+        );
+        print!("Use GPU? [Y/n]: ");
         io::stdout().flush()?;
 
         input.clear();
         io::stdin().read_line(&mut input)?;
         !input.trim().eq_ignore_ascii_case("n")
     } else {
-        println!("\n💻 No CUDA GPU detected. Using CPU mode.");
+        println!("\n💻 No GPU backend available. Using CPU mode.");
         false
     };
 
@@ -367,16 +378,5 @@ fn collect_user_settings(has_cuda: bool) -> Result<(String, bool, String)> {
         input.trim().to_string()
     };
 
-    Ok((model_size, use_cuda, hotkey))
-}
-
-/// Detect if CUDA is available
-fn detect_cuda() -> bool {
-    // Check for nvidia-smi
-    std::process::Command::new("nvidia-smi")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    Ok((model_size, use_gpu, hotkey))
 }
