@@ -1,0 +1,43 @@
+.github/workflows/release.yml
+  s_229a35bbae3466::t_d25939dc83bfc1 1-163
+Cargo.toml
+  s_229a35bbae3466::t_97523a4930e9af 5,15-77
+install.sh
+  s_229a35bbae3466::t_8e93ebabe074f9 1-25,27,29-96
+packaging/70-hush.rules
+  s_229a35bbae3466::t_4a69c76e47bb46 1-4
+packaging/AppRun
+  s_229a35bbae3466::t_82ae3ab6caf69a 1-3
+packaging/aur/PKGBUILD.template
+  s_229a35bbae3466::t_2a3f5d7a1e1611 1-25
+packaging/hush.service
+  s_229a35bbae3466::t_7a7eb84aba02fd 1-13
+packaging/io.github.andymai.hush.desktop
+  s_229a35bbae3466::t_448c6b3dbf3254 1-11
+packaging/io.github.andymai.hush.svg
+  s_229a35bbae3466::t_beec94d71e05b2 1-6
+src/cli/commands/listen.rs
+  s_229a35bbae3466::t_096facfa1a808b 232-233
+src/cli/commands/record.rs
+  s_229a35bbae3466::t_9cc206bd4041ad 100
+src/cli_main.rs
+  s_229a35bbae3466::t_d260d16491a1fb 7
+src/permissions.rs
+  s_229a35bbae3466::t_8f5ff5f9a18fe7 215-220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "407139d7ad1d2fd55614c9310f6992112ea61f9e",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
