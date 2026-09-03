@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+# Validation is delegated to CI (.github/workflows/ci.yml), which runs the
+# test suite alongside fmt, clippy, deny, audit, docs, machete, and taplo
+# behind the CI Pass gate. The pre-commit hook gives fast local feedback.
+echo "Pre-push: validation delegated to CI (.github/workflows/ci.yml)."

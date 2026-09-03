@@ -1,0 +1,41 @@
+# Hush is Linux-only. Scoping the graph keeps Windows- and macOS-only
+# transitive crates (and their licenses) out of the checks.
+[graph]
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+
+[advisories]
+unmaintained = "workspace"
+yanked = "warn"
+ignore = []
+
+[licenses]
+# OFL-1.1 and LicenseRef-UFL-1.0 cover the fonts bundled by epaint_default_fonts.
+# MPL-2.0 enters via rodio's symphonia decoders and dirs' option-ext.
+# Unicode-3.0 covers the icu crates under url; Zlib the bytemuck and GL crates.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "Unlicense",
+  "0BSD",
+  "MPL-2.0",
+  "OFL-1.1",
+  "LicenseRef-UFL-1.0",
+  "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+allow-git = []
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+unknown-git = "deny"
+unknown-registry = "deny"

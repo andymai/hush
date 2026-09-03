@@ -1,7 +1,6 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
 
 # IDE / Editors
 .vscode/
@@ -12,6 +11,9 @@ Cargo.lock
 .zed/
 .helix/
 .fleet/
+
+# Node (commit hooks)
+node_modules/
 
 # Rust tooling
 rust-project.json

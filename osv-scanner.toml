@@ -1,0 +1,31 @@
+# Advisories that OSV reports for crates hush cannot drop yet. Each entry
+# names the change that removes the crate; delete the entry with that change.
+
+# cgmath: pulled by three-d through egui_overlay. Leaves with the iced
+# overlay (#101).
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0196"
+reason = "unmaintained cgmath via egui_overlay/three-d; removed by the iced overlay migration (#101)"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0197"
+reason = "unmaintained cgmath via egui_overlay/three-d; removed by the iced overlay migration (#101)"
+
+# ttf-parser and instant: pulled by egui 0.29 and its GLFW window stack.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0192"
+reason = "unmaintained ttf-parser via egui 0.29; removed by the iced overlay migration (#101)"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0384"
+reason = "unmaintained instant via the egui_overlay window stack; removed by the iced overlay migration (#101)"
+
+# number_prefix: pulled by indicatif 0.17 through hf-hub. paste: pulled by
+# gemm through candle. Both leave with the candle removal (#85).
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0119"
+reason = "unmaintained number_prefix via hf-hub/indicatif; removed with the candle stack (#85)"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0436"
+reason = "unmaintained paste via candle/gemm; removed with the candle stack (#85)"

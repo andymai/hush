@@ -1,0 +1,20 @@
+name: Setup build environment
+description: Install the system libraries hush links against and restore the cargo cache
+
+runs:
+  using: composite
+  steps:
+    # whisper-rs-sys builds whisper.cpp with cmake; cpal needs ALSA headers;
+    # the overlay's GLFW build and x11rb need the X11 and GL development files.
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          cmake pkg-config \
+          libasound2-dev \
+          libx11-dev libxi-dev libxtst-dev libxcursor-dev \
+          libxrandr-dev libxinerama-dev libgl1-mesa-dev
+    - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      with:
+        save-if: ${{ github.ref == 'refs/heads/main' }}

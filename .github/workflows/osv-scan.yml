@@ -1,0 +1,54 @@
+name: OSV Scan
+
+# Complements the Dependabot cooldown: cooldown blocks fresh-but-untrusted
+# versions in PR proposals, OSV catches old-but-known-bad versions in the
+# lockfiles. PRs are report-only; main and the weekly schedule fail closed.
+# osv-scanner.toml lists the advisories accepted for now, each with the
+# change that removes the crate.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Don't cancel in-progress main/schedule scans; a rapid second push would
+  # otherwise leave the older commit's lockfile unscanned.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions: {}
+
+jobs:
+  scan-pr:
+    name: OSV Scan (report-only)
+    if: github.event_name == 'pull_request'
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
+    with:
+      scan-args: |-
+        --lockfile=Cargo.lock
+        --lockfile=package-lock.json
+      # Code scanning is unavailable on a private repository; switch this on
+      # when the repository goes public (#98).
+      upload-sarif: false
+    permissions:
+      actions: read
+      contents: read
+
+  scan-main:
+    name: OSV Scan (blocking)
+    if: github.event_name != 'pull_request'
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
+    with:
+      scan-args: |-
+        --lockfile=Cargo.lock
+        --lockfile=package-lock.json
+      # Code scanning is unavailable on a private repository; switch this on
+      # when the repository goes public (#98).
+      upload-sarif: false
+    permissions:
+      actions: read
+      contents: read
