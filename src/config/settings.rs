@@ -1,5 +1,6 @@
 use crate::config::paths;
 use crate::hotkey::{HotkeyBackend, HotkeyMode, KeyCombination};
+use crate::text::InsertionMethod;
 use crate::transcription::models::ModelSize;
 use crate::Result;
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,28 @@ pub struct Config {
     pub hotkey: HotkeyConfig,
     /// User feedback settings (audio cues, notifications)
     pub feedback: FeedbackConfig,
+    /// How text reaches the focused window
+    #[serde(default)]
+    pub insertion: InsertionConfig,
+}
+
+/// Text insertion configuration
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct InsertionConfig {
+    /// auto, uinput, or clipboard
+    pub method: InsertionMethod,
+    /// Delay between typed keys in milliseconds
+    pub typing_delay_ms: u64,
+}
+
+impl Default for InsertionConfig {
+    fn default() -> Self {
+        Self {
+            method: InsertionMethod::Auto,
+            typing_delay_ms: 10,
+        }
+    }
 }
 
 /// Audio capture configuration
@@ -188,6 +211,12 @@ impl Config {
             ));
         }
 
+        if self.insertion.typing_delay_ms > 200 {
+            return Err(anyhow::anyhow!(
+                "Invalid typing delay: must be at most 200 ms"
+            ));
+        }
+
         // Validate hotkey configuration
         if self.hotkey.enabled {
             if self.hotkey.combination.is_empty() {
@@ -315,6 +344,16 @@ model_size = "small"
         assert_eq!(config.hotkey.mode, HotkeyMode::Toggle);
         assert_eq!(config.hotkey.backend, HotkeyBackend::X11);
         assert!(Config::parse_over_defaults("[hotkey]\ncombination = \"Ctrl+Bogus\"\n").is_err());
+    }
+
+    #[test]
+    fn insertion_section_defaults_and_parses() {
+        let config = Config::defaults().unwrap();
+        assert_eq!(config.insertion.method, InsertionMethod::Auto);
+        assert_eq!(config.insertion.typing_delay_ms, 10);
+        let config = Config::parse_over_defaults("[insertion]\nmethod = \"clipboard\"\n").unwrap();
+        assert_eq!(config.insertion.method, InsertionMethod::Clipboard);
+        assert!(Config::parse_over_defaults("[insertion]\ntyping_delay_ms = 999\n").is_err());
     }
 
     #[test]

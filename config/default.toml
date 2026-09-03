@@ -23,3 +23,7 @@ backend = "auto"                 # auto: evdev (Wayland and X11), falling back t
 
 [feedback]
 audio_enabled = false
+
+[insertion]
+method = "auto"      # auto: uinput typing, clipboard paste for text uinput cannot type; or "uinput", "clipboard"
+typing_delay_ms = 10

@@ -60,6 +60,7 @@ The file lands in `~/.config/hush/config.toml` (or `$XDG_CONFIG_HOME/hush/config
 | `hotkey.combination` | Push-to-talk key | Ctrl+Shift+Space |
 | `hotkey.mode` | `hold` (record while held) or `toggle` (press to start and stop) | hold |
 | `hotkey.backend` | `auto`, `evdev`, or `x11` | auto |
+| `insertion.method` | `auto` (type, paste what uinput cannot type), `uinput`, or `clipboard` | auto |
 
 ## Usage
 

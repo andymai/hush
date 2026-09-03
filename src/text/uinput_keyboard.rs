@@ -163,6 +163,24 @@ impl UinputKeyboard {
         self.ready
     }
 
+    /// Whether the US-layout key map covers every character.
+    pub fn can_type_all(text: &str) -> bool {
+        text.chars()
+            .all(|ch| matches!(ch, '\n' | '\t') || CHAR_TO_KEY_MAP.contains_key(&ch))
+    }
+
+    /// Ctrl+V
+    pub fn send_paste_shortcut(&mut self) -> Result<()> {
+        if !self.ready {
+            return Err(anyhow::anyhow!("Uinput keyboard not ready"));
+        }
+        self.send_key_event(Key::LeftCtrl, KeyState::PRESSED)?;
+        self.send_sync()?;
+        self.send_key(Key::V, false)?;
+        self.send_key_event(Key::LeftCtrl, KeyState::RELEASED)?;
+        self.send_sync()
+    }
+
     pub fn set_typing_delay(&mut self, delay_ms: u64) {
         self.typing_delay_ms = delay_ms;
         debug!("Typing delay set to {}ms", delay_ms);
@@ -333,7 +351,7 @@ impl UinputKeyboard {
         if let Some((key, needs_shift)) = CHAR_TO_KEY_MAP.get(&ch) {
             self.send_key(*key, *needs_shift)?;
         } else {
-            debug!("Character '{}' not in basic mapping, skipping", ch);
+            warn!("Character '{}' is not in the US key map, skipping", ch);
         }
         Ok(())
     }

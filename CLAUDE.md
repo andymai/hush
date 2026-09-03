@@ -65,7 +65,7 @@ src/
 ├── audio/          # CPAL-based audio capture
 ├── transcription/  # whisper.cpp via whisper-rs (whisper.rs), model catalogue and downloads (models.rs), GPU detection (device.rs)
 ├── text_processing/# Pipeline: filler removal → vocabulary → entities → LLM polish
-├── text/           # uinput_keyboard.rs for kernel-level text insertion
+├── text/           # uinput typing, clipboard paste fallback, window detection (X11, Hyprland, Sway)
 ├── hotkey/         # Hotkey combination parser, evdev backend, X11 fallback
 ├── overlay/        # egui floating window UI
 ├── config/         # TOML settings

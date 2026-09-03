@@ -44,9 +44,6 @@ regex = "1.12" # Pattern matching for filler words
 # LLM integration for text polishing
 dotenvy = "0.15" # Environment variable loading
 
-# System integration (cross-platform)
-enigo = "0.6"
-
 # Hotkey management
 global-hotkey = "0.7"
 
@@ -90,6 +87,9 @@ tempfile = "3.23"
 serde_json = "1.0"
 evdev = "0.13"
 libc = "0.2"
+arboard = { version = "3.6", default-features = false, features = [
+  "wayland-data-control",
+] }
 
 # ============================================================================
 # Platform-specific dependencies

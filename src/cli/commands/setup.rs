@@ -103,7 +103,7 @@ fn setup_permissions(check: bool, print: bool) -> Result<()> {
         return Ok(());
     }
 
-    print_permission_status(&status);
+    permissions::print_status(&status);
     if check {
         return Ok(());
     }
@@ -134,7 +134,7 @@ fn setup_permissions(check: bool, print: bool) -> Result<()> {
     permissions::install(elevation)?;
 
     let after = permissions::status();
-    print_permission_status(&after);
+    permissions::print_status(&after);
     if after.ready() {
         println!("\n✅ Hotkeys and text insertion are ready. No logout needed.");
     } else {
@@ -144,39 +144,6 @@ fn setup_permissions(check: bool, print: bool) -> Result<()> {
         println!("   `sudo usermod -a -G input $USER` and a re-login grants access group-wide.");
     }
     Ok(())
-}
-
-fn print_permission_status(status: &permissions::PermissionStatus) {
-    let mark = |ok: bool| if ok { "✅" } else { "❌" };
-    println!("🔎 Device access:");
-    println!(
-        "   {} udev rule {}",
-        mark(status.rule_installed),
-        permissions::UDEV_RULE_PATH
-    );
-    println!(
-        "   {} /dev/uinput {}",
-        mark(status.uinput_writable),
-        if status.uinput_writable {
-            "writable"
-        } else if status.uinput_present {
-            "present, not writable"
-        } else {
-            "missing (uinput module not loaded)"
-        }
-    );
-    println!(
-        "   {} /dev/input: {} of {} event devices readable",
-        mark(status.readable_event_nodes > 0),
-        status.readable_event_nodes,
-        status.event_nodes
-    );
-    if status.in_input_group {
-        println!("   ℹ️  user is in the input group");
-    }
-    if status.in_container {
-        println!("   ℹ️  running inside a container");
-    }
 }
 
 /// Setup and test audio devices

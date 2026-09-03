@@ -156,6 +156,40 @@ pub fn install(elevation: Elevation) -> Result<()> {
     }
 }
 
+/// Print the status table used by `hush setup permissions --check`.
+pub fn print_status(status: &PermissionStatus) {
+    let mark = |ok: bool| if ok { "✅" } else { "❌" };
+    println!("🔎 Device access:");
+    println!(
+        "   {} udev rule {}",
+        mark(status.rule_installed),
+        UDEV_RULE_PATH
+    );
+    println!(
+        "   {} /dev/uinput {}",
+        mark(status.uinput_writable),
+        if status.uinput_writable {
+            "writable"
+        } else if status.uinput_present {
+            "present, not writable"
+        } else {
+            "missing (uinput module not loaded)"
+        }
+    );
+    println!(
+        "   {} /dev/input: {} of {} event devices readable",
+        mark(status.readable_event_nodes > 0),
+        status.readable_event_nodes,
+        status.event_nodes
+    );
+    if status.in_input_group {
+        println!("   ℹ️  user is in the input group");
+    }
+    if status.in_container {
+        println!("   ℹ️  running inside a container");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
