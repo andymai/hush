@@ -16,7 +16,21 @@ runs:
           libasound2-dev \
           libx11-dev libxi-dev libxtst-dev libxcursor-dev \
           libxrandr-dev libxinerama-dev libgl1-mesa-dev \
-          glslc libvulkan-dev
+          libvulkan-dev
+        # Ubuntu 22.04, which the release job uses for its glibc floor, has no
+        # glslc package; LunarG's Vulkan repository ships it as shaderc.
+        if apt-cache show glslc >/dev/null 2>&1; then
+          sudo apt-get install -y --no-install-recommends glslc
+        else
+          codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc \
+            | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc >/dev/null
+          sudo wget -qO "/etc/apt/sources.list.d/lunarg-vulkan-$codename.list" \
+            "https://packages.lunarg.com/vulkan/lunarg-vulkan-$codename.list"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shaderc
+        fi
+        glslc --version | head -n 1
     - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
