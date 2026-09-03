@@ -360,7 +360,7 @@ pub async fn test_transcription_system(
             Ok(transcriber) => {
                 println!("✅ Transcriber initialized");
                 println!("   Device: {}", transcriber.get_device_info());
-                println!("   CUDA: {}", transcriber.is_using_cuda());
+                println!("   GPU: {}", transcriber.is_using_gpu());
 
                 if timing {
                     let start = std::time::Instant::now();

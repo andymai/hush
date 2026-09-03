@@ -1,4 +1,4 @@
-use crate::transcription::cuda::CudaAvailability;
+use crate::transcription::GpuAvailability;
 use crate::{AudioCapture, Config};
 /// Utility functions shared across command handlers
 ///
@@ -31,20 +31,11 @@ pub async fn show_system_info() -> Result<()> {
     println!("  OS: {}", std::env::consts::OS);
     println!("  Architecture: {}", std::env::consts::ARCH);
 
-    let cuda = CudaAvailability::detect();
-    if cuda.available {
-        println!(
-            "  🚀 GPU: {} (CUDA {})",
-            cuda.device_name.as_deref().unwrap_or("Unknown"),
-            cuda.cuda_version.as_deref().unwrap_or("Unknown")
-        );
-        println!("     Devices: {}", cuda.device_count);
+    let gpu = GpuAvailability::detect();
+    if gpu.available {
+        println!("  🚀 GPU: {} ({})", gpu.device_name, gpu.gpu_type);
     } else {
-        #[cfg(feature = "cuda")]
-        println!("  ⚠️  GPU: Not detected (using CPU)");
-
-        #[cfg(not(feature = "cuda"))]
-        println!("  💻 GPU: Not compiled (CPU-only build)");
+        println!("  💻 GPU: none available, using CPU ({})", gpu.device_name);
     }
 
     Ok(())

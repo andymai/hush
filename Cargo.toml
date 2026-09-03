@@ -17,12 +17,7 @@ default = []
 
 # GPU acceleration features (mutually exclusive)
 # CUDA for NVIDIA GPUs (Linux/Windows)
-cuda = [
-  "candle-core/cuda",
-  "candle-nn/cuda",
-  "candle-transformers/cuda",
-  "whisper-rs/cuda",
-]
+cuda = ["whisper-rs/cuda"]
 
 
 [dependencies]
@@ -36,21 +31,12 @@ rodio = { version = "0.21", default-features = false, features = [
 rubato = "1.0"
 audioadapter-buffers = "2.0" # Buffer adapters for rubato resampler; must match rubato's own version
 
-# Whisper integration (using candle for pure Rust)
-# CUDA features are optional via the "cuda" feature flag
-candle-core = { version = "0.9" }
-candle-nn = { version = "0.9" }
-candle-transformers = { version = "0.9" }
-tokenizers = "0.22"
-hf-hub = { version = "0.4", default-features = false, features = [
-  "tokio",
-  "rustls-tls",
-] }
-sha2 = "0.10" # SHA256 checksum validation for model integrity
-raw-cpuid = "11" # CPU feature detection
+sha2 = "0.10"        # SHA256 checksum validation for model integrity
+indicatif = "0.18"   # Model download progress
+futures-util = "0.3" # Streaming download bodies
 
-# Alternative whisper implementation
-whisper-rs = { version = "0.15", features = ["tracing_backend"] }
+# whisper.cpp; GPU backends are enabled through the cuda and vulkan features
+whisper-rs = { version = "0.15", features = ["tracing_backend", "raw-api"] }
 
 # Text processing
 regex = "1.12" # Pattern matching for filler words

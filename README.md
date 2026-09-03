@@ -164,5 +164,4 @@ MIT. See [LICENSE](LICENSE).
 ## Acknowledgments
 
 - [OpenAI Whisper](https://github.com/openai/whisper)
-- [candle](https://github.com/huggingface/candle)
 - [whisper-rs](https://github.com/tazz4843/whisper-rs)

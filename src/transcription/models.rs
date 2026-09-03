@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
-use hf_hub::api::tokio::Api;
+use futures_util::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use tokio::io::AsyncWriteExt;
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone)]
@@ -241,40 +243,77 @@ impl ModelManager {
         Ok(model_path)
     }
 
+    /// Where a catalogue entry is fetched from.
+    pub fn download_url(info: &ModelInfo) -> String {
+        format!(
+            "https://huggingface.co/{}/resolve/main/{}",
+            info.repo_id, info.filename
+        )
+    }
+
     async fn download_model(&self, info: &ModelInfo) -> Result<()> {
+        let url = Self::download_url(info);
         info!(
-            "Starting download of {} ({:.1}MB)",
+            "Downloading {} ({:.1} MB) from {}",
             info.name,
-            info.expected_size as f64 / 1_000_000.0
+            info.expected_size as f64 / 1_000_000.0,
+            url
         );
 
-        let api = Api::new()?;
-        let repo = api.model(info.repo_id.clone());
+        let target = self.cache_dir.join(&info.filename);
+        let partial = self.cache_dir.join(format!("{}.part", info.filename));
 
-        // Download the main model file
-        let model_file = repo
-            .get(&info.filename)
+        let client = reqwest::Client::builder()
+            .user_agent(concat!("hush/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .context("Failed to build HTTP client")?;
+        let response = client
+            .get(&url)
+            .send()
             .await
-            .context("Failed to download model file")?;
+            .context("Failed to start model download")?
+            .error_for_status()
+            .with_context(|| format!("Model download failed: {}", url))?;
 
-        // Also download config and tokenizer files if they exist
-        let _config_file = repo.get("config.json").await.unwrap_or_else(|_| {
-            debug!("config.json not found, using defaults");
-            self.cache_dir.join("config.json") // placeholder
-        });
+        let total = response.content_length().unwrap_or(info.expected_size);
+        let progress = Self::progress_bar(total, &info.name);
 
-        let _tokenizer_file = repo.get("tokenizer.json").await.unwrap_or_else(|_| {
-            debug!("tokenizer.json not found, using defaults");
-            self.cache_dir.join("tokenizer.json") // placeholder
-        });
+        let mut file = tokio::fs::File::create(&partial)
+            .await
+            .with_context(|| format!("Failed to create {}", partial.display()))?;
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("Model download interrupted")?;
+            file.write_all(&chunk)
+                .await
+                .context("Failed to write model file")?;
+            progress.inc(chunk.len() as u64);
+        }
+        file.flush().await.context("Failed to flush model file")?;
+        drop(file);
+        progress.finish_and_clear();
 
-        // Copy the model to our cache directory with the expected filename
-        let target_path = self.cache_dir.join(&info.filename);
-        std::fs::copy(&model_file, &target_path)
-            .context("Failed to copy model to cache directory")?;
+        tokio::fs::rename(&partial, &target)
+            .await
+            .context("Failed to move the downloaded model into place")?;
 
-        info!("Model downloaded successfully to {:?}", target_path);
+        info!("Model downloaded to {}", target.display());
         Ok(())
+    }
+
+    fn progress_bar(total: u64, name: &str) -> ProgressBar {
+        use std::io::IsTerminal;
+        if !std::io::stderr().is_terminal() {
+            return ProgressBar::hidden();
+        }
+        let bar = ProgressBar::new(total);
+        if let Ok(style) =
+            ProgressStyle::with_template("{msg} [{bar:30}] {bytes}/{total_bytes} ({eta})")
+        {
+            bar.set_style(style.progress_chars("=> "));
+        }
+        bar.set_message(name.to_owned());
+        bar
     }
 
     /// Computes the SHA256 checksum of a file
@@ -430,6 +469,17 @@ mod tests {
         let info = manager.get_model_info(&ModelSize::Tiny);
         assert!(info.is_some());
         assert_eq!(info.unwrap().size, ModelSize::Tiny);
+    }
+
+    #[test]
+    fn download_url_points_at_the_whisper_cpp_catalogue() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        let info = manager.get_model_info(&ModelSize::Base).unwrap();
+        assert_eq!(
+            ModelManager::download_url(info),
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+        );
     }
 
     #[test]
