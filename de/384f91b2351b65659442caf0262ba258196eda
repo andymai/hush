@@ -1,0 +1,49 @@
+CLAUDE.md
+  s_229a35bbae3466::t_40acd38eb2fdf1 68
+Cargo.lock
+  s_229a35bbae3466::t_f098cf4725189f 150-167,407,461-469,721-726,870-875,907-908,910,913-914,916,1016,1116-1124,1187,1420,1577,1885,1950-1962,1982-1992,2011-2020,2050,2059-2069,2140-2148,3204-3214,3403-3472,3591,3593-3594,3636,3638,3648-3649,3709,3727,3736,3781,3836,3986-4003
+Cargo.toml
+  s_229a35bbae3466::t_a884e5c017fe80 90-92
+README.md
+  s_229a35bbae3466::t_8a7b4f7562d9da 63
+config/default.toml
+  s_229a35bbae3466::t_5086279d36c09a 26-29
+src/adapters/mod.rs
+  s_229a35bbae3466::t_d226bff9943a2b 14
+src/adapters/text/inserter_adapter.rs
+  s_229a35bbae3466::t_f291dd167a89ce 10,14,30,36-43,47,57-59,66
+src/adapters/text/mod.rs
+  s_229a35bbae3466::t_e1051aa64c400b 3-4,11
+src/cli/commands/listen.rs
+  s_229a35bbae3466::t_bbba9ccdebbd9c 282-284
+src/cli/commands/setup.rs
+  s_229a35bbae3466::t_7be2ecf24a221f 106,137
+src/config/settings.rs
+  s_229a35bbae3466::t_54131ef33cf51d 3,22-43,214-219,349-358
+src/permissions.rs
+  s_229a35bbae3466::t_44448fdc4852e7 159-192
+src/text/insertion.rs
+  s_229a35bbae3466::t_5a24d6195d98a0 1-11,17-24,27-38,41-46,50,52-60,62,66,68-70,72-77,81-82,87,90-91,94-101,104-110,112,116-119,123-138,141-145,148,150-153,159,161,166,168-174,177,179-181,183-185,187-205,208-217
+src/text/mod.rs
+  s_229a35bbae3466::t_e0fbfe0d7553fa 57-69,74-75,79,83-84
+src/text/uinput_keyboard.rs
+  s_229a35bbae3466::t_a6489f8bad1779 166-183,354
+src/text/window.rs
+  s_229a35bbae3466::t_9de4605fbb05e1 1-197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "de384f91b2351b65659442caf0262ba258196eda",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
