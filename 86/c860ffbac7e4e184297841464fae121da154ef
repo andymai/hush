@@ -1,0 +1,127 @@
+docs/plans/2026-09-03-open-source-launch.md
+  s_229a35bbae3466::t_cf86132696649f 1-57,59-99,101-159
+  s_229a35bbae3466::t_65f3267a8c5fe1 58,100
+.github/dependabot.yml
+  s_229a35bbae3466::t_f1a637443c38e7 3-4,6-9,11-13,15-16,18-39
+.github/ISSUE_TEMPLATE/bug_report.yml
+  s_229a35bbae3466::t_f1a637443c38e7 1-36
+.github/ISSUE_TEMPLATE/feature_request.yml
+  s_229a35bbae3466::t_f1a637443c38e7 1-21
+.github/PULL_REQUEST_TEMPLATE.md
+  s_229a35bbae3466::t_f1a637443c38e7 1,3,5,7-10
+.github/actions/setup/action.yml
+  s_229a35bbae3466::t_f1a637443c38e7 1-20
+deny.toml
+  s_229a35bbae3466::t_1cd76f5e68f732 1-5,7-8,12-14,22-29,38-41
+Cargo.lock
+  s_229a35bbae3466::t_5f65d03597dfcb 1-5404
+.gitignore
+  s_229a35bbae3466::t_3d9075702bc297 17
+  s_229a35bbae3466::t_1cd76f5e68f732 15-16
+  s_229a35bbae3466::t_abf7f4bf6910ed 88
+rust-toolchain.toml
+  s_229a35bbae3466::t_1cd76f5e68f732 1-3
+SECURITY.md
+  s_229a35bbae3466::t_1cd76f5e68f732 5,7,12-16,18,20,22,24,26-32
+commitlint.config.js
+  s_229a35bbae3466::t_1cd76f5e68f732 1-3
+package.json
+  s_229a35bbae3466::t_1cd76f5e68f732 1-14
+release-please-config.json
+  s_229a35bbae3466::t_1cd76f5e68f732 1-20
+.github/workflows/dependabot-auto-merge.yml
+  s_229a35bbae3466::t_f1a637443c38e7 1-29
+.husky/commit-msg
+  s_229a35bbae3466::t_1cd76f5e68f732 1-6
+.editorconfig
+  s_229a35bbae3466::t_1cd76f5e68f732 1-23
+package-lock.json
+  s_229a35bbae3466::t_4630a704832dda 1-1402
+.github/workflows/pr-title.yml
+  s_229a35bbae3466::t_f1a637443c38e7 1-40
+.release-please-manifest.json
+  s_229a35bbae3466::t_1cd76f5e68f732 1-3
+.github/workflows/osv-scan.yml
+  s_229a35bbae3466::t_f1a637443c38e7 1-5,8-33,37-39,40-48,52-54
+  s_229a35bbae3466::t_4dff9427cb3d74 6-7,34-36,49-51
+.github/workflows/ci.yml
+  s_229a35bbae3466::t_f1a637443c38e7 8-12,15-21,24-25,27-28,30,32-33,35-45,47-62,64,66-76,78,81-93,95-104,107,109-112,114-119,121-133,135-141,143-163
+  s_229a35bbae3466::t_2de297d5655fea 65,77,79
+Cargo.toml
+  s_229a35bbae3466::t_0ffce460c23348 21-24,32-35,37,45-50,56,59,78,90,94-98
+  s_229a35bbae3466::t_2de297d5655fea 10
+  s_229a35bbae3466::t_1cd76f5e68f732 8-9
+.github/workflows/release-please.yml
+  s_229a35bbae3466::t_f1a637443c38e7 1-98
+.github/FUNDING.yml
+  s_229a35bbae3466::t_f1a637443c38e7 1
+CONTRIBUTING.md
+  s_229a35bbae3466::t_1cd76f5e68f732 5-6,8-15,17-25,27-30,32-34,37-43,46-47,50-58,60,62
+.husky/pre-push
+  s_229a35bbae3466::t_1cd76f5e68f732 1-6
+CODE_OF_CONDUCT.md
+  s_229a35bbae3466::t_1cd76f5e68f732 1-83
+.github/ISSUE_TEMPLATE/config.yml
+  s_229a35bbae3466::t_f1a637443c38e7 1-5
+CLAUDE.md
+  s_229a35bbae3466::t_1cd76f5e68f732 16-17,21-22,100-103
+  s_229a35bbae3466::t_2de297d5655fea 99
+  s_229a35bbae3466::t_65f3267a8c5fe1 93
+.husky/pre-commit
+  s_229a35bbae3466::t_1cd76f5e68f732 1-57
+osv-scanner.toml
+  s_229a35bbae3466::t_e044e5e0130af6 1-31
+src/cli/commands/setup.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 6,247,254,284-288,290
+README.md
+  s_229a35bbae3466::t_65f3267a8c5fe1 52
+src/cli/dispatcher.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 331,355,499
+src/logging.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 124-126
+src/cli/commands/listen.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 115-121,176-178,185-188
+src/main.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 61-63
+src/cli/commands/status.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 77
+config/default.toml
+  s_229a35bbae3466::t_abf7f4bf6910ed 1-16
+src/cli/commands/models.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 46,97,156,215,247,327,392
+src/transcription/models.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 30-45
+src/cli/commands/utils.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 15
+src/lib.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 28
+src/cli/commands/record.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 92
+src/config/mod.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 1-2,4-16,19
+  s_229a35bbae3466::t_65f3267a8c5fe1 3
+src/config/settings.rs
+  s_229a35bbae3466::t_65f3267a8c5fe1 104-106,117-118
+  s_229a35bbae3466::t_26bb02b813c050 109-111,134-135
+  s_229a35bbae3466::t_abf7f4bf6910ed 1-2,5-7,38-41,54-71,89-99,101,107-108,112-116,119-124,126-127,136,138-145,193,195,199,205-214,224,226-230,232-233,239-309,311-312
+src/config/paths.rs
+  s_229a35bbae3466::t_65f3267a8c5fe1 22-26,102-104,106
+  s_229a35bbae3466::t_26bb02b813c050 118-121
+  s_229a35bbae3466::t_abf7f4bf6910ed 1-21,27-101,105,107-117,122-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "86c860ffbac7e4e184297841464fae121da154ef",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
