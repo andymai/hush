@@ -116,7 +116,7 @@ fn explain_no_keyboard() -> anyhow::Error {
     if denied {
         anyhow!(
             "No readable keyboard under /dev/input (permission denied). \
-             Run `hush setup uinput --quick`, then log out and back in."
+             Run `hush setup permissions`."
         )
     } else if nodes == 0 {
         anyhow!("No input devices under /dev/input")

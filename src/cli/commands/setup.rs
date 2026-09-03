@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use std::io::{self, Write};
-use tracing::warn;
 
 use crate::cli::SetupCommands;
+use crate::permissions;
 use crate::transcription::GpuAvailability;
 use crate::Config;
 
@@ -51,13 +51,14 @@ use crate::Config;
 pub async fn handle_setup(setup_command: SetupCommands) -> Result<()> {
     match setup_command {
         SetupCommands::Init { defaults, force } => init_config(defaults, force).await,
+        SetupCommands::Permissions { check, print } => setup_permissions(check, print),
         SetupCommands::Uinput { quick, auto_fix } => {
             #[cfg(target_os = "linux")]
             {
                 if quick {
                     print_uinput_quick_setup();
                 } else if auto_fix {
-                    auto_fix_uinput().await?;
+                    setup_permissions(false, false)?;
                 } else {
                     crate::text::print_uinput_setup_guidance();
                 }
@@ -86,26 +87,96 @@ pub async fn handle_setup(setup_command: SetupCommands) -> Result<()> {
     }
 }
 
-/// Print quick UInput setup commands
-///
-/// Displays the essential commands needed to configure UInput permissions.
-/// These commands add the user to the input group and load the uinput kernel module.
+/// Print the commands `hush setup permissions` runs as root
 fn print_uinput_quick_setup() {
-    println!("🔧 Quick UInput Setup:");
-    println!("sudo usermod -a -G input $USER");
-    println!("sudo modprobe uinput");
-    println!("echo 'uinput' | sudo tee /etc/modules-load.d/uinput.conf");
-    println!("# Then log out and log back in");
+    println!("🔧 Run as root (or run `hush setup permissions` on the host):");
+    println!();
+    print!("{}", permissions::install_script());
 }
 
-/// Attempt automatic UInput setup
-///
-/// **Note**: This functionality is not yet implemented.
-/// Users should run manual setup commands instead.
-async fn auto_fix_uinput() -> Result<()> {
-    warn!("Auto-fix functionality not yet implemented");
-    println!("🚧 Auto-fix is not yet implemented. Please run 'hush setup uinput' for manual instructions.");
+/// Install, print, or check the udev rule that grants device access.
+fn setup_permissions(check: bool, print: bool) -> Result<()> {
+    let status = permissions::status();
+
+    if print {
+        print_uinput_quick_setup();
+        return Ok(());
+    }
+
+    print_permission_status(&status);
+    if check {
+        return Ok(());
+    }
+
+    if status.ready() && status.rule_installed {
+        println!("\n✅ Permissions are already set up.");
+        return Ok(());
+    }
+
+    if status.in_container {
+        println!("\n⚠️  This shell is inside a container, so the rule must go on the host.");
+        println!("   Run `hush setup permissions` from a host terminal, or as root on the host:");
+        println!();
+        print!("{}", permissions::install_script());
+        return Ok(());
+    }
+
+    let elevation = permissions::preferred_elevation()
+        .ok_or_else(|| anyhow::anyhow!("Neither pkexec nor sudo is available; run `hush setup permissions --print` and apply the commands as root"))?;
+    println!(
+        "\n🔐 Installing {} (one {} prompt)...",
+        permissions::UDEV_RULE_PATH,
+        match elevation {
+            permissions::Elevation::Pkexec => "polkit",
+            permissions::Elevation::Sudo => "sudo",
+        }
+    );
+    permissions::install(elevation)?;
+
+    let after = permissions::status();
+    print_permission_status(&after);
+    if after.ready() {
+        println!("\n✅ Hotkeys and text insertion are ready. No logout needed.");
+    } else {
+        println!("\n⚠️  The rule is installed but this session did not receive access yet.");
+        println!("   Log out and back in, then run `hush setup permissions --check`.");
+        println!("   If it still fails, your session may lack a seat (some SSH or nested setups);");
+        println!("   `sudo usermod -a -G input $USER` and a re-login grants access group-wide.");
+    }
     Ok(())
+}
+
+fn print_permission_status(status: &permissions::PermissionStatus) {
+    let mark = |ok: bool| if ok { "✅" } else { "❌" };
+    println!("🔎 Device access:");
+    println!(
+        "   {} udev rule {}",
+        mark(status.rule_installed),
+        permissions::UDEV_RULE_PATH
+    );
+    println!(
+        "   {} /dev/uinput {}",
+        mark(status.uinput_writable),
+        if status.uinput_writable {
+            "writable"
+        } else if status.uinput_present {
+            "present, not writable"
+        } else {
+            "missing (uinput module not loaded)"
+        }
+    );
+    println!(
+        "   {} /dev/input: {} of {} event devices readable",
+        mark(status.readable_event_nodes > 0),
+        status.readable_event_nodes,
+        status.event_nodes
+    );
+    if status.in_input_group {
+        println!("   ℹ️  user is in the input group");
+    }
+    if status.in_container {
+        println!("   ℹ️  running inside a container");
+    }
 }
 
 /// Setup and test audio devices
@@ -318,7 +389,7 @@ async fn init_config(defaults: bool, force: bool) -> Result<()> {
         "   1. Download a model:  ./hush models download {}",
         model_size
     );
-    println!("   2. Setup permissions: ./hush setup uinput --quick");
+    println!("   2. Setup permissions: ./hush setup permissions");
     println!("   3. Start listening:   ./hush listen");
 
     Ok(())

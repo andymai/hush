@@ -23,6 +23,9 @@ pub mod cli_main;
 // Logging system
 pub mod logging;
 
+// Device permissions for hotkeys and text insertion
+pub mod permissions;
+
 // Re-export main types for convenience (legacy)
 pub use audio::{AudioCapture, AudioFeedback};
 pub use config::Config;

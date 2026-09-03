@@ -4,7 +4,6 @@ use crate::{AudioCapture, Config};
 ///
 /// This module contains helper functions used by multiple command implementations.
 use anyhow::Result;
-use tracing::warn;
 
 /// Display configuration status information
 pub async fn show_config_status() -> Result<()> {
@@ -63,20 +62,11 @@ pub async fn show_device_status() -> Result<()> {
     Ok(())
 }
 
-/// Print quick UInput setup instructions
+/// Print the commands `hush setup permissions` runs as root
 pub fn print_uinput_quick_setup() {
-    println!("🔧 Quick UInput Setup:");
-    println!("sudo usermod -a -G input $USER");
-    println!("sudo modprobe uinput");
-    println!("echo 'uinput' | sudo tee /etc/modules-load.d/uinput.conf");
-    println!("# Then log out and log back in");
-}
-
-/// Automatically fix UInput permissions (placeholder)
-pub async fn auto_fix_uinput() -> Result<()> {
-    warn!("Auto-fix functionality not yet implemented");
-    println!("🚧 Auto-fix is not yet implemented. Please run 'hush setup uinput' for manual instructions.");
-    Ok(())
+    println!("🔧 Run as root (or run `hush setup permissions` on the host):");
+    println!();
+    print!("{}", crate::permissions::install_script());
 }
 
 /// Setup audio devices (list or test)

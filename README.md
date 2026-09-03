@@ -23,7 +23,7 @@ make release                      # Vulkan GPU build (`make release-cuda` for CU
 # Setup
 ./hush setup init                 # Interactive configuration setup
 ./hush models download base       # Download Whisper model (~145MB)
-./hush setup uinput --quick       # Enable text insertion (then log out/in)
+./hush setup permissions          # One polkit prompt: keyboard and uinput access
 
 # Run
 ./hush listen                     # Hold Ctrl+Shift+Space to dictate
@@ -128,8 +128,8 @@ echo "ANTHROPIC_API_KEY=your_key" > .env
 
 **Text not inserting:**
 ```bash
-./hush setup diagnose-uinput
-./hush setup uinput --auto-fix
+./hush setup permissions --check
+./hush setup permissions
 ```
 
 **Audio issues:**

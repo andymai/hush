@@ -143,13 +143,24 @@ pub enum SetupCommands {
         force: bool,
     },
 
+    /// Grant access to keyboards and uinput through one udev rule
+    Permissions {
+        /// Report the current access state without changing anything
+        #[arg(long)]
+        check: bool,
+
+        /// Print the commands instead of running them (for containers or remote shells)
+        #[arg(long)]
+        print: bool,
+    },
+
     /// Show UInput setup guide for optimal text insertion
     Uinput {
-        /// Show quick setup commands only
+        /// Print the permission setup commands
         #[arg(short, long)]
         quick: bool,
 
-        /// Apply recommended fixes automatically (requires sudo)
+        /// Install the udev rule (same as `setup permissions`)
         #[arg(long)]
         auto_fix: bool,
     },
