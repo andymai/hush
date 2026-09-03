@@ -1,0 +1,4 @@
+# Installed by `hush setup permissions`.
+# Lets the logged-in user read keyboards (hotkeys) and write uinput (text insertion).
+KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess"
+SUBSYSTEM=="input", KERNEL=="event*", TAG+="uaccess"

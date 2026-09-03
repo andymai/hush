@@ -229,7 +229,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         transcriber.get_device_info()
     );
 
-    // Load environment variables from .env file
+    // API keys: ~/.config/hush/.env for installed daemons, ./.env for source checkouts
+    let _ = dotenvy::from_path(crate::config::paths::config_dir().join(".env"));
     let _ = dotenvy::dotenv();
 
     // Initialize text processor

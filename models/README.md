@@ -24,12 +24,6 @@ List available models:
 ./hush models list
 ```
 
-Or use the download script:
-```bash
-./scripts/download-models.sh base
-./scripts/download-models.sh --list
-```
-
 ## Troubleshooting
 
 **Model download fails:**

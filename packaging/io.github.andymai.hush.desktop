@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Hush
+GenericName=Voice to Text
+Comment=Local voice-to-text: hold a key, speak, and the text appears at your cursor
+Exec=hush daemon start --foreground
+Icon=io.github.andymai.hush
+Terminal=false
+Categories=Utility;Accessibility;AudioVideo;
+Keywords=voice;speech;dictation;transcription;whisper;
+StartupNotify=false
