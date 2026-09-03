@@ -14,7 +14,7 @@ use crate::text_processing::{
     TextProcessor,
 };
 use crate::transcription::models::{ModelManager, ModelSize};
-use crate::transcription::SimpleWhisperTranscriber;
+use crate::transcription::{WhisperTranscriber, WHISPER_SAMPLE_RATE};
 use crate::AudioCapture;
 
 #[cfg(target_os = "linux")]
@@ -191,21 +191,20 @@ pub async fn handle_listen(
 
     info!("Using model path: {:?}", model_path);
 
-    let transcriber = match SimpleWhisperTranscriber::new(&model_path).await {
-        Ok(t) => {
-            if t.is_ready() {
-                info!("✅ Whisper transcriber ready (GPU-accelerated)");
-            } else {
-                warn!("⚠️  Whisper model not loaded - will use simulation");
-            }
-            Some(t)
-        },
-        Err(e) => {
-            warn!("Failed to initialize transcriber: {}", e);
-            warn!("Will use simulated transcription");
-            None
-        },
-    };
+    let transcriber = WhisperTranscriber::new(&model_path, config.transcription.use_cuda)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "{}\nDownload a model with: hush models download {}",
+                e,
+                config.transcription.model_size
+            )
+        })?
+        .with_language(&config.transcription.language);
+    info!(
+        "✅ Whisper transcriber ready ({})",
+        transcriber.get_device_info()
+    );
 
     // Load environment variables from .env file
     let _ = dotenvy::dotenv();
@@ -615,48 +614,36 @@ pub async fn handle_listen(
                 }
 
                 // Transcribe
-                let transcription_result = if let Some(ref t) = transcriber {
-                    if t.is_ready() {
-                        match t.transcribe(&audio_data).await {
-                            Ok(result) => {
-                                // Filter common Whisper hallucinations on near-silence
-                                let text = result.text.trim().to_lowercase();
-                                let hallucinations = [
-                                    "you",
-                                    "thank you",
-                                    "thanks",
-                                    "thank you.",
-                                    "thanks for watching",
-                                    "bye",
-                                    "goodbye",
-                                    "thank you for watching",
-                                    "see you next time",
-                                    "subscribe",
-                                    "like and subscribe",
-                                ];
-                                if hallucinations.iter().any(|h| text == *h) {
-                                    *state_handle.lock() = OverlayState::idle();
-                                    continue;
-                                }
-                                TranscriptionResult::Success(result.text)
-                            },
-                            Err(_) => {
-                                TranscriptionResult::Error("Transcription failed".to_string())
-                            },
+                let transcription_result = match transcriber
+                    .transcribe_async(&audio_data, WHISPER_SAMPLE_RATE)
+                    .await
+                {
+                    Ok(result) => {
+                        // Filter common Whisper hallucinations on near-silence
+                        let text = result.text.trim().to_lowercase();
+                        let hallucinations = [
+                            "you",
+                            "thank you",
+                            "thanks",
+                            "thank you.",
+                            "thanks for watching",
+                            "bye",
+                            "goodbye",
+                            "thank you for watching",
+                            "see you next time",
+                            "subscribe",
+                            "like and subscribe",
+                        ];
+                        if hallucinations.iter().any(|h| text == *h) {
+                            *state_handle.lock() = OverlayState::idle();
+                            continue;
                         }
-                    } else {
-                        let duration = audio_data.len() as f32 / 16000.0;
-                        TranscriptionResult::Success(format!(
-                            "um well uh I mean this is like simulated text you know ({:.1}s)",
-                            duration
-                        ))
-                    }
-                } else {
-                    let duration = audio_data.len() as f32 / 16000.0;
-                    TranscriptionResult::Success(format!(
-                        "Simulated transcription ({:.1}s of audio)",
-                        duration
-                    ))
+                        TranscriptionResult::Success(result.text)
+                    },
+                    Err(e) => {
+                        error!("Transcription failed: {}", e);
+                        TranscriptionResult::Error("Transcription failed".to_string())
+                    },
                 };
 
                 if transcription_tx.send(transcription_result).is_err() {

@@ -1,16 +1,47 @@
-use candle_core::Device;
+//! GPU detection through ggml's backend registry.
+//!
+//! whisper.cpp registers every backend it was built with (CPU, CUDA, Vulkan)
+//! in a static registry, so the devices it will actually use can be listed
+//! without loading a model.
+
+use std::ffi::CStr;
+use std::os::raw::c_char;
 use std::sync::OnceLock;
 use tracing::info;
+use whisper_rs::whisper_rs_sys as sys;
 
 static GPU_AVAILABILITY: OnceLock<GpuAvailability> = OnceLock::new();
 
-/// GPU device type
+/// Accelerator backend in use
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GpuType {
-    /// NVIDIA CUDA GPU
+    /// NVIDIA CUDA
     Cuda,
+    /// Vulkan (NVIDIA, AMD, Intel)
+    Vulkan,
     /// CPU fallback (no GPU acceleration)
     Cpu,
+}
+
+impl std::fmt::Display for GpuType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            GpuType::Cuda => "CUDA",
+            GpuType::Vulkan => "Vulkan",
+            GpuType::Cpu => "CPU",
+        })
+    }
+}
+
+/// One device known to ggml's backend registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendDevice {
+    /// Backend device name, such as `CUDA0`, `Vulkan0`, or `CPU`
+    pub name: String,
+    /// Human-readable description, such as the GPU or CPU model
+    pub description: String,
+    /// Whether ggml classifies the device as a GPU
+    pub is_gpu: bool,
 }
 
 /// GPU availability and device information
@@ -18,7 +49,6 @@ pub enum GpuType {
 pub struct GpuAvailability {
     pub gpu_type: GpuType,
     pub device_name: String,
-    pub expected_latency_ms: u32,
     pub available: bool,
 }
 
@@ -26,41 +56,29 @@ impl GpuAvailability {
     /// Detect GPU availability (cached)
     pub fn detect() -> &'static Self {
         GPU_AVAILABILITY.get_or_init(|| {
-            #[cfg(feature = "cuda")]
-            {
-                match Device::cuda_if_available(0) {
-                    Ok(device) => {
-                        if !matches!(device, Device::Cpu) {
-                            info!("CUDA GPU detected and available");
-                            return Self {
-                                gpu_type: GpuType::Cuda,
-                                device_name: "NVIDIA CUDA GPU".to_string(),
-                                expected_latency_ms: 80,
-                                available: true,
-                            };
-                        }
-                    },
-                    Err(e) => {
-                        info!("CUDA initialization failed: {}", e);
-                    },
-                }
-            }
-
-            #[cfg(not(feature = "cuda"))]
-            {
-                info!("Built without GPU support (CPU-only mode)");
-            }
-
-            #[cfg(feature = "cuda")]
-            {
-                info!("No GPU available, falling back to CPU");
-            }
-
-            Self {
-                gpu_type: GpuType::Cpu,
-                device_name: Self::get_cpu_name(),
-                expected_latency_ms: 800,
-                available: false,
+            let devices = backend_devices();
+            match devices.iter().find(|d| d.is_gpu) {
+                Some(gpu) => {
+                    info!("GPU detected: {} ({})", gpu.description, gpu.name);
+                    Self {
+                        gpu_type: gpu_type_for(&gpu.name),
+                        device_name: gpu.description.clone(),
+                        available: true,
+                    }
+                },
+                None => {
+                    let cpu = devices
+                        .iter()
+                        .find(|d| !d.is_gpu)
+                        .map(|d| d.description.clone())
+                        .unwrap_or_else(|| "CPU".to_string());
+                    info!("No GPU backend available; using CPU ({})", cpu);
+                    Self {
+                        gpu_type: GpuType::Cpu,
+                        device_name: cpu,
+                        available: false,
+                    }
+                },
             }
         })
     }
@@ -75,55 +93,64 @@ impl GpuAvailability {
         Self::detect().gpu_type
     }
 
-    /// Get CPU name from system info
-    fn get_cpu_name() -> String {
-        #[cfg(target_arch = "x86_64")]
-        {
-            use raw_cpuid::CpuId;
-            if let Some(brand) = CpuId::new().get_processor_brand_string() {
-                return brand.as_str().trim().to_string();
-            }
-        }
-
-        "CPU".to_string()
-    }
-
-    /// Create appropriate Candle device based on detection
-    pub fn create_device() -> crate::Result<Device> {
-        let gpu = Self::detect();
-
-        match gpu.gpu_type {
-            GpuType::Cuda => {
-                #[cfg(feature = "cuda")]
-                {
-                    Device::cuda_if_available(0)
-                        .map_err(|e| anyhow::anyhow!("Failed to create CUDA device: {}", e))
-                }
-                #[cfg(not(feature = "cuda"))]
-                {
-                    Ok(Device::Cpu)
-                }
-            },
-            GpuType::Cpu => Ok(Device::Cpu),
-        }
+    /// whisper.cpp's own summary of the compiled backends and CPU features
+    pub fn system_info() -> String {
+        // SAFETY: whisper_print_system_info returns a pointer to a static
+        // buffer owned by whisper.cpp; it is never null and is not freed.
+        unsafe { cstr_to_string(sys::whisper_print_system_info()) }
     }
 }
 
 impl std::fmt::Display for GpuAvailability {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.available {
-            write!(
-                f,
-                "{} (expected latency: ~{}ms)",
-                self.device_name, self.expected_latency_ms
-            )
+            write!(f, "{} via {}", self.device_name, self.gpu_type)
         } else {
-            write!(
-                f,
-                "{} (expected latency: ~{}ms) [No GPU acceleration]",
-                self.device_name, self.expected_latency_ms
-            )
+            write!(f, "{} [No GPU acceleration]", self.device_name)
         }
+    }
+}
+
+fn gpu_type_for(backend_name: &str) -> GpuType {
+    let name = backend_name.to_ascii_lowercase();
+    if name.starts_with("cuda") {
+        GpuType::Cuda
+    } else if name.starts_with("vulkan") {
+        GpuType::Vulkan
+    } else {
+        GpuType::Cpu
+    }
+}
+
+/// Every device registered with ggml, in registry order.
+pub fn backend_devices() -> Vec<BackendDevice> {
+    // SAFETY: the registry is populated by static initializers in the linked
+    // backends; every index below `ggml_backend_dev_count()` yields a live
+    // device whose name and description strings outlive the process.
+    unsafe {
+        let count = sys::ggml_backend_dev_count();
+        (0..count)
+            .filter_map(|index| {
+                let device = sys::ggml_backend_dev_get(index);
+                if device.is_null() {
+                    return None;
+                }
+                Some(BackendDevice {
+                    name: cstr_to_string(sys::ggml_backend_dev_name(device)),
+                    description: cstr_to_string(sys::ggml_backend_dev_description(device)),
+                    is_gpu: sys::ggml_backend_dev_type(device)
+                        == sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU,
+                })
+            })
+            .collect()
+    }
+}
+
+unsafe fn cstr_to_string(ptr: *const c_char) -> String {
+    if ptr.is_null() {
+        String::new()
+    } else {
+        CStr::from_ptr(ptr).to_string_lossy().into_owned()
     }
 }
 
@@ -132,43 +159,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_gpu_detection_cached() {
+    fn detection_is_cached() {
         let first = GpuAvailability::detect();
         let second = GpuAvailability::detect();
         assert!(std::ptr::eq(first, second));
     }
 
     #[test]
-    fn test_gpu_type_determination() {
-        let gpu = GpuAvailability::detect();
-        assert!(matches!(gpu.gpu_type, GpuType::Cuda | GpuType::Cpu));
+    fn registry_always_lists_the_cpu() {
+        let devices = backend_devices();
+        assert!(devices.iter().any(|d| !d.is_gpu), "{devices:?}");
+        assert!(devices.iter().all(|d| !d.name.is_empty()));
     }
 
     #[test]
-    fn test_device_creation() {
-        let device = GpuAvailability::create_device();
-        assert!(device.is_ok());
-    }
-
-    #[cfg(feature = "cuda")]
-    #[test]
-    fn test_cuda_feature_enabled() {
-        let gpu = GpuAvailability::detect();
-        let _ = gpu.available;
+    fn gpu_type_follows_the_backend_name() {
+        assert_eq!(gpu_type_for("CUDA0"), GpuType::Cuda);
+        assert_eq!(gpu_type_for("Vulkan1"), GpuType::Vulkan);
+        assert_eq!(gpu_type_for("CPU"), GpuType::Cpu);
     }
 
     #[cfg(not(feature = "cuda"))]
     #[test]
-    fn test_cpu_only_build() {
+    fn cpu_only_build_reports_no_gpu() {
         let gpu = GpuAvailability::detect();
         assert!(!gpu.available);
         assert_eq!(gpu.gpu_type, GpuType::Cpu);
+        assert!(!gpu.device_name.is_empty());
     }
 
     #[test]
-    fn test_display_formatting() {
-        let gpu = GpuAvailability::detect();
-        let display_string = format!("{}", gpu);
-        assert!(!display_string.is_empty());
+    fn system_info_mentions_the_cpu_features() {
+        assert!(!GpuAvailability::system_info().is_empty());
     }
 }

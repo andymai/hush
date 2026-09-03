@@ -92,7 +92,8 @@ pub async fn handle_record(
             &config.transcription.model_path(),
             config.transcription.use_cuda,
         )
-        .await?;
+        .await?
+        .with_language(&config.transcription.language);
 
         // Initialize text processor
         let text_processor = {

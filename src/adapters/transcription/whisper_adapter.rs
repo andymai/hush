@@ -62,6 +62,7 @@ impl Transcriber for WhisperAdapter {
         TranscriberInfo {
             name: match self.gpu_type {
                 GpuType::Cuda => "Whisper (CUDA)".to_string(),
+                GpuType::Vulkan => "Whisper (Vulkan)".to_string(),
                 GpuType::Cpu => "Whisper (CPU)".to_string(),
             },
         }
