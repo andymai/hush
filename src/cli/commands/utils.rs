@@ -13,7 +13,7 @@ pub async fn show_config_status() -> Result<()> {
     match Config::load() {
         Ok(config) => {
             println!("  Model: {}", config.transcription.model_path().display());
-            println!("  Use CUDA: {}", config.transcription.use_cuda);
+            println!("  Use GPU: {}", config.transcription.use_gpu);
             println!("  Sample Rate: {}Hz", config.audio.sample_rate);
             println!("  Hotkey: {}", config.hotkey.combination);
         },

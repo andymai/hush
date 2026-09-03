@@ -191,7 +191,7 @@ pub async fn handle_listen(
 
     info!("Using model path: {:?}", model_path);
 
-    let transcriber = WhisperTranscriber::new(&model_path, config.transcription.use_cuda)
+    let transcriber = WhisperTranscriber::new(&model_path, config.transcription.use_gpu)
         .await
         .map_err(|e| {
             anyhow::anyhow!(

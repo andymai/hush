@@ -13,12 +13,12 @@ All processing happens on your machine. Your voice data never leaves your comput
 
 ```bash
 # Install dependencies (Ubuntu/Debian)
-sudo apt install libasound2-dev pkg-config libx11-dev
+sudo apt install cmake pkg-config libasound2-dev libx11-dev libxi-dev libxtst-dev libxcursor-dev libxrandr-dev libxinerama-dev libgl1-mesa-dev glslc libvulkan-dev
 
 # Build
 git clone https://github.com/andymai/hush.git
 cd hush
-make release                      # GPU build (or `make release-cpu` for CPU-only)
+make release                      # Vulkan GPU build (`make release-cuda` for CUDA, `make release-cpu` for CPU-only)
 
 # Setup
 ./hush setup init                 # Interactive configuration setup
@@ -33,7 +33,7 @@ For other distributions, see [INSTALL.md](INSTALL.md).
 
 ## Features
 
-- **Local Whisper transcription** with optional CUDA acceleration
+- **Local Whisper transcription** with Vulkan or CUDA acceleration
 - **Hardware-level text insertion** via UInput—works in VMs, SSH, games, secure contexts
 - **Push-to-talk hotkey** with visual overlay feedback
 - **Filler word removal** ("um", "uh", "like")
@@ -56,7 +56,7 @@ The file lands in `~/.config/hush/config.toml` (or `$XDG_CONFIG_HOME/hush/config
 | Setting | Description | Default |
 |---------|-------------|---------|
 | `transcription.model_size` | Whisper model (tiny/base/small/medium/large) | base |
-| `transcription.use_cuda` | Enable GPU acceleration | true |
+| `transcription.use_gpu` | Enable GPU acceleration | true |
 | `hotkey.combination` | Push-to-talk key | Ctrl+Shift+Space |
 
 ## Usage
@@ -120,7 +120,7 @@ echo "ANTHROPIC_API_KEY=your_key" > .env
 ## Requirements
 
 - ALSA development libraries
-- For GPU: NVIDIA GPU with CUDA 12.0+
+- For GPU: a Vulkan-capable graphics driver (NVIDIA, AMD, Intel). The CUDA build needs CUDA 12.0+.
 
 ## Troubleshooting
 
@@ -139,13 +139,14 @@ echo "ANTHROPIC_API_KEY=your_key" > .env
 **GPU not detected:**
 ```bash
 ./hush status --full
-nvidia-smi  # Check CUDA
+vulkaninfo --summary  # Check the Vulkan driver
 ```
 
 ## Building
 
 ```bash
-make release      # GPU-accelerated (CUDA)
+make release      # GPU-accelerated (Vulkan)
+make release-cuda # GPU-accelerated (CUDA)
 make release-cpu  # CPU-only
 cargo test        # Run tests
 ```

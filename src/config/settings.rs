@@ -43,8 +43,8 @@ pub struct TranscriptionConfig {
     pub model_size: String,
     /// Language code for transcription (e.g., "en" for English)
     pub language: String,
-    /// Enable CUDA GPU acceleration (requires CUDA-enabled build)
-    pub use_cuda: bool,
+    /// Use the GPU backend the binary was built with (`vulkan` or `cuda`)
+    pub use_gpu: bool,
     /// Beam search width (1-20, higher = more accurate but slower)
     pub beam_size: usize,
     /// Threshold for detecting silence/no speech (0.0-1.0)
@@ -138,8 +138,9 @@ impl Config {
     fn parse_over_defaults(user_toml: &str) -> Result<Self> {
         let mut merged: toml::Table = toml::from_str(DEFAULTS)
             .map_err(|e| anyhow::anyhow!("Built-in defaults are invalid TOML: {}", e))?;
-        let user: toml::Table = toml::from_str(user_toml)
+        let mut user: toml::Table = toml::from_str(user_toml)
             .map_err(|e| anyhow::anyhow!("Failed to parse TOML config: {}", e))?;
+        rename_legacy_keys(&mut user);
         merge_tables(&mut merged, user);
         let config: Config = toml::Value::Table(merged)
             .try_into()
@@ -223,6 +224,16 @@ impl Config {
     }
 }
 
+/// Keys from earlier config layouts, renamed before the merge so they neither
+/// collide with the current key nor fail as unknown.
+fn rename_legacy_keys(user: &mut toml::Table) {
+    if let Some(toml::Value::Table(transcription)) = user.get_mut("transcription") {
+        if let Some(value) = transcription.remove("use_cuda") {
+            transcription.entry("use_gpu").or_insert(value);
+        }
+    }
+}
+
 fn merge_tables(base: &mut toml::Table, overlay: toml::Table) {
     for (key, value) in overlay {
         match (base.get_mut(&key), value) {
@@ -267,6 +278,20 @@ model_size = "small"
         assert_eq!(config.transcription.model_size, "small");
         assert_eq!(config.transcription.beam_size, 5);
         assert_eq!(config.audio.sample_rate, 16000);
+    }
+
+    #[test]
+    fn legacy_use_cuda_key_is_renamed() {
+        let config = Config::parse_over_defaults("[transcription]\nuse_cuda = false\n").unwrap();
+        assert!(!config.transcription.use_gpu);
+
+        let both = "[transcription]\nuse_cuda = false\nuse_gpu = true\n";
+        assert!(
+            Config::parse_over_defaults(both)
+                .unwrap()
+                .transcription
+                .use_gpu
+        );
     }
 
     #[test]

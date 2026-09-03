@@ -7,11 +7,11 @@
 
    ```bash
    # Ubuntu / Debian
-   sudo apt install cmake pkg-config libasound2-dev libx11-dev libxi-dev libxtst-dev libxcursor-dev libxrandr-dev libxinerama-dev libgl1-mesa-dev
+   sudo apt install cmake pkg-config libasound2-dev libx11-dev libxi-dev libxtst-dev libxcursor-dev libxrandr-dev libxinerama-dev libgl1-mesa-dev glslc libvulkan-dev
    # Fedora
-   sudo dnf install cmake pkgconf-pkg-config alsa-lib-devel libX11-devel libXi-devel libXtst-devel libXcursor-devel libXrandr-devel libXinerama-devel mesa-libGL-devel
+   sudo dnf install cmake pkgconf-pkg-config alsa-lib-devel libX11-devel libXi-devel libXtst-devel libXcursor-devel libXrandr-devel libXinerama-devel mesa-libGL-devel glslc vulkan-headers vulkan-loader-devel
    # Arch
-   sudo pacman -S cmake pkgconf alsa-lib libx11 libxi libxtst libxcursor libxrandr libxinerama mesa
+   sudo pacman -S cmake pkgconf alsa-lib libx11 libxi libxtst libxcursor libxrandr libxinerama mesa shaderc vulkan-headers vulkan-icd-loader
    ```
 
 3. Install Node.js 20+ and run `npm install` to enable the commit hooks.

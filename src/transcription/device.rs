@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(gpu_type_for("CPU"), GpuType::Cpu);
     }
 
-    #[cfg(not(feature = "cuda"))]
+    #[cfg(not(any(feature = "cuda", feature = "vulkan")))]
     #[test]
     fn cpu_only_build_reports_no_gpu() {
         let gpu = GpuAvailability::detect();
