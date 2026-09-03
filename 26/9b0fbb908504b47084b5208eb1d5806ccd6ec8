@@ -1,0 +1,49 @@
+CLAUDE.md
+  s_229a35bbae3466::t_08f8a8b620f9ab 39-41
+README.md
+  s_229a35bbae3466::t_31a762ae80dc58 29,66,69-72,75-85
+src/cli/commands/daemon.rs
+  s_229a35bbae3466::t_74ed4a99d12e3a 1-165
+src/cli/commands/listen.rs
+  s_229a35bbae3466::t_6bf110b315509e 9,12,25,27-28,32-34,95-100,127,152,155-178,318,321,340,342,357,373,425,432-435,495,501,528-552,571,625-629,645,659,676,703,721-722,725,735-736
+src/cli/commands/mod.rs
+  s_229a35bbae3466::t_5d287bdf9dcf9a 1,34-37
+src/cli/commands/status.rs
+  s_229a35bbae3466::t_2d41d23b291a5f 37-43
+src/cli/dispatcher.rs
+  s_229a35bbae3466::t_3da4986c962c56 2-4,6-7,57-61,113-150,152-155,679,730,744
+src/cli/mod.rs
+  s_229a35bbae3466::t_f37519ba326cb7 7-9
+src/cli_main.rs
+  s_229a35bbae3466::t_4d03c1f98c12b7 54,69-86,151-193
+src/ipc/client.rs
+  s_229a35bbae3466::t_556caf8cb40d73 1-44
+src/ipc/lock.rs
+  s_229a35bbae3466::t_0d4bfd70cb0808 1-91
+src/ipc/mod.rs
+  s_229a35bbae3466::t_e26496a65c0c86 1-12
+src/ipc/paths.rs
+  s_229a35bbae3466::t_0bb3e6dbd68b7d 1-45
+src/ipc/protocol.rs
+  s_229a35bbae3466::t_b8210d325ce761 1-114
+src/ipc/server.rs
+  s_229a35bbae3466::t_fbe3b323c223b2 1-261
+src/lib.rs
+  s_229a35bbae3466::t_ca41e8edf4203f 29-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "269b0fbb908504b47084b5208eb1d5806ccd6ec8",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
