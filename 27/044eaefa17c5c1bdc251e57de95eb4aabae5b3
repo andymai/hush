@@ -1,0 +1,43 @@
+CLAUDE.md
+  s_229a35bbae3466::t_10e0dc62d8f136 67,110
+src/hotkey/mod.rs
+  s_229a35bbae3466::t_10e0dc62d8f136 1-167
+src/hotkey/combination.rs
+  s_229a35bbae3466::t_10e0dc62d8f136 1-217
+config/default.toml
+  s_229a35bbae3466::t_10e0dc62d8f136 21-22
+Cargo.toml
+  s_229a35bbae3466::t_75062209a936a5 91
+  s_229a35bbae3466::t_10e0dc62d8f136 92
+src/cli_main.rs
+  s_229a35bbae3466::t_dea77a0efcd4e5 244
+src/config/settings.rs
+  s_229a35bbae3466::t_10e0dc62d8f136 2,80-85,192-198,307-317
+  s_229a35bbae3466::t_41974c7c79e1be 318-319
+README.md
+  s_229a35bbae3466::t_10e0dc62d8f136 61-62
+src/cli/commands/listen.rs
+  s_229a35bbae3466::t_10e0dc62d8f136 10,123,127-133,169-170,172-176,308-334
+src/hotkey/x11.rs
+  s_229a35bbae3466::t_10e0dc62d8f136 1-103
+src/hotkey/evdev.rs
+  s_229a35bbae3466::t_10e0dc62d8f136 1-355
+Cargo.lock
+  s_229a35bbae3466::t_3298079c920d19 258-269,892-903,964-969,1219,1225,2196-2201,2779-2784,3976-3984
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "27044eaefa17c5c1bdc251e57de95eb4aabae5b3",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
