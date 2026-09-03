@@ -3,6 +3,8 @@ name: Release Please
 on:
   push:
     branches: [main]
+  # Manual trigger for re-running release management after the workflow was paused.
+  workflow_dispatch:
 
 permissions: {}
 
