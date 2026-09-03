@@ -101,7 +101,7 @@ These versions are constrained:
 
 ## Testing
 
-Unit tests are embedded in modules via `#[cfg(test)] mod tests`. Use mock implementations from `core/mocks.rs` for trait testing. `.github/workflows/ci.yml` runs fmt, clippy, nextest, MSRV (1.88), rustdoc, cargo-deny, cargo-audit, cargo-machete, and taplo as parallel jobs behind a required `CI Pass` check; `osv-scan.yml` scans both lockfiles. Doctests are excluded until the module-level examples compile again (#91). CUDA builds are not covered by CI, so verify those locally.
+Unit tests are embedded in modules via `#[cfg(test)] mod tests`. Use mock implementations from `core/mocks.rs` for trait testing. `.github/workflows/ci.yml` runs fmt, clippy, nextest, MSRV (1.88), rustdoc, cargo-deny, cargo-audit, cargo-machete, and taplo as parallel jobs behind a required `CI Pass` check; `osv-scan.yml` scans both lockfiles. Doctests run as a separate step, so examples in `///` comments must compile. CUDA builds are not covered by CI, so verify those locally.
 
 ## Commits and Releases
 

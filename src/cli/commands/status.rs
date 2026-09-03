@@ -24,11 +24,15 @@ use anyhow::Result;
 /// # Examples
 ///
 /// ```no_run
+/// # use hush::cli::commands::handle_status;
+/// # async fn example() -> anyhow::Result<()> {
 /// // Basic status
 /// handle_status(false, false, false).await?;
 ///
 /// // Full status with component health
 /// handle_status(false, false, true).await?;
+/// # Ok(())
+/// # }
 /// ```
 pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<()> {
     println!("🤫 Hush System Status");

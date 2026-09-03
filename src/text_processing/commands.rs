@@ -89,34 +89,38 @@ impl ParsedCommand {
     }
 }
 
-/// Patterns for detecting voice commands
+/// Patterns for detecting voice commands. The patterns are literals, so a
+/// failure here is a programming error caught by `static_patterns_compile`.
 static COMMAND_PATTERNS: Lazy<Vec<(Regex, VoiceCommand)>> = Lazy::new(|| {
     vec![
         // Paragraph and line breaks
         (
-            Regex::new(r"\b(new paragraph|next paragraph)\b").unwrap(),
+            Regex::new(r"\b(new paragraph|next paragraph)\b")
+                .expect("command pattern is a valid regex"),
             VoiceCommand::NewParagraph,
         ),
         (
-            Regex::new(r"\b(new line|next line)\b").unwrap(),
+            Regex::new(r"\b(new line|next line)\b").expect("command pattern is a valid regex"),
             VoiceCommand::NewLine,
         ),
         // Undo/delete (longer matches first)
         (
-            Regex::new(r"\b(undo that|undo)\b").unwrap(),
+            Regex::new(r"\b(undo that|undo)\b").expect("command pattern is a valid regex"),
             VoiceCommand::Undo,
         ),
         (
-            Regex::new(r"\b(scratch that|delete that)\b").unwrap(),
+            Regex::new(r"\b(scratch that|delete that)\b")
+                .expect("command pattern is a valid regex"),
             VoiceCommand::DeleteThat,
         ),
         // Capitalization
         (
-            Regex::new(r"\b(cap that|capitalize that)\b").unwrap(),
+            Regex::new(r"\b(cap that|capitalize that)\b")
+                .expect("command pattern is a valid regex"),
             VoiceCommand::CapitalizeThat,
         ),
         (
-            Regex::new(r"\b(all caps|upper case)\b").unwrap(),
+            Regex::new(r"\b(all caps|upper case)\b").expect("command pattern is a valid regex"),
             VoiceCommand::AllCaps,
         ),
     ]
@@ -225,6 +229,11 @@ impl Default for CommandParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn static_patterns_compile() {
+        assert!(!COMMAND_PATTERNS.is_empty());
+    }
 
     #[test]
     fn test_no_commands() {

@@ -158,7 +158,7 @@ impl SessionMemory {
         for entry in self.entries.iter().take(5) {
             for word in entry.text.split_whitespace() {
                 // Look for words starting with capital letter (potential proper nouns)
-                if word.len() > 3 && word.chars().next().unwrap().is_uppercase() {
+                if word.len() > 3 && word.chars().next().is_some_and(|c| c.is_uppercase()) {
                     let clean_word = word.trim_matches(|c: char| !c.is_alphanumeric());
                     if !clean_word.is_empty() && !topics.contains(&clean_word.to_string()) {
                         topics.push(clean_word.to_string());

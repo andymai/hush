@@ -183,12 +183,9 @@ impl FillerWordRemover {
             return trimmed.to_string();
         }
 
-        // Safe to expect: we just checked that trimmed is not empty
-        let last_char = trimmed.chars().last().expect("trimmed is not empty");
-        if matches!(last_char, '.' | '!' | '?') {
-            trimmed.to_string()
-        } else {
-            format!("{}.", trimmed)
+        match trimmed.chars().last() {
+            Some('.' | '!' | '?') | None => trimmed.to_string(),
+            Some(_) => format!("{}.", trimmed),
         }
     }
 }
@@ -196,6 +193,16 @@ impl FillerWordRemover {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn static_patterns_compile() {
+        let _ = &*MULTIPLE_SPACES;
+        let _ = &*SPACE_BEFORE_PUNCTUATION;
+        let _ = &*REPEATED_PERIODS;
+        let _ = &*REPEATED_COMMAS;
+        let _ = &*REPEATED_EXCLAMATION;
+        let _ = &*REPEATED_QUESTION;
+    }
 
     #[test]
     fn test_light_mode() {

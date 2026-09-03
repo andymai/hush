@@ -73,8 +73,9 @@ jobs:
       - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.62.30
         with:
           tool: nextest
-      # Doctests run once the module-level examples compile again (#91).
       - run: cargo nextest run --lib --bins
+      # nextest does not run doctests, so they get their own step.
+      - run: cargo test --doc
 
   msrv:
     name: MSRV (1.88)

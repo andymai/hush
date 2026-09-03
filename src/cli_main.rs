@@ -417,10 +417,10 @@ impl Cli {
             _ => Level::TRACE,
         };
 
-        let directive = format!("hush={}", level)
-            .parse()
-            .expect("Failed to parse log level directive - this is a bug");
-        let filter = EnvFilter::from_default_env().add_directive(directive);
+        let filter = match format!("hush={}", level).parse() {
+            Ok(directive) => EnvFilter::from_default_env().add_directive(directive),
+            Err(_) => EnvFilter::from_default_env(),
+        };
 
         fmt()
             .with_env_filter(filter)

@@ -284,6 +284,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn static_patterns_compile() {
+        let _ = &*CODE_PATTERNS;
+        let _ = &*COMMENT_PATTERNS;
+        let _ = &*COMMAND_PATTERNS;
+        let _ = &*LIST_PATTERNS;
+        let _ = &*QUESTION_PATTERNS;
+        let _ = &*TODO_PATTERNS;
+        let _ = &*EMAIL_PATTERNS;
+        let _ = &*CHAT_PATTERNS;
+    }
+
+    #[test]
     fn test_detect_code() {
         let detector = IntentDetector::new();
 
