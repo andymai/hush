@@ -7,12 +7,11 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 
 /// Adapter that wraps TextInserter to implement TextOutput trait
-/// Uses Arc<Mutex<>> for thread safety since Enigo is not Send + Sync
-pub struct X11TextAdapter {
+pub struct TextInserterAdapter {
     inner: Arc<Mutex<TextInserter>>,
 }
 
-impl X11TextAdapter {
+impl TextInserterAdapter {
     /// Create new adapter wrapping a TextInserter instance
     pub fn new() -> Result<Self> {
         let inner = TextInserter::new()?;
@@ -28,27 +27,24 @@ impl X11TextAdapter {
 }
 
 #[async_trait]
-impl TextOutput for X11TextAdapter {
+impl TextOutput for TextInserterAdapter {
     async fn insert_text(&mut self, text: &str) -> Result<()> {
         self.inner.lock().insert_text(text)
     }
 
     async fn focused_window(&self) -> Result<Option<WindowInfo>> {
-        match self.inner.lock().get_focused_window() {
-            Ok(window) => {
-                let class = window.class.clone();
-                Ok(Some(WindowInfo {
-                    title: window.title,
-                    class: class.clone(),
-                    app_name: class,
-                }))
-            },
-            Err(_) => Ok(None),
-        }
+        Ok(self.inner.lock().get_focused_window().map(|window| {
+            let class = window.class.clone();
+            WindowInfo {
+                title: window.title,
+                class: class.clone(),
+                app_name: class,
+            }
+        }))
     }
 
     fn output_method(&self) -> &str {
-        "X11"
+        "uinput"
     }
 }
 
@@ -58,15 +54,15 @@ mod tests {
     use crate::core::traits::TextOutput;
 
     #[test]
-    fn test_x11_adapter_creation() {
-        if let Ok(adapter) = X11TextAdapter::new() {
-            assert_eq!(adapter.output_method(), "X11");
+    fn test_adapter_creation() {
+        if let Ok(adapter) = TextInserterAdapter::new() {
+            assert_eq!(adapter.output_method(), "uinput");
         }
     }
 
     #[test]
     fn test_adapter_implements_trait() {
         let _can_box: Result<Box<dyn TextOutput>> =
-            X11TextAdapter::new().map(|adapter| Box::new(adapter) as Box<dyn TextOutput>);
+            TextInserterAdapter::new().map(|adapter| Box::new(adapter) as Box<dyn TextOutput>);
     }
 }

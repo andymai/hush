@@ -279,7 +279,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     // Initialize text inserter
     #[cfg(target_os = "linux")]
     let text_inserter = match TextInserter::new() {
-        Ok(inserter) => {
+        Ok(mut inserter) => {
+            inserter.set_method(config.insertion.method);
+            inserter.set_typing_delay(config.insertion.typing_delay_ms);
             info!("✅ Text inserter initialized");
             Some(Arc::new(Mutex::new(inserter)))
         },
