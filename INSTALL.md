@@ -39,7 +39,7 @@ make release-cpu    # CPU only
 ```bash
 ./hush setup init             # Write ~/.config/hush/config.toml
 ./hush models download base   # Download a Whisper model
-./hush setup uinput --quick   # Enable text insertion
+./hush setup permissions      # One polkit prompt: keyboard and uinput access
 ./hush status --full          # Verify
 ```
 
@@ -78,8 +78,8 @@ matching `-dev` (Ubuntu) or `-devel` (Fedora) package from the lists above.
 
 **Text insertion not working:**
 ```bash
-./hush setup diagnose-uinput
-./hush setup uinput --auto-fix
+./hush setup permissions --check
+./hush setup permissions
 ```
 
 **Audio device not found:**
