@@ -7,7 +7,7 @@ use tracing::{error, info, warn};
 
 // Import Hush components
 use crate::config::Config;
-use crate::hotkey::{HotkeyEvent, HotkeyManager};
+use crate::hotkey::{HotkeyEvent, HotkeyManager, HotkeyMode};
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
 use crate::text_processing::{
     CommandExecutor, CommandParser, EditingMode, InsertionHistory, LlmProvider, ProcessingConfig,
@@ -120,10 +120,17 @@ pub async fn handle_listen(
         },
     };
     let hotkey_combination = config.hotkey.combination.clone();
+    let hotkey_mode = config.hotkey.mode;
 
     println!("🎤 Hush Intelligent Listening Mode");
     println!("═══════════════════════════════════════════════════════");
-    println!("Press {} to start recording", hotkey_combination);
+    match hotkey_mode {
+        HotkeyMode::Hold => println!("Hold {} to dictate", hotkey_combination),
+        HotkeyMode::Toggle => println!(
+            "Press {} to start dictating, press it again to stop",
+            hotkey_combination
+        ),
+    }
     println!("Release to transcribe and insert text");
     println!("Press Ctrl+C to quit");
     println!("═══════════════════════════════════════════════════════\n");
@@ -159,9 +166,14 @@ pub async fn handle_listen(
     let (transcription_tx, transcription_rx) = mpsc::channel::<TranscriptionResult>();
 
     // Create hotkey manager
-    let (hotkey_manager, hotkey_rx) = HotkeyManager::new(&hotkey_combination)?;
+    let (hotkey_manager, hotkey_rx) =
+        HotkeyManager::with_backend(&hotkey_combination, config.hotkey.backend)?;
     hotkey_manager.start_listening()?;
-    info!("✅ Hotkey '{}' registered", hotkey_combination);
+    info!(
+        "✅ Hotkey '{}' registered via {}",
+        hotkey_combination,
+        hotkey_manager.backend_name()
+    );
 
     // Initialize audio capture (main thread - !Send)
     let mut audio_capture = AudioCapture::new(config.audio.device.as_deref())?;
@@ -293,32 +305,33 @@ pub async fn handle_listen(
     let state_handle_clone = state_handle.clone();
     let egui_context_clone = egui_context_handle.clone();
     let hotkey_thread = thread::spawn(move || {
-        loop {
-            match hotkey_rx.recv() {
-                Ok(HotkeyEvent::Pressed) => {
-                    *state_handle_clone.lock() = OverlayState::start_recording();
-                    // Request immediate overlay repaint to show recording state
-                    if let Some(ctx) = egui_context_clone.lock().as_ref() {
-                        ctx.request_repaint();
-                    }
-                    if audio_cmd_tx_clone
-                        .send(AudioCommand::StartRecording)
-                        .is_err()
-                    {
-                        warn!("Channel send failed - receiver dropped");
-                    }
-                },
-                Ok(HotkeyEvent::Released) => {
-                    // Stop recording - state transitions handled by result handler thread
-                    // Visual state remains in Recording until transcription completes
-                    if audio_cmd_tx_clone
-                        .send(AudioCommand::StopRecording)
-                        .is_err()
-                    {
-                        warn!("Channel send failed - receiver dropped");
-                    }
-                },
-                Err(_) => break,
+        let mut recording = false;
+        while let Ok(event) = hotkey_rx.recv() {
+            let start = match (hotkey_mode, event) {
+                (HotkeyMode::Hold, HotkeyEvent::Pressed) => true,
+                (HotkeyMode::Hold, HotkeyEvent::Released) => false,
+                (HotkeyMode::Toggle, HotkeyEvent::Pressed) => !recording,
+                (HotkeyMode::Toggle, HotkeyEvent::Released) => continue,
+            };
+            if start == recording {
+                continue;
+            }
+            recording = start;
+            if start {
+                *state_handle_clone.lock() = OverlayState::start_recording();
+                // Request immediate overlay repaint to show recording state
+                if let Some(ctx) = egui_context_clone.lock().as_ref() {
+                    ctx.request_repaint();
+                }
+            }
+            // On stop the visual state stays in Recording until transcription completes
+            let command = if start {
+                AudioCommand::StartRecording
+            } else {
+                AudioCommand::StopRecording
+            };
+            if audio_cmd_tx_clone.send(command).is_err() {
+                warn!("Channel send failed - receiver dropped");
             }
         }
     });

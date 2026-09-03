@@ -58,6 +58,8 @@ The file lands in `~/.config/hush/config.toml` (or `$XDG_CONFIG_HOME/hush/config
 | `transcription.model_size` | Whisper model (tiny/base/small/medium/large) | base |
 | `transcription.use_gpu` | Enable GPU acceleration | true |
 | `hotkey.combination` | Push-to-talk key | Ctrl+Shift+Space |
+| `hotkey.mode` | `hold` (record while held) or `toggle` (press to start and stop) | hold |
+| `hotkey.backend` | `auto`, `evdev`, or `x11` | auto |
 
 ## Usage
 

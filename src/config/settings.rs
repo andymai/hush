@@ -1,4 +1,5 @@
 use crate::config::paths;
+use crate::hotkey::{HotkeyBackend, HotkeyMode, KeyCombination};
 use crate::transcription::models::ModelSize;
 use crate::Result;
 use serde::{Deserialize, Serialize};
@@ -76,6 +77,12 @@ pub struct HotkeyConfig {
     pub enabled: bool,
     /// Hotkey combination string (e.g., "Ctrl+Shift+Space")
     pub combination: String,
+    /// Hold-to-talk or toggle
+    #[serde(default)]
+    pub mode: HotkeyMode,
+    /// Which backend reads the keyboard
+    #[serde(default)]
+    pub backend: HotkeyBackend,
 }
 
 /// User feedback and notification settings
@@ -182,10 +189,13 @@ impl Config {
         }
 
         // Validate hotkey configuration
-        if self.hotkey.enabled && self.hotkey.combination.is_empty() {
-            return Err(anyhow::anyhow!(
-                "Hotkey combination cannot be empty when hotkey is enabled"
-            ));
+        if self.hotkey.enabled {
+            if self.hotkey.combination.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "Hotkey combination cannot be empty when hotkey is enabled"
+                ));
+            }
+            KeyCombination::parse(&self.hotkey.combination)?;
         }
 
         Ok(())
@@ -292,6 +302,19 @@ model_size = "small"
                 .transcription
                 .use_gpu
         );
+    }
+
+    #[test]
+    fn hotkey_mode_and_backend_default_and_parse() {
+        let config = Config::defaults().unwrap();
+        assert_eq!(config.hotkey.mode, HotkeyMode::Hold);
+        assert_eq!(config.hotkey.backend, HotkeyBackend::Auto);
+        let config =
+            Config::parse_over_defaults("[hotkey]\nmode = \"toggle\"\nbackend = \"x11\"\n")
+                .unwrap();
+        assert_eq!(config.hotkey.mode, HotkeyMode::Toggle);
+        assert_eq!(config.hotkey.backend, HotkeyBackend::X11);
+        assert!(Config::parse_over_defaults("[hotkey]\ncombination = \"Ctrl+Bogus\"\n").is_err());
     }
 
     #[test]

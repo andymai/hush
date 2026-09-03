@@ -241,7 +241,7 @@ pub enum TestCommands {
     /// Test hotkey system
     Hotkeys {
         /// Hotkey combination to test
-        #[arg(short, long)]
+        #[arg(long)]
         combination: Option<String>,
 
         /// Test duration in seconds
