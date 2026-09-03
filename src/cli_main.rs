@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "hush")]
 #[command(about = "🤫 Hush - local voice-to-text for Linux")]
-#[command(version = "0.1.0")]
+#[command(version)]
 #[command(author = "Andy")]
 #[command(
     long_about = "Fast, accurate voice-to-text for Linux developers using local Whisper models.\nSupports global hotkeys, multiple input methods, and UInput text insertion."
