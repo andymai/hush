@@ -1,0 +1,49 @@
+.github/workflows/ci.yml
+  s_229a35bbae3466::t_cdf1a1f4da9571 77-78
+CLAUDE.md
+  s_229a35bbae3466::t_a6ec6d98740854 104
+src/cli/commands/manual.rs
+  s_229a35bbae3466::t_dc4ab3ea365261 21-22,28-29
+src/cli/commands/record.rs
+  s_229a35bbae3466::t_0d094b38e16027 28-30,36-37
+src/cli/commands/setup.rs
+  s_229a35bbae3466::t_8f2ade17ed6afb 35-39,46-47
+src/cli/commands/status.rs
+  s_229a35bbae3466::t_2b92da1702da1c 27-28,34-35
+src/cli/commands/test.rs
+  s_229a35bbae3466::t_6fd6f23773e56e 25-27,29,34-37
+src/cli_main.rs
+  s_229a35bbae3466::t_1795deec68026d 420-423
+src/logging.rs
+  s_229a35bbae3466::t_1c4482091d9070 333-344
+src/overlay/mod.rs
+  s_229a35bbae3466::t_bdc6d213582c9e 1-26
+src/text/mod.rs
+  s_229a35bbae3466::t_c3b9e56ad6a65f 1-19
+src/text_processing/commands.rs
+  s_229a35bbae3466::t_4167492d0ba51e 92-93,98-99,103,108,112-113,118-119,123,233-237
+src/text_processing/context.rs
+  s_229a35bbae3466::t_63cb4497851dc1 428-432
+src/text_processing/filler_words.rs
+  s_229a35bbae3466::t_81de82514b09a9 186-188,197-206
+src/text_processing/intent.rs
+  s_229a35bbae3466::t_fd7190bd5e7061 286-297
+src/text_processing/session.rs
+  s_229a35bbae3466::t_036d38e6b17e69 161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "1bb4f1d415811349a9577cc431cb8ec9b170e163",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
