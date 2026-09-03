@@ -1,8 +1,10 @@
 use crate::cli::commands::{
-    handle_listen, handle_manual, handle_models, handle_record, handle_setup, handle_status,
-    handle_test,
+    handle_client_command, handle_daemon_restart, handle_daemon_start, handle_daemon_status,
+    handle_daemon_stop, handle_listen, handle_manual, handle_models, handle_record, handle_setup,
+    handle_status, handle_test, SessionOptions,
 };
-use crate::cli::Commands;
+use crate::cli::{Commands, DaemonCommands};
+use crate::ipc::DaemonCommand;
 use crate::logging::RequestContext;
 use anyhow::{Context, Result};
 use hound;
@@ -52,6 +54,11 @@ impl CommandDispatcher {
             Commands::Record { .. } => "record",
             Commands::Manual { .. } => "manual",
             Commands::Listen { .. } => "listen",
+            Commands::Daemon { .. } => "daemon",
+            Commands::Toggle => "toggle",
+            Commands::Start => "start",
+            Commands::Stop => "stop",
+            Commands::Cancel => "cancel",
             Commands::Setup { .. } => "setup",
             Commands::Test { .. } => "test",
             Commands::Models { .. } => "models",
@@ -103,8 +110,49 @@ impl CommandDispatcher {
                     no_button = %no_button,
                     "Listen command parameters"
                 );
-                handle_listen(editing_mode.clone(), no_processing, no_button).await
+                handle_listen(SessionOptions {
+                    editing_mode: editing_mode.clone(),
+                    no_processing,
+                    no_button,
+                })
+                .await
             },
+            Commands::Daemon { daemon_command } => match daemon_command {
+                DaemonCommands::Start {
+                    foreground,
+                    editing_mode,
+                    no_processing,
+                    no_button,
+                } => {
+                    handle_daemon_start(
+                        SessionOptions {
+                            editing_mode,
+                            no_processing,
+                            no_button,
+                        },
+                        foreground,
+                    )
+                    .await
+                },
+                DaemonCommands::Stop => handle_daemon_stop().await,
+                DaemonCommands::Restart {
+                    editing_mode,
+                    no_processing,
+                    no_button,
+                } => {
+                    handle_daemon_restart(SessionOptions {
+                        editing_mode,
+                        no_processing,
+                        no_button,
+                    })
+                    .await
+                },
+                DaemonCommands::Status => handle_daemon_status().await,
+            },
+            Commands::Toggle => handle_client_command(DaemonCommand::Toggle).await,
+            Commands::Start => handle_client_command(DaemonCommand::Start).await,
+            Commands::Stop => handle_client_command(DaemonCommand::Stop).await,
+            Commands::Cancel => handle_client_command(DaemonCommand::Cancel).await,
             Commands::Setup { setup_command } => handle_setup(setup_command).await,
             Commands::Test { test_command } => handle_test(test_command).await,
             Commands::Models { model_command } => handle_models(model_command).await,
@@ -628,7 +676,7 @@ async fn install_autostart() -> Result<()> {
          Type=Application\n\
          Name=Hush Voice-to-Text\n\
          Comment=Fast, accurate voice-to-text for Linux developers\n\
-         Exec={} listen\n\
+         Exec={} daemon start --foreground\n\
          Icon=audio-input-microphone\n\
          Terminal=false\n\
          Categories=Utility;Accessibility;\n\
@@ -679,7 +727,7 @@ async fn install_desktop_entry() -> Result<()> {
          Name=Hush Voice-to-Text\n\
          GenericName=Voice-to-Text\n\
          Comment=Fast, accurate voice-to-text with GPU acceleration\n\
-         Exec={} listen\n\
+         Exec={} daemon start --foreground\n\
          Icon=audio-input-microphone\n\
          Terminal=false\n\
          Categories=Utility;Accessibility;AudioVideo;\n\
@@ -693,7 +741,7 @@ async fn install_desktop_entry() -> Result<()> {
          \n\
          [Desktop Action Listen]\n\
          Name=Start Listening Mode\n\
-         Exec={} listen\n\
+         Exec={} daemon start --foreground\n\
          \n\
          [Desktop Action Status]\n\
          Name=Check Status\n\

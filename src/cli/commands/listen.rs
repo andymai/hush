@@ -6,8 +6,10 @@ use std::thread;
 use tracing::{error, info, warn};
 
 // Import Hush components
+use crate::cli::commands::daemon::{self, SessionOptions};
 use crate::config::Config;
 use crate::hotkey::{HotkeyEvent, HotkeyManager, HotkeyMode};
+use crate::ipc::SessionCommand;
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
 use crate::text_processing::{
     CommandExecutor, CommandParser, EditingMode, InsertionHistory, LlmProvider, ProcessingConfig,
@@ -20,27 +22,16 @@ use crate::AudioCapture;
 #[cfg(target_os = "linux")]
 use crate::TextInserter;
 
-/// Handle the listen command
+/// Run the dictation session in the foreground: the daemon body.
 ///
-/// Starts intelligent listening mode with hotkey-activated voice recording.
-/// This is the main interactive mode for Hush, providing real-time voice-to-text
-/// with optional LLM-based text processing and voice commands.
+/// Claims the single-daemon slot (PID file and control socket), then serves
+/// hotkey and IPC commands until `hush daemon stop`, Ctrl+C, or SIGTERM.
 ///
 /// # Arguments
 ///
-/// * `editing_mode_str` - Text editing aggressiveness: "light", "medium", or "aggressive"
-/// * `no_processing` - If true, skip LLM-based text processing (rule-based only)
-/// * `no_button` - If true, hide the idle overlay button
-///
-/// # Examples
-///
-/// ```no_run
-/// // Start with medium editing and LLM processing
-/// handle_listen("medium".to_string(), false, false).await?;
-///
-/// // Start with light editing, no processing, no button
-/// handle_listen("light".to_string(), true, true).await?;
-/// ```
+/// * `options.editing_mode` - Text editing aggressiveness: "light", "medium", or "aggressive"
+/// * `options.no_processing` - If true, skip LLM-based text processing (rule-based only)
+/// * `options.no_button` - If true, hide the idle overlay button
 ///
 /// # Workflow
 ///
@@ -101,11 +92,12 @@ use crate::TextInserter;
 /// - LLM calls only if ANTHROPIC_API_KEY is set
 /// - Audio never leaves device unless LLM enabled
 /// - No telemetry or external connections (except optional LLM)
-pub async fn handle_listen(
-    editing_mode_str: String,
-    no_processing: bool,
-    no_button: bool,
-) -> Result<()> {
+pub async fn handle_listen(options: SessionOptions) -> Result<()> {
+    let SessionOptions {
+        editing_mode: editing_mode_str,
+        no_processing,
+        no_button,
+    } = options;
     info!("🎧 Starting intelligent listening mode");
     info!("   Editing mode: {}", editing_mode_str);
     info!("   Text processing: {}", !no_processing);
@@ -132,7 +124,7 @@ pub async fn handle_listen(
         ),
     }
     println!("Release to transcribe and insert text");
-    println!("Press Ctrl+C to quit");
+    println!("`hush toggle` starts and stops from a keybind; Ctrl+C or `hush daemon stop` quits");
     println!("═══════════════════════════════════════════════════════\n");
 
     // Parse editing mode
@@ -152,18 +144,37 @@ pub async fn handle_listen(
     };
 
     // Communication channels
-    enum AudioCommand {
-        StartRecording,
-        StopRecording,
-    }
-
     enum TranscriptionResult {
         Success(String),
         Error(String),
     }
 
-    let (audio_cmd_tx, audio_cmd_rx) = mpsc::channel::<AudioCommand>();
+    let (audio_cmd_tx, audio_cmd_rx) = mpsc::channel::<SessionCommand>();
     let (transcription_tx, transcription_rx) = mpsc::channel::<TranscriptionResult>();
+
+    // Single instance and control socket, before any device is opened
+    let handles = daemon::claim(audio_cmd_tx.clone()).await?;
+    let shared = Arc::clone(&handles.shared);
+
+    {
+        let quit_tx = audio_cmd_tx.clone();
+        tokio::spawn(async move {
+            let mut sigterm =
+                match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                    Ok(signal) => signal,
+                    Err(e) => {
+                        warn!("SIGTERM handler unavailable: {}", e);
+                        return;
+                    },
+                };
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {},
+                _ = sigterm.recv() => {},
+            }
+            info!("Shutdown signal received");
+            let _ = quit_tx.send(SessionCommand::Quit);
+        });
+    }
 
     // Create hotkey manager
     let (hotkey_manager, hotkey_rx) =
@@ -304,9 +315,10 @@ pub async fn handle_listen(
     let audio_cmd_tx_clone = audio_cmd_tx.clone();
     let state_handle_clone = state_handle.clone();
     let egui_context_clone = egui_context_handle.clone();
+    let shared_hotkey = Arc::clone(&shared);
     let hotkey_thread = thread::spawn(move || {
-        let mut recording = false;
         while let Ok(event) = hotkey_rx.recv() {
+            let recording = shared_hotkey.is_recording();
             let start = match (hotkey_mode, event) {
                 (HotkeyMode::Hold, HotkeyEvent::Pressed) => true,
                 (HotkeyMode::Hold, HotkeyEvent::Released) => false,
@@ -316,7 +328,6 @@ pub async fn handle_listen(
             if start == recording {
                 continue;
             }
-            recording = start;
             if start {
                 *state_handle_clone.lock() = OverlayState::start_recording();
                 // Request immediate overlay repaint to show recording state
@@ -326,9 +337,9 @@ pub async fn handle_listen(
             }
             // On stop the visual state stays in Recording until transcription completes
             let command = if start {
-                AudioCommand::StartRecording
+                SessionCommand::StartRecording
             } else {
-                AudioCommand::StopRecording
+                SessionCommand::StopRecording
             };
             if audio_cmd_tx_clone.send(command).is_err() {
                 warn!("Channel send failed - receiver dropped");
@@ -343,6 +354,7 @@ pub async fn handle_listen(
     let command_parser_clone = command_parser.clone();
     let command_executor_clone = command_executor.clone();
     let insertion_history_clone = insertion_history.clone();
+    let shared_result = Arc::clone(&shared);
     let result_thread = thread::spawn(move || {
         let result_runtime = match tokio::runtime::Runtime::new() {
             Ok(runtime) => runtime,
@@ -358,6 +370,7 @@ pub async fn handle_listen(
         while let Ok(result) = transcription_rx.recv() {
             match result {
                 TranscriptionResult::Success(raw_text) => {
+                    shared_result.set_inserting();
                     // Parse for voice commands
                     let parsed = command_parser_clone.parse(&raw_text);
 
@@ -409,13 +422,17 @@ pub async fn handle_listen(
                                 );
                             }
                         }
+                        shared_result.set_idle();
                         continue;
                     }
 
                     // If no text to insert, skip
                     let command_text = match exec_result.text {
                         Some(text) => text,
-                        None => continue,
+                        None => {
+                            shared_result.set_idle();
+                            continue;
+                        },
                     };
 
                     // Process text (if enabled and should_process is true)
@@ -475,11 +492,13 @@ pub async fn handle_listen(
                     };
 
                     *state_handle_clone2.lock() = OverlayState::idle();
+                    shared_result.set_idle();
                 },
                 TranscriptionResult::Error(error_msg) => {
                     error!("❌ Transcription failed: {}", error_msg);
                     *state_handle_clone2.lock() =
                         OverlayState::error(&error_msg, std::time::Duration::from_secs(4));
+                    shared_result.set_idle();
                 },
             }
         }
@@ -506,7 +525,31 @@ pub async fn handle_listen(
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         };
         match command {
-            AudioCommand::StartRecording => {
+            SessionCommand::Quit => {
+                info!("Quit requested");
+                shared.set_stopping();
+                break;
+            },
+            SessionCommand::CancelRecording => {
+                if !audio_capture.is_recording() {
+                    continue;
+                }
+                amplitude_stop_signal.store(true, Ordering::Release);
+                audio_capture.disable_amplitude_monitoring();
+                if let Some(thread) = current_amplitude_thread.take() {
+                    let _ = thread.join();
+                }
+                if let Err(e) = audio_capture.stop_recording() {
+                    error!("Failed to stop recording: {}", e);
+                }
+                info!("Recording cancelled");
+                *state_handle.lock() = OverlayState::idle();
+                shared.set_idle();
+            },
+            SessionCommand::StartRecording => {
+                if audio_capture.is_recording() {
+                    continue;
+                }
                 // Reset stop signal for new recording
                 amplitude_stop_signal.store(false, Ordering::Release);
 
@@ -525,6 +568,7 @@ pub async fn handle_listen(
                         warn!("Channel send failed - receiver dropped");
                     }
                 } else {
+                    shared.set_recording();
                     // Start polling amplitude updates with batching for performance
                     let state_handle_amp = state_handle.clone();
                     let stop_signal = amplitude_stop_signal.clone();
@@ -578,7 +622,11 @@ pub async fn handle_listen(
                     current_amplitude_thread = Some(amplitude_thread);
                 }
             },
-            AudioCommand::StopRecording => {
+            SessionCommand::StopRecording => {
+                if !audio_capture.is_recording() {
+                    continue;
+                }
+                shared.set_transcribing();
                 // Signal amplitude thread to stop and clean up immediately
                 amplitude_stop_signal.store(true, Ordering::Release);
                 audio_capture.disable_amplitude_monitoring();
@@ -594,6 +642,7 @@ pub async fn handle_listen(
                     Ok(data) => data,
                     Err(e) => {
                         error!("Failed to stop recording: {}", e);
+                        shared.set_idle();
                         if transcription_tx
                             .send(TranscriptionResult::Error(
                                 "Failed to stop recording".to_string(),
@@ -607,6 +656,7 @@ pub async fn handle_listen(
                 };
 
                 if audio_data.is_empty() {
+                    shared.set_idle();
                     if transcription_tx
                         .send(TranscriptionResult::Error("No audio recorded".to_string()))
                         .is_err()
@@ -623,6 +673,7 @@ pub async fn handle_listen(
 
                 if rms < SILENCE_THRESHOLD {
                     *state_handle.lock() = OverlayState::idle();
+                    shared.set_idle();
                     continue;
                 }
 
@@ -649,6 +700,7 @@ pub async fn handle_listen(
                         ];
                         if hallucinations.iter().any(|h| text == *h) {
                             *state_handle.lock() = OverlayState::idle();
+                            shared.set_idle();
                             continue;
                         }
                         TranscriptionResult::Success(result.text)
@@ -666,9 +718,11 @@ pub async fn handle_listen(
         }
     }
 
-    // Cleanup
+    // Cleanup: release the socket and PID file first so a restart can claim them
+    drop(handles);
     drop(hotkey_manager);
     drop(audio_cmd_tx);
+    drop(transcription_tx);
 
     // Signal any remaining amplitude thread to stop
     amplitude_stop_signal.store(true, Ordering::Release);
@@ -678,7 +732,8 @@ pub async fn handle_listen(
 
     let _ = hotkey_thread.join();
     let _ = result_thread.join();
-    let _ = overlay_thread.join();
+    // The overlay window only closes when the process exits, so it is not joined.
+    drop(overlay_thread);
 
     info!("Listen mode ended");
     Ok(())

@@ -51,7 +51,7 @@ pub enum Commands {
         count: u32,
     },
 
-    /// Start intelligent listening mode with overlay (Wispr Flow-style)
+    /// Run the daemon in this terminal (same as `daemon start --foreground`)
     Listen {
         /// Editing mode for text processing
         #[arg(short, long, default_value = "light")]
@@ -65,6 +65,24 @@ pub enum Commands {
         #[arg(long)]
         no_button: bool,
     },
+
+    /// Run Hush in the background and control it over its socket
+    Daemon {
+        #[command(subcommand)]
+        daemon_command: DaemonCommands,
+    },
+
+    /// Start recording if idle, otherwise stop and transcribe (talks to the daemon)
+    Toggle,
+
+    /// Start recording (talks to the daemon)
+    Start,
+
+    /// Stop recording and transcribe (talks to the daemon)
+    Stop,
+
+    /// Stop recording and discard the audio (talks to the daemon)
+    Cancel,
 
     /// Setup and configuration commands
     Setup {
@@ -128,6 +146,49 @@ pub enum Commands {
         #[arg(long)]
         system: bool,
     },
+}
+
+#[derive(Subcommand)]
+pub enum DaemonCommands {
+    /// Start the daemon, detached from this terminal unless --foreground
+    Start {
+        /// Stay attached to this terminal
+        #[arg(long)]
+        foreground: bool,
+
+        /// Editing mode for text processing
+        #[arg(short, long, default_value = "light")]
+        editing_mode: String,
+
+        /// Disable text processing (use raw transcription)
+        #[arg(long)]
+        no_processing: bool,
+
+        /// Hide overlay button when idle
+        #[arg(long)]
+        no_button: bool,
+    },
+
+    /// Ask the daemon to quit
+    Stop,
+
+    /// Stop the daemon if it runs, then start it detached
+    Restart {
+        /// Editing mode for text processing
+        #[arg(short, long, default_value = "light")]
+        editing_mode: String,
+
+        /// Disable text processing (use raw transcription)
+        #[arg(long)]
+        no_processing: bool,
+
+        /// Hide overlay button when idle
+        #[arg(long)]
+        no_button: bool,
+    },
+
+    /// Show what the daemon is doing
+    Status,
 }
 
 #[derive(Subcommand)]

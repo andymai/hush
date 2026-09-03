@@ -26,7 +26,7 @@ make release                      # Vulkan GPU build (`make release-cuda` for CU
 ./hush setup permissions          # One polkit prompt: keyboard and uinput access
 
 # Run
-./hush listen                     # Hold Ctrl+Shift+Space to dictate
+./hush daemon start               # Runs in the background; hold Ctrl+Shift+Space to dictate
 ```
 
 For other distributions, see [INSTALL.md](INSTALL.md).
@@ -63,13 +63,26 @@ The file lands in `~/.config/hush/config.toml` (or `$XDG_CONFIG_HOME/hush/config
 
 ## Usage
 
-### Listen Mode
+### Daemon
 
 ```bash
-./hush listen
+hush daemon start          # Background daemon: hotkey works in any window
+hush daemon status
+hush daemon stop
+hush listen                # Same session, attached to the terminal
 ```
 
-Hold `Ctrl+Shift+Space`, speak, release. Text appears at your cursor.
+Hold `Ctrl+Shift+Space`, speak, release. Text appears at your cursor. With `hotkey.mode = "toggle"` one press starts and the next stops.
+
+Any key bound in your compositor can drive the daemon over its socket:
+
+```bash
+hush toggle                # Start recording, or stop and transcribe
+hush start / hush stop
+hush cancel                # Stop and discard
+```
+
+Hyprland: `bind = , F9, exec, hush toggle`. Sway: `bindsym F9 exec hush toggle`.
 
 Options:
 ```bash

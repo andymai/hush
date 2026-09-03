@@ -34,6 +34,13 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
     println!("🤫 Hush System Status");
     println!();
 
+    print!("Daemon: ");
+    match crate::ipc::client::status().await {
+        Some(state) => println!("✅ running ({})", state),
+        None => println!("not running (start with `hush daemon start`)"),
+    }
+    println!();
+
     // Always show basic status
     show_system_info().await?;
     println!();
