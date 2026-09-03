@@ -36,7 +36,9 @@ CMake auto-detects it and deadlocks on the CUDA kernel fan-out.
 ```bash
 ./hush models download base   # Download Whisper model (~145MB)
 ./hush setup permissions      # udev rule for keyboard and uinput access
-./hush listen                 # Hold Ctrl+Shift+Space to dictate
+./hush daemon start           # Background daemon; hold Ctrl+Shift+Space to dictate
+./hush toggle                 # Start or stop recording over the daemon socket
+./hush listen                 # Same session attached to the terminal
 ./hush record --duration 5    # Record for N seconds
 ./hush status --full          # System diagnostics
 ```

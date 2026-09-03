@@ -1,3 +1,4 @@
+pub mod daemon;
 pub mod listen;
 pub mod manual;
 pub mod models;
@@ -30,6 +31,10 @@ pub mod test;
 pub mod utils;
 
 // Re-export command handlers
+pub use daemon::{
+    handle_client_command, handle_daemon_restart, handle_daemon_start, handle_daemon_status,
+    handle_daemon_stop, SessionOptions,
+};
 pub use listen::handle_listen;
 pub use manual::handle_manual;
 pub use models::handle_models;
