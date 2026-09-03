@@ -168,9 +168,11 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: taplo fmt --check
 
+  # !cancelled() rather than always(): a run superseded by a newer push must
+  # not report a failing gate for its commit.
   ci-pass:
     name: CI Pass
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [fmt, clippy, clippy-vulkan, test, msrv, docs, deny, audit, machete, taplo]
     runs-on: ubuntu-latest
     steps:
