@@ -1,0 +1,38 @@
+README.md
+  s_229a35bbae3466::t_d4abd6fd982372 26,131-132
+src/lib.rs
+  s_229a35bbae3466::t_d4abd6fd982372 26-28
+INSTALL.md
+  s_229a35bbae3466::t_d4abd6fd982372 42,81-82
+SECURITY.md
+  s_229a35bbae3466::t_d4abd6fd982372 18
+src/cli/commands/utils.rs
+  s_229a35bbae3466::t_d4abd6fd982372 65,67-69
+src/hotkey/evdev.rs
+  s_229a35bbae3466::t_d4abd6fd982372 119
+src/cli_main.rs
+  s_229a35bbae3466::t_d4abd6fd982372 146-156,159,163
+src/permissions.rs
+  s_229a35bbae3466::t_d4abd6fd982372 1-66,68-189
+  s_229a35bbae3466::t_7172613e167a23 67
+CLAUDE.md
+  s_229a35bbae3466::t_d4abd6fd982372 38
+src/cli/commands/setup.rs
+  s_229a35bbae3466::t_d4abd6fd982372 5,54,61,90,92-94,97-145,149-181,392
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "89e089471e60d6ae1f0324f99684d74cde83ec0b",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
