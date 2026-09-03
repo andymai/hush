@@ -28,9 +28,11 @@ runs:
           sudo wget -qO "/etc/apt/sources.list.d/lunarg-vulkan-$codename.list" \
             "https://packages.lunarg.com/vulkan/lunarg-vulkan-$codename.list"
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends shaderc
+          # ggml-vulkan needs headers newer than jammy's; LunarG's are current.
+          sudo apt-get install -y --no-install-recommends shaderc vulkan-headers libvulkan-dev
         fi
         glslc --version | head -n 1
+        pkg-config --modversion vulkan
     - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}
