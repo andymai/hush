@@ -1,0 +1,60 @@
+src/cli/commands/setup.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 6,247,254,284-288,290
+.gitignore
+  s_229a35bbae3466::t_abf7f4bf6910ed 88
+README.md
+  s_229a35bbae3466::t_65f3267a8c5fe1 52
+src/cli/dispatcher.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 331,355,499
+src/logging.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 124-126
+CLAUDE.md
+  s_229a35bbae3466::t_65f3267a8c5fe1 93
+src/cli/commands/listen.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 115-121,176-178,185-188
+src/main.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 61-63
+src/cli/commands/status.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 77
+config/default.toml
+  s_229a35bbae3466::t_abf7f4bf6910ed 1-16
+src/cli/commands/models.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 46,97,156,215,247,327,392
+src/transcription/models.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 30-45
+src/cli/commands/utils.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 15
+src/lib.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 28
+docs/plans/2026-09-03-open-source-launch.md
+  s_229a35bbae3466::t_65f3267a8c5fe1 58,100
+src/cli/commands/record.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 92
+src/config/mod.rs
+  s_229a35bbae3466::t_abf7f4bf6910ed 1-2,4-16,19
+  s_229a35bbae3466::t_65f3267a8c5fe1 3
+src/config/settings.rs
+  s_229a35bbae3466::t_65f3267a8c5fe1 104-106,117-118
+  s_229a35bbae3466::t_26bb02b813c050 109-111,134-135
+  s_229a35bbae3466::t_abf7f4bf6910ed 1-2,5-7,38-41,54-71,89-99,101,107-108,112-116,119-124,126-127,136,138-145,193,195,199,205-214,224,226-230,232-233,239-309,311-312
+src/config/paths.rs
+  s_229a35bbae3466::t_65f3267a8c5fe1 22-26,102-104,106
+  s_229a35bbae3466::t_26bb02b813c050 118-121
+  s_229a35bbae3466::t_abf7f4bf6910ed 1-21,27-101,105,107-117,122-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "a926f368a88a6ef52e0651bfb3398560de1dce7a",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
