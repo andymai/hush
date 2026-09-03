@@ -64,7 +64,7 @@ src/
 ├── transcription/  # whisper.cpp via whisper-rs (whisper.rs), model catalogue and downloads (models.rs), GPU detection (device.rs)
 ├── text_processing/# Pipeline: filler removal → vocabulary → entities → LLM polish
 ├── text/           # uinput_keyboard.rs for kernel-level text insertion
-├── hotkey/         # Global hotkey listener
+├── hotkey/         # Hotkey combination parser, evdev backend, X11 fallback
 ├── overlay/        # egui floating window UI
 ├── config/         # TOML settings
 └── logging.rs      # Structured tracing with request correlation
@@ -107,4 +107,4 @@ Commit messages and PR titles follow Conventional Commits (commitlint locally, `
 
 ## Platform
 
-Linux-only. Uses `#[cfg(target_os = "linux")]` for platform-specific code. X11 for window detection, uinput for keyboard emulation.
+Linux-only. Uses `#[cfg(target_os = "linux")]` for platform-specific code. Hotkeys read `/dev/input` through evdev on any session type, with an X11 grab as fallback; uinput for keyboard emulation; X11 for window detection.
