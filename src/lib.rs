@@ -25,7 +25,7 @@ pub mod logging;
 
 // Re-export main types for convenience (legacy)
 pub use audio::{AudioCapture, AudioFeedback};
-pub use config::{Config, ConfigWatcher};
+pub use config::Config;
 pub use hotkey::{HotkeyEvent, HotkeyManager};
 
 #[cfg(target_os = "linux")]

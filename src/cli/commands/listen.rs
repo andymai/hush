@@ -1,6 +1,5 @@
 use anyhow::Result;
 use parking_lot::Mutex;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -113,10 +112,13 @@ pub async fn handle_listen(
     info!("   Show button: {}", !no_button);
 
     // Load configuration
-    let config = Config::load().unwrap_or_else(|e| {
-        warn!("Failed to load config, using defaults: {}", e);
-        Config::programmatic_default()
-    });
+    let config = match Config::load() {
+        Ok(config) => config,
+        Err(e) => {
+            warn!("Failed to load config, using defaults: {}", e);
+            Config::defaults()?
+        },
+    };
     let hotkey_combination = config.hotkey.combination.clone();
 
     println!("🎤 Hush Intelligent Listening Mode");
@@ -171,31 +173,19 @@ pub async fn handle_listen(
 
     // Initialize transcriber - try config first, then fall back to ModelManager
     let model_path = {
-        let config_path = &config.transcription.model_path;
-
-        // If config has a valid path, use it
-        if config_path.exists() {
-            config_path.clone()
+        let configured = config.transcription.model_path();
+        if configured.exists() {
+            configured
         } else {
-            // Fall back to ModelManager to find the model in cache
-            let cache_dir = dirs::cache_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("hush/models");
-
             let model_size: ModelSize = config
                 .transcription
                 .model_size
                 .parse()
                 .unwrap_or(ModelSize::Base);
-
-            if let Ok(manager) = ModelManager::new(&cache_dir) {
-                manager.get_model_path(&model_size).unwrap_or_else(|| {
-                    // Last resort: default base model path
-                    cache_dir.join("ggml-base.bin")
-                })
-            } else {
-                cache_dir.join("ggml-base.bin")
-            }
+            ModelManager::new(crate::config::paths::models_dir())
+                .ok()
+                .and_then(|manager| manager.get_model_path(&model_size))
+                .unwrap_or(configured)
         }
     };
 

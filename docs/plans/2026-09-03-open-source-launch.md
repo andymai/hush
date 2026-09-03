@@ -55,7 +55,7 @@ Mirrors the patterns in brepkit, brepjs, and elevator-core.
 
 ### M1: Launch blockers
 
-- Config resolves from `$XDG_CONFIG_HOME/hush/config.toml` with `--config` and `HUSH_CONFIG` overrides. Built-in defaults compile in from `config/default.toml`. `hush setup init` writes to the XDG path.
+- Config resolves from `$XDG_CONFIG_HOME/hush/config.toml` with `--config-file` and `HUSH_CONFIG` overrides. Built-in defaults compile in from `config/default.toml`. `hush setup init` writes to the XDG path.
 - Remove the candle stack (candle-core, candle-nn, candle-transformers, hf-hub, tokenizers, safetensors) and the experimental safetensors path. Model downloads use reqwest against `huggingface.co/ggerganov/whisper.cpp` with SHA256 verification.
 - `vulkan` Cargo feature via `whisper-rs/vulkan`. GPU detection reports the Vulkan device name. Falls back to CPU when no device is found.
 - evdev hotkey backend implementing `InputTrigger`, with hold and toggle modes, device hotplug, and a combination parser shared with the config format. The X11 backend remains a fallback when `/dev/input` is not readable.
@@ -97,7 +97,7 @@ Exit: release 1.0.0.
 
 ### Configuration
 
-`Config::load` resolves, in order: `--config`, `HUSH_CONFIG`, `$XDG_CONFIG_HOME/hush/config.toml`. Missing files fall back to compiled defaults. Models live in `$XDG_DATA_HOME/hush/models`; the cache location keeps working through a one-time migration. Runtime files (socket, PID) live in `$XDG_RUNTIME_DIR/hush`.
+`Config::load` resolves, in order: `--config-file`, `HUSH_CONFIG`, `$XDG_CONFIG_HOME/hush/config.toml`. Missing files fall back to compiled defaults. Models live in `$XDG_DATA_HOME/hush/models`; the cache location keeps working through a one-time migration. Runtime files (socket, PID) live in `$XDG_RUNTIME_DIR/hush`.
 
 ### Transcription
 

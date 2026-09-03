@@ -121,12 +121,9 @@ impl PerformanceMetrics {
             }
         }
 
-        // Also check for models and logs
-        if let Some(home_dir) = dirs::home_dir() {
-            let models_dir = home_dir.join(".hush/models");
-            if models_dir.exists() {
-                total_size += Self::dir_size(&models_dir).unwrap_or(0);
-            }
+        let models_dir = crate::config::paths::models_dir();
+        if models_dir.exists() {
+            total_size += Self::dir_size(&models_dir).unwrap_or(0);
         }
 
         if let Some(data_dir) = dirs::data_local_dir() {

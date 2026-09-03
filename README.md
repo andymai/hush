@@ -49,12 +49,7 @@ Initialize your configuration interactively:
 ./hush setup init --defaults  # Use defaults without prompts
 ```
 
-Or copy the example and edit manually:
-
-```bash
-cp config/default.toml.example config/default.toml
-# Edit config/default.toml with your preferences
-```
+The file lands in `~/.config/hush/config.toml` (or `$XDG_CONFIG_HOME/hush/config.toml`) and only needs the keys you change; everything else comes from the built-in defaults in `config/default.toml`. Point at another file with `--config-file <path>` or `HUSH_CONFIG=<path>`. Models live in `~/.local/share/hush/models`.
 
 ### Key Settings
 

@@ -27,6 +27,22 @@ pub enum ModelSize {
     LargeV3,
 }
 
+impl ModelSize {
+    /// File name of this model in the ggerganov/whisper.cpp catalogue.
+    pub fn filename(&self) -> String {
+        match self {
+            ModelSize::Tiny => "ggml-tiny.bin",
+            ModelSize::Base => "ggml-base.bin",
+            ModelSize::Small => "ggml-small.bin",
+            ModelSize::Medium => "ggml-medium.bin",
+            ModelSize::Large => "ggml-large-v1.bin",
+            ModelSize::LargeV2 => "ggml-large-v2.bin",
+            ModelSize::LargeV3 => "ggml-large-v3.bin",
+        }
+        .to_string()
+    }
+}
+
 impl std::str::FromStr for ModelSize {
     type Err = anyhow::Error;
 

@@ -1,0 +1,23 @@
+# Built-in defaults. User overrides live in $XDG_CONFIG_HOME/hush/config.toml
+# (usually ~/.config/hush/config.toml) and only need the keys they change.
+
+[audio]
+sample_rate = 16000
+channels = 1
+buffer_size = 1024
+# device = "default"
+
+[transcription]
+# model_path = "/path/to/ggml-base.bin"  # derived from model_size when unset
+model_size = "base"       # tiny, base, small, medium, large, large-v2, large-v3
+language = "en"
+use_cuda = true
+beam_size = 5
+no_speech_threshold = 0.6
+
+[hotkey]
+enabled = true
+combination = "Ctrl+Shift+Space"
+
+[feedback]
+audio_enabled = false

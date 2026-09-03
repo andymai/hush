@@ -1,6 +1,10 @@
+use crate::config::paths;
+use crate::transcription::models::ModelSize;
 use crate::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+const DEFAULTS: &str = include_str!("../../config/default.toml");
 
 /// Main configuration structure for the Hush application
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -31,8 +35,10 @@ pub struct AudioConfig {
 /// Whisper transcription model configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TranscriptionConfig {
-    /// Path to the Whisper model binary file
-    pub model_path: PathBuf,
+    /// Explicit model file. When unset, the file for `model_size` inside the
+    /// models directory is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_path: Option<PathBuf>,
     /// Model size identifier (tiny, base, small, medium, large, large-v2, large-v3)
     pub model_size: String,
     /// Language code for transcription (e.g., "en" for English)
@@ -43,6 +49,24 @@ pub struct TranscriptionConfig {
     pub beam_size: usize,
     /// Threshold for detecting silence/no speech (0.0-1.0)
     pub no_speech_threshold: f32,
+}
+
+impl TranscriptionConfig {
+    /// The model file to load: the explicit path when set, otherwise the
+    /// catalogue file for `model_size` in the models directory.
+    pub fn model_path(&self) -> PathBuf {
+        match &self.model_path {
+            Some(path) => path.clone(),
+            None => {
+                let filename = self
+                    .model_size
+                    .parse::<ModelSize>()
+                    .map(|size| size.filename())
+                    .unwrap_or_else(|_| format!("ggml-{}.bin", self.model_size));
+                paths::models_dir().join(filename)
+            },
+        }
+    }
 }
 
 /// Global hotkey listener configuration
@@ -62,24 +86,64 @@ pub struct FeedbackConfig {
 }
 
 impl Config {
-    pub fn load() -> Result<Self> {
-        Self::load_from_file("config/default.toml")
+    /// The compiled-in defaults from `config/default.toml`.
+    pub fn defaults() -> Result<Self> {
+        Self::parse_over_defaults("")
     }
 
-    pub fn load_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self> {
-        use std::fs;
+    /// Where the user configuration file lives.
+    pub fn path() -> PathBuf {
+        paths::config_path()
+    }
 
-        let config_str = fs::read_to_string(path.as_ref()).map_err(|e| {
+    /// Load the user configuration, falling back to defaults when no file exists.
+    pub fn load() -> Result<Self> {
+        Self::load_from(None)
+    }
+
+    /// Load from an explicit file, or from the resolved location when `explicit`
+    /// is `None`. A file named explicitly, by argument or by `HUSH_CONFIG`, must
+    /// exist; the default location may be absent.
+    pub fn load_from(explicit: Option<&Path>) -> Result<Self> {
+        match explicit {
+            Some(path) if !path.exists() => {
+                Err(anyhow::anyhow!("Config file not found: {}", path.display()))
+            },
+            Some(path) => Self::load_from_file(path),
+            None => {
+                let path = paths::config_path();
+                if path.exists() {
+                    Self::load_from_file(&path)
+                } else if paths::config_path_is_explicit() {
+                    Err(anyhow::anyhow!("Config file not found: {}", path.display()))
+                } else {
+                    Self::defaults()
+                }
+            },
+        }
+    }
+
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let user = std::fs::read_to_string(path.as_ref()).map_err(|e| {
             anyhow::anyhow!(
                 "Failed to read config file {}: {}",
                 path.as_ref().display(),
                 e
             )
         })?;
+        Self::parse_over_defaults(&user)
+            .map_err(|e| anyhow::anyhow!("Invalid config file {}: {}", path.as_ref().display(), e))
+    }
 
-        let config: Config = toml::from_str(&config_str)
+    fn parse_over_defaults(user_toml: &str) -> Result<Self> {
+        let mut merged: toml::Table = toml::from_str(DEFAULTS)
+            .map_err(|e| anyhow::anyhow!("Built-in defaults are invalid TOML: {}", e))?;
+        let user: toml::Table = toml::from_str(user_toml)
             .map_err(|e| anyhow::anyhow!("Failed to parse TOML config: {}", e))?;
-
+        merge_tables(&mut merged, user);
+        let config: Config = toml::Value::Table(merged)
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("Failed to parse TOML config: {}", e))?;
         config.validate()?;
         Ok(config)
     }
@@ -126,24 +190,28 @@ impl Config {
         Ok(())
     }
 
-    /// Save configuration to the default config file
+    /// Save to the user configuration file, creating its directory as needed.
     pub fn save(&self) -> Result<()> {
-        self.save_to_file("config/default.toml")
+        self.save_to_file(paths::config_path())
     }
 
     /// Save configuration to a specific file path
-    pub fn save_to_file<P: AsRef<std::path::Path>>(&self, path: P) -> Result<()> {
-        use std::fs;
-
-        // Validate before saving
+    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         self.validate()?;
 
-        // Serialize to TOML
         let toml_string = toml::to_string_pretty(self)
             .map_err(|e| anyhow::anyhow!("Failed to serialize config: {}", e))?;
 
-        // Write to file
-        fs::write(path.as_ref(), toml_string).map_err(|e| {
+        if let Some(parent) = path.as_ref().parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to create config directory {}: {}",
+                    parent.display(),
+                    e
+                )
+            })?;
+        }
+        std::fs::write(path.as_ref(), toml_string).map_err(|e| {
             anyhow::anyhow!(
                 "Failed to write config file {}: {}",
                 path.as_ref().display(),
@@ -153,41 +221,94 @@ impl Config {
 
         Ok(())
     }
+}
 
-    /// Create a default configuration programmatically
-    pub fn programmatic_default() -> Self {
-        Config {
-            audio: AudioConfig {
-                sample_rate: 16000,
-                channels: 1,
-                buffer_size: 1024,
-                device: None,
+fn merge_tables(base: &mut toml::Table, overlay: toml::Table) {
+    for (key, value) in overlay {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(existing)), toml::Value::Table(incoming)) => {
+                merge_tables(existing, incoming)
             },
-            transcription: TranscriptionConfig {
-                model_path: PathBuf::from("models/whisper-medium.bin"),
-                model_size: "medium".to_string(),
-                language: "en".to_string(),
-                use_cuda: true,
-                beam_size: 5,
-                no_speech_threshold: 0.6,
-            },
-            hotkey: HotkeyConfig {
-                enabled: true,
-                combination: "Ctrl+Shift+Space".to_string(),
-            },
-            feedback: FeedbackConfig {
-                audio_enabled: true,
+            (_, value) => {
+                base.insert(key, value);
             },
         }
     }
 }
 
-pub struct ConfigWatcher {
-    // Will be implemented later
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl ConfigWatcher {
-    pub fn new() -> Result<Self> {
-        todo!("Implement in later task")
+    #[test]
+    fn defaults_parse_and_validate() {
+        let config = Config::defaults().unwrap();
+        assert_eq!(config.audio.sample_rate, 16000);
+        assert_eq!(config.transcription.model_size, "base");
+        assert_eq!(config.hotkey.combination, "Ctrl+Shift+Space");
+        assert!(config.transcription.model_path.is_none());
+        assert!(config.audio.device.is_none());
+    }
+
+    #[test]
+    fn partial_user_file_merges_over_defaults() {
+        let config = Config::parse_over_defaults(
+            r#"
+[hotkey]
+combination = "F12"
+
+[transcription]
+model_size = "small"
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.hotkey.combination, "F12");
+        assert!(config.hotkey.enabled);
+        assert_eq!(config.transcription.model_size, "small");
+        assert_eq!(config.transcription.beam_size, 5);
+        assert_eq!(config.audio.sample_rate, 16000);
+    }
+
+    #[test]
+    fn invalid_user_value_is_rejected() {
+        let err = Config::parse_over_defaults("[audio]\nsample_rate = 1\n").unwrap_err();
+        assert!(err.to_string().contains("sample rate"));
+    }
+
+    #[test]
+    fn model_path_is_derived_from_the_catalogue() {
+        let mut config = Config::defaults().unwrap();
+        config.transcription.model_size = "large".into();
+        assert!(config
+            .transcription
+            .model_path()
+            .ends_with("ggml-large-v1.bin"));
+
+        config.transcription.model_path = Some(PathBuf::from("/tmp/custom.bin"));
+        assert_eq!(
+            config.transcription.model_path(),
+            PathBuf::from("/tmp/custom.bin")
+        );
+    }
+
+    #[test]
+    fn explicit_missing_file_is_an_error() {
+        let err = Config::load_from(Some(Path::new("/nonexistent/hush.toml"))).unwrap_err();
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn save_round_trips_and_omits_unset_model_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/config.toml");
+        let mut config = Config::defaults().unwrap();
+        config.hotkey.combination = "Ctrl+Alt+Space".into();
+        config.save_to_file(&path).unwrap();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("model_path"));
+
+        let reloaded = Config::load_from(Some(&path)).unwrap();
+        assert_eq!(reloaded.hotkey.combination, "Ctrl+Alt+Space");
     }
 }

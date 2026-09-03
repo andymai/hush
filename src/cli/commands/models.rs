@@ -43,7 +43,7 @@ use tracing::error;
 ///
 /// # Cache Location
 ///
-/// Models are stored in `~/.cache/hush/models/`
+/// Models are stored in `$XDG_DATA_HOME/hush/models/` (`~/.local/share/hush/models/`)
 pub async fn handle_models(model_command: ModelCommands) -> Result<()> {
     match model_command {
         ModelCommands::List {
@@ -94,10 +94,7 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
     let models = [
         "tiny", "base", "small", "medium", "large", "large-v2", "large-v3",
     ];
-    let cache_dir = dirs::cache_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("hush")
-        .join("models");
+    let cache_dir = crate::config::paths::models_dir();
 
     // Use ModelManager to check which models are actually downloaded
     let manager = ModelManager::new(&cache_dir)?;
@@ -156,10 +153,7 @@ pub async fn download_model(model_size: &str, force: bool) -> Result<std::path::
         .parse()
         .context(format!("Invalid model size: {}", model_size))?;
 
-    let cache_dir = dirs::cache_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("hush")
-        .join("models");
+    let cache_dir = crate::config::paths::models_dir();
 
     // If force, remove existing model first
     if force {
@@ -218,7 +212,7 @@ pub async fn set_model(model_size: &str) -> Result<()> {
 
     // Update config with actual path from download
     config.transcription.model_size = model_size.to_string();
-    config.transcription.model_path = model_path;
+    config.transcription.model_path = Some(model_path);
 
     // Validate updated config
     config
@@ -250,10 +244,7 @@ pub async fn set_model(model_size: &str) -> Result<()> {
 async fn remove_model(model_size: &str, yes: bool) -> Result<()> {
     use crate::Config;
 
-    let cache_dir = dirs::cache_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("hush")
-        .join("models");
+    let cache_dir = crate::config::paths::models_dir();
 
     if model_size == "all" {
         println!("🗑️ Removing all cached models...");
@@ -333,10 +324,7 @@ async fn show_model_info(clear_stats: bool) -> Result<()> {
     use crate::transcription::models::ModelManager;
     use crate::Config;
 
-    let cache_dir = dirs::cache_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("hush")
-        .join("models");
+    let cache_dir = crate::config::paths::models_dir();
 
     println!("📊 Model Cache Information:");
     println!("Cache directory: {}", cache_dir.display());
@@ -401,10 +389,7 @@ async fn verify_models(model_size: Option<&str>, fix: bool) -> Result<()> {
 
     println!("🔍 Verifying model integrity...");
 
-    let cache_dir = dirs::cache_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("hush")
-        .join("models");
+    let cache_dir = crate::config::paths::models_dir();
 
     let manager = ModelManager::new(&cache_dir)?;
 

@@ -89,7 +89,7 @@ pub async fn handle_record(
     if !print_only {
         println!("🗣️ Transcribing...");
         let transcriber = WhisperTranscriber::new(
-            &config.transcription.model_path,
+            &config.transcription.model_path(),
             config.transcription.use_cuda,
         )
         .await?;
