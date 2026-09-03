@@ -1,0 +1,57 @@
+Makefile
+  s_229a35bbae3466::t_58f721cca2dbc5 1-9,13-14,17,21,24-34,37,39,47,50-61,67,70-81,83-84,93,98,100,121,123-124
+INSTALL.md
+  s_229a35bbae3466::t_58f721cca2dbc5 7-9,14-16,21-23,32-34,40-43,46-49,51,53,57,59,65-66,76-77,93-95
+src/cli/commands/listen.rs
+  s_229a35bbae3466::t_58f721cca2dbc5 194
+CONTRIBUTING.md
+  s_229a35bbae3466::t_58f721cca2dbc5 10,12,14
+README.md
+  s_229a35bbae3466::t_58f721cca2dbc5 16,21,36,59,123,142,148-149
+CLAUDE.md
+  s_229a35bbae3466::t_58f721cca2dbc5 12-13,26-32
+src/config/settings.rs
+  s_229a35bbae3466::t_58f721cca2dbc5 46-47,283,285-286
+  s_229a35bbae3466::t_8d696a2c700318 141,143,227-236,284,287-295
+  s_229a35bbae3466::t_9c74e89fe45a4b 296
+.github/actions/setup/action.yml
+  s_229a35bbae3466::t_58f721cca2dbc5 7-9,18-19
+src/cli/commands/utils.rs
+  s_229a35bbae3466::t_58f721cca2dbc5 16
+src/logging.rs
+  s_229a35bbae3466::t_58f721cca2dbc5 536,539
+config/default.toml
+  s_229a35bbae3466::t_58f721cca2dbc5 14
+src/cli/commands/status.rs
+  s_229a35bbae3466::t_58f721cca2dbc5 78
+src/cli/dispatcher.rs
+  s_229a35bbae3466::t_58f721cca2dbc5 332,356,500
+.github/workflows/ci.yml
+  s_229a35bbae3466::t_58f721cca2dbc5 47-61,171
+src/transcription/device.rs
+  s_229a35bbae3466::t_58f721cca2dbc5 182
+Cargo.toml
+  s_229a35bbae3466::t_58f721cca2dbc5 18-19,21
+src/cli/commands/record.rs
+  s_229a35bbae3466::t_58f721cca2dbc5 93
+src/cli/commands/setup.rs
+  s_229a35bbae3466::t_58f721cca2dbc5 6,277,279-284,286,291,301-306,328,351-356,363,381
+Cargo.lock
+  s_229a35bbae3466::t_0130cce6ca82e5 3359
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "3004b3e51b5c6a316066c30187e0c0126278c82b",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
