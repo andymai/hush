@@ -34,9 +34,13 @@ jobs:
       # Code scanning is unavailable on a private repository; switch this on
       # when the repository goes public (#98).
       upload-sarif: false
+    # The called workflow declares security-events: write for its upload step,
+    # and a caller must grant every permission the callee declares or the run
+    # fails at startup, even with the upload switched off.
     permissions:
       actions: read
       contents: read
+      security-events: write
 
   scan-main:
     name: OSV Scan (blocking)
@@ -49,6 +53,10 @@ jobs:
       # Code scanning is unavailable on a private repository; switch this on
       # when the repository goes public (#98).
       upload-sarif: false
+    # The called workflow declares security-events: write for its upload step,
+    # and a caller must grant every permission the callee declares or the run
+    # fails at startup, even with the upload switched off.
     permissions:
       actions: read
       contents: read
+      security-events: write
