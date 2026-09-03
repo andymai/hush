@@ -1,62 +1,19 @@
-/// Configuration management with hot-reload support
-///
-/// This module handles loading, parsing, and watching configuration files
-/// for the Hush application. Supports TOML format with automatic reload.
-///
-/// # Components
-///
-/// - [`Config`] - Application configuration structure
-/// - [`ConfigWatcher`] - Monitors config file for changes and reloads automatically
-///
-/// # Configuration File
-///
-/// Default location: `~/.config/hush/config.toml`
-///
-/// Example configuration:
-///
-/// ```toml
-/// [audio]
-/// sample_rate = 16000
-/// device = "default"
-///
-/// [transcription]
-/// model_size = "base"
-/// use_gpu = true
-///
-/// [hotkeys]
-/// record = "Ctrl+Shift+Space"
-///
-/// [text_processing]
-/// editing_mode = "medium"
-/// enable_llm = false
-/// ```
-///
-/// # Examples
-///
-/// ```no_run
-/// use hush::config::Config;
-///
-/// // Load configuration
-/// let config = Config::load().expect("Failed to load config");
-///
-/// println!("Model size: {:?}", config.transcription.model_size);
-/// println!("Sample rate: {}", config.audio.sample_rate);
-/// ```
-///
-/// # Hot Reload
-///
-/// Use `ConfigWatcher` to automatically reload when config file changes:
-///
-/// ```no_run
-/// use hush::config::ConfigWatcher;
-///
-/// let watcher = ConfigWatcher::new().expect("Failed to create watcher");
-///
-/// // Check for config updates
-/// if let Some(new_config) = watcher.check_for_updates() {
-///     println!("Config reloaded!");
-/// }
-/// ```
+//! Configuration loading and filesystem paths.
+//!
+//! [`Config::load`] reads the user file named by `--config-file`, then `HUSH_CONFIG`,
+//! then `$XDG_CONFIG_HOME/hush/config.toml`, and merges it over the compiled-in
+//! defaults from `config/default.toml`. A user file only needs the keys it
+//! changes; a missing file means defaults.
+//!
+//! ```no_run
+//! use hush::config::Config;
+//!
+//! let config = Config::load()?;
+//! println!("Model file: {}", config.transcription.model_path().display());
+//! # Ok::<(), anyhow::Error>(())
+//! ```
+
+pub mod paths;
 pub mod settings;
 
-pub use settings::{Config, ConfigWatcher};
+pub use settings::Config;

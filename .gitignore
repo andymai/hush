@@ -85,9 +85,7 @@ models/
 assets/sounds/*.wav
 !assets/sounds/.gitkeep
 
-# Config files with secrets or user-specific settings
-config/default.toml
-config/local.toml
+# Secrets
 .env
 .env.*
 !.env.example

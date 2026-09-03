@@ -74,7 +74,7 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
 
         print!("Whisper Transcriber: ");
         match WhisperTranscriber::new(
-            &config.transcription.model_path,
+            &config.transcription.model_path(),
             config.transcription.use_cuda,
         )
         .await

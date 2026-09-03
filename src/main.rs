@@ -58,6 +58,9 @@ static TRACE_LEVELS: Lazy<HashMap<String, Level>> = Lazy::new(|| {
 async fn main() -> Result<()> {
     // Parse command line arguments
     let cli = Cli::parse_args();
+    if let Some(path) = &cli.config_file {
+        std::env::set_var(hush::config::paths::CONFIG_ENV, path);
+    }
 
     // Initialize comprehensive logging system
     let logging_result = initialize_logging(&cli);

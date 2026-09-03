@@ -90,7 +90,7 @@ These versions are constrained:
 
 ## Configuration
 
-- **`config/default.toml`** - App defaults (16kHz sample rate, "base" model, Ctrl+Shift+Space hotkey)
+- **`config/default.toml`** - Compiled-in defaults (16kHz sample rate, "base" model, Ctrl+Shift+Space hotkey). User overrides live in `$XDG_CONFIG_HOME/hush/config.toml`; `--config-file` or `HUSH_CONFIG` point elsewhere. Models live in `$XDG_DATA_HOME/hush/models`.
 - **`.env`** - LLM keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
 - **Logging verbosity**: `-v` (INFO), `-vv` (DEBUG), `-vvv` (TRACE)
 
