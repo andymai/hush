@@ -36,7 +36,7 @@ CMake auto-detects it and deadlocks on the CUDA kernel fan-out.
 ```bash
 ./hush models download base   # Download Whisper model (~145MB)
 ./hush setup permissions      # udev rule for keyboard and uinput access
-./hush daemon start           # Background daemon; hold Ctrl+Shift+Space to dictate
+./hush daemon start           # Background daemon; hold RightAlt to dictate, double-tap to lock
 ./hush toggle                 # Start or stop recording over the daemon socket
 ./hush listen                 # Same session attached to the terminal
 ./hush record --duration 5    # Record for N seconds
@@ -95,7 +95,7 @@ These versions are constrained:
 
 ## Configuration
 
-- **`config/default.toml`** - Compiled-in defaults (16kHz sample rate, "base" model, Ctrl+Shift+Space hotkey). User overrides live in `$XDG_CONFIG_HOME/hush/config.toml`; `--config-file` or `HUSH_CONFIG` point elsewhere. Models live in `$XDG_DATA_HOME/hush/models`.
+- **`config/default.toml`** - Compiled-in defaults (16kHz sample rate, "base" model, RightAlt hotkey, Escape cancels, Ctrl+RightAlt for Command Mode). User overrides live in `$XDG_CONFIG_HOME/hush/config.toml`; `--config-file` or `HUSH_CONFIG` point elsewhere. Models live in `$XDG_DATA_HOME/hush/models`.
 - **`.env`** - `ANTHROPIC_API_KEY` for the Anthropic provider; `[llm]` in the config picks Ollama, Anthropic, or none
 - **Logging verbosity**: `-v` (INFO), `-vv` (DEBUG), `-vvv` (TRACE)
 

@@ -204,7 +204,7 @@ async fn setup_audio(list: bool, test: Option<String>) -> Result<()> {
 async fn setup_hotkeys(test: Option<String>, list: bool) -> Result<()> {
     if list {
         println!("⌨️ Common Hotkey Combinations:");
-        println!("  • Ctrl+Shift+Space (default)");
+        println!("  • RightAlt (default)");
         println!("  • Ctrl+Alt+Space");
         println!("  • F12");
         println!("  • Ctrl+F12");
@@ -320,11 +320,7 @@ async fn init_config(defaults: bool, force: bool) -> Result<()> {
     let gpu = GpuAvailability::detect();
 
     let (model_size, use_gpu, hotkey) = if defaults {
-        (
-            "base".to_string(),
-            gpu.available,
-            "Ctrl+Shift+Space".to_string(),
-        )
+        ("base".to_string(), gpu.available, "RightAlt".to_string())
     } else {
         collect_user_settings(gpu)?
     };
@@ -409,14 +405,14 @@ fn collect_user_settings(gpu: &GpuAvailability) -> Result<(String, bool, String)
 
     // Hotkey
     println!("\n⌨️  Configure hotkey (press and hold to record):");
-    println!("   Common options: Ctrl+Shift+Space, Ctrl+Alt+Space, F12");
-    print!("Hotkey [Ctrl+Shift+Space]: ");
+    println!("   Common options: RightAlt, RightCtrl, F13, Ctrl+Shift+Space");
+    print!("Hotkey [RightAlt]: ");
     io::stdout().flush()?;
 
     input.clear();
     io::stdin().read_line(&mut input)?;
     let hotkey = if input.trim().is_empty() {
-        "Ctrl+Shift+Space".to_string()
+        "RightAlt".to_string()
     } else {
         input.trim().to_string()
     };

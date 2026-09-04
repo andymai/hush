@@ -15,7 +15,10 @@ impl AudioFeedback {
     /// Probe the default output; without one the cues are silent.
     pub fn new() -> Result<Self> {
         let enabled = match OutputStreamBuilder::open_default_stream() {
-            Ok(_stream) => true,
+            Ok(mut stream) => {
+                stream.log_on_drop(false);
+                true
+            },
             Err(e) => {
                 warn!(
                     "Audio feedback unavailable: {}. Continuing without sound feedback.",
@@ -126,8 +129,9 @@ impl Default for AudioFeedback {
 
 /// Play a single tone at the specified frequency and duration
 fn play_tone(frequency: f32, duration_ms: u64) -> Result<()> {
-    let stream =
+    let mut stream =
         OutputStreamBuilder::open_default_stream().context("Failed to get audio output stream")?;
+    stream.log_on_drop(false);
 
     let sink = Sink::connect_new(stream.mixer());
 
@@ -143,8 +147,9 @@ fn play_tone(frequency: f32, duration_ms: u64) -> Result<()> {
 
 /// Play two tones in sequence (for error sound)
 fn play_double_beep(frequency: f32, duration_ms: u64, gap_ms: u64) -> Result<()> {
-    let stream =
+    let mut stream =
         OutputStreamBuilder::open_default_stream().context("Failed to get audio output stream")?;
+    stream.log_on_drop(false);
 
     let sink = Sink::connect_new(stream.mixer());
 

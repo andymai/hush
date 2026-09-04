@@ -28,7 +28,7 @@ hush models download base     # ~145 MB; large-v3-turbo is the accurate choice o
 hush daemon start             # runs in the background
 ```
 
-Hold `Ctrl+Shift+Space`, speak, release. Done.
+Hold `Right Alt`, speak, release. Done.
 
 `hush setup init` walks through model, GPU, and hotkey choices and writes `~/.config/hush/config.toml`. `hush install --autostart` starts the daemon at login.
 
@@ -52,7 +52,7 @@ Hold `Ctrl+Shift+Space`, speak, release. Done.
 | `transcription.model_size` | tiny, base, small, medium, large, large-v2, large-v3 | base |
 | `transcription.language` | Whisper language code, or `auto` | en |
 | `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
-| `hotkey.combination` | The key or mouse button: `Ctrl+Shift+Space`, `RightAlt`, `F13`, `Mouse4` | Ctrl+Shift+Space |
+| `hotkey.combination` | The key or mouse button: `RightAlt`, `RightCtrl`, `F13`, `Mouse4`, or a chord like `Ctrl+Shift+Space` (a chord also reaches the focused app unless `exclusive` is on) | RightAlt |
 | `hotkey.mode` | `hold` (double-tap locks hands-free) or `toggle` (a tap locks) | hold |
 | `hotkey.backend` | `auto`, `evdev`, or `x11` | auto |
 | `hotkey.exclusive` | Grab the hotkey's device so applications never see the key or button (a browser stops treating `Mouse4` as Back) | false |
