@@ -1,0 +1,44 @@
+src/tray/mod.rs
+  s_229a35bbae3466::t_7db672cf7d7f6b 1-334
+  s_229a35bbae3466::t_af91b8f05433df 335
+packaging/io.github.andymai.hush.svg
+  s_229a35bbae3466::t_5d5b2fd23fa75d 2-19
+src/tray/icon.rs
+  s_229a35bbae3466::t_39c7e0ccfa98c5 1-7,14-18,50-59,61,76,132-133,135-137,139-145,149-163
+  s_229a35bbae3466::t_5fda5803b4dd54 8-13,19-49,60,62-75,77-131,134,138,146-148,164-180
+  s_229a35bbae3466::t_6bc966993f27bb 181-183
+Cargo.lock
+  s_229a35bbae3466::t_36a65c9ce155da 1417,1775-1787,2336-2341,3301,4548
+Cargo.toml
+  s_229a35bbae3466::t_298cfb4df9875b 164
+README.md
+  s_229a35bbae3466::t_c997f920b0aa4e 40,69
+config/default.toml
+  s_229a35bbae3466::t_8cac669bccaf4a 62-68
+src/cli/commands/listen.rs
+  s_229a35bbae3466::t_6f2f23cdd79088 28,224-234,974
+src/config/settings.rs
+  s_229a35bbae3466::t_3bd9dfb174c127 31-47,535-541
+src/lib.rs
+  s_229a35bbae3466::t_d0690a7f79e87a 35-37
+src/notify.rs
+  s_229a35bbae3466::t_20772fdd47bb55 3-6,14-32
+src/text/kwin.rs
+  s_229a35bbae3466::t_b8462d1b72c7d2 2-7,11,13,15,17,22-28,31,46,51-72,76-81,83-84,89,91-116,118,121-177,179-187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "47405311b0bf4326c31e827a4db62d7bbd7a0a8f",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
