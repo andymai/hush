@@ -121,6 +121,7 @@ pub async fn handle_record(
             let processing_config = ProcessingConfig {
                 mode: EditingMode::Medium,
                 llm_provider,
+                polish: true,
                 max_tokens: 200,
                 temperature: 0.3,
             };

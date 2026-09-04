@@ -11,11 +11,11 @@ pub enum LlmProvider {
         /// Model to use (default: claude-3-haiku-20240307)
         model: String,
     },
-    /// OpenAI GPT API
-    OpenAI {
-        /// API key (read from env var if None)
-        api_key: Option<String>,
-        /// Model to use (default: gpt-4o-mini)
+    /// A local Ollama server
+    Ollama {
+        /// Base URL, such as http://localhost:11434
+        url: String,
+        /// Model name, such as llama3.2
         model: String,
     },
     /// No LLM - rule-based only
@@ -26,7 +26,7 @@ impl Default for LlmProvider {
     fn default() -> Self {
         Self::Anthropic {
             api_key: None,
-            model: "claude-3-haiku-20240307".to_string(),
+            model: "claude-haiku-4-5".to_string(),
         }
     }
 }
@@ -54,6 +54,9 @@ pub struct ProcessingConfig {
     /// LLM provider for text polishing
     pub llm_provider: LlmProvider,
 
+    /// Run the LLM polish stage (Command Mode uses the LLM either way)
+    pub polish: bool,
+
     /// Maximum tokens for LLM response
     pub max_tokens: u32,
 
@@ -66,6 +69,7 @@ impl Default for ProcessingConfig {
         Self {
             mode: EditingMode::Medium,
             llm_provider: LlmProvider::default(),
+            polish: true,
             max_tokens: 200,
             temperature: 0.3,
         }
@@ -78,6 +82,7 @@ impl ProcessingConfig {
         Self {
             mode: EditingMode::Light,
             llm_provider: LlmProvider::None,
+            polish: true,
             ..Default::default()
         }
     }

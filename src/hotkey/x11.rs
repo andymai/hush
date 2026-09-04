@@ -23,8 +23,8 @@ pub struct X11Hotkey {
 impl X11Hotkey {
     pub fn new(bindings: HotkeyBindings) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
         let combination = bindings.primary;
-        if bindings.cancel.is_some() || !bindings.actions.is_empty() {
-            info!("The cancel key and action chords are not available on the X11 backend");
+        if bindings.cancel.is_some() || !bindings.actions.is_empty() || bindings.command.is_some() {
+            info!("The cancel key, action chords, and Command Mode are not available on the X11 backend");
         }
         let code = combination.x11_code().ok_or_else(|| {
             anyhow::anyhow!(

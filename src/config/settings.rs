@@ -25,6 +25,55 @@ pub struct Config {
     /// Tone by application
     #[serde(default = "crate::text_processing::ProfilesConfig::defaults")]
     pub profiles: crate::text_processing::ProfilesConfig,
+    /// LLM polishing and Command Mode
+    #[serde(default)]
+    pub llm: LlmConfig,
+}
+
+/// Which LLM to use
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmSetting {
+    /// Ollama when reachable, else Anthropic when a key exists, else none
+    #[default]
+    Auto,
+    Ollama,
+    Anthropic,
+    None,
+}
+
+/// LLM settings; the Anthropic key comes from `ANTHROPIC_API_KEY`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct LlmConfig {
+    pub provider: LlmSetting,
+    pub ollama_url: String,
+    pub ollama_model: String,
+    pub anthropic_model: String,
+    /// Polish every transcript with the LLM; Command Mode works either way
+    pub polish: bool,
+    pub max_tokens: u32,
+    pub temperature: f32,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self::defaults()
+    }
+}
+
+impl LlmConfig {
+    pub fn defaults() -> Self {
+        Self {
+            provider: LlmSetting::Auto,
+            ollama_url: "http://localhost:11434".to_string(),
+            ollama_model: "llama3.2".to_string(),
+            anthropic_model: "claude-haiku-4-5".to_string(),
+            polish: true,
+            max_tokens: 400,
+            temperature: 0.3,
+        }
+    }
 }
 
 /// Text insertion configuration
@@ -140,6 +189,13 @@ pub struct HotkeyConfig {
     /// Chord that adds the selected text to the vocabulary; empty leaves it unbound
     #[serde(default)]
     pub learn: String,
+    /// Command Mode chord: hold, speak an instruction, release; empty disables it
+    #[serde(default = "default_command_chord")]
+    pub command: String,
+}
+
+fn default_command_chord() -> String {
+    "Ctrl+RightAlt".to_string()
 }
 
 fn default_cancel_key() -> String {
@@ -456,6 +512,13 @@ model_size = "small"
         assert!(config.feedback.audio_enabled);
         assert!(config.transcription.context_prompt);
         assert!(config.profiles.enabled);
+        assert_eq!(config.hotkey.command, "Ctrl+RightAlt");
+        assert_eq!(config.llm.provider, LlmSetting::Auto);
+        assert_eq!(config.llm.ollama_model, "llama3.2");
+        let config =
+            Config::parse_over_defaults("[llm]\nprovider = \"none\"\npolish = false\n").unwrap();
+        assert_eq!(config.llm.provider, LlmSetting::None);
+        assert!(!config.llm.polish);
         assert!(Config::parse_over_defaults("[hotkey]\ntap_ms = 5000\n").is_err());
         let config = Config::parse_over_defaults("[profiles]\nchat = [\"myapp\"]\n").unwrap();
         assert_eq!(config.profiles.chat, vec!["myapp".to_string()]);

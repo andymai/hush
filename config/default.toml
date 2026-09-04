@@ -27,6 +27,7 @@ cancel = "Escape"                # discards a recording in progress; "" disables
 tap_ms = 300                     # shorter presses are taps: a tap discards, a double-tap locks hands-free (hold); a tap locks (toggle)
 paste_last = ""                  # chord that types the last transcript again, e.g. "Shift+RightAlt"
 learn = ""                       # chord that adds the selected text to the vocabulary, e.g. "Super+RightAlt"
+command = "Ctrl+RightAlt"        # Command Mode: hold, speak an instruction, release; the LLM rewrites the selection or the last transcript
 
 [feedback]
 audio_enabled = true # start, stop, cancel, and warning tones
@@ -46,3 +47,15 @@ chat = []
 mail = []
 docs = []
 browser = []
+
+[llm]
+# Polishing and Command Mode. auto: a local Ollama server when reachable,
+# else Anthropic when ANTHROPIC_API_KEY is set (in the environment or
+# ~/.config/hush/.env), else rule-based only. Only text is sent, never audio.
+provider = "auto"                     # auto, ollama, anthropic, none
+ollama_url = "http://localhost:11434"
+ollama_model = "llama3.2"
+anthropic_model = "claude-haiku-4-5"
+polish = true                         # rewrite every transcript with the LLM; Command Mode works either way
+max_tokens = 400
+temperature = 0.3

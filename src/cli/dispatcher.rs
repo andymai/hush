@@ -522,6 +522,12 @@ pub async fn test_hotkey_system(combination: Option<String>, duration: u64) -> R
                             crate::hotkey::HotkeyEvent::Action(action) => {
                                 println!("🎯 {:?} chord detected!", action);
                             },
+                            crate::hotkey::HotkeyEvent::Command(pressed) => {
+                                println!(
+                                    "🎯 Command chord {}!",
+                                    if pressed { "pressed" } else { "released" }
+                                );
+                            },
                         }
                     }
                     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
