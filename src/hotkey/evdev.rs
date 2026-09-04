@@ -3,7 +3,7 @@
 //! `input` group membership as uinput provides.
 
 use super::combination::KeyCombination;
-use super::HotkeyEvent;
+use super::{HotkeyBindings, HotkeyEvent};
 use anyhow::{anyhow, Result};
 use evdev::uinput::VirtualDevice;
 use evdev::{AttributeSetRef, BusType, Device, EventSummary, InputEvent, InputId, KeyCode};
@@ -111,6 +111,32 @@ impl HotkeyMatcher {
     }
 }
 
+/// The dictation hotkey plus the cancel key, fed from every reader thread.
+pub struct Matchers {
+    primary: HotkeyMatcher,
+    cancel: Option<HotkeyMatcher>,
+}
+
+impl Matchers {
+    pub fn new(bindings: &HotkeyBindings) -> Self {
+        Self {
+            primary: HotkeyMatcher::new(bindings.primary.clone()),
+            cancel: bindings.cancel.clone().map(HotkeyMatcher::new),
+        }
+    }
+
+    /// The cancel key only reports its press, and is never swallowed.
+    pub fn process(&mut self, code: KeyCode, value: i32) -> Processed {
+        let mut processed = self.primary.process(code, value);
+        if let Some(cancel) = self.cancel.as_mut() {
+            if cancel.feed(code, value) == Some(HotkeyEvent::Pressed) && processed.event.is_none() {
+                processed.event = Some(HotkeyEvent::Cancel);
+            }
+        }
+        processed
+    }
+}
+
 /// Vendor id stamped on every uinput device Hush creates (the typing
 /// keyboard and exclusive-mode proxies) so the hotkey reader can skip its
 /// own output instead of grabbing a proxy and chaining another onto it.
@@ -140,14 +166,22 @@ fn carries_key(device: &Device, key: KeyCode) -> bool {
         .unwrap_or(false)
 }
 
-/// Paths and devices of every readable device the combination needs.
-pub fn devices_for(combination: &KeyCombination) -> Vec<(PathBuf, Device)> {
+fn bindings_match(keys: &AttributeSetRef<KeyCode>, bindings: &HotkeyBindings) -> bool {
+    device_matches(keys, &bindings.primary)
+        || bindings
+            .cancel
+            .as_ref()
+            .is_some_and(|cancel| device_matches(keys, cancel))
+}
+
+/// Paths and devices of every readable device the bindings need.
+pub fn devices_for(bindings: &HotkeyBindings) -> Vec<(PathBuf, Device)> {
     evdev::enumerate()
         .filter(|(_, device)| !is_hush_virtual(device.input_id()))
         .filter(|(_, device)| {
             device
                 .supported_keys()
-                .map(|keys| device_matches(keys, combination))
+                .map(|keys| bindings_match(keys, bindings))
                 .unwrap_or(false)
         })
         .collect()
@@ -182,10 +216,10 @@ fn explain_no_keyboard() -> anyhow::Error {
 }
 
 pub struct EvdevHotkey {
-    combination: KeyCombination,
+    bindings: HotkeyBindings,
     exclusive: bool,
     running: Arc<AtomicBool>,
-    matcher: Arc<Mutex<HotkeyMatcher>>,
+    matcher: Arc<Mutex<Matchers>>,
     sender: mpsc::Sender<HotkeyEvent>,
 }
 
@@ -194,10 +228,11 @@ impl EvdevHotkey {
     /// and every other event it produces is replayed through a uinput proxy,
     /// so applications never see the hotkey itself.
     pub fn new(
-        combination: KeyCombination,
+        bindings: HotkeyBindings,
         exclusive: bool,
     ) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
-        let found = devices_for(&combination);
+        let combination = &bindings.primary;
+        let found = devices_for(&bindings);
         if found.is_empty()
             || !found
                 .iter()
@@ -222,8 +257,8 @@ impl EvdevHotkey {
         let (sender, receiver) = mpsc::channel();
         Ok((
             Self {
-                matcher: Arc::new(Mutex::new(HotkeyMatcher::new(combination.clone()))),
-                combination,
+                matcher: Arc::new(Mutex::new(Matchers::new(&bindings))),
+                bindings,
                 exclusive,
                 running: Arc::new(AtomicBool::new(false)),
                 sender,
@@ -233,7 +268,7 @@ impl EvdevHotkey {
     }
 
     pub fn combination(&self) -> &KeyCombination {
-        &self.combination
+        &self.bindings.primary
     }
 
     /// Start reader threads for every keyboard and keep watching for new ones.
@@ -244,11 +279,11 @@ impl EvdevHotkey {
         let running = Arc::clone(&self.running);
         let matcher = Arc::clone(&self.matcher);
         let sender = self.sender.clone();
-        let combination = self.combination.clone();
+        let bindings = self.bindings.clone();
         let exclusive = self.exclusive;
         thread::Builder::new()
             .name("hush-hotkey-scan".into())
-            .spawn(move || supervise(running, matcher, sender, combination, exclusive))
+            .spawn(move || supervise(running, matcher, sender, bindings, exclusive))
             .map_err(|e| anyhow!("Failed to start hotkey thread: {}", e))?;
         Ok(())
     }
@@ -267,15 +302,15 @@ impl Drop for EvdevHotkey {
 
 fn supervise(
     running: Arc<AtomicBool>,
-    matcher: Arc<Mutex<HotkeyMatcher>>,
+    matcher: Arc<Mutex<Matchers>>,
     sender: mpsc::Sender<HotkeyEvent>,
-    combination: KeyCombination,
+    bindings: HotkeyBindings,
     exclusive: bool,
 ) {
     let mut readers: HashMap<PathBuf, thread::JoinHandle<()>> = HashMap::new();
     while running.load(Ordering::Acquire) {
         readers.retain(|_, handle| !handle.is_finished());
-        for (path, device) in devices_for(&combination) {
+        for (path, device) in devices_for(&bindings) {
             if readers.contains_key(&path) {
                 continue;
             }
@@ -286,7 +321,7 @@ fn supervise(
             let spawn_path = path.clone();
             // Only the device that carries the hotkey's key is grabbed; a
             // keyboard read for modifiers stays untouched.
-            let grab = exclusive && carries_key(&device, combination.evdev_key());
+            let grab = exclusive && carries_key(&device, bindings.primary.evdev_key());
             match thread::Builder::new()
                 .name(name)
                 .spawn(move || read_device(&spawn_path, device, running, matcher, sender, grab))
@@ -332,7 +367,7 @@ fn read_device(
     path: &Path,
     mut device: Device,
     running: Arc<AtomicBool>,
-    matcher: Arc<Mutex<HotkeyMatcher>>,
+    matcher: Arc<Mutex<Matchers>>,
     sender: mpsc::Sender<HotkeyEvent>,
     grab: bool,
 ) {
@@ -604,9 +639,30 @@ mod tests {
     }
 
     #[test]
+    fn the_cancel_key_reports_a_press_and_is_never_swallowed() {
+        let bindings = HotkeyBindings::parse("Ctrl+Space", Some("Escape")).unwrap();
+        let mut m = Matchers::new(&bindings);
+        let esc = m.process(KeyCode::KEY_ESC, 1);
+        assert_eq!(esc.event, Some(HotkeyEvent::Cancel));
+        assert!(!esc.swallow);
+        assert_eq!(m.process(KeyCode::KEY_ESC, 0).event, None);
+        m.process(KeyCode::KEY_LEFTCTRL, 1);
+        assert_eq!(
+            m.process(KeyCode::KEY_ESC, 1).event,
+            None,
+            "Ctrl+Esc is not the cancel key"
+        );
+        m.process(KeyCode::KEY_ESC, 0);
+        assert_eq!(
+            m.process(KeyCode::KEY_SPACE, 1).event,
+            Some(HotkeyEvent::Pressed)
+        );
+    }
+
+    #[test]
     fn device_enumeration_does_not_panic() {
-        let combination = KeyCombination::parse("Ctrl+Shift+Space").unwrap();
-        for (path, device) in devices_for(&combination) {
+        let bindings = HotkeyBindings::parse("Ctrl+Shift+Space", Some("Escape")).unwrap();
+        for (path, device) in devices_for(&bindings) {
             assert!(path.starts_with("/dev/input"));
             assert!(device.supported_keys().is_some());
             assert!(!is_hush_virtual(device.input_id()));

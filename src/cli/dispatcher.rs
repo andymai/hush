@@ -509,6 +509,9 @@ pub async fn test_hotkey_system(combination: Option<String>, duration: u64) -> R
                             crate::hotkey::HotkeyEvent::Released => {
                                 println!("🎯 Hotkey released detected!");
                             },
+                            crate::hotkey::HotkeyEvent::Cancel => {
+                                println!("🎯 Cancel key detected!");
+                            },
                         }
                     }
                     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;

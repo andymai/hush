@@ -39,6 +39,9 @@ pub fn render_overlay(
     // Target dimensions based on state
     let (target_width, target_height) = match state {
         OverlayState::Idle => (IDLE_WIDTH, IDLE_HEIGHT), // Very short pill when inactive
+        OverlayState::Recording {
+            warning: Some(_), ..
+        } => (RECORDING_WIDTH + 44.0, RECORDING_HEIGHT),
         OverlayState::Recording { .. } => (RECORDING_WIDTH, RECORDING_HEIGHT), // Expand taller when recording
         OverlayState::Settings => (220.0, 140.0), // Larger panel for settings
         _ => (RECORDING_WIDTH, RECORDING_HEIGHT), // Other states use recording size
@@ -97,8 +100,9 @@ pub fn render_overlay(
                             action = render_idle_state(ui, config);
                         }
                     }
-                    OverlayState::Recording { start_time, amplitude, smoothed_amplitude } => {
+                    OverlayState::Recording { start_time, amplitude, smoothed_amplitude, locked, warning } => {
                         render_recording_state(ui, start_time.elapsed().as_secs_f32(), *amplitude, *smoothed_amplitude, config, transition_progress);
+                        render_recording_badges(ui, *locked, warning.as_deref());
                     }
                     OverlayState::Processing { message } => {
                         render_processing_state(ui, message, config);
@@ -277,6 +281,29 @@ fn render_recording_state(
 
     // Allocate the space we used
     ui.allocate_rect(available_rect, Sense::hover());
+}
+
+/// A dot on the left while locked hands-free, and the time left on the right
+/// once the cap is near.
+fn render_recording_badges(ui: &mut egui::Ui, locked: bool, warning: Option<&str>) {
+    let rect = ui.max_rect();
+    let painter = ui.painter();
+    if locked {
+        painter.circle_filled(
+            egui::pos2(rect.left() + 7.0, rect.center().y),
+            2.5,
+            Color32::from_white_alpha(220),
+        );
+    }
+    if let Some(text) = warning {
+        painter.text(
+            egui::pos2(rect.right() - 6.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            text,
+            egui::FontId::proportional(10.0),
+            Color32::from_white_alpha(230),
+        );
+    }
 }
 
 fn render_processing_state(ui: &mut egui::Ui, _message: &str, _config: &OverlayConfig) {

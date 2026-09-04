@@ -13,6 +13,10 @@ pub enum OverlayState {
         amplitude: f32,
         /// Smoothed amplitude for animation (with decay)
         smoothed_amplitude: f32,
+        /// Hands-free: recording continues without the key held
+        locked: bool,
+        /// Short text shown beside the waveform, such as the time left
+        warning: Option<String>,
     },
     /// Processing - transcribing the audio
     Processing { message: String },
@@ -39,6 +43,24 @@ impl OverlayState {
             start_time: Instant::now(),
             amplitude: 0.0,
             smoothed_amplitude: 0.0,
+            locked: false,
+            warning: None,
+        }
+    }
+
+    pub fn set_locked(&mut self, value: bool) {
+        if let Self::Recording { locked, .. } = self {
+            *locked = value;
+        }
+    }
+
+    pub fn is_locked(&self) -> bool {
+        matches!(self, Self::Recording { locked: true, .. })
+    }
+
+    pub fn set_warning(&mut self, text: Option<String>) {
+        if let Self::Recording { warning, .. } = self {
+            *warning = text;
         }
     }
 
@@ -48,11 +70,15 @@ impl OverlayState {
             Self::Recording {
                 start_time,
                 smoothed_amplitude,
+                locked,
+                warning,
                 ..
             } => Self::Recording {
                 start_time,
                 amplitude: new_amplitude.clamp(0.0, 1.0),
                 smoothed_amplitude,
+                locked,
+                warning,
             },
             _ => self,
         }

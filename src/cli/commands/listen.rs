@@ -6,10 +6,13 @@ use std::thread;
 use tracing::{error, info, warn};
 
 // Import Hush components
+use crate::audio::AudioFeedback;
 use crate::cli::commands::daemon::{self, SessionOptions};
 use crate::config::Config;
-use crate::hotkey::{HotkeyEvent, HotkeyManager, HotkeyMode};
+use crate::hotkey::{GestureAction, GestureDetector, HotkeyBindings, HotkeyManager, HotkeyMode};
+use crate::ipc::protocol::DaemonState;
 use crate::ipc::SessionCommand;
+use crate::notify::notify;
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
 use crate::text_processing::{
     CommandExecutor, CommandParser, EditingMode, InsertionHistory, LlmProvider, ProcessingConfig,
@@ -117,13 +120,21 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     println!("🎤 Hush Intelligent Listening Mode");
     println!("═══════════════════════════════════════════════════════");
     match hotkey_mode {
-        HotkeyMode::Hold => println!("Hold {} to dictate", hotkey_combination),
-        HotkeyMode::Toggle => println!(
-            "Press {} to start dictating, press it again to stop",
-            hotkey_combination
-        ),
+        HotkeyMode::Hold => {
+            println!("Hold {} to dictate, release to insert", hotkey_combination);
+            println!("Double-tap it to keep recording hands-free, press again to stop");
+        },
+        HotkeyMode::Toggle => {
+            println!(
+                "Tap {} to start recording, press again to stop and insert",
+                hotkey_combination
+            );
+            println!("Holding it records only while held");
+        },
     }
-    println!("Release to transcribe and insert text");
+    if !config.hotkey.cancel.trim().is_empty() {
+        println!("{} discards a recording", config.hotkey.cancel.trim());
+    }
     println!("`hush toggle` starts and stops from a keybind; Ctrl+C or `hush daemon stop` quits");
     println!("═══════════════════════════════════════════════════════\n");
 
@@ -176,12 +187,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         });
     }
 
-    // Create hotkey manager
-    let (hotkey_manager, hotkey_rx) = HotkeyManager::with_backend(
-        &hotkey_combination,
-        config.hotkey.backend,
-        config.hotkey.exclusive,
-    )?;
+    let bindings = HotkeyBindings::parse(&hotkey_combination, Some(&config.hotkey.cancel))?;
+    let (hotkey_manager, hotkey_rx) =
+        HotkeyManager::with_backend(bindings, config.hotkey.backend, config.hotkey.exclusive)?;
+    let feedback = if config.feedback.audio_enabled {
+        AudioFeedback::default()
+    } else {
+        AudioFeedback::silent()
+    };
     hotkey_manager.start_listening()?;
     info!(
         "✅ Hotkey '{}' registered via {}",
@@ -317,38 +330,58 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let state_handle = overlay.state();
     let egui_context_handle = overlay.egui_context();
 
-    // Hotkey handler thread
+    // Hotkey handler thread: raw presses become gestures, gestures become commands
     let audio_cmd_tx_clone = audio_cmd_tx.clone();
     let state_handle_clone = state_handle.clone();
     let egui_context_clone = egui_context_handle.clone();
     let shared_hotkey = Arc::clone(&shared);
+    let tap_window = std::time::Duration::from_millis(config.hotkey.tap_ms);
     let hotkey_thread = thread::spawn(move || {
-        while let Ok(event) = hotkey_rx.recv() {
-            let recording = shared_hotkey.is_recording();
-            let start = match (hotkey_mode, event) {
-                (HotkeyMode::Hold, HotkeyEvent::Pressed) => true,
-                (HotkeyMode::Hold, HotkeyEvent::Released) => false,
-                (HotkeyMode::Toggle, HotkeyEvent::Pressed) => !recording,
-                (HotkeyMode::Toggle, HotkeyEvent::Released) => continue,
+        let mut gesture = GestureDetector::new(hotkey_mode, tap_window);
+        loop {
+            let timeout = gesture
+                .deadline()
+                .map(|deadline| deadline.saturating_duration_since(std::time::Instant::now()))
+                .unwrap_or(std::time::Duration::from_secs(3600));
+            let event = match hotkey_rx.recv_timeout(timeout) {
+                Ok(event) => Some(event),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             };
-            if start == recording {
-                continue;
+            let now = std::time::Instant::now();
+            if !matches!(shared_hotkey.snapshot(), DaemonState::Recording { .. }) {
+                gesture.session_ended();
             }
-            if start {
-                *state_handle_clone.lock() = OverlayState::start_recording();
-                // Request immediate overlay repaint to show recording state
-                if let Some(ctx) = egui_context_clone.lock().as_ref() {
-                    ctx.request_repaint();
+            let action = match event {
+                Some(event) => gesture.feed(event, now),
+                None => {
+                    gesture.expire(now);
+                    None
+                },
+            };
+            let command = match action {
+                Some(GestureAction::Start) => {
+                    let mut state = OverlayState::start_recording();
+                    state.set_locked(gesture.is_locked());
+                    *state_handle_clone.lock() = state;
+                    if let Some(ctx) = egui_context_clone.lock().as_ref() {
+                        ctx.request_repaint();
+                    }
+                    Some(SessionCommand::StartRecording)
+                },
+                // The overlay stays in Recording until transcription completes
+                Some(GestureAction::Stop) => Some(SessionCommand::StopRecording),
+                Some(GestureAction::Cancel) => Some(SessionCommand::CancelRecording),
+                None => None,
+            };
+            if gesture.is_locked() {
+                state_handle_clone.lock().set_locked(true);
+            }
+            if let Some(command) = command {
+                if audio_cmd_tx_clone.send(command).is_err() {
+                    warn!("Channel send failed - receiver dropped");
+                    break;
                 }
-            }
-            // On stop the visual state stays in Recording until transcription completes
-            let command = if start {
-                SessionCommand::StartRecording
-            } else {
-                SessionCommand::StopRecording
-            };
-            if audio_cmd_tx_clone.send(command).is_err() {
-                warn!("Channel send failed - receiver dropped");
             }
         }
     });
@@ -502,6 +535,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 },
                 TranscriptionResult::Error(error_msg) => {
                     error!("❌ Transcription failed: {}", error_msg);
+                    let _ = feedback.play_error();
                     *state_handle_clone2.lock() =
                         OverlayState::error(&error_msg, std::time::Duration::from_secs(4));
                     shared_result.set_idle();
@@ -523,11 +557,62 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     // Stop signal for amplitude thread - shared between main loop and amplitude thread
     let amplitude_stop_signal = Arc::new(AtomicBool::new(false));
 
+    let max_secs = config.audio.max_recording_secs;
+    let warn_secs = if max_secs > 90 {
+        max_secs - 60
+    } else {
+        max_secs * 2 / 3
+    };
+    let mut cap_warned = false;
+    let mut cap_shown: Option<u64> = None;
+
     loop {
         // Use short timeout for responsive hotkey handling (16ms ≈ 60Hz)
         let command = match audio_cmd_rx.recv_timeout(std::time::Duration::from_millis(16)) {
             Ok(cmd) => cmd,
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if max_secs == 0 || !audio_capture.is_recording() {
+                    continue;
+                }
+                let DaemonState::Recording { elapsed_ms } = shared.snapshot() else {
+                    continue;
+                };
+                let elapsed = elapsed_ms / 1000;
+                if elapsed >= max_secs {
+                    info!("Recording reached the {} second cap", max_secs);
+                    notify(
+                        "Recording stopped",
+                        &format!(
+                            "Hush stops after {} minutes and inserts what it heard.",
+                            max_secs / 60
+                        ),
+                    );
+                    if audio_cmd_tx.send(SessionCommand::StopRecording).is_err() {
+                        break;
+                    }
+                    continue;
+                }
+                if elapsed >= warn_secs {
+                    if !cap_warned {
+                        cap_warned = true;
+                        let _ = feedback.play_warning();
+                        notify(
+                            "Recording stops soon",
+                            &format!("Hush stops recording in {} seconds.", max_secs - elapsed),
+                        );
+                    }
+                    let remaining = max_secs - elapsed;
+                    if cap_shown != Some(remaining) {
+                        cap_shown = Some(remaining);
+                        state_handle.lock().set_warning(Some(format!(
+                            "{}:{:02}",
+                            remaining / 60,
+                            remaining % 60
+                        )));
+                    }
+                }
+                continue;
+            },
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         };
         match command {
@@ -549,6 +634,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     error!("Failed to stop recording: {}", e);
                 }
                 info!("Recording cancelled");
+                let _ = feedback.play_cancel();
                 *state_handle.lock() = OverlayState::idle();
                 shared.set_idle();
             },
@@ -575,6 +661,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     }
                 } else {
                     shared.set_recording();
+                    cap_warned = false;
+                    cap_shown = None;
+                    let _ = feedback.play_start();
                     // Start polling amplitude updates with batching for performance
                     let state_handle_amp = state_handle.clone();
                     let stop_signal = amplitude_stop_signal.clone();
@@ -633,6 +722,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     continue;
                 }
                 shared.set_transcribing();
+                let _ = feedback.play_stop();
                 // Signal amplitude thread to stop and clean up immediately
                 amplitude_stop_signal.store(true, Ordering::Release);
                 audio_capture.disable_amplitude_monitoring();

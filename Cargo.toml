@@ -110,6 +110,9 @@ dotenvy = "0.15" # Environment variable loading
 # Hotkey management
 global-hotkey = "0.7"
 
+# Desktop notifications over D-Bus (pure Rust through zbus)
+notify-rust = { version = "4.11", default-features = false, features = ["z"] }
+
 # Configuration
 toml = "0.9"
 serde = { version = "1.0", features = ["derive"] }

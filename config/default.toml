@@ -6,6 +6,7 @@ sample_rate = 16000
 channels = 1
 buffer_size = 1024
 # device = "default"
+max_recording_secs = 600 # stop and transcribe after ten minutes, warning a minute before; 0 disables
 
 [transcription]
 # model_path = "/path/to/ggml-base.bin"  # derived from model_size when unset
@@ -21,9 +22,11 @@ combination = "Ctrl+Shift+Space" # or a key applications ignore: "RightAlt", "F1
 mode = "hold"                    # hold: record while held; toggle: press to start, press again to stop
 backend = "auto"                 # auto: evdev (Wayland and X11), falling back to x11; or "evdev", "x11"
 exclusive = false                # true: grab the hotkey's device so applications never see the key or button
+cancel = "Escape"                # discards a recording in progress; "" disables
+tap_ms = 300                     # shorter presses are taps: a tap discards, a double-tap locks hands-free (hold); a tap locks (toggle)
 
 [feedback]
-audio_enabled = false
+audio_enabled = true # start, stop, cancel, and warning tones
 
 [insertion]
 method = "auto"      # auto: uinput typing, clipboard paste for text uinput cannot type; or "uinput", "clipboard"
