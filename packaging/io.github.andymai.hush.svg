@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M12 1C10.34 1 9 2.34 9 4V12C9 13.66 10.34 15 12 15S15 13.66 15 12V4C15 2.34 13.66 1 12 1Z" fill="#6b7280"/>
-  <path d="M19 10V12C19 16.42 15.42 20 11 20H13C13 20 13 20 13 20H11V22H13V24H11H13H11V22H13C17.42 22 21 18.42 21 14V12V10H19Z" fill="#6b7280"/>
-  <path d="M5 10V12C5 15.31 7.69 18 11 18V20C6.58 20 3 16.42 3 12V10H5Z" fill="#6b7280"/>
+<!-- The Hush mark: the five-bar waveform the overlay animates while recording,
+     which the tray icon draws in code at small sizes. -->
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="hush-ground" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5b4bdb"/>
+      <stop offset="1" stop-color="#8b3ee0"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#hush-ground)"/>
+  <g fill="#ffffff">
+    <rect x="29.18" y="50.94" width="8.70" height="26.11" rx="4.35"/>
+    <rect x="44.41" y="40.50" width="8.70" height="47.00" rx="4.35"/>
+    <rect x="59.65" y="30.06" width="8.70" height="67.89" rx="4.35"/>
+    <rect x="74.88" y="40.50" width="8.70" height="47.00" rx="4.35"/>
+    <rect x="90.11" y="50.94" width="8.70" height="26.11" rx="4.35"/>
+  </g>
 </svg>

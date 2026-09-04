@@ -32,6 +32,9 @@ pub mod ipc;
 /// Desktop notifications
 pub mod notify;
 
+/// Panel status icon
+pub mod tray;
+
 // Re-export main types for convenience (legacy)
 pub use audio::{AudioCapture, AudioFeedback};
 pub use config::Config;

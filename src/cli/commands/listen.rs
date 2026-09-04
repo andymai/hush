@@ -25,6 +25,7 @@ use crate::text_processing::{
 };
 use crate::transcription::models::{ModelManager, ModelSize};
 use crate::transcription::{WhisperTranscriber, WHISPER_SAMPLE_RATE};
+use crate::tray;
 use crate::AudioCapture;
 
 #[cfg(target_os = "linux")]
@@ -219,6 +220,17 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         hotkey_combination,
         hotkey_manager.backend_name()
     );
+
+    let tray_guard = if config.tray.enabled {
+        tray::spawn(
+            Arc::clone(&shared),
+            audio_cmd_tx.clone(),
+            hotkey_combination.clone(),
+        )
+        .await
+    } else {
+        None
+    };
 
     // Initialize audio capture (main thread - !Send)
     let mut audio_capture = AudioCapture::new(config.audio.device.as_deref())?;
@@ -959,6 +971,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     }
 
     // Cleanup: release the socket and PID file first so a restart can claim them
+    drop(tray_guard);
     drop(handles);
     drop(hotkey_manager);
     drop(audio_cmd_tx);

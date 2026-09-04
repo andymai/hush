@@ -59,3 +59,10 @@ anthropic_model = "claude-haiku-4-5"
 polish = true                         # rewrite every transcript with the LLM; Command Mode works either way
 max_tokens = 400
 temperature = 0.3
+
+[tray]
+# Status icon on the desktop panel: click to start or stop dictation, with
+# the same actions the hotkeys have. Needs a panel that speaks
+# StatusNotifierItem (KDE and most panels do; GNOME needs the AppIndicator
+# extension).
+enabled = true
