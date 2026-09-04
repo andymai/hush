@@ -1,0 +1,21 @@
+Cargo.lock
+  s_229a35bbae3466::t_88d5b4619445ad 1993,1995
+Cargo.toml
+  s_229a35bbae3466::t_bb950a9c52d27b 114-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "72ce0ae52e49c796a7af402c72e6bff6cc515aa6",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
