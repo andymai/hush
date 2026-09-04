@@ -134,7 +134,7 @@ impl Tray for HushTray {
             .into(),
             MenuItem::Separator,
             StandardItem {
-                label: "Edit settings".into(),
+                label: "Settings".into(),
                 activate: Box::new(|_| open_settings()),
                 ..Default::default()
             }
@@ -150,22 +150,12 @@ impl Tray for HushTray {
     }
 }
 
-/// Write the effective configuration the first time, so the file the user
-/// opens lists every key rather than being empty, then hand it to the desktop.
+/// Open the settings window in its own process, so the daemon never owns one.
 fn open_settings() {
-    let path = crate::config::paths::config_path();
-    if !path.exists() {
-        match crate::config::Config::load().and_then(|config| config.save_to_file(&path)) {
-            Ok(()) => info!("Wrote the default configuration to {}", path.display()),
-            Err(e) => {
-                warn!("Could not write {}: {}", path.display(), e);
-                return;
-            },
-        }
-    }
-    match std::process::Command::new("xdg-open").arg(&path).spawn() {
-        Ok(_) => debug!("Opened {}", path.display()),
-        Err(e) => warn!("Could not open {}: {}", path.display(), e),
+    let binary = std::env::current_exe().unwrap_or_else(|_| "hush".into());
+    match std::process::Command::new(&binary).arg("settings").spawn() {
+        Ok(_) => debug!("Opened the settings window"),
+        Err(e) => warn!("Could not open the settings window: {}", e),
     }
 }
 
@@ -287,6 +277,7 @@ mod tests {
             .collect();
         assert_eq!(labels[0], "Start dictation");
         assert!(labels.contains(&"Type last transcript".to_string()));
+        assert!(labels.contains(&"Settings".to_string()));
         assert!(labels.contains(&"Quit Hush".to_string()));
 
         let (recording, _rx) = tray(DaemonState::Recording { elapsed_ms: 0 });

@@ -12,30 +12,6 @@ use std::path::PathBuf;
 use std::{env, fs};
 use tracing::{debug, error, info};
 
-/// Get XDG config home path, falling back to ~/.config
-fn get_xdg_config_home() -> Option<PathBuf> {
-    std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(|| {
-            std::env::var("HOME")
-                .map(|home| PathBuf::from(home).join(".config"))
-                .ok()
-        })
-}
-
-/// Get XDG data home path, falling back to ~/.local/share
-fn get_xdg_data_home() -> Option<PathBuf> {
-    std::env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(|| {
-            std::env::var("HOME")
-                .map(|home| PathBuf::from(home).join(".local/share"))
-                .ok()
-        })
-}
-
 pub struct CommandDispatcher {
     _config_path: Option<PathBuf>,
     _notifications_enabled: bool,
@@ -59,6 +35,7 @@ impl CommandDispatcher {
             Commands::Start => "start",
             Commands::Stop => "stop",
             Commands::Cancel => "cancel",
+            Commands::Settings => "settings",
             Commands::PasteLast => "paste-last",
             Commands::Learn { .. } => "learn",
             Commands::Setup { .. } => "setup",
@@ -155,6 +132,7 @@ impl CommandDispatcher {
             Commands::Start => handle_client_command(DaemonCommand::Start).await,
             Commands::Stop => handle_client_command(DaemonCommand::Stop).await,
             Commands::Cancel => handle_client_command(DaemonCommand::Cancel).await,
+            Commands::Settings => crate::gui::run(),
             Commands::PasteLast => handle_client_command(DaemonCommand::PasteLast).await,
             Commands::Learn { text } => {
                 let text = (!text.is_empty()).then(|| text.join(" "));
@@ -670,123 +648,29 @@ pub async fn run_all_tests(benchmarks: bool, output: Option<PathBuf>) -> Result<
 // Installation functions
 async fn install_autostart() -> Result<()> {
     println!("📥 Installing autostart entry...");
-
-    // Get XDG autostart directory
-    let config_home = get_xdg_config_home()
-        .ok_or_else(|| anyhow::anyhow!("Failed to determine config directory"))?;
-    let autostart_dir = config_home.join("autostart");
-
-    // Create autostart directory if it doesn't exist
-    fs::create_dir_all(&autostart_dir).with_context(|| {
-        format!(
-            "Failed to create autostart directory: {}",
-            autostart_dir.display()
-        )
-    })?;
-
-    let autostart_file = autostart_dir.join("hush.desktop");
-
-    // Get current executable path
-    let exe_path = env::current_exe().with_context(|| "Failed to determine executable path")?;
-
-    // Create autostart desktop entry
-    let desktop_content = format!(
-        "[Desktop Entry]\n\
-         Type=Application\n\
-         Name=Hush Voice-to-Text\n\
-         Comment=Fast, accurate voice-to-text for Linux developers\n\
-         Exec={} daemon start --foreground\n\
-         Icon=audio-input-microphone\n\
-         Terminal=false\n\
-         Categories=Utility;Accessibility;\n\
-         X-GNOME-Autostart-enabled=true\n",
-        exe_path.display()
-    );
-
-    fs::write(&autostart_file, desktop_content).with_context(|| {
-        format!(
-            "Failed to write autostart file: {}",
-            autostart_file.display()
-        )
-    })?;
-
-    println!(
-        "   ✅ Autostart entry installed: {}",
-        autostart_file.display()
-    );
-    println!("   ℹ️  Hush will start in listen mode on login");
+    let dir = crate::desktop::autostart_dir();
+    fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;
+    let exe = env::current_exe().with_context(|| "Failed to determine executable path")?;
+    let path = crate::desktop::autostart_path();
+    fs::write(&path, crate::desktop::autostart_entry(&exe))
+        .with_context(|| format!("Failed to write {}", path.display()))?;
+    println!("   ✅ Autostart entry installed: {}", path.display());
+    println!("   ℹ️  Hush will start when you log in");
     Ok(())
 }
 
 async fn install_desktop_entry() -> Result<()> {
     println!("📥 Installing desktop entry...");
-
-    // Get XDG data directory
-    let data_home =
-        get_xdg_data_home().ok_or_else(|| anyhow::anyhow!("Failed to determine data directory"))?;
-    let applications_dir = data_home.join("applications");
-
-    // Create applications directory if it doesn't exist
-    fs::create_dir_all(&applications_dir).with_context(|| {
-        format!(
-            "Failed to create applications directory: {}",
-            applications_dir.display()
-        )
-    })?;
-
-    let desktop_file = applications_dir.join("hush.desktop");
-
-    // Get current executable path
-    let exe_path = env::current_exe().with_context(|| "Failed to determine executable path")?;
-
-    // Create desktop entry
-    let desktop_content = format!(
-        "[Desktop Entry]\n\
-         Type=Application\n\
-         Name=Hush Voice-to-Text\n\
-         GenericName=Voice-to-Text\n\
-         Comment=Fast, accurate voice-to-text with GPU acceleration\n\
-         Exec={} daemon start --foreground\n\
-         Icon=audio-input-microphone\n\
-         Terminal=false\n\
-         Categories=Utility;Accessibility;AudioVideo;\n\
-         Keywords=voice;speech;dictation;transcription;whisper;\n\
-         StartupNotify=false\n\
-         Actions=Record;Listen;Status;\n\
-         \n\
-         [Desktop Action Record]\n\
-         Name=Quick Record\n\
-         Exec={} record --duration 10\n\
-         \n\
-         [Desktop Action Listen]\n\
-         Name=Start Listening Mode\n\
-         Exec={} daemon start --foreground\n\
-         \n\
-         [Desktop Action Status]\n\
-         Name=Check Status\n\
-         Exec={} status --full\n",
-        exe_path.display(),
-        exe_path.display(),
-        exe_path.display(),
-        exe_path.display()
-    );
-
-    fs::write(&desktop_file, desktop_content)
-        .with_context(|| format!("Failed to write desktop file: {}", desktop_file.display()))?;
-
-    println!("   ✅ Desktop entry installed: {}", desktop_file.display());
-    println!("   ℹ️  Hush should now appear in your application menu");
-
-    // Try to update desktop database
-    if let Ok(output) = std::process::Command::new("update-desktop-database")
-        .arg(&applications_dir)
-        .output()
-    {
-        if output.status.success() {
-            println!("   ✅ Desktop database updated");
-        }
-    }
-
+    let dir = crate::desktop::applications_dir();
+    fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;
+    let exe = env::current_exe().with_context(|| "Failed to determine executable path")?;
+    let path = crate::desktop::entry_path();
+    fs::write(&path, crate::desktop::application_entry(&exe))
+        .with_context(|| format!("Failed to write {}", path.display()))?;
+    let _ = std::process::Command::new("update-desktop-database")
+        .arg(&dir)
+        .output();
+    println!("   ✅ Desktop entry installed: {}", path.display());
     Ok(())
 }
 
@@ -854,56 +738,49 @@ async fn install_system_wide() -> Result<()> {
 
 async fn remove_autostart() -> Result<()> {
     println!("🗑️  Removing autostart entry...");
-
-    let config_home = get_xdg_config_home()
-        .ok_or_else(|| anyhow::anyhow!("Failed to determine config directory"))?;
-    let autostart_file = config_home.join("autostart").join("hush.desktop");
-
-    if autostart_file.exists() {
-        fs::remove_file(&autostart_file).with_context(|| {
-            format!(
-                "Failed to remove autostart file: {}",
-                autostart_file.display()
-            )
-        })?;
-        println!(
-            "   ✅ Autostart entry removed: {}",
-            autostart_file.display()
-        );
-    } else {
+    let dir = crate::desktop::autostart_dir();
+    let mut removed = false;
+    for name in [
+        crate::desktop::ENTRY_FILE,
+        crate::desktop::LEGACY_ENTRY_FILE,
+    ] {
+        let path = dir.join(name);
+        if path.exists() {
+            fs::remove_file(&path)
+                .with_context(|| format!("Failed to remove {}", path.display()))?;
+            println!("   ✅ Autostart entry removed: {}", path.display());
+            removed = true;
+        }
+    }
+    if !removed {
         println!("   ℹ️  No autostart entry found");
     }
-
     Ok(())
 }
 
 async fn remove_desktop_entry() -> Result<()> {
     println!("🗑️  Removing desktop entry...");
-
-    let data_home =
-        get_xdg_data_home().ok_or_else(|| anyhow::anyhow!("Failed to determine data directory"))?;
-    let desktop_file = data_home.join("applications").join("hush.desktop");
-
-    if desktop_file.exists() {
-        fs::remove_file(&desktop_file).with_context(|| {
-            format!("Failed to remove desktop file: {}", desktop_file.display())
-        })?;
-        println!("   ✅ Desktop entry removed: {}", desktop_file.display());
-
-        // Try to update desktop database
-        let applications_dir = data_home.join("applications");
-        if let Ok(output) = std::process::Command::new("update-desktop-database")
-            .arg(&applications_dir)
-            .output()
-        {
-            if output.status.success() {
-                println!("   ✅ Desktop database updated");
-            }
+    let dir = crate::desktop::applications_dir();
+    let mut removed = false;
+    for name in [
+        crate::desktop::ENTRY_FILE,
+        crate::desktop::LEGACY_ENTRY_FILE,
+    ] {
+        let path = dir.join(name);
+        if path.exists() {
+            fs::remove_file(&path)
+                .with_context(|| format!("Failed to remove {}", path.display()))?;
+            println!("   ✅ Desktop entry removed: {}", path.display());
+            removed = true;
         }
+    }
+    if removed {
+        let _ = std::process::Command::new("update-desktop-database")
+            .arg(&dir)
+            .output();
     } else {
         println!("   ℹ️  No desktop entry found");
     }
-
     Ok(())
 }
 

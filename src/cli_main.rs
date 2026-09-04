@@ -84,6 +84,9 @@ pub enum Commands {
     /// Stop recording and discard the audio (talks to the daemon)
     Cancel,
 
+    /// Open the setup and settings window
+    Settings,
+
     /// Type the last transcript again (talks to the daemon)
     PasteLast,
 

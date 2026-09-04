@@ -35,6 +35,12 @@ pub mod notify;
 /// Panel status icon
 pub mod tray;
 
+/// Setup and settings window
+pub mod gui;
+
+/// Launcher and autostart entries
+pub mod desktop;
+
 // Re-export main types for convenience (legacy)
 pub use audio::{AudioCapture, AudioFeedback};
 pub use config::Config;

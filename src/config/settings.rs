@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 const DEFAULTS: &str = include_str!("../../config/default.toml");
 
 /// Main configuration structure for the Hush application
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     /// Audio capture settings
     pub audio: AudioConfig,
@@ -94,7 +94,7 @@ impl LlmConfig {
 }
 
 /// Text insertion configuration
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct InsertionConfig {
     /// auto, uinput, or clipboard
@@ -113,7 +113,7 @@ impl Default for InsertionConfig {
 }
 
 /// Audio capture configuration
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
 pub struct AudioConfig {
     /// Sample rate in Hz (8000-48000, default 16000 for Whisper)
     pub sample_rate: u32,
@@ -134,7 +134,7 @@ fn default_max_recording_secs() -> u64 {
 }
 
 /// Whisper transcription model configuration
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
 pub struct TranscriptionConfig {
     /// Explicit model file. When unset, the file for `model_size` inside the
     /// models directory is used.
@@ -178,7 +178,7 @@ impl TranscriptionConfig {
 }
 
 /// Global hotkey listener configuration
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
 pub struct HotkeyConfig {
     /// Whether hotkey listening is enabled
     pub enabled: bool,
@@ -224,7 +224,7 @@ fn default_tap_ms() -> u64 {
 }
 
 /// User feedback and notification settings
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
 pub struct FeedbackConfig {
     /// Enable audio feedback sounds (beeps, clicks)
     pub audio_enabled: bool,
