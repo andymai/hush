@@ -59,6 +59,8 @@ impl CommandDispatcher {
             Commands::Start => "start",
             Commands::Stop => "stop",
             Commands::Cancel => "cancel",
+            Commands::PasteLast => "paste-last",
+            Commands::Learn { .. } => "learn",
             Commands::Setup { .. } => "setup",
             Commands::Test { .. } => "test",
             Commands::Models { .. } => "models",
@@ -153,6 +155,11 @@ impl CommandDispatcher {
             Commands::Start => handle_client_command(DaemonCommand::Start).await,
             Commands::Stop => handle_client_command(DaemonCommand::Stop).await,
             Commands::Cancel => handle_client_command(DaemonCommand::Cancel).await,
+            Commands::PasteLast => handle_client_command(DaemonCommand::PasteLast).await,
+            Commands::Learn { text } => {
+                let text = (!text.is_empty()).then(|| text.join(" "));
+                handle_client_command(DaemonCommand::Learn { text }).await
+            },
             Commands::Setup { setup_command } => handle_setup(setup_command).await,
             Commands::Test { test_command } => handle_test(test_command).await,
             Commands::Models { model_command } => handle_models(model_command).await,
@@ -511,6 +518,9 @@ pub async fn test_hotkey_system(combination: Option<String>, duration: u64) -> R
                             },
                             crate::hotkey::HotkeyEvent::Cancel => {
                                 println!("🎯 Cancel key detected!");
+                            },
+                            crate::hotkey::HotkeyEvent::Action(action) => {
+                                println!("🎯 {:?} chord detected!", action);
                             },
                         }
                     }

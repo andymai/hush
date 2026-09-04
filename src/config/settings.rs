@@ -124,6 +124,12 @@ pub struct HotkeyConfig {
     /// double-tap locks hands-free, in toggle mode a tap locks
     #[serde(default = "default_tap_ms")]
     pub tap_ms: u64,
+    /// Chord that types the last transcript again; empty leaves it unbound
+    #[serde(default)]
+    pub paste_last: String,
+    /// Chord that adds the selected text to the vocabulary; empty leaves it unbound
+    #[serde(default)]
+    pub learn: String,
 }
 
 fn default_cancel_key() -> String {

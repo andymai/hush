@@ -3,6 +3,7 @@
 //! the reply names the state that request leads to.
 
 use super::protocol::{DaemonCommand, DaemonResponse, DaemonState};
+use crate::text_processing::learn;
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use std::os::unix::fs::PermissionsExt;
@@ -20,6 +21,12 @@ pub enum SessionCommand {
     StartRecording,
     StopRecording,
     CancelRecording,
+    /// Type the last transcript again
+    PasteLast,
+    /// Learn the current selection (from an action chord)
+    Learn,
+    /// The vocabulary file changed
+    ReloadVocabulary,
     Quit,
 }
 
@@ -31,9 +38,11 @@ enum Phase {
     Stopping,
 }
 
-/// Current phase, written by the session and read by IPC.
+/// Current phase and the last transcript, written by the session and read
+/// by IPC.
 pub struct SharedState {
     phase: Mutex<Phase>,
+    last_text: Mutex<Option<String>>,
 }
 
 impl Default for SharedState {
@@ -46,7 +55,16 @@ impl SharedState {
     pub fn new() -> Self {
         Self {
             phase: Mutex::new(Phase::Idle),
+            last_text: Mutex::new(None),
         }
+    }
+
+    pub fn set_last_text(&self, text: String) {
+        *self.last_text.lock() = Some(text);
+    }
+
+    pub fn last_text(&self) -> Option<String> {
+        self.last_text.lock().clone()
     }
 
     pub fn set_idle(&self) {
@@ -195,6 +213,18 @@ pub fn respond(
         DaemonCommand::Stop => forward(SessionCommand::StopRecording, DaemonState::Transcribing),
         DaemonCommand::Cancel => forward(SessionCommand::CancelRecording, DaemonState::Idle),
         DaemonCommand::Quit => forward(SessionCommand::Quit, DaemonState::Stopping),
+        DaemonCommand::PasteLast => {
+            if shared.last_text().is_none() {
+                DaemonResponse::error("Nothing to paste yet: dictate something first")
+            } else {
+                forward(SessionCommand::PasteLast, DaemonState::Inserting)
+            }
+        },
+        DaemonCommand::Learn { text } => match learn::learn(text.as_deref()) {
+            Ok(term) => forward(SessionCommand::ReloadVocabulary, shared.snapshot())
+                .with_message(format!("Learned '{}'", term)),
+            Err(e) => DaemonResponse::error(e.to_string()),
+        },
     }
 }
 
@@ -224,6 +254,21 @@ mod tests {
             respond(DaemonCommand::Status, &shared, &tx).state,
             Some(DaemonState::Recording { .. })
         ));
+    }
+
+    #[test]
+    fn paste_last_needs_a_transcript() {
+        let shared = SharedState::new();
+        let (tx, rx) = mpsc::channel();
+        let response = respond(DaemonCommand::PasteLast, &shared, &tx);
+        assert!(!response.ok);
+        assert!(rx.try_recv().is_err());
+        shared.set_last_text("hello".to_string());
+        assert_eq!(
+            respond(DaemonCommand::PasteLast, &shared, &tx).state,
+            Some(DaemonState::Inserting)
+        );
+        assert_eq!(rx.try_recv(), Ok(SessionCommand::PasteLast));
     }
 
     #[test]

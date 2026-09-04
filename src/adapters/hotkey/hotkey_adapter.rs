@@ -67,11 +67,14 @@ impl InputTrigger for HotkeyTriggerAdapter {
 
     async fn next_event(&mut self) -> Option<TriggerEvent> {
         // Properly async receive - no polling, no busy-wait
-        match self.async_receiver.recv().await {
-            Some(HotkeyEvent::Pressed) => Some(TriggerEvent::StartRecording),
-            Some(HotkeyEvent::Released) => Some(TriggerEvent::StopRecording),
-            Some(HotkeyEvent::Cancel) => Some(TriggerEvent::Cancel),
-            None => None, // Channel closed
+        loop {
+            match self.async_receiver.recv().await {
+                Some(HotkeyEvent::Pressed) => return Some(TriggerEvent::StartRecording),
+                Some(HotkeyEvent::Released) => return Some(TriggerEvent::StopRecording),
+                Some(HotkeyEvent::Cancel) => return Some(TriggerEvent::Cancel),
+                Some(HotkeyEvent::Action(_)) => continue,
+                None => return None,
+            }
         }
     }
 

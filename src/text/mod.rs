@@ -33,6 +33,8 @@ pub enum InsertionMethod {
 #[cfg(target_os = "linux")]
 pub mod insertion;
 #[cfg(target_os = "linux")]
+pub mod selection;
+#[cfg(target_os = "linux")]
 pub mod uinput_keyboard;
 #[cfg(target_os = "linux")]
 pub mod window;

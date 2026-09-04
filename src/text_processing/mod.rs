@@ -31,12 +31,13 @@ pub use executor::{CommandExecutor, ExecutionResult};
 pub use filler_words::FillerWordRemover;
 pub use history::{HistoryEntry, InsertionHistory};
 pub use intent::{CommunicationStyle, IntentDetector, UserIntent};
+pub mod learn;
 pub use llm::LlmProcessor;
 pub use session::{SessionEntry, SessionMemory};
 pub use vocabulary::{DomainVocabularies, DomainVocabulary, VocabularyManager};
 
 use anyhow::Result;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Main text processor that combines rule-based and LLM processing
 pub struct TextProcessor {
@@ -45,7 +46,7 @@ pub struct TextProcessor {
     llm_processor: Option<LlmProcessor>,
     context_detector: ContextDetector,
     intent_detector: IntentDetector,
-    vocabulary_manager: VocabularyManager,
+    vocabulary_manager: parking_lot::RwLock<VocabularyManager>,
     session_memory: SessionMemory,
     config: ProcessingConfig,
 }
@@ -61,14 +62,7 @@ impl TextProcessor {
         let intent_detector = IntentDetector::new();
         let session_memory = SessionMemory::new();
 
-        // Initialize vocabulary manager with default vocabularies
-        let mut vocabulary_manager = VocabularyManager::new();
-        vocabulary_manager.add(DomainVocabularies::general_programming());
-
-        // Try to load user-defined vocabulary
-        if let Err(e) = vocabulary_manager.load_if_exists(DomainVocabulary::default_path()) {
-            debug!("Could not load user vocabulary: {}", e);
-        }
+        let vocabulary_manager = Self::build_vocabulary();
 
         let llm_processor = match &config.llm_provider {
             LlmProvider::None => {
@@ -101,10 +95,29 @@ impl TextProcessor {
             llm_processor,
             context_detector,
             intent_detector,
-            vocabulary_manager,
+            vocabulary_manager: parking_lot::RwLock::new(vocabulary_manager),
             session_memory,
             config,
         })
+    }
+
+    /// The built-in programming vocabulary plus the user's vocabulary file.
+    fn build_vocabulary() -> VocabularyManager {
+        let mut manager = VocabularyManager::new();
+        manager.add(DomainVocabularies::general_programming());
+        if let Err(e) = manager.load_if_exists(DomainVocabulary::default_path()) {
+            warn!("Could not load the vocabulary file: {}", e);
+        }
+        manager
+    }
+
+    /// Re-read the vocabulary file after `hush learn`; returns the entry count.
+    pub fn reload_vocabulary(&self) -> usize {
+        let manager = Self::build_vocabulary();
+        let total = manager.total_entries();
+        *self.vocabulary_manager.write() = manager;
+        info!("Vocabulary reloaded: {} entries", total);
+        total
     }
 
     /// Process raw transcription text with full context awareness
@@ -123,7 +136,7 @@ impl TextProcessor {
         debug!("After filler removal: '{}'", cleaned);
 
         // Stage 2: Apply domain vocabularies
-        let with_vocab = self.vocabulary_manager.apply(&cleaned);
+        let with_vocab = self.vocabulary_manager.read().apply(&cleaned);
         debug!("After vocabulary: '{}'", with_vocab);
 
         // Stage 3: Smart capitalization for tech terms
@@ -224,7 +237,7 @@ impl TextProcessor {
 
     /// Add a custom vocabulary
     pub fn add_vocabulary(&mut self, vocab: DomainVocabulary) {
-        self.vocabulary_manager.add(vocab);
+        self.vocabulary_manager.write().add(vocab);
     }
 
     /// Check if LLM is available and ready
@@ -235,7 +248,7 @@ impl TextProcessor {
     /// Get processing statistics
     pub fn get_stats(&self) -> ProcessingStats {
         ProcessingStats {
-            vocabulary_entries: self.vocabulary_manager.total_entries(),
+            vocabulary_entries: self.vocabulary_manager.read().total_entries(),
             session_entries: self.session_memory.len(),
             session_active: self.session_memory.is_active(),
             llm_enabled: self.is_llm_ready(),

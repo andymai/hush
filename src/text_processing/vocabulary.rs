@@ -93,10 +93,7 @@ impl DomainVocabulary {
 
     /// Get default vocabulary file path
     pub fn default_path() -> PathBuf {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("hush")
-            .join("vocabulary.json")
+        crate::config::paths::config_dir().join("vocabulary.json")
     }
 
     /// Apply vocabulary transformations to text

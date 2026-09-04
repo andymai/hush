@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Sent by a client, one JSON object per line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum DaemonCommand {
     /// Start recording if idle, otherwise stop and transcribe
@@ -13,6 +13,13 @@ pub enum DaemonCommand {
     Cancel,
     Status,
     Quit,
+    /// Type the last transcript again
+    PasteLast,
+    /// Add words to the vocabulary; without `text`, the current selection
+    Learn {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
 }
 
 /// What the daemon is doing right now.
@@ -48,6 +55,9 @@ pub struct DaemonResponse {
     pub state: Option<DaemonState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// A line for the user, such as the term that was learned
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 impl DaemonResponse {
@@ -56,6 +66,7 @@ impl DaemonResponse {
             ok: true,
             state: Some(state),
             error: None,
+            message: None,
         }
     }
 
@@ -64,7 +75,13 @@ impl DaemonResponse {
             ok: false,
             state: None,
             error: Some(message.into()),
+            message: None,
         }
+    }
+
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
     }
 }
 
@@ -80,6 +97,35 @@ mod tests {
         );
         let parsed: DaemonCommand = serde_json::from_str(r#"{"command":"cancel"}"#).unwrap();
         assert_eq!(parsed, DaemonCommand::Cancel);
+        assert_eq!(
+            serde_json::to_string(&DaemonCommand::PasteLast).unwrap(),
+            r#"{"command":"paste_last"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&DaemonCommand::Learn { text: None }).unwrap(),
+            r#"{"command":"learn"}"#
+        );
+        let learn: DaemonCommand =
+            serde_json::from_str(r#"{"command":"learn","text":"Kubernetes"}"#).unwrap();
+        assert_eq!(
+            learn,
+            DaemonCommand::Learn {
+                text: Some("Kubernetes".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn messages_ride_along_with_ok_responses() {
+        let json =
+            serde_json::to_string(&DaemonResponse::ok(DaemonState::Idle).with_message("Learned"))
+                .unwrap();
+        assert_eq!(
+            json,
+            r#"{"ok":true,"state":{"state":"idle"},"message":"Learned"}"#
+        );
+        let back: DaemonResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.message.as_deref(), Some("Learned"));
     }
 
     #[test]
