@@ -76,6 +76,19 @@ impl std::fmt::Display for ModelSize {
     }
 }
 
+/// The model this machine should start with: a GPU can carry a larger one,
+/// and a small machine should not swap while transcribing.
+pub fn recommended_model() -> ModelSize {
+    let gpu = crate::transcription::device::GpuAvailability::detect().available;
+    let memory_gb = sysinfo::System::new_all().total_memory() / 1024 / 1024 / 1024;
+    match (gpu, memory_gb) {
+        (true, 16..) => ModelSize::Medium,
+        (true, _) => ModelSize::Small,
+        (false, 16..) => ModelSize::Base,
+        (false, _) => ModelSize::Tiny,
+    }
+}
+
 pub struct ModelManager {
     pub cache_dir: PathBuf,
     available_models: HashMap<ModelSize, ModelInfo>,

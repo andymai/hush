@@ -7,6 +7,8 @@ mod settings;
 mod setup;
 mod theme;
 
+pub use setup::size_key;
+
 use crate::config::Config;
 use crate::permissions::PermissionStatus;
 use crate::transcription::models::{ModelManager, ModelSize};

@@ -5,7 +5,7 @@ use crate::config::Config;
 use crate::hotkey::HotkeyBindings;
 use crate::text::WindowProvider;
 use crate::transcription::device::GpuAvailability;
-use crate::transcription::models::{ModelManager, ModelSize};
+use crate::transcription::models::{recommended_model, ModelManager, ModelSize};
 use crate::AudioCapture;
 use anyhow::Result;
 use std::fmt;
@@ -147,11 +147,16 @@ fn model_check(config: &Config) -> Check {
             }
         }
     }
-    Check::fail(
-        "Speech model",
-        format!("{} is not downloaded", size),
-        format!("hush models download {}", size),
-    )
+    let suggested = recommended_model();
+    let fix = match size.parse::<ModelSize>() {
+        Ok(_) => format!("hush models download {}", size),
+        Err(_) => format!(
+            "hush models download {} (unknown model name '{}')",
+            crate::gui::size_key(suggested),
+            size
+        ),
+    };
+    Check::fail("Speech model", format!("{} is not downloaded", size), fix)
 }
 
 fn gpu_check(config: &Config) -> Check {
@@ -355,9 +360,24 @@ mod tests {
         config.transcription.model_size = "definitely-not-a-model".to_string();
         let check = model_check(&config);
         assert_eq!(check.level, Level::Fail);
+        let fix = check.fix.unwrap();
+        assert!(
+            fix.starts_with("hush models download "),
+            "an unknown name falls back to the suggested model: {fix}"
+        );
+        assert!(
+            fix.contains("definitely-not-a-model"),
+            "and says what was wrong: {fix}"
+        );
+
+        config.transcription.model_size = "large-v3".to_string();
+        config.transcription.model_path = Some("/nowhere/ggml-large-v3.bin".into());
+        let check = model_check(&config);
+        assert_eq!(check.level, Level::Fail);
         assert_eq!(
             check.fix.as_deref(),
-            Some("hush models download definitely-not-a-model")
+            Some("hush models download large-v3"),
+            "a known name is downloaded as asked"
         );
     }
 

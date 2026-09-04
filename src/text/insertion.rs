@@ -24,12 +24,17 @@ pub enum Chosen {
     Clipboard,
 }
 
-pub fn choose_method(configured: InsertionMethod, text: &str) -> Chosen {
+/// `types_like_us` is false when the session's keyboard layout would turn
+/// Hush's key codes into different characters.
+pub fn choose_method(configured: InsertionMethod, text: &str, types_like_us: bool) -> Chosen {
     match configured {
         InsertionMethod::Uinput => Chosen::Uinput,
         InsertionMethod::Clipboard => Chosen::Clipboard,
         InsertionMethod::Auto => {
-            if !UinputKeyboard::can_type_all(text) || text.chars().count() > PASTE_THRESHOLD_CHARS {
+            if !types_like_us
+                || !UinputKeyboard::can_type_all(text)
+                || text.chars().count() > PASTE_THRESHOLD_CHARS
+            {
                 Chosen::Clipboard
             } else {
                 Chosen::Uinput
@@ -44,6 +49,7 @@ pub struct TextInserter {
     windows: WindowProvider,
     method: InsertionMethod,
     typing_delay_ms: u64,
+    types_like_us: bool,
 }
 
 impl TextInserter {
@@ -64,8 +70,14 @@ impl TextInserter {
             },
         };
         let windows = WindowProvider::detect();
+        let types_like_us = super::layout::types_like_us();
         info!(
-            "Text insertion ready: uinput, clipboard {}, window detection via {}",
+            "Text insertion ready: {}, clipboard {}, window detection via {}",
+            if types_like_us {
+                "typed key by key"
+            } else {
+                "pasted, because the keyboard layout is not US"
+            },
             if clipboard.is_some() { "ready" } else { "off" },
             windows.name()
         );
@@ -75,6 +87,7 @@ impl TextInserter {
             windows,
             method: InsertionMethod::Auto,
             typing_delay_ms: 10,
+            types_like_us,
         })
     }
 
@@ -101,7 +114,7 @@ impl TextInserter {
             debug!("Target window: {} ({})", window.title, window.class);
         }
 
-        match choose_method(self.method, text) {
+        match choose_method(self.method, text, self.types_like_us) {
             Chosen::Uinput => self.type_with_uinput(text),
             Chosen::Clipboard => match self.paste(text) {
                 Ok(()) => Ok(()),
@@ -198,20 +211,20 @@ mod tests {
     #[test]
     fn auto_types_plain_text_and_pastes_the_rest() {
         assert_eq!(
-            choose_method(InsertionMethod::Auto, "hello, world!\n"),
+            choose_method(InsertionMethod::Auto, "hello, world!\n", true),
             Chosen::Uinput
         );
         assert_eq!(
-            choose_method(InsertionMethod::Auto, "café"),
+            choose_method(InsertionMethod::Auto, "café", true),
             Chosen::Clipboard
         );
         assert_eq!(
-            choose_method(InsertionMethod::Auto, "日本語"),
+            choose_method(InsertionMethod::Auto, "日本語", true),
             Chosen::Clipboard
         );
         let long = "a".repeat(PASTE_THRESHOLD_CHARS + 1);
         assert_eq!(
-            choose_method(InsertionMethod::Auto, &long),
+            choose_method(InsertionMethod::Auto, &long, true),
             Chosen::Clipboard
         );
     }
@@ -219,12 +232,26 @@ mod tests {
     #[test]
     fn explicit_methods_win() {
         assert_eq!(
-            choose_method(InsertionMethod::Uinput, "café"),
+            choose_method(InsertionMethod::Uinput, "café", true),
             Chosen::Uinput
         );
         assert_eq!(
-            choose_method(InsertionMethod::Clipboard, "abc"),
+            choose_method(InsertionMethod::Clipboard, "abc", true),
             Chosen::Clipboard
+        );
+    }
+
+    #[test]
+    fn a_non_us_layout_pastes_even_plain_text() {
+        assert_eq!(
+            choose_method(InsertionMethod::Auto, "hello", false),
+            Chosen::Clipboard,
+            "key codes would come out as other letters"
+        );
+        assert_eq!(
+            choose_method(InsertionMethod::Uinput, "hello", false),
+            Chosen::Uinput,
+            "an explicit choice is still honoured"
         );
     }
 }

@@ -11,7 +11,7 @@ max_recording_secs = 600 # stop and transcribe after ten minutes, warning a minu
 [transcription]
 # model_path = "/path/to/ggml-base.bin"  # derived from model_size when unset
 model_size = "base"       # tiny, base, small, medium, large, large-v2, large-v3
-language = "en"
+language = "en"           # a two-letter code, or "auto" to detect the language you speak
 use_gpu = true
 beam_size = 5
 no_speech_threshold = 0.6
