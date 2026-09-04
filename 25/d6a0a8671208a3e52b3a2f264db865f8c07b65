@@ -1,0 +1,21 @@
+src/hotkey/evdev.rs
+  s_229a35bbae3466::t_92275ee07bc0f8 9,114-125,146,307-321,578-605,612
+src/text/uinput_keyboard.rs
+  s_229a35bbae3466::t_34d8320afc3988 244-246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "25d6a0a8671208a3e52b3a2f264db865f8c07b65",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
