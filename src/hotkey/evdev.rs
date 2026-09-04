@@ -71,14 +71,19 @@ impl HotkeyMatcher {
         None
     }
 
+    /// The hotkey's own key never counts as a held modifier, so a bare
+    /// `RightAlt` hotkey matches even though Right Alt is a modifier.
     fn modifiers_match(&self) -> bool {
         let wanted = self.combination.modifiers;
+        let key = self.combination.evdev_key();
         let required = [wanted.ctrl, wanted.shift, wanted.alt, wanted.super_key];
         MODIFIER_PAIRS
             .iter()
             .zip(required)
             .all(|((left, right), needed)| {
-                (self.held.contains(left) || self.held.contains(right)) == needed
+                let held = (*left != key && self.held.contains(left))
+                    || (*right != key && self.held.contains(right));
+                held == needed
             })
     }
 }
@@ -335,6 +340,30 @@ mod tests {
         m.feed(KeyCode::KEY_SPACE, 0);
         m.feed(KeyCode::KEY_LEFTCTRL, 0);
         assert_eq!(m.feed(KeyCode::KEY_SPACE, 1), Some(HotkeyEvent::Pressed));
+    }
+
+    #[test]
+    fn a_bare_modifier_hotkey_fires_on_its_own_and_not_with_others() {
+        let mut m = matcher("RightAlt");
+        assert_eq!(m.feed(KeyCode::KEY_RIGHTALT, 1), Some(HotkeyEvent::Pressed));
+        assert_eq!(m.feed(KeyCode::KEY_RIGHTALT, 2), None);
+        assert_eq!(
+            m.feed(KeyCode::KEY_RIGHTALT, 0),
+            Some(HotkeyEvent::Released)
+        );
+
+        m.feed(KeyCode::KEY_LEFTCTRL, 1);
+        assert_eq!(
+            m.feed(KeyCode::KEY_RIGHTALT, 1),
+            None,
+            "Ctrl+RightAlt is a different chord"
+        );
+        m.feed(KeyCode::KEY_RIGHTALT, 0);
+        m.feed(KeyCode::KEY_LEFTCTRL, 0);
+
+        let mut m = matcher("Ctrl+RightAlt");
+        m.feed(KeyCode::KEY_LEFTCTRL, 1);
+        assert_eq!(m.feed(KeyCode::KEY_RIGHTALT, 1), Some(HotkeyEvent::Pressed));
     }
 
     #[test]

@@ -63,6 +63,18 @@ const KEYS: &[KeyDef] = keys![
     ["f5"] => KEY_F5 / F5, ["f6"] => KEY_F6 / F6, ["f7"] => KEY_F7 / F7, ["f8"] => KEY_F8 / F8,
     ["f9"] => KEY_F9 / F9, ["f10"] => KEY_F10 / F10, ["f11"] => KEY_F11 / F11,
     ["f12"] => KEY_F12 / F12,
+    // Keys a programmable keyboard can emit that no application binds.
+    ["f13"] => KEY_F13 / F13, ["f14"] => KEY_F14 / F14, ["f15"] => KEY_F15 / F15,
+    ["f16"] => KEY_F16 / F16, ["f17"] => KEY_F17 / F17, ["f18"] => KEY_F18 / F18,
+    ["f19"] => KEY_F19 / F19, ["f20"] => KEY_F20 / F20, ["f21"] => KEY_F21 / F21,
+    ["f22"] => KEY_F22 / F22, ["f23"] => KEY_F23 / F23, ["f24"] => KEY_F24 / F24,
+    // A bare modifier as the hotkey: applications ignore a modifier pressed on its own.
+    ["rightalt", "altgr"] => KEY_RIGHTALT / AltRight, ["leftalt"] => KEY_LEFTALT / AltLeft,
+    ["rightctrl", "rightcontrol"] => KEY_RIGHTCTRL / ControlRight,
+    ["leftctrl", "leftcontrol"] => KEY_LEFTCTRL / ControlLeft,
+    ["rightshift"] => KEY_RIGHTSHIFT / ShiftRight, ["leftshift"] => KEY_LEFTSHIFT / ShiftLeft,
+    ["rightsuper", "rightmeta", "rightwin"] => KEY_RIGHTMETA / MetaRight,
+    ["leftsuper", "leftmeta", "leftwin"] => KEY_LEFTMETA / MetaLeft,
     ["space"] => KEY_SPACE / Space, ["enter", "return"] => KEY_ENTER / Enter,
     ["escape", "esc"] => KEY_ESC / Escape, ["backspace"] => KEY_BACKSPACE / Backspace,
     ["delete", "del"] => KEY_DELETE / Delete, ["tab"] => KEY_TAB / Tab,
@@ -155,16 +167,26 @@ impl fmt::Display for KeyCombination {
         if self.modifiers.super_key {
             f.write_str("Super+")?;
         }
-        let name = self.key.names[0];
-        let mut chars = name.chars();
+        f.write_str(&display_name(self.key.names[0]))
+    }
+}
+
+fn display_name(name: &str) -> String {
+    let capitalize = |s: &str| {
+        let mut chars = s.chars();
         match chars.next() {
-            Some(first) => {
-                write!(f, "{}", first.to_ascii_uppercase())?;
-                f.write_str(chars.as_str())
-            },
-            None => Ok(()),
+            Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+            None => String::new(),
+        }
+    };
+    for side in ["right", "left"] {
+        if let Some(rest) = name.strip_prefix(side) {
+            if !rest.is_empty() {
+                return capitalize(side) + &capitalize(rest);
+            }
         }
     }
+    capitalize(name)
 }
 
 #[cfg(test)]
@@ -196,6 +218,30 @@ mod tests {
             KeyCode::KEY_COMMA
         );
         assert_eq!(KeyCombination::parse("Alt+`").unwrap().to_string(), "Alt+`");
+    }
+
+    #[test]
+    fn bare_modifiers_and_high_function_keys_are_keys() {
+        let alt = KeyCombination::parse("RightAlt").unwrap();
+        assert_eq!(alt.evdev_key(), KeyCode::KEY_RIGHTALT);
+        assert_eq!(alt.x11_code(), Code::AltRight);
+        assert_eq!(alt.modifiers, Modifiers::default());
+        assert_eq!(alt.to_string(), "RightAlt");
+        assert_eq!(
+            KeyCombination::parse("AltGr").unwrap().to_string(),
+            "RightAlt"
+        );
+        assert_eq!(
+            KeyCombination::parse("Ctrl+RightSuper")
+                .unwrap()
+                .to_string(),
+            "Ctrl+RightSuper"
+        );
+        assert_eq!(
+            KeyCombination::parse("F13").unwrap().evdev_key(),
+            KeyCode::KEY_F13
+        );
+        assert_eq!(KeyCombination::parse("f24").unwrap().x11_code(), Code::F24);
     }
 
     #[test]
