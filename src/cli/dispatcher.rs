@@ -1,7 +1,7 @@
 use crate::cli::commands::{
     handle_client_command, handle_daemon_restart, handle_daemon_start, handle_daemon_status,
-    handle_daemon_stop, handle_listen, handle_manual, handle_models, handle_record, handle_setup,
-    handle_status, handle_test, SessionOptions,
+    handle_daemon_stop, handle_doctor, handle_listen, handle_manual, handle_models, handle_record,
+    handle_setup, handle_status, handle_test, SessionOptions,
 };
 use crate::cli::{Commands, DaemonCommands};
 use crate::ipc::DaemonCommand;
@@ -35,6 +35,7 @@ impl CommandDispatcher {
             Commands::Start => "start",
             Commands::Stop => "stop",
             Commands::Cancel => "cancel",
+            Commands::Doctor => "doctor",
             Commands::Settings => "settings",
             Commands::PasteLast => "paste-last",
             Commands::Learn { .. } => "learn",
@@ -132,6 +133,7 @@ impl CommandDispatcher {
             Commands::Start => handle_client_command(DaemonCommand::Start).await,
             Commands::Stop => handle_client_command(DaemonCommand::Stop).await,
             Commands::Cancel => handle_client_command(DaemonCommand::Cancel).await,
+            Commands::Doctor => handle_doctor().await,
             Commands::Settings => crate::gui::run(),
             Commands::PasteLast => handle_client_command(DaemonCommand::PasteLast).await,
             Commands::Learn { text } => {

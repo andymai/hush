@@ -1,8 +1,4 @@
 use super::utils::{show_config_status, show_device_status, show_system_info};
-use crate::{hotkey, AudioCapture, Config, WhisperTranscriber};
-
-#[cfg(target_os = "linux")]
-use crate::TextInserter;
 /// Status command implementation
 ///
 /// Displays system status including configuration, devices, and component health.
@@ -14,7 +10,7 @@ use anyhow::Result;
 ///
 /// * `_config` - Reserved for future use to show only configuration details
 /// * `_devices` - Reserved for future use to show only device details
-/// * `full` - Show full system component status
+/// * `full` - Follow with the `hush doctor` report
 ///
 /// # Note
 ///
@@ -29,7 +25,7 @@ use anyhow::Result;
 /// // Basic status
 /// handle_status(false, false, false).await?;
 ///
-/// // Full status with component health
+/// // Followed by the doctor report
 /// handle_status(false, false, true).await?;
 /// # Ok(())
 /// # }
@@ -54,45 +50,7 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
 
     if full {
         println!();
-        println!("⚙️ System Components:");
-
-        // Test each component
-        print!("Audio Capture: ");
-        match AudioCapture::new(None) {
-            Ok(_) => println!("✅ Available"),
-            Err(e) => println!("❌ Failed ({})", e),
-        }
-
-        print!("Text Insertion: ");
-        #[cfg(target_os = "linux")]
-        {
-            match TextInserter::new() {
-                Ok(_) => println!("✅ Available"),
-                Err(e) => println!("❌ Failed ({})", e),
-            }
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            println!("ℹ️  Platform-specific (use trait-based adapters)");
-        }
-
-        print!("Hotkey System: ");
-        let config = Config::load()?;
-        match hotkey::HotkeyManager::new(&config.hotkey.combination) {
-            Ok(_) => println!("✅ Available"),
-            Err(e) => println!("❌ Failed ({})", e),
-        }
-
-        print!("Whisper Transcriber: ");
-        match WhisperTranscriber::new(
-            &config.transcription.model_path(),
-            config.transcription.use_gpu,
-        )
-        .await
-        {
-            Ok(_) => println!("✅ Available"),
-            Err(e) => println!("❌ Failed ({})", e),
-        }
+        return super::doctor::handle_doctor().await;
     }
 
     Ok(())
