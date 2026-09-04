@@ -84,6 +84,9 @@ pub enum Commands {
     /// Stop recording and discard the audio (talks to the daemon)
     Cancel,
 
+    /// Check everything Hush needs and say how to fix what is missing
+    Doctor,
+
     /// Open the setup and settings window
     Settings,
 

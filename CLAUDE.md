@@ -41,6 +41,7 @@ CMake auto-detects it and deadlocks on the CUDA kernel fan-out.
 ./hush listen                 # Same session attached to the terminal
 ./hush record --duration 5    # Record for N seconds
 ./hush settings               # Setup and settings window
+./hush doctor                 # Check everything and print the fix for each problem
 ./hush status --full          # System diagnostics
 ```
 
