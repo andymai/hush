@@ -1,0 +1,25 @@
+README.md
+  s_229a35bbae3466::t_03df79b26a73a2 52
+config/default.toml
+  s_229a35bbae3466::t_9cb64d801541c6 20
+src/hotkey/combination.rs
+  s_229a35bbae3466::t_fb7050af144669 66-77,170-176,178-186,189,223-246
+src/hotkey/evdev.rs
+  s_229a35bbae3466::t_375515cd9071bd 74-75,78,84-86,345-368
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "a89f7cb6b3e45fc304a77cbfefee8e282b42935b",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
