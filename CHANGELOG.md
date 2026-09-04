@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/andymai/hush/compare/v0.3.0...v0.4.0) (2026-09-04)
+
+
+### Features
+
+* **hotkey:** allow bare modifiers and F13 to F24 as the hotkey ([#139](https://github.com/andymai/hush/issues/139)) ([8692a8c](https://github.com/andymai/hush/commit/8692a8c14600b733fbd080b4289aa4ff384004e9))
+
 ## [0.3.0](https://github.com/andymai/hush/compare/v0.2.0...v0.3.0) (2026-09-04)
 
 
