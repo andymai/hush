@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0](https://github.com/andymai/hush/compare/v0.5.0...v0.6.0) (2026-09-04)
+
+
+### Features
+
+* **cli:** hush doctor ([#152](https://github.com/andymai/hush/issues/152)) ([8fa17db](https://github.com/andymai/hush/commit/8fa17db8f03b6d78172d818ec956d88cc85f2800))
+* language detection, layout-aware insertion, and a suggested model ([#153](https://github.com/andymai/hush/issues/153)) ([d65335c](https://github.com/andymai/hush/commit/d65335cc870609e81ba82666e632323b42b9bf8d))
+* **ui:** setup and settings window ([#151](https://github.com/andymai/hush/issues/151)) ([3015468](https://github.com/andymai/hush/commit/301546871e782a9193bcefcc196702d2d15d5242))
+* **ui:** status icon on the desktop panel ([#149](https://github.com/andymai/hush/issues/149)) ([889220d](https://github.com/andymai/hush/commit/889220d99e5472b6e26d8d9d480356e055cac360))
+
+
+### Bug Fixes
+
+* **install:** Arch installs the tarball, not a package that does not exist ([#156](https://github.com/andymai/hush/issues/156)) ([67e23ef](https://github.com/andymai/hush/commit/67e23ef735d87a4332c330b64994a6f99987f088))
+
 ## [0.5.0](https://github.com/andymai/hush/compare/v0.4.0...v0.5.0) (2026-09-04)
 
 
