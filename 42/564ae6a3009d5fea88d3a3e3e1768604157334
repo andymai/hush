@@ -1,0 +1,23 @@
+.github/workflows/release.yml
+  s_229a35bbae3466::t_095f2569df3511 21-28,44,162-165,177,180,183-187,197,199-245
+README.md
+  s_229a35bbae3466::t_2749762abbb616 16
+packaging/hush.spec.template
+  s_229a35bbae3466::t_9636eba530ed08 1-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "42564ae6a3009d5fea88d3a3e3e1768604157334",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
