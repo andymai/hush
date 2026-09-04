@@ -18,7 +18,7 @@ pub struct ModelInfo {
     pub sha256: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelSize {
     Tiny,
     Base,
@@ -217,6 +217,32 @@ impl ModelManager {
     }
 
     pub async fn ensure_model_downloaded(&self, size: &ModelSize) -> Result<PathBuf> {
+        let bar = std::sync::Mutex::new(None::<ProgressBar>);
+        let name = self
+            .get_model_info(size)
+            .map(|info| info.name.clone())
+            .unwrap_or_default();
+        self.ensure_model_downloaded_with(size, &move |done, total| {
+            let mut bar = match bar.lock() {
+                Ok(bar) => bar,
+                Err(_) => return,
+            };
+            let bar = bar.get_or_insert_with(|| Self::progress_bar(total, &name));
+            bar.set_position(done);
+            if done >= total {
+                bar.finish_and_clear();
+            }
+        })
+        .await
+    }
+
+    /// Download with a progress callback of `(downloaded, total)` bytes, for
+    /// callers that draw their own progress.
+    pub async fn ensure_model_downloaded_with(
+        &self,
+        size: &ModelSize,
+        progress: &(dyn Fn(u64, u64) + Send + Sync),
+    ) -> Result<PathBuf> {
         info!("Ensuring model {:?} is available", size);
 
         let model_info = self
@@ -232,7 +258,7 @@ impl ModelManager {
         }
 
         info!("Downloading model {:?} from {}", size, model_info.repo_id);
-        self.download_model(model_info).await?;
+        self.download_model(model_info, progress).await?;
 
         // Verify the downloaded model
         if !self.is_model_valid(&model_path, model_info).await? {
@@ -251,7 +277,11 @@ impl ModelManager {
         )
     }
 
-    async fn download_model(&self, info: &ModelInfo) -> Result<()> {
+    async fn download_model(
+        &self,
+        info: &ModelInfo,
+        progress: &(dyn Fn(u64, u64) + Send + Sync),
+    ) -> Result<()> {
         let url = Self::download_url(info);
         info!(
             "Downloading {} ({:.1} MB) from {}",
@@ -276,7 +306,8 @@ impl ModelManager {
             .with_context(|| format!("Model download failed: {}", url))?;
 
         let total = response.content_length().unwrap_or(info.expected_size);
-        let progress = Self::progress_bar(total, &info.name);
+        let mut downloaded = 0u64;
+        progress(0, total);
 
         let mut file = tokio::fs::File::create(&partial)
             .await
@@ -287,11 +318,12 @@ impl ModelManager {
             file.write_all(&chunk)
                 .await
                 .context("Failed to write model file")?;
-            progress.inc(chunk.len() as u64);
+            downloaded += chunk.len() as u64;
+            progress(downloaded, total);
         }
         file.flush().await.context("Failed to flush model file")?;
         drop(file);
-        progress.finish_and_clear();
+        progress(total, total);
 
         tokio::fs::rename(&partial, &target)
             .await

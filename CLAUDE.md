@@ -40,6 +40,7 @@ CMake auto-detects it and deadlocks on the CUDA kernel fan-out.
 ./hush toggle                 # Start or stop recording over the daemon socket
 ./hush listen                 # Same session attached to the terminal
 ./hush record --duration 5    # Record for N seconds
+./hush settings               # Setup and settings window
 ./hush status --full          # System diagnostics
 ```
 
@@ -68,6 +69,8 @@ src/
 ├── text/           # uinput typing, clipboard paste fallback, window detection (X11, Hyprland, Sway)
 ├── hotkey/         # Hotkey combination parser, evdev backend, X11 fallback
 ├── overlay/        # egui floating window UI
+├── gui/            # eframe setup and settings window (`hush settings`)
+├── tray/           # StatusNotifierItem panel icon and the Hush mark
 ├── config/         # TOML settings
 └── logging.rs      # Structured tracing with request correlation
 ```
