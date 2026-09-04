@@ -16,6 +16,7 @@
 //!         HotkeyEvent::Pressed => println!("recording"),
 //!         HotkeyEvent::Released => println!("stopped"),
 //!         HotkeyEvent::Cancel => println!("discarded"),
+//!         HotkeyEvent::Action(action) => println!("{:?}", action),
 //!     }
 //! }
 //! # Ok::<(), anyhow::Error>(())
@@ -40,13 +41,24 @@ pub enum HotkeyEvent {
     Released,
     /// The cancel key went down.
     Cancel,
+    /// A secondary chord went down.
+    Action(HotkeyAction),
 }
 
-/// The keys a backend watches: the dictation hotkey and an optional cancel key.
+/// Secondary chords that run a daemon command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HotkeyAction {
+    PasteLast,
+    Learn,
+}
+
+/// The keys a backend watches: the dictation hotkey, an optional cancel key,
+/// and optional action chords.
 #[derive(Debug, Clone)]
 pub struct HotkeyBindings {
     pub primary: KeyCombination,
     pub cancel: Option<KeyCombination>,
+    pub actions: Vec<(HotkeyAction, KeyCombination)>,
 }
 
 impl HotkeyBindings {
@@ -65,7 +77,38 @@ impl HotkeyBindings {
                 ));
             }
         }
-        Ok(Self { primary, cancel })
+        Ok(Self {
+            primary,
+            cancel,
+            actions: Vec::new(),
+        })
+    }
+
+    /// Bind an action chord; an empty string leaves the action unbound.
+    pub fn with_action(mut self, action: HotkeyAction, text: &str) -> Result<Self> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Ok(self);
+        }
+        let combination = KeyCombination::parse(text)?;
+        let taken = self
+            .all()
+            .any(|existing| existing.to_string() == combination.to_string());
+        if taken {
+            return Err(anyhow::anyhow!(
+                "{} is already bound; {:?} needs its own chord",
+                combination,
+                action
+            ));
+        }
+        self.actions.push((action, combination));
+        Ok(self)
+    }
+
+    fn all(&self) -> impl Iterator<Item = &KeyCombination> {
+        std::iter::once(&self.primary)
+            .chain(self.cancel.iter())
+            .chain(self.actions.iter().map(|(_, c)| c))
     }
 }
 
@@ -213,5 +256,21 @@ mod tests {
             .cancel
             .is_none());
         assert!(HotkeyBindings::parse("Escape", Some("Escape")).is_err());
+    }
+
+    #[test]
+    fn action_chords_must_be_distinct() {
+        let b = HotkeyBindings::parse("RightAlt", Some("Escape"))
+            .unwrap()
+            .with_action(HotkeyAction::PasteLast, "Shift+RightAlt")
+            .unwrap()
+            .with_action(HotkeyAction::Learn, "")
+            .unwrap();
+        assert_eq!(b.actions.len(), 1);
+        assert!(b
+            .clone()
+            .with_action(HotkeyAction::Learn, "shift+rightalt")
+            .is_err());
+        assert!(b.with_action(HotkeyAction::Learn, "Escape").is_err());
     }
 }

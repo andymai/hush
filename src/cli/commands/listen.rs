@@ -9,11 +9,15 @@ use tracing::{error, info, warn};
 use crate::audio::AudioFeedback;
 use crate::cli::commands::daemon::{self, SessionOptions};
 use crate::config::Config;
-use crate::hotkey::{GestureAction, GestureDetector, HotkeyBindings, HotkeyManager, HotkeyMode};
+use crate::hotkey::{
+    GestureAction, GestureDetector, HotkeyAction, HotkeyBindings, HotkeyEvent, HotkeyManager,
+    HotkeyMode,
+};
 use crate::ipc::protocol::DaemonState;
 use crate::ipc::SessionCommand;
 use crate::notify::notify;
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
+use crate::text_processing::learn;
 use crate::text_processing::{
     CommandExecutor, CommandParser, EditingMode, InsertionHistory, LlmProvider, ProcessingConfig,
     TextProcessor,
@@ -187,7 +191,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         });
     }
 
-    let bindings = HotkeyBindings::parse(&hotkey_combination, Some(&config.hotkey.cancel))?;
+    let bindings = HotkeyBindings::parse(&hotkey_combination, Some(&config.hotkey.cancel))?
+        .with_action(HotkeyAction::PasteLast, &config.hotkey.paste_last)?
+        .with_action(HotkeyAction::Learn, &config.hotkey.learn)?;
     let (hotkey_manager, hotkey_rx) =
         HotkeyManager::with_backend(bindings, config.hotkey.backend, config.hotkey.exclusive)?;
     let feedback = if config.feedback.audio_enabled {
@@ -349,6 +355,16 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             };
             let now = std::time::Instant::now();
+            if let Some(HotkeyEvent::Action(action)) = event {
+                let command = match action {
+                    HotkeyAction::PasteLast => SessionCommand::PasteLast,
+                    HotkeyAction::Learn => SessionCommand::Learn,
+                };
+                if audio_cmd_tx_clone.send(command).is_err() {
+                    break;
+                }
+                continue;
+            }
             if !matches!(shared_hotkey.snapshot(), DaemonState::Recording { .. }) {
                 gesture.session_ended();
             }
@@ -498,12 +514,15 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         command_text
                     };
 
+                    shared_result.set_last_text(processed_text.clone());
+
                     // Insert text
                     #[cfg(target_os = "linux")]
                     if let Some(ref inserter) = text_inserter_clone {
                         thread::sleep(std::time::Duration::from_millis(200));
 
-                        match inserter.lock().insert_text(&processed_text) {
+                        let mut inserter = inserter.lock();
+                        match inserter.insert_text(&processed_text) {
                             Ok(_) => {
                                 // Record in history for undo
                                 insertion_history_clone
@@ -512,6 +531,12 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             },
                             Err(e) => {
                                 error!("Text insertion failed: {}", e);
+                                let _ = feedback.play_error();
+                                let body = match inserter.copy_to_clipboard(&processed_text) {
+                                    Ok(()) => "The text is on the clipboard. `hush paste-last` types it again.",
+                                    Err(_) => "`hush paste-last` types it again.",
+                                };
+                                notify("Hush could not insert the text", body);
                             },
                         }
                     }
@@ -620,6 +645,49 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 info!("Quit requested");
                 shared.set_stopping();
                 break;
+            },
+            SessionCommand::PasteLast => {
+                if audio_capture.is_recording() {
+                    warn!("Ignoring paste-last while recording");
+                    continue;
+                }
+                let Some(text) = shared.last_text() else {
+                    notify("Nothing to paste yet", "Dictate something first.");
+                    continue;
+                };
+                #[cfg(target_os = "linux")]
+                if let Some(inserter) = text_inserter.as_ref() {
+                    shared.set_inserting();
+                    match inserter.lock().insert_text(&text) {
+                        Ok(()) => insertion_history.lock().record(text.clone()),
+                        Err(e) => {
+                            error!("Paste-last failed: {}", e);
+                            let _ = feedback.play_error();
+                        },
+                    }
+                    shared.set_idle();
+                }
+            },
+            SessionCommand::Learn => match learn::learn(None) {
+                Ok(term) => {
+                    if let Some(processor) = text_processor.as_ref() {
+                        processor.reload_vocabulary();
+                    }
+                    let _ = feedback.play_success();
+                    notify(
+                        "Learned",
+                        &format!("'{}' will be written exactly like that.", term),
+                    );
+                },
+                Err(e) => {
+                    let _ = feedback.play_error();
+                    notify("Nothing learned", &e.to_string());
+                },
+            },
+            SessionCommand::ReloadVocabulary => {
+                if let Some(processor) = text_processor.as_ref() {
+                    processor.reload_vocabulary();
+                }
             },
             SessionCommand::CancelRecording => {
                 if !audio_capture.is_recording() {

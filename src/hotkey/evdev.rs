@@ -3,7 +3,7 @@
 //! `input` group membership as uinput provides.
 
 use super::combination::KeyCombination;
-use super::{HotkeyBindings, HotkeyEvent};
+use super::{HotkeyAction, HotkeyBindings, HotkeyEvent};
 use anyhow::{anyhow, Result};
 use evdev::uinput::VirtualDevice;
 use evdev::{AttributeSetRef, BusType, Device, EventSummary, InputEvent, InputId, KeyCode};
@@ -115,6 +115,7 @@ impl HotkeyMatcher {
 pub struct Matchers {
     primary: HotkeyMatcher,
     cancel: Option<HotkeyMatcher>,
+    actions: Vec<(HotkeyAction, HotkeyMatcher)>,
 }
 
 impl Matchers {
@@ -122,15 +123,27 @@ impl Matchers {
         Self {
             primary: HotkeyMatcher::new(bindings.primary.clone()),
             cancel: bindings.cancel.clone().map(HotkeyMatcher::new),
+            actions: bindings
+                .actions
+                .iter()
+                .map(|(action, combination)| (*action, HotkeyMatcher::new(combination.clone())))
+                .collect(),
         }
     }
 
-    /// The cancel key only reports its press, and is never swallowed.
+    /// The cancel key and action chords only report their press, and are
+    /// never swallowed.
     pub fn process(&mut self, code: KeyCode, value: i32) -> Processed {
         let mut processed = self.primary.process(code, value);
         if let Some(cancel) = self.cancel.as_mut() {
             if cancel.feed(code, value) == Some(HotkeyEvent::Pressed) && processed.event.is_none() {
                 processed.event = Some(HotkeyEvent::Cancel);
+            }
+        }
+        for (action, matcher) in self.actions.iter_mut() {
+            if matcher.feed(code, value) == Some(HotkeyEvent::Pressed) && processed.event.is_none()
+            {
+                processed.event = Some(HotkeyEvent::Action(*action));
             }
         }
         processed
@@ -172,6 +185,10 @@ fn bindings_match(keys: &AttributeSetRef<KeyCode>, bindings: &HotkeyBindings) ->
             .cancel
             .as_ref()
             .is_some_and(|cancel| device_matches(keys, cancel))
+        || bindings
+            .actions
+            .iter()
+            .any(|(_, combination)| device_matches(keys, combination))
 }
 
 /// Paths and devices of every readable device the bindings need.
@@ -655,6 +672,25 @@ mod tests {
         m.process(KeyCode::KEY_ESC, 0);
         assert_eq!(
             m.process(KeyCode::KEY_SPACE, 1).event,
+            Some(HotkeyEvent::Pressed)
+        );
+    }
+
+    #[test]
+    fn action_chords_report_their_press() {
+        let bindings = HotkeyBindings::parse("RightAlt", None)
+            .unwrap()
+            .with_action(HotkeyAction::Learn, "Super+RightAlt")
+            .unwrap();
+        let mut m = Matchers::new(&bindings);
+        m.process(KeyCode::KEY_LEFTMETA, 1);
+        let press = m.process(KeyCode::KEY_RIGHTALT, 1);
+        assert_eq!(press.event, Some(HotkeyEvent::Action(HotkeyAction::Learn)));
+        assert!(!press.swallow);
+        assert_eq!(m.process(KeyCode::KEY_RIGHTALT, 0).event, None);
+        m.process(KeyCode::KEY_LEFTMETA, 0);
+        assert_eq!(
+            m.process(KeyCode::KEY_RIGHTALT, 1).event,
             Some(HotkeyEvent::Pressed)
         );
     }

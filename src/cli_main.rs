@@ -84,6 +84,15 @@ pub enum Commands {
     /// Stop recording and discard the audio (talks to the daemon)
     Cancel,
 
+    /// Type the last transcript again (talks to the daemon)
+    PasteLast,
+
+    /// Add the selected text to the vocabulary with its exact spelling (talks to the daemon)
+    Learn {
+        /// Words to learn instead of the current selection
+        text: Vec<String>,
+    },
+
     /// Setup and configuration commands
     Setup {
         #[command(subcommand)]

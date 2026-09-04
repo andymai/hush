@@ -145,6 +145,17 @@ impl TextInserter {
         Ok(())
     }
 
+    /// Leave text on the clipboard for the user to paste by hand.
+    pub fn copy_to_clipboard(&mut self, text: &str) -> Result<()> {
+        let clipboard = self
+            .clipboard
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("clipboard unavailable"))?;
+        clipboard
+            .set_text(text.to_string())
+            .map_err(|e| anyhow::anyhow!("failed to set clipboard: {}", e))
+    }
+
     /// Undo the last insertion by sending backspaces.
     pub fn undo_last_insertion(&mut self, char_count: usize) -> Result<()> {
         info!("Undoing last insertion ({} chars)", char_count);

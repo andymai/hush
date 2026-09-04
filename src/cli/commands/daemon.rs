@@ -124,6 +124,10 @@ pub async fn handle_daemon_status() -> Result<()> {
 /// `hush toggle`, `hush start`, `hush stop`, `hush cancel`
 pub async fn handle_client_command(command: DaemonCommand) -> Result<()> {
     let response = client::send(command).await?;
+    if let (true, Some(message)) = (response.ok, &response.message) {
+        println!("{}", message);
+        return Ok(());
+    }
     match (response.ok, response.state) {
         (true, Some(DaemonState::Recording { .. })) => println!("Recording."),
         (true, Some(DaemonState::Transcribing)) => println!("Transcribing."),

@@ -24,6 +24,8 @@ backend = "auto"                 # auto: evdev (Wayland and X11), falling back t
 exclusive = false                # true: grab the hotkey's device so applications never see the key or button
 cancel = "Escape"                # discards a recording in progress; "" disables
 tap_ms = 300                     # shorter presses are taps: a tap discards, a double-tap locks hands-free (hold); a tap locks (toggle)
+paste_last = ""                  # chord that types the last transcript again, e.g. "Shift+RightAlt"
+learn = ""                       # chord that adds the selected text to the vocabulary, e.g. "Super+RightAlt"
 
 [feedback]
 audio_enabled = true # start, stop, cancel, and warning tones
