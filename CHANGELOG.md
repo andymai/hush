@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/andymai/hush/compare/v0.4.0...v0.5.0) (2026-09-04)
+
+
+### Features
+
+* Command Mode and an Ollama provider ([#147](https://github.com/andymai/hush/issues/147)) ([4ccc15e](https://github.com/andymai/hush/commit/4ccc15e78ade7492a48a1f85917224127aa26dfa))
+* **hotkey:** double-tap to lock, Esc to cancel, and a recording cap ([#144](https://github.com/andymai/hush/issues/144)) ([03c7d7c](https://github.com/andymai/hush/commit/03c7d7c19edb1698216557abc002fce7e3805e09))
+* **hotkey:** mouse button hotkeys and an exclusive grab mode ([#141](https://github.com/andymai/hush/issues/141)) ([45bb29f](https://github.com/andymai/hush/commit/45bb29fa6ffac4203277ef343340628ab7701ef2))
+* **hotkey:** RightAlt is the default hotkey ([#148](https://github.com/andymai/hush/issues/148)) ([924ae3b](https://github.com/andymai/hush/commit/924ae3b52874fb51543b9cf962af70db3538fc24))
+* paste-last and learn commands ([#145](https://github.com/andymai/hush/issues/145)) ([e487147](https://github.com/andymai/hush/commit/e48714737e7bfa8898296d679e092fba2e67f97e))
+* tone by app, KWin window detection, and a Whisper context prompt ([#146](https://github.com/andymai/hush/issues/146)) ([d9c38e0](https://github.com/andymai/hush/commit/d9c38e0d3f5ccc4b1a0e7f76a56559d24bfa3488))
+
 ## [0.4.0](https://github.com/andymai/hush/compare/v0.3.0...v0.4.0) (2026-09-04)
 
 
