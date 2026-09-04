@@ -167,3 +167,30 @@ Modelled on Wispr Flow after research (vault: Projects/hush/hush-research.md). L
 - `hush paste-last`, `hush learn`, and their optional chords. Insertion failures leave the text on the clipboard.
 - Tone by app: `[profiles]` picks terminal, editor, chat, mail, docs, or browser from the window class; KWin scripting supplies the window on KDE Wayland; the title and learned terms prime Whisper.
 - Command Mode on `Ctrl+RightAlt`, rewriting the selection or last transcript through `[llm]`: Ollama when reachable, else Anthropic, else off.
+
+## Addendum, 2026-09-04: M2, the application around the daemon
+
+- Panel icon through ksni (#149): state colour, click to dictate, a menu that
+  sends the same session commands the hotkey does, `tray.enabled` to turn it off.
+- Setup and settings window (#151): `hush settings` runs as its own process,
+  launched by the tray and the desktop entry. Setup covers keyboard access,
+  model downloads with progress, starting Hush, and start-at-login; settings
+  covers every configuration key.
+- `hush doctor` (#152) replaces `status --full` and names the command that
+  fixes each problem.
+- Language detection, layout-aware insertion, and a model suggested from the
+  hardware (#153).
+
+The window is built on **eframe 0.29**, not iced. eframe shares the egui
+version the overlay already uses, so the binary carries one toolkit instead of
+two, and the working egui overlay stays as it is. Issue #101 (an
+`iced_layershell` overlay) is therefore not planned.
+
+The Hush mark is the five-bar waveform the overlay animates: drawn from signed
+distance fields for the tray at 22 to 48 pixels, and as a gradient tile in
+`packaging/io.github.andymai.hush.svg` for the launcher.
+
+One build-wide consequence worth remembering: ksni enables zbus's tokio
+backend, and feature unification applies that to every zbus user, so anything
+calling `zbus::blocking` needs a runtime. The KWin window query and desktop
+notifications each own a runtime on their own thread.
