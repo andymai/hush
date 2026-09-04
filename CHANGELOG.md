@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/andymai/hush/compare/v0.2.0...v0.3.0) (2026-09-04)
+
+
+### Features
+
+* **packaging:** publish releases to AUR and COPR ([#137](https://github.com/andymai/hush/issues/137)) ([7f7635a](https://github.com/andymai/hush/commit/7f7635aeccce3458d435ea2d12c7d95e6c47a1e8))
+
 ## [0.2.0](https://github.com/andymai/hush/compare/v0.1.0...v0.2.0) (2026-09-03)
 
 
