@@ -240,11 +240,10 @@ impl UinputKeyboard {
     fn create_device(&mut self) -> Result<()> {
         info!("Creating uinput keyboard device...");
 
-        // Create device info
         let device_id = InputId {
-            bustype: 0x03, // USB
-            vendor: 0x1234,
-            product: 0x5678,
+            bustype: sys::BUS_VIRTUAL,
+            vendor: crate::hotkey::evdev::VIRTUAL_VENDOR,
+            product: crate::hotkey::evdev::VIRTUAL_PRODUCT_KEYBOARD,
             version: 1,
         };
 

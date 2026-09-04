@@ -6,7 +6,7 @@ use super::combination::KeyCombination;
 use super::HotkeyEvent;
 use anyhow::{anyhow, Result};
 use evdev::uinput::VirtualDevice;
-use evdev::{AttributeSetRef, Device, EventSummary, InputEvent, KeyCode};
+use evdev::{AttributeSetRef, BusType, Device, EventSummary, InputEvent, InputId, KeyCode};
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -111,6 +111,18 @@ impl HotkeyMatcher {
     }
 }
 
+/// Vendor id stamped on every uinput device Hush creates (the typing
+/// keyboard and exclusive-mode proxies) so the hotkey reader can skip its
+/// own output instead of grabbing a proxy and chaining another onto it.
+pub const VIRTUAL_VENDOR: u16 = 0x4855;
+pub const VIRTUAL_PRODUCT_KEYBOARD: u16 = 0x0001;
+pub const VIRTUAL_PRODUCT_PROXY: u16 = 0x0002;
+
+/// Whether an input identity belongs to one of Hush's own virtual devices.
+pub fn is_hush_virtual(id: InputId) -> bool {
+    id.bus_type() == BusType::BUS_VIRTUAL && id.vendor() == VIRTUAL_VENDOR
+}
+
 /// A device is interesting when it carries the hotkey's key (a keyboard, or
 /// a mouse for a button), or when it is a keyboard and the chord needs
 /// modifiers from one.
@@ -131,6 +143,7 @@ fn carries_key(device: &Device, key: KeyCode) -> bool {
 /// Paths and devices of every readable device the combination needs.
 pub fn devices_for(combination: &KeyCombination) -> Vec<(PathBuf, Device)> {
     evdev::enumerate()
+        .filter(|(_, device)| !is_hush_virtual(device.input_id()))
         .filter(|(_, device)| {
             device
                 .supported_keys()
@@ -291,8 +304,21 @@ fn supervise(
 /// Clone a device's buttons, keys, and relative axes into a uinput device so
 /// a grabbed device's other events can be replayed to the system.
 fn build_proxy(device: &Device) -> Result<VirtualDevice> {
-    let name = format!("{} (hush)", device.name().unwrap_or("input"));
-    let mut builder = VirtualDevice::builder()?.name(name.as_str());
+    // uinput caps names at 80 bytes including the terminator.
+    const MAX_NAME: usize = 79;
+    let suffix = " (hush)";
+    let mut base = device.name().unwrap_or("input").to_string();
+    while base.len() + suffix.len() > MAX_NAME {
+        base.pop();
+    }
+    let name = base + suffix;
+    let id = InputId::new(
+        BusType::BUS_VIRTUAL,
+        VIRTUAL_VENDOR,
+        VIRTUAL_PRODUCT_PROXY,
+        1,
+    );
+    let mut builder = VirtualDevice::builder()?.name(name.as_str()).input_id(id);
     if let Some(keys) = device.supported_keys() {
         builder = builder.with_keys(keys)?;
     }
@@ -550,11 +576,40 @@ mod tests {
     }
 
     #[test]
+    fn own_virtual_devices_are_recognised() {
+        assert!(is_hush_virtual(InputId::new(
+            BusType::BUS_VIRTUAL,
+            VIRTUAL_VENDOR,
+            VIRTUAL_PRODUCT_PROXY,
+            1
+        )));
+        assert!(is_hush_virtual(InputId::new(
+            BusType::BUS_VIRTUAL,
+            VIRTUAL_VENDOR,
+            VIRTUAL_PRODUCT_KEYBOARD,
+            1
+        )));
+        assert!(!is_hush_virtual(InputId::new(
+            BusType::BUS_USB,
+            VIRTUAL_VENDOR,
+            1,
+            1
+        )));
+        assert!(!is_hush_virtual(InputId::new(
+            BusType::BUS_VIRTUAL,
+            0x046d,
+            1,
+            1
+        )));
+    }
+
+    #[test]
     fn device_enumeration_does_not_panic() {
         let combination = KeyCombination::parse("Ctrl+Shift+Space").unwrap();
         for (path, device) in devices_for(&combination) {
             assert!(path.starts_with("/dev/input"));
             assert!(device.supported_keys().is_some());
+            assert!(!is_hush_virtual(device.input_id()));
         }
     }
 }
