@@ -71,7 +71,7 @@ impl GestureDetector {
 
     pub fn feed(&mut self, event: HotkeyEvent, now: Instant) -> Option<GestureAction> {
         match (event, self.state) {
-            (HotkeyEvent::Action(_), _) => None,
+            (HotkeyEvent::Action(_), _) | (HotkeyEvent::Command(_), _) => None,
             (HotkeyEvent::Cancel, State::Idle) => None,
             (HotkeyEvent::Cancel, _) => {
                 self.state = State::Idle;

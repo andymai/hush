@@ -17,6 +17,7 @@
 //!         HotkeyEvent::Released => println!("stopped"),
 //!         HotkeyEvent::Cancel => println!("discarded"),
 //!         HotkeyEvent::Action(action) => println!("{:?}", action),
+//!         HotkeyEvent::Command(pressed) => println!("command chord {}", pressed),
 //!     }
 //! }
 //! # Ok::<(), anyhow::Error>(())
@@ -43,6 +44,8 @@ pub enum HotkeyEvent {
     Cancel,
     /// A secondary chord went down.
     Action(HotkeyAction),
+    /// The Command Mode chord went down (`true`) or up (`false`).
+    Command(bool),
 }
 
 /// Secondary chords that run a daemon command.
@@ -59,6 +62,7 @@ pub struct HotkeyBindings {
     pub primary: KeyCombination,
     pub cancel: Option<KeyCombination>,
     pub actions: Vec<(HotkeyAction, KeyCombination)>,
+    pub command: Option<KeyCombination>,
 }
 
 impl HotkeyBindings {
@@ -81,7 +85,28 @@ impl HotkeyBindings {
             primary,
             cancel,
             actions: Vec::new(),
+            command: None,
         })
+    }
+
+    /// Bind the Command Mode chord; an empty string leaves it unbound.
+    pub fn with_command(mut self, text: &str) -> Result<Self> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Ok(self);
+        }
+        let combination = KeyCombination::parse(text)?;
+        if self
+            .all()
+            .any(|existing| existing.to_string() == combination.to_string())
+        {
+            return Err(anyhow::anyhow!(
+                "{} is already bound; Command Mode needs its own chord",
+                combination
+            ));
+        }
+        self.command = Some(combination);
+        Ok(self)
     }
 
     /// Bind an action chord; an empty string leaves the action unbound.
@@ -109,6 +134,7 @@ impl HotkeyBindings {
         std::iter::once(&self.primary)
             .chain(self.cancel.iter())
             .chain(self.actions.iter().map(|(_, c)| c))
+            .chain(self.command.iter())
     }
 }
 
@@ -272,5 +298,22 @@ mod tests {
             .with_action(HotkeyAction::Learn, "shift+rightalt")
             .is_err());
         assert!(b.with_action(HotkeyAction::Learn, "Escape").is_err());
+    }
+
+    #[test]
+    fn the_command_chord_is_distinct_too() {
+        let b = HotkeyBindings::parse("RightAlt", Some("Escape"))
+            .unwrap()
+            .with_command("Ctrl+RightAlt")
+            .unwrap();
+        assert_eq!(b.command.as_ref().unwrap().to_string(), "Ctrl+RightAlt");
+        assert!(b
+            .clone()
+            .with_action(HotkeyAction::Learn, "ctrl+rightalt")
+            .is_err());
+        assert!(HotkeyBindings::parse("RightAlt", None)
+            .unwrap()
+            .with_command("RightAlt")
+            .is_err());
     }
 }

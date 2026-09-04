@@ -116,6 +116,7 @@ pub struct Matchers {
     primary: HotkeyMatcher,
     cancel: Option<HotkeyMatcher>,
     actions: Vec<(HotkeyAction, HotkeyMatcher)>,
+    command: Option<HotkeyMatcher>,
 }
 
 impl Matchers {
@@ -128,6 +129,7 @@ impl Matchers {
                 .iter()
                 .map(|(action, combination)| (*action, HotkeyMatcher::new(combination.clone())))
                 .collect(),
+            command: bindings.command.clone().map(HotkeyMatcher::new),
         }
     }
 
@@ -144,6 +146,20 @@ impl Matchers {
             if matcher.feed(code, value) == Some(HotkeyEvent::Pressed) && processed.event.is_none()
             {
                 processed.event = Some(HotkeyEvent::Action(*action));
+            }
+        }
+        if let Some(command) = self.command.as_mut() {
+            let event = command.feed(code, value);
+            if processed.event.is_none() {
+                match event {
+                    Some(HotkeyEvent::Pressed) => {
+                        processed.event = Some(HotkeyEvent::Command(true))
+                    },
+                    Some(HotkeyEvent::Released) => {
+                        processed.event = Some(HotkeyEvent::Command(false))
+                    },
+                    _ => {},
+                }
             }
         }
         processed
@@ -189,6 +205,10 @@ fn bindings_match(keys: &AttributeSetRef<KeyCode>, bindings: &HotkeyBindings) ->
             .actions
             .iter()
             .any(|(_, combination)| device_matches(keys, combination))
+        || bindings
+            .command
+            .as_ref()
+            .is_some_and(|command| device_matches(keys, command))
 }
 
 /// Paths and devices of every readable device the bindings need.
@@ -692,6 +712,30 @@ mod tests {
         assert_eq!(
             m.process(KeyCode::KEY_RIGHTALT, 1).event,
             Some(HotkeyEvent::Pressed)
+        );
+    }
+
+    #[test]
+    fn the_command_chord_reports_press_and_release() {
+        let bindings = HotkeyBindings::parse("RightAlt", Some("Escape"))
+            .unwrap()
+            .with_command("Ctrl+RightAlt")
+            .unwrap();
+        let mut m = Matchers::new(&bindings);
+        m.process(KeyCode::KEY_LEFTCTRL, 1);
+        assert_eq!(
+            m.process(KeyCode::KEY_RIGHTALT, 1).event,
+            Some(HotkeyEvent::Command(true))
+        );
+        assert_eq!(
+            m.process(KeyCode::KEY_RIGHTALT, 0).event,
+            Some(HotkeyEvent::Command(false))
+        );
+        m.process(KeyCode::KEY_LEFTCTRL, 0);
+        assert_eq!(
+            m.process(KeyCode::KEY_RIGHTALT, 1).event,
+            Some(HotkeyEvent::Pressed),
+            "the bare key is still the dictation hotkey"
         );
     }
 

@@ -18,7 +18,7 @@ use crate::ipc::SessionCommand;
 use crate::notify::notify;
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
 use crate::text::WindowInfo;
-use crate::text_processing::{learn, prompt, ProcessingContext};
+use crate::text_processing::{learn, llm, prompt, ProcessingContext};
 use crate::text_processing::{
     CommandExecutor, CommandParser, EditingMode, InsertionHistory, LlmProvider, ProcessingConfig,
     TextProcessor,
@@ -29,6 +29,12 @@ use crate::AudioCapture;
 
 #[cfg(target_os = "linux")]
 use crate::TextInserter;
+
+/// What a Command Mode instruction applies to, captured when the chord went down.
+struct CommandTarget {
+    selection: Option<String>,
+    last_text: Option<String>,
+}
 
 /// Run the dictation session in the foreground: the daemon body.
 ///
@@ -164,6 +170,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         Success {
             text: String,
             window: Option<WindowInfo>,
+            command: Option<CommandTarget>,
         },
         Error(String),
     }
@@ -197,7 +204,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     let bindings = HotkeyBindings::parse(&hotkey_combination, Some(&config.hotkey.cancel))?
         .with_action(HotkeyAction::PasteLast, &config.hotkey.paste_last)?
-        .with_action(HotkeyAction::Learn, &config.hotkey.learn)?;
+        .with_action(HotkeyAction::Learn, &config.hotkey.learn)?
+        .with_command(&config.hotkey.command)?;
     let (hotkey_manager, hotkey_rx) =
         HotkeyManager::with_backend(bindings, config.hotkey.backend, config.hotkey.exclusive)?;
     let feedback = if config.feedback.audio_enabled {
@@ -261,35 +269,24 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     // Initialize text processor
     let text_processor = if !no_processing {
-        // Configure LLM provider from environment
-        let llm_provider = if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
-            if !api_key.is_empty() {
-                info!("Using Anthropic Claude API for text polishing");
-                LlmProvider::Anthropic {
-                    api_key: Some(api_key),
-                    model: "claude-3-haiku-20240307".to_string(),
-                }
-            } else {
-                LlmProvider::None
-            }
-        } else {
-            info!("No ANTHROPIC_API_KEY found, using rule-based processing only");
-            LlmProvider::None
-        };
+        let llm_provider = llm::resolve_provider(&config.llm).await;
+        if matches!(llm_provider, LlmProvider::None) {
+            info!("No LLM: polishing is rule-based and Command Mode is off until Ollama runs or ANTHROPIC_API_KEY is set");
+        }
 
         let processing_config = ProcessingConfig {
             mode: editing_mode,
             llm_provider,
-            max_tokens: 200,
-            temperature: 0.3,
+            polish: config.llm.polish,
+            max_tokens: config.llm.max_tokens,
+            temperature: config.llm.temperature,
         };
 
         match TextProcessor::new(processing_config) {
             Ok(processor) => {
-                if processor.is_llm_ready() {
-                    info!("✅ Text processor initialized with LLM");
-                } else {
-                    info!("✅ Text processor initialized (rule-based only)");
+                match processor.llm_name() {
+                    Some(name) => info!("✅ Text processor initialized with {}", name),
+                    None => info!("✅ Text processor initialized (rule-based only)"),
                 }
                 Some(Arc::new(processor))
             },
@@ -359,6 +356,23 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             };
             let now = std::time::Instant::now();
+            if let Some(HotkeyEvent::Command(pressed)) = event {
+                let command = if pressed {
+                    let mut state = OverlayState::start_recording();
+                    state.set_warning(Some("cmd".to_string()));
+                    *state_handle_clone.lock() = state;
+                    if let Some(ctx) = egui_context_clone.lock().as_ref() {
+                        ctx.request_repaint();
+                    }
+                    SessionCommand::StartCommand
+                } else {
+                    SessionCommand::StopRecording
+                };
+                if audio_cmd_tx_clone.send(command).is_err() {
+                    break;
+                }
+                continue;
+            }
             if let Some(HotkeyEvent::Action(action)) = event {
                 let command = match action {
                     HotkeyAction::PasteLast => SessionCommand::PasteLast,
@@ -432,8 +446,24 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 TranscriptionResult::Success {
                     text: raw_text,
                     window,
+                    command,
                 } => {
                     shared_result.set_inserting();
+                    if let Some(target) = command {
+                        run_command_mode(
+                            &raw_text,
+                            target,
+                            text_processor_clone.as_deref(),
+                            &result_runtime,
+                            text_inserter_clone.as_ref(),
+                            &insertion_history_clone,
+                            &shared_result,
+                            feedback,
+                        );
+                        *state_handle_clone2.lock() = OverlayState::idle();
+                        shared_result.set_idle();
+                        continue;
+                    }
                     // Parse for voice commands
                     let parsed = command_parser_clone.parse(&raw_text);
 
@@ -603,6 +633,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let mut cap_shown: Option<u64> = None;
     let context_prompt = config.transcription.context_prompt;
     let mut current_window: Option<WindowInfo> = None;
+    let mut command_target: Option<CommandTarget> = None;
 
     loop {
         // Use short timeout for responsive hotkey handling (16ms ≈ 60Hz)
@@ -715,14 +746,16 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     error!("Failed to stop recording: {}", e);
                 }
                 info!("Recording cancelled");
+                command_target = None;
                 let _ = feedback.play_cancel();
                 *state_handle.lock() = OverlayState::idle();
                 shared.set_idle();
             },
-            SessionCommand::StartRecording => {
+            SessionCommand::StartRecording | SessionCommand::StartCommand => {
                 if audio_capture.is_recording() {
                     continue;
                 }
+                let is_command = command == SessionCommand::StartCommand;
                 // Reset stop signal for new recording
                 amplitude_stop_signal.store(false, Ordering::Release);
 
@@ -748,6 +781,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             .as_ref()
                             .and_then(|inserter| inserter.lock().get_focused_window());
                     }
+                    command_target = is_command.then(|| CommandTarget {
+                        selection: read_selection(),
+                        last_text: shared.last_text(),
+                    });
                     cap_warned = false;
                     cap_shown = None;
                     let _ = feedback.play_start();
@@ -861,6 +898,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 }
 
                 let window = current_window.take();
+                let command = command_target.take();
                 let initial_prompt = if context_prompt {
                     let terms = text_processor
                         .as_ref()
@@ -904,6 +942,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         TranscriptionResult::Success {
                             text: result.text,
                             window,
+                            command,
                         }
                     },
                     Err(e) => {
@@ -938,4 +977,105 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     info!("Listen mode ended");
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn read_selection() -> Option<String> {
+    crate::text::selection::read_primary()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_selection() -> Option<String> {
+    None
+}
+
+/// Apply a spoken instruction to the selection, or to the last transcript
+/// when nothing is selected, and replace it in place.
+#[allow(clippy::too_many_arguments)]
+fn run_command_mode(
+    instruction: &str,
+    target: CommandTarget,
+    processor: Option<&TextProcessor>,
+    runtime: &tokio::runtime::Runtime,
+    inserter: Option<&Arc<Mutex<TextInserter>>>,
+    history: &Arc<Mutex<InsertionHistory>>,
+    shared: &crate::ipc::SharedState,
+    feedback: AudioFeedback,
+) {
+    let instruction = instruction.trim();
+    if instruction.is_empty() {
+        return;
+    }
+    let Some(processor) = processor.filter(|p| p.is_llm_ready()) else {
+        let _ = feedback.play_error();
+        notify(
+            "Command Mode needs an LLM",
+            "Run Ollama, or set ANTHROPIC_API_KEY in ~/.config/hush/.env, then restart the daemon.",
+        );
+        return;
+    };
+    let (text, replaces_last) = match (target.selection, target.last_text) {
+        (Some(selection), _) => (selection, false),
+        (None, Some(last)) => (last, true),
+        (None, None) => {
+            let _ = feedback.play_error();
+            notify(
+                "Nothing to edit",
+                "Select some text or dictate something first.",
+            );
+            return;
+        },
+    };
+    info!(
+        "Command Mode: '{}' on {} chars",
+        instruction,
+        text.chars().count()
+    );
+    let rewritten = match runtime.block_on(processor.rewrite(instruction, &text)) {
+        Ok(rewritten) => rewritten,
+        Err(e) => {
+            error!("Command Mode failed: {}", e);
+            let _ = feedback.play_error();
+            notify("Command failed", &e.to_string());
+            return;
+        },
+    };
+    if rewritten.trim().is_empty() || rewritten == text {
+        notify(
+            "Nothing changed",
+            "The instruction left the text as it was.",
+        );
+        return;
+    }
+    let Some(inserter) = inserter else {
+        info!("Rewritten text: {}", rewritten);
+        return;
+    };
+    let mut inserter = inserter.lock();
+    if replaces_last {
+        let chars = history
+            .lock()
+            .pop_last()
+            .map(|entry| entry.char_count)
+            .unwrap_or_else(|| text.chars().count());
+        if let Err(e) = inserter.undo_last_insertion(chars) {
+            error!("Could not remove the last transcript: {}", e);
+        }
+    }
+    match inserter.insert_text(&rewritten) {
+        Ok(()) => {
+            history.lock().record(rewritten.clone());
+            shared.set_last_text(rewritten);
+            let _ = feedback.play_success();
+        },
+        Err(e) => {
+            error!("Command Mode insertion failed: {}", e);
+            let _ = feedback.play_error();
+            let _ = inserter.copy_to_clipboard(&rewritten);
+            notify(
+                "Hush could not insert the text",
+                "The result is on the clipboard.",
+            );
+        },
+    }
 }

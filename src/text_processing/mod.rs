@@ -17,7 +17,7 @@ mod executor;
 mod filler_words;
 mod history;
 mod intent;
-mod llm;
+pub mod llm;
 mod session;
 mod vocabulary;
 
@@ -195,7 +195,8 @@ impl TextProcessor {
         debug!("After entity capitalization: '{}'", capitalized);
 
         // Stage 4: Context-aware LLM polishing (optional)
-        let polished = if let Some(ref llm) = self.llm_processor {
+        let polished = if let Some(llm) = self.llm_processor.as_ref().filter(|_| self.config.polish)
+        {
             debug!("Applying context-aware LLM polishing...");
 
             // Build context from session memory
@@ -304,6 +305,19 @@ impl TextProcessor {
         self.vocabulary_manager.write().add(vocab);
     }
 
+    /// Command Mode: apply a spoken instruction to some text with the LLM.
+    pub async fn rewrite(&self, instruction: &str, target: &str) -> Result<String> {
+        let llm = self
+            .llm_processor
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No LLM is configured"))?;
+        llm.rewrite(instruction, target).await
+    }
+
+    pub fn llm_name(&self) -> Option<String> {
+        self.llm_processor.as_ref().map(|llm| llm.provider_name())
+    }
+
     /// Check if LLM is available and ready
     pub fn is_llm_ready(&self) -> bool {
         self.llm_processor.is_some()
@@ -343,6 +357,7 @@ mod tests {
         let config = ProcessingConfig {
             mode: EditingMode::Medium,
             llm_provider: LlmProvider::None,
+            polish: true,
             max_tokens: 200,
             temperature: 0.3,
         };

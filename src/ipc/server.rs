@@ -19,6 +19,8 @@ use tracing::{debug, warn};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionCommand {
     StartRecording,
+    /// Record a spoken instruction for Command Mode
+    StartCommand,
     StopRecording,
     CancelRecording,
     /// Type the last transcript again
