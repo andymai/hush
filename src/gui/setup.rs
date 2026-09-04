@@ -3,7 +3,7 @@
 
 use super::theme::{hint, section, state_line};
 use super::{megabytes, Gui, MODEL_ORDER};
-use crate::transcription::models::{ModelManager, ModelSize};
+use crate::transcription::models::{recommended_model, ModelManager, ModelSize};
 use std::sync::Arc;
 
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -78,6 +78,7 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
         return;
     };
     let selected: Option<ModelSize> = gui.config.transcription.model_size.parse().ok();
+    let recommended = recommended_model();
     for size in MODEL_ORDER {
         let Some(info) = manager.get_model_info(&size) else {
             continue;
@@ -85,7 +86,15 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
         let installed = gui.machine.installed_models.contains(&size);
         ui.horizontal(|ui| {
             let is_selected = selected == Some(size);
-            let label = format!("{} ({})", info.name, megabytes(info.expected_size));
+            let label = if size == recommended {
+                format!(
+                    "{} ({}) — suggested for this machine",
+                    info.name,
+                    megabytes(info.expected_size)
+                )
+            } else {
+                format!("{} ({})", info.name, megabytes(info.expected_size))
+            };
             if ui
                 .radio(is_selected && installed, label)
                 .on_hover_text(if installed {

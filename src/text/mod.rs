@@ -35,6 +35,8 @@ pub mod insertion;
 #[cfg(target_os = "linux")]
 pub mod kwin;
 #[cfg(target_os = "linux")]
+pub mod layout;
+#[cfg(target_os = "linux")]
 pub mod selection;
 #[cfg(target_os = "linux")]
 pub mod uinput_keyboard;

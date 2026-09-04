@@ -37,6 +37,7 @@ Hold `Right Alt`, speak, release. Done.
 - **Hold to talk** is the default. Double-tap the hotkey to keep recording hands-free and press it again to stop; a quick tap by itself records nothing. Set `mode = "toggle"` under `[hotkey]` to lock on a single tap. `Esc` discards a recording, and hands-free recording stops on its own after ten minutes with a warning a minute before.
 - **Any keybind can drive it.** `hush toggle`, `hush start`, `hush stop`, and `hush cancel` talk to the daemon over its socket. Hyprland: `bind = , F9, exec, hush toggle`. Sway: `bindsym F9 exec hush toggle`.
 - **Tone by app.** Text lands the way the focused application wants it: lowercase and unpunctuated in terminals and editors, casual in chat, full sentences in mail and documents. The window title and your learned terms also prime Whisper, so names are spelled your way. Works on X11, Hyprland, Sway, and KDE Plasma on Wayland.
+- **Any language Whisper knows.** Set `language = "auto"` under `[transcription]`, or pick one in the window. On a keyboard layout that is not US, Hush pastes rather than typing key by key, so the letters come out right.
 - **When something is off**, `hush doctor` checks the configuration, keyboard access, model, GPU, microphone, hotkey, window detection, polishing, panel icon, autostart, and the daemon, and prints the one command that fixes each problem.
 - **A window for the rest.** `hush settings`, the panel icon's menu, or the application launcher opens one window: what still needs setting up (keyboard access, a speech model to download, starting Hush at login) and every setting, with the file underneath if you prefer it.
 - **Panel icon.** A status icon shows whether Hush is idle, recording, or working, and its menu starts and stops dictation, discards a recording, types the last transcript, learns the selected word, and opens the settings file. Turn it off with `tray.enabled = false`.
@@ -69,6 +70,7 @@ Hold `Right Alt`, speak, release. Done.
 | `llm.anthropic_model` | Anthropic model; the key comes from `ANTHROPIC_API_KEY` | claude-haiku-4-5 |
 | `llm.polish` | Rewrite every transcript with the LLM; Command Mode works either way | true |
 | `tray.enabled` | Status icon on the desktop panel | true |
+| `transcription.language` | A two-letter code, or `auto` to detect what you speak | en |
 | `transcription.context_prompt` | Prime Whisper with the focused window's title and learned terms | true |
 | `profiles.enabled` | Adapt the output to the focused application; `profiles.terminal`, `editor`, `chat`, `mail`, `docs`, `browser` add window classes | true |
 | `audio.max_recording_secs` | Stop and transcribe after this long, with a warning a minute before; 0 disables | 600 |

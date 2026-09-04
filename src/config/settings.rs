@@ -294,7 +294,20 @@ impl Config {
         Ok(config)
     }
 
+    /// A Whisper language code, or `auto` to detect it.
+    pub fn valid_language(language: &str) -> bool {
+        let language = language.trim();
+        language == "auto"
+            || (language.len() == 2 && language.chars().all(|c| c.is_ascii_lowercase()))
+    }
+
     pub fn validate(&self) -> Result<()> {
+        if !Self::valid_language(&self.transcription.language) {
+            return Err(anyhow::anyhow!(
+                "Invalid language '{}': use a two-letter code such as en, or auto",
+                self.transcription.language
+            ));
+        }
         if self.hotkey.tap_ms > 2000 {
             return Err(anyhow::anyhow!(
                 "Invalid hotkey.tap_ms: must be 2000 or less"
@@ -547,5 +560,18 @@ model_size = "small"
         let config = Config::parse_over_defaults("[profiles]\nchat = [\"myapp\"]\n").unwrap();
         assert_eq!(config.profiles.chat, vec!["myapp".to_string()]);
         assert!(config.profiles.enabled);
+    }
+
+    #[test]
+    fn languages_are_two_letters_or_auto() {
+        assert!(Config::valid_language("en"));
+        assert!(Config::valid_language("de"));
+        assert!(Config::valid_language("auto"));
+        assert!(!Config::valid_language("english"));
+        assert!(!Config::valid_language("EN"));
+        assert!(!Config::valid_language(""));
+        let mut config = Config::defaults().unwrap();
+        config.transcription.language = "klingon".to_string();
+        assert!(config.validate().is_err());
     }
 }

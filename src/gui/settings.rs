@@ -16,6 +16,35 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     desktop(gui, ui);
 }
 
+/// The languages Whisper handles best, plus detection.
+const LANGUAGES: &[(&str, &str)] = &[
+    ("auto", "Detect it"),
+    ("en", "English"),
+    ("es", "Spanish"),
+    ("fr", "French"),
+    ("de", "German"),
+    ("it", "Italian"),
+    ("pt", "Portuguese"),
+    ("nl", "Dutch"),
+    ("pl", "Polish"),
+    ("ru", "Russian"),
+    ("uk", "Ukrainian"),
+    ("tr", "Turkish"),
+    ("ar", "Arabic"),
+    ("hi", "Hindi"),
+    ("zh", "Chinese"),
+    ("ja", "Japanese"),
+    ("ko", "Korean"),
+];
+
+fn language_name(code: &str) -> String {
+    LANGUAGES
+        .iter()
+        .find(|(candidate, _)| *candidate == code)
+        .map(|(_, name)| (*name).to_string())
+        .unwrap_or_else(|| code.to_string())
+}
+
 /// Red text under a hotkey field that does not parse.
 fn combination_error(text: &str) -> Option<String> {
     if text.trim().is_empty() {
@@ -140,14 +169,32 @@ fn dictation(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Listening");
     ui.horizontal(|ui| {
         ui.label("Language");
-        ui.add(
-            egui::TextEdit::singleline(&mut gui.config.transcription.language).desired_width(70.0),
-        );
+        let current = gui.config.transcription.language.clone();
+        egui::ComboBox::from_id_salt("language")
+            .selected_text(language_name(&current))
+            .width(190.0)
+            .show_ui(ui, |ui| {
+                if !LANGUAGES.iter().any(|(code, _)| *code == current) {
+                    ui.selectable_value(
+                        &mut gui.config.transcription.language,
+                        current.clone(),
+                        &current,
+                    );
+                }
+                for (code, name) in LANGUAGES {
+                    ui.selectable_value(
+                        &mut gui.config.transcription.language,
+                        code.to_string(),
+                        *name,
+                    );
+                }
+            });
         ui.checkbox(&mut gui.config.transcription.use_gpu, "Use the GPU");
     });
     hint(
         ui,
-        "A language code such as en, de, or fr. Set auto to detect it.",
+        "Detecting the language costs a little accuracy, so name it when you \
+         mostly speak one.",
     );
 
     let mut minutes = gui.config.audio.max_recording_secs as f32 / 60.0;
@@ -311,5 +358,22 @@ mod tests {
         assert!(combination_error("").is_none(), "empty means unbound");
         assert!(combination_error("  ").is_none());
         assert!(combination_error("Ctrl+Nope").is_some());
+    }
+
+    #[test]
+    fn language_codes_show_their_name() {
+        assert_eq!(language_name("de"), "German");
+        assert_eq!(language_name("auto"), "Detect it");
+        assert_eq!(
+            language_name("cy"),
+            "cy",
+            "an unlisted code shows as itself"
+        );
+        for (code, _) in LANGUAGES {
+            assert!(
+                crate::config::Config::valid_language(code),
+                "{code} passes validation"
+            );
+        }
     }
 }
