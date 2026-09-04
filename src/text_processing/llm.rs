@@ -107,9 +107,21 @@ impl LlmProcessor {
 
     /// Polish text using the configured LLM
     pub async fn polish(&self, text: &str, mode: EditingMode) -> Result<String> {
+        self.polish_with_context(text, mode, None, None).await
+    }
+
+    /// Polish with the application's tone and, when known, where the text goes.
+    pub async fn polish_with_context(
+        &self,
+        text: &str,
+        mode: EditingMode,
+        tone: Option<&str>,
+        place: Option<&str>,
+    ) -> Result<String> {
         match &self.provider {
             LlmProvider::Anthropic { api_key, model } => {
-                self.polish_with_claude(text, mode, api_key, model).await
+                self.polish_with_claude(text, mode, tone, place, api_key, model)
+                    .await
             },
             LlmProvider::OpenAI { .. } => {
                 warn!("OpenAI polishing not implemented, returning input");
@@ -127,6 +139,8 @@ impl LlmProcessor {
         &self,
         text: &str,
         mode: EditingMode,
+        tone: Option<&str>,
+        place: Option<&str>,
         api_key: &Option<String>,
         model_name: &str,
     ) -> Result<String> {
@@ -140,7 +154,7 @@ impl LlmProcessor {
         };
 
         // Create prompts
-        let system_prompt = Self::create_system_prompt(mode);
+        let system_prompt = Self::create_system_prompt_with(mode, tone, place);
         let user_prompt = format!(
             "Edit this voice transcription:\n\n{}\n\nReturn ONLY the edited text, nothing else.",
             text
@@ -226,6 +240,25 @@ impl LlmProcessor {
         Ok(polished)
     }
 
+    /// System prompt for the editing mode plus the application's tone.
+    pub fn create_system_prompt_with(
+        mode: EditingMode,
+        tone: Option<&str>,
+        place: Option<&str>,
+    ) -> String {
+        let mut prompt = Self::create_system_prompt(mode);
+        let context: Vec<&str> = tone.into_iter().chain(place).collect();
+        if !context.is_empty() {
+            prompt.push_str("\n\nContext:\n");
+            for line in context {
+                prompt.push_str("- ");
+                prompt.push_str(line);
+                prompt.push('\n');
+            }
+        }
+        prompt
+    }
+
     /// Create system prompt based on editing mode
     fn create_system_prompt(mode: EditingMode) -> String {
         let base =
@@ -278,5 +311,19 @@ mod tests {
         let aggressive = LlmProcessor::create_system_prompt(EditingMode::Aggressive);
         assert!(aggressive.contains("comprehensive"));
         assert!(aggressive.contains("professionalism"));
+    }
+
+    #[test]
+    fn tone_and_place_are_appended_as_context() {
+        let prompt = LlmProcessor::create_system_prompt_with(
+            EditingMode::Light,
+            Some("Chat message"),
+            Some("The text goes into chat"),
+        );
+        assert!(prompt.contains("Context:\n- Chat message\n- The text goes into chat"));
+        assert_eq!(
+            LlmProcessor::create_system_prompt_with(EditingMode::Light, None, None),
+            LlmProcessor::create_system_prompt(EditingMode::Light)
+        );
     }
 }

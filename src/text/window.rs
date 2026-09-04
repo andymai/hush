@@ -17,6 +17,7 @@ pub enum WindowProvider {
     },
     Hyprland,
     Sway,
+    Kwin(super::kwin::KwinQuery),
     Unavailable,
 }
 
@@ -29,6 +30,12 @@ impl WindowProvider {
         }
         if std::env::var_os("SWAYSOCK").is_some() {
             return Self::Sway;
+        }
+        if is_kde_wayland() {
+            match super::kwin::KwinQuery::new() {
+                Ok(query) => return Self::Kwin(query),
+                Err(e) => debug!("KWin window queries unavailable: {}", e),
+            }
         }
         if std::env::var_os("DISPLAY").is_some() {
             if let Ok((conn, screen)) = x11rb::connect(None) {
@@ -46,6 +53,7 @@ impl WindowProvider {
             Self::X11 { .. } => "x11",
             Self::Hyprland => "hyprland",
             Self::Sway => "sway",
+            Self::Kwin(_) => "kwin",
             Self::Unavailable => "none",
         }
     }
@@ -57,9 +65,18 @@ impl WindowProvider {
                 run_json("hyprctl", &["activewindow", "-j"]).and_then(|s| parse_hyprland(&s))
             },
             Self::Sway => run_json("swaymsg", &["-t", "get_tree"]).and_then(|s| parse_sway(&s)),
+            Self::Kwin(query) => query.focused(),
             Self::Unavailable => None,
         }
     }
+}
+
+fn is_kde_wayland() -> bool {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+        && desktop
+            .split(':')
+            .any(|part| part.eq_ignore_ascii_case("kde"))
 }
 
 fn run_json(program: &str, args: &[&str]) -> Option<String> {
