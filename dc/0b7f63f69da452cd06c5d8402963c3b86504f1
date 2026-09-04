@@ -1,0 +1,43 @@
+src/hotkey/combination.rs
+  s_229a35bbae3466::t_fb7050af144669 67-78,217-223,225-233,236,270-273,275-290,308-309
+  s_5db949d661ab96::t_5ef23ca6c7a3e8 28-29,47,98-132,151,170-171,175-184,249,274,291-307
+src/hotkey/evdev.rs
+  s_229a35bbae3466::t_375515cd9071bd 97-98,101,107-109,466-489
+  s_5db949d661ab96::t_7a657e6f31b1a3 8-9,34-41,60-68,76,79-88,91-94,114-124,127,131-132,134-139,173,180-192,203,205-206,214,234-235,238,259-260,265,274-276,279,291-304,311,313-334,353-363,365-383,387-392,498-555,557
+README.md
+  s_5db949d661ab96::t_9683d75b73ff64 52,55
+config/default.toml
+  s_5db949d661ab96::t_b6a45c2cbfa28d 20,23
+src/cli/commands/listen.rs
+  s_5db949d661ab96::t_a05c69ba8a90ec 180-184
+src/config/settings.rs
+  s_5db949d661ab96::t_ea5dddfd07b997 109-111,344
+src/hotkey/mod.rs
+  s_5db949d661ab96::t_561c38b9e413e9 75,78-79,83,88,95
+src/hotkey/x11.rs
+  s_5db949d661ab96::t_15b6dbd21d124a 25-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "dc0b7f63f69da452cd06c5d8402963c3b86504f1",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    },
+    "s_5db949d661ab96": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e87946c-fbe6-438d-9094-2f2d5c47d1ed",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
