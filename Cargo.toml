@@ -161,6 +161,7 @@ libc = "0.2"
 arboard = { version = "3.6", default-features = false, features = [
   "wayland-data-control",
 ] }
+ksni = { version = "0.3", default-features = false, features = ["tokio"] }
 
 # ============================================================================
 # Platform-specific dependencies

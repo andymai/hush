@@ -28,6 +28,23 @@ pub struct Config {
     /// LLM polishing and Command Mode
     #[serde(default)]
     pub llm: LlmConfig,
+    /// Panel status icon
+    #[serde(default)]
+    pub tray: TrayConfig,
+}
+
+/// Status icon settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct TrayConfig {
+    /// Show an icon in the system tray while the daemon runs
+    pub enabled: bool,
+}
+
+impl Default for TrayConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 /// Which LLM to use
@@ -515,6 +532,13 @@ model_size = "small"
         assert_eq!(config.hotkey.command, "Ctrl+RightAlt");
         assert_eq!(config.llm.provider, LlmSetting::Auto);
         assert_eq!(config.llm.ollama_model, "llama3.2");
+        assert!(config.tray.enabled);
+        assert!(
+            !Config::parse_over_defaults("[tray]\nenabled = false\n")
+                .unwrap()
+                .tray
+                .enabled
+        );
         let config =
             Config::parse_over_defaults("[llm]\nprovider = \"none\"\npolish = false\n").unwrap();
         assert_eq!(config.llm.provider, LlmSetting::None);
