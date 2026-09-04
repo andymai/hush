@@ -101,7 +101,7 @@ pub async fn setup_audio(list: bool, test: Option<String>) -> Result<()> {
 pub async fn setup_hotkeys(test: Option<String>, list: bool) -> Result<()> {
     if list {
         println!("⌨️ Common Hotkey Combinations:");
-        println!("  • Ctrl+Shift+Space (default)");
+        println!("  • RightAlt (default)");
         println!("  • Ctrl+Alt+Space");
         println!("  • F12");
         println!("  • Ctrl+F12");

@@ -157,3 +157,13 @@ release-please opens a release PR from conventional commits, CI validates it, th
 | iced_layershell tracks iced closely and can lag a release | Pin both crates; the overlay is small enough to port. |
 | evdev sees keys while another app has a grab | Modifier tracking is local, so a grab in another app never blocks the hotkey; the release edge is always observed. |
 | AppImage on systems without FUSE | The installer prefers `.deb` and `.rpm`; the AppImage documents `--appimage-extract-and-run`. |
+
+## Addendum, 2026-09-04: hotkey and dictation UX (v0.5.0)
+
+Modelled on Wispr Flow after research (vault: Projects/hush/hush-research.md). Landed as one held series (#141, #144 to #147, plus the default flip):
+
+- Default hotkey `RightAlt`. Bare modifiers, F13 to F24, and mouse buttons parse; `hotkey.exclusive` grabs the hotkey's device and replays everything else through a uinput proxy.
+- Hold to talk, double-tap to lock hands-free, `hotkey.mode = "toggle"` locks on a tap; presses under `tap_ms` record nothing. `Escape` cancels. `audio.max_recording_secs` caps a session with a warning a minute before. Sounds on by default; desktop notifications through notify-rust.
+- `hush paste-last`, `hush learn`, and their optional chords. Insertion failures leave the text on the clipboard.
+- Tone by app: `[profiles]` picks terminal, editor, chat, mail, docs, or browser from the window class; KWin scripting supplies the window on KDE Wayland; the title and learned terms prime Whisper.
+- Command Mode on `Ctrl+RightAlt`, rewriting the selection or last transcript through `[llm]`: Ollama when reachable, else Anthropic, else off.

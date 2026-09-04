@@ -165,7 +165,7 @@ impl TranscriptionConfig {
 pub struct HotkeyConfig {
     /// Whether hotkey listening is enabled
     pub enabled: bool,
-    /// Hotkey combination string (e.g., "Ctrl+Shift+Space")
+    /// Hotkey combination string (e.g., "RightAlt" or "Ctrl+Shift+Space")
     pub combination: String,
     /// Hold-to-talk or toggle
     #[serde(default)]
@@ -398,7 +398,7 @@ mod tests {
         let config = Config::defaults().unwrap();
         assert_eq!(config.audio.sample_rate, 16000);
         assert_eq!(config.transcription.model_size, "base");
-        assert_eq!(config.hotkey.combination, "Ctrl+Shift+Space");
+        assert_eq!(config.hotkey.combination, "RightAlt");
         assert!(config.transcription.model_path.is_none());
         assert!(config.audio.device.is_none());
     }
