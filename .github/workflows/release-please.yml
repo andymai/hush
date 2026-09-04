@@ -92,8 +92,10 @@ jobs:
           PR_NUMBER: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}
           REPO: ${{ github.repository }}
         run: gh pr review "$PR_NUMBER" --approve --body "Auto-approved by the release pipeline." --repo "$REPO"
+      # Set the repository variable RELEASE_HOLD to "true" to keep a release PR
+      # open while a series of changes lands; clear it and re-run to release.
       - name: Auto-merge release PR
-        if: steps.release.outputs.pr && env.HAS_APP == 'true'
+        if: steps.release.outputs.pr && env.HAS_APP == 'true' && vars.RELEASE_HOLD != 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number || '' }}
