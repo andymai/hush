@@ -5,7 +5,7 @@
 #
 # Debian and Ubuntu get the .deb, Fedora and openSUSE the .rpm (both through
 # the package manager, so removal is `apt remove hush` or `dnf remove hush`),
-# Arch is pointed at the AUR, and everything else gets the tarball under
+# and everything else, Arch included, gets the tarball under
 # ~/.local. Set HUSH_VERSION to install a specific tag.
 set -eu
 
@@ -37,7 +37,8 @@ like="${ID_LIKE:-}"
 case " $id $like " in
   *" debian "*|*" ubuntu "*) kind=deb ;;
   *" fedora "*|*" rhel "*|*" centos "*|*" suse "*|*" opensuse "*) kind=rpm ;;
-  *" arch "*) kind=arch ;;
+  # Arch takes the tarball: there is no AUR package yet.
+  *" arch "*) kind=tar ;;
   *) kind=tar ;;
 esac
 
@@ -67,11 +68,6 @@ case "$kind" in
     if command -v dnf >/dev/null 2>&1; then sudo_cmd dnf install -y "$tmp/$file"
     elif command -v zypper >/dev/null 2>&1; then sudo_cmd zypper --non-interactive install "$tmp/$file"
     else sudo_cmd rpm -i "$tmp/$file"; fi
-    ;;
-  arch)
-    say "On Arch, install from the AUR instead:"
-    say "  paru -S hush-bin    # or: yay -S hush-bin"
-    exit 0
     ;;
   tar)
     file="hush-${version}-x86_64-linux.tar.gz"
