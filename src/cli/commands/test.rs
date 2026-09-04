@@ -71,10 +71,45 @@ pub async fn handle_test(test_command: TestCommands) -> Result<()> {
             combination,
             duration,
         } => test_hotkey_system(combination, duration).await,
+        TestCommands::Window { duration } => test_window_detection(duration).await,
         TestCommands::Pipeline {
             count,
             transcribe_only,
         } => test_full_pipeline(count, transcribe_only).await,
         TestCommands::All { benchmarks, output } => run_all_tests(benchmarks, output).await,
     }
+}
+
+/// Report the focused window once a second so the user can switch around.
+async fn test_window_detection(duration: u64) -> Result<()> {
+    use crate::text::WindowProvider;
+    use crate::text_processing::{AppKind, ProfilesConfig};
+
+    let provider = WindowProvider::detect();
+    println!("Window detection: {}", provider.name());
+    if provider.name() == "none" {
+        println!("No compositor backend matched (X11, Hyprland, Sway, or KDE Plasma on Wayland).");
+        return Ok(());
+    }
+    let profiles = crate::config::Config::load()
+        .map(|c| c.profiles)
+        .unwrap_or_else(|_| ProfilesConfig::defaults());
+    let mut last: Option<String> = None;
+    for _ in 0..duration.max(1) {
+        let line = match provider.focused() {
+            Some(info) => format!(
+                "{:?} profile, class \"{}\", title \"{}\"",
+                AppKind::classify(&info, &profiles),
+                info.class,
+                info.title
+            ),
+            None => "no focused window reported".to_string(),
+        };
+        if last.as_deref() != Some(&line) {
+            println!("{}", line);
+            last = Some(line);
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    Ok(())
 }

@@ -110,6 +110,18 @@ impl FillerWordRemover {
 
     /// Remove filler words based on editing mode
     pub fn remove(&self, text: &str, mode: EditingMode) -> String {
+        self.remove_with(text, mode, true, true)
+    }
+
+    /// Remove filler words, then capitalise the first letter and add a
+    /// trailing period only when the application profile wants them.
+    pub fn remove_with(
+        &self,
+        text: &str,
+        mode: EditingMode,
+        capitalize: bool,
+        ending_punctuation: bool,
+    ) -> String {
         let mut result: Cow<str> = Cow::Borrowed(text);
 
         // Select patterns based on mode
@@ -162,11 +174,16 @@ impl FillerWordRemover {
             result.into_owned()
         };
 
-        // Capitalize first letter
-        let result = Self::capitalize_first(&result);
-
-        // Ensure ends with punctuation
-        Self::ensure_ending_punctuation(&result)
+        let result = if capitalize {
+            Self::capitalize_first(&result)
+        } else {
+            result
+        };
+        if ending_punctuation {
+            Self::ensure_ending_punctuation(&result)
+        } else {
+            result.trim().to_string()
+        }
     }
 
     fn capitalize_first(text: &str) -> String {
@@ -252,5 +269,22 @@ mod tests {
         let result = remover.remove("um   hello    world   um", EditingMode::Light);
 
         assert!(!result.contains("  ")); // No double spaces
+    }
+
+    #[test]
+    fn profiles_can_skip_capitalization_and_the_period() {
+        let remover = FillerWordRemover::new();
+        assert_eq!(
+            remover.remove_with("um cargo build", EditingMode::Medium, false, false),
+            "cargo build"
+        );
+        assert_eq!(
+            remover.remove_with("hello there", EditingMode::Light, true, false),
+            "Hello there"
+        );
+        assert_eq!(
+            remover.remove_with("hello there", EditingMode::Light, true, true),
+            "Hello there."
+        );
     }
 }

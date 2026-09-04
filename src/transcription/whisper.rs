@@ -134,6 +134,18 @@ impl WhisperTranscriber {
         audio_data: &[f32],
         sample_rate: u32,
     ) -> Result<TranscriptionResult> {
+        self.transcribe_with_prompt(audio_data, sample_rate, None)
+            .await
+    }
+
+    /// Transcribe with an initial prompt that primes Whisper with names and
+    /// spellings (the window title, learned terms).
+    pub async fn transcribe_with_prompt(
+        &self,
+        audio_data: &[f32],
+        sample_rate: u32,
+        prompt: Option<&str>,
+    ) -> Result<TranscriptionResult> {
         let start = Instant::now();
         let ctx = RequestContext::new("whisper_transcription")
             .with_metadata("samples", &audio_data.len().to_string())
@@ -167,10 +179,14 @@ impl WhisperTranscriber {
         let engine = Arc::clone(&self.engine);
         let language = self.language.clone();
         let threads = self.threads;
-        let text =
-            tokio::task::spawn_blocking(move || run_full(&engine, &samples, &language, threads))
-                .await
-                .map_err(|e| anyhow::anyhow!("Transcription task failed: {}", e))?;
+        let prompt = prompt
+            .map(|p| p.replace('\0', ""))
+            .filter(|p| !p.trim().is_empty());
+        let text = tokio::task::spawn_blocking(move || {
+            run_full(&engine, &samples, &language, threads, prompt.as_deref())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Transcription task failed: {}", e))?;
 
         let text = match text {
             Ok(text) => text,
@@ -210,9 +226,18 @@ impl WhisperTranscriber {
     }
 }
 
-fn run_full(engine: &Engine, samples: &[f32], language: &str, threads: i32) -> Result<String> {
+fn run_full(
+    engine: &Engine,
+    samples: &[f32],
+    language: &str,
+    threads: i32,
+    prompt: Option<&str>,
+) -> Result<String> {
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     params.set_language(Some(language));
+    if let Some(prompt) = prompt {
+        params.set_initial_prompt(prompt);
+    }
     params.set_translate(false);
     params.set_no_context(true);
     params.set_print_special(false);

@@ -1436,6 +1436,7 @@ dependencies = [
  "tracing-subscriber",
  "whisper-rs",
  "x11rb",
+ "zbus",
 ]
 
 [[package]]

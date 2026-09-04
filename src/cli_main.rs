@@ -330,6 +330,13 @@ pub enum TestCommands {
         duration: u64,
     },
 
+    /// Show which window Hush sees as focused, and the tone profile it picks
+    Window {
+        /// Keep reporting for this many seconds so you can switch windows
+        #[arg(short, long, default_value = "5")]
+        duration: u64,
+    },
+
     /// Test complete voice-to-text pipeline
     Pipeline {
         /// Number of test recordings

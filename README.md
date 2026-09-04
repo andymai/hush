@@ -36,6 +36,7 @@ Hold `Ctrl+Shift+Space`, speak, release. Done.
 
 - **Hold to talk** is the default. Double-tap the hotkey to keep recording hands-free and press it again to stop; a quick tap by itself records nothing. Set `mode = "toggle"` under `[hotkey]` to lock on a single tap. `Esc` discards a recording, and hands-free recording stops on its own after ten minutes with a warning a minute before.
 - **Any keybind can drive it.** `hush toggle`, `hush start`, `hush stop`, and `hush cancel` talk to the daemon over its socket. Hyprland: `bind = , F9, exec, hush toggle`. Sway: `bindsym F9 exec hush toggle`.
+- **Tone by app.** Text lands the way the focused application wants it: lowercase and unpunctuated in terminals and editors, casual in chat, full sentences in mail and documents. The window title and your learned terms also prime Whisper, so names are spelled your way. Works on X11, Hyprland, Sway, and KDE Plasma on Wayland.
 - **Teach it words.** Select a name Hush keeps misspelling and run `hush learn` (or `hush learn Kubernetes`); from then on it is written exactly that way. `hush paste-last` types the last transcript again, and when insertion fails the text waits on the clipboard.
 - **Voice commands**: "new line", "new paragraph", "undo" or "scratch that".
 - **Filler words** ("um", "uh", "like") are removed. Optional polishing through Claude when `ANTHROPIC_API_KEY` is set in `~/.config/hush/.env` or the environment; only text is sent, never audio.
@@ -58,6 +59,8 @@ Hold `Ctrl+Shift+Space`, speak, release. Done.
 | `hotkey.tap_ms` | Presses shorter than this are taps: a tap discards and a double-tap locks hands-free in `hold` mode, a tap locks in `toggle` mode | 300 |
 | `hotkey.paste_last` | Chord that types the last transcript again, such as `Shift+RightAlt` | unbound |
 | `hotkey.learn` | Chord that adds the selected text to the vocabulary, such as `Super+RightAlt` | unbound |
+| `transcription.context_prompt` | Prime Whisper with the focused window's title and learned terms | true |
+| `profiles.enabled` | Adapt the output to the focused application; `profiles.terminal`, `editor`, `chat`, `mail`, `docs`, `browser` add window classes | true |
 | `audio.max_recording_secs` | Stop and transcribe after this long, with a warning a minute before; 0 disables | 600 |
 | `feedback.audio_enabled` | Tones on start, stop, cancel, and the cap warning | true |
 | `insertion.method` | `auto` (type, paste what uinput cannot type), `uinput`, or `clipboard` | auto |

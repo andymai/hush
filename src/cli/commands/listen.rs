@@ -17,7 +17,8 @@ use crate::ipc::protocol::DaemonState;
 use crate::ipc::SessionCommand;
 use crate::notify::notify;
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
-use crate::text_processing::learn;
+use crate::text::WindowInfo;
+use crate::text_processing::{learn, prompt, ProcessingContext};
 use crate::text_processing::{
     CommandExecutor, CommandParser, EditingMode, InsertionHistory, LlmProvider, ProcessingConfig,
     TextProcessor,
@@ -160,7 +161,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     // Communication channels
     enum TranscriptionResult {
-        Success(String),
+        Success {
+            text: String,
+            window: Option<WindowInfo>,
+        },
         Error(String),
     }
 
@@ -406,6 +410,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let state_handle_clone2 = state_handle.clone();
     let text_inserter_clone = text_inserter.clone();
     let text_processor_clone = text_processor.clone();
+    let profiles = config.profiles.clone();
     let command_parser_clone = command_parser.clone();
     let command_executor_clone = command_executor.clone();
     let insertion_history_clone = insertion_history.clone();
@@ -424,7 +429,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
         while let Ok(result) = transcription_rx.recv() {
             match result {
-                TranscriptionResult::Success(raw_text) => {
+                TranscriptionResult::Success {
+                    text: raw_text,
+                    window,
+                } => {
                     shared_result.set_inserting();
                     // Parse for voice commands
                     let parsed = command_parser_clone.parse(&raw_text);
@@ -496,7 +504,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             info!("🔄 Processing text...");
                             // Keep current state (likely Recording) while processing
 
-                            match result_runtime.block_on(processor.process(&command_text)) {
+                            let context = ProcessingContext::new(window.clone(), &profiles);
+                            match result_runtime
+                                .block_on(processor.process_for(&command_text, &context))
+                            {
                                 Ok(polished) => {
                                     info!("✨ Text polished: '{}'", polished);
                                     polished
@@ -590,6 +601,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     };
     let mut cap_warned = false;
     let mut cap_shown: Option<u64> = None;
+    let context_prompt = config.transcription.context_prompt;
+    let mut current_window: Option<WindowInfo> = None;
 
     loop {
         // Use short timeout for responsive hotkey handling (16ms ≈ 60Hz)
@@ -729,6 +742,12 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     }
                 } else {
                     shared.set_recording();
+                    #[cfg(target_os = "linux")]
+                    {
+                        current_window = text_inserter
+                            .as_ref()
+                            .and_then(|inserter| inserter.lock().get_focused_window());
+                    }
                     cap_warned = false;
                     cap_shown = None;
                     let _ = feedback.play_start();
@@ -841,9 +860,24 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     continue;
                 }
 
+                let window = current_window.take();
+                let initial_prompt = if context_prompt {
+                    let terms = text_processor
+                        .as_ref()
+                        .map(|processor| processor.user_terms())
+                        .unwrap_or_default();
+                    prompt::whisper_prompt(window.as_ref(), &terms)
+                } else {
+                    None
+                };
+
                 // Transcribe
                 let transcription_result = match transcriber
-                    .transcribe_async(&audio_data, WHISPER_SAMPLE_RATE)
+                    .transcribe_with_prompt(
+                        &audio_data,
+                        WHISPER_SAMPLE_RATE,
+                        initial_prompt.as_deref(),
+                    )
                     .await
                 {
                     Ok(result) => {
@@ -867,7 +901,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             shared.set_idle();
                             continue;
                         }
-                        TranscriptionResult::Success(result.text)
+                        TranscriptionResult::Success {
+                            text: result.text,
+                            window,
+                        }
                     },
                     Err(e) => {
                         error!("Transcription failed: {}", e);

@@ -22,6 +22,9 @@ pub struct Config {
     /// How text reaches the focused window
     #[serde(default)]
     pub insertion: InsertionConfig,
+    /// Tone by application
+    #[serde(default = "crate::text_processing::ProfilesConfig::defaults")]
+    pub profiles: crate::text_processing::ProfilesConfig,
 }
 
 /// Text insertion configuration
@@ -81,6 +84,13 @@ pub struct TranscriptionConfig {
     pub beam_size: usize,
     /// Threshold for detecting silence/no speech (0.0-1.0)
     pub no_speech_threshold: f32,
+    /// Prime Whisper with the focused window's title and learned terms
+    #[serde(default = "default_true")]
+    pub context_prompt: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl TranscriptionConfig {
@@ -435,5 +445,20 @@ model_size = "small"
 
         let reloaded = Config::load_from(Some(&path)).unwrap();
         assert_eq!(reloaded.hotkey.combination, "Ctrl+Alt+Space");
+    }
+
+    #[test]
+    fn gesture_cap_and_profile_defaults() {
+        let config = Config::defaults().unwrap();
+        assert_eq!(config.hotkey.cancel, "Escape");
+        assert_eq!(config.hotkey.tap_ms, 300);
+        assert_eq!(config.audio.max_recording_secs, 600);
+        assert!(config.feedback.audio_enabled);
+        assert!(config.transcription.context_prompt);
+        assert!(config.profiles.enabled);
+        assert!(Config::parse_over_defaults("[hotkey]\ntap_ms = 5000\n").is_err());
+        let config = Config::parse_over_defaults("[profiles]\nchat = [\"myapp\"]\n").unwrap();
+        assert_eq!(config.profiles.chat, vec!["myapp".to_string()]);
+        assert!(config.profiles.enabled);
     }
 }

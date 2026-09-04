@@ -32,12 +32,32 @@ pub use filler_words::FillerWordRemover;
 pub use history::{HistoryEntry, InsertionHistory};
 pub use intent::{CommunicationStyle, IntentDetector, UserIntent};
 pub mod learn;
+pub mod profiles;
+pub mod prompt;
 pub use llm::LlmProcessor;
+pub use profiles::{AppKind, ProfilesConfig, TextProfile};
 pub use session::{SessionEntry, SessionMemory};
 pub use vocabulary::{DomainVocabularies, DomainVocabulary, VocabularyManager};
 
 use anyhow::Result;
 use tracing::{debug, info, warn};
+
+/// Where the text is going: the focused window and the kind of app it is.
+#[derive(Debug, Clone, Default)]
+pub struct ProcessingContext {
+    pub window: Option<crate::text::WindowInfo>,
+    pub kind: AppKind,
+}
+
+impl ProcessingContext {
+    pub fn new(window: Option<crate::text::WindowInfo>, profiles: &ProfilesConfig) -> Self {
+        let kind = match &window {
+            Some(info) if profiles.enabled => AppKind::classify(info, profiles),
+            _ => AppKind::Other,
+        };
+        Self { window, kind }
+    }
+}
 
 /// Main text processor that combines rule-based and LLM processing
 pub struct TextProcessor {
@@ -47,6 +67,7 @@ pub struct TextProcessor {
     context_detector: ContextDetector,
     intent_detector: IntentDetector,
     vocabulary_manager: parking_lot::RwLock<VocabularyManager>,
+    user_terms: parking_lot::RwLock<Vec<String>>,
     session_memory: SessionMemory,
     config: ProcessingConfig,
 }
@@ -62,7 +83,7 @@ impl TextProcessor {
         let intent_detector = IntentDetector::new();
         let session_memory = SessionMemory::new();
 
-        let vocabulary_manager = Self::build_vocabulary();
+        let (vocabulary_manager, user_terms) = Self::build_vocabulary();
 
         let llm_processor = match &config.llm_provider {
             LlmProvider::None => {
@@ -96,33 +117,58 @@ impl TextProcessor {
             context_detector,
             intent_detector,
             vocabulary_manager: parking_lot::RwLock::new(vocabulary_manager),
+            user_terms: parking_lot::RwLock::new(user_terms),
             session_memory,
             config,
         })
     }
 
-    /// The built-in programming vocabulary plus the user's vocabulary file.
-    fn build_vocabulary() -> VocabularyManager {
+    /// The built-in programming vocabulary plus the user's vocabulary file,
+    /// and the user's own terms for the transcription prompt.
+    fn build_vocabulary() -> (VocabularyManager, Vec<String>) {
         let mut manager = VocabularyManager::new();
         manager.add(DomainVocabularies::general_programming());
-        if let Err(e) = manager.load_if_exists(DomainVocabulary::default_path()) {
-            warn!("Could not load the vocabulary file: {}", e);
+        let path = DomainVocabulary::default_path();
+        let mut terms = Vec::new();
+        if path.exists() {
+            match DomainVocabulary::load_from_file(&path) {
+                Ok(vocab) => {
+                    let mut values: Vec<String> = vocab.technical_terms.values().cloned().collect();
+                    values.sort();
+                    terms = values;
+                    manager.add(vocab);
+                },
+                Err(e) => warn!("Could not load the vocabulary file: {}", e),
+            }
         }
-        manager
+        (manager, terms)
     }
 
     /// Re-read the vocabulary file after `hush learn`; returns the entry count.
     pub fn reload_vocabulary(&self) -> usize {
-        let manager = Self::build_vocabulary();
+        let (manager, terms) = Self::build_vocabulary();
         let total = manager.total_entries();
         *self.vocabulary_manager.write() = manager;
+        *self.user_terms.write() = terms;
         info!("Vocabulary reloaded: {} entries", total);
         total
     }
 
-    /// Process raw transcription text with full context awareness
+    /// The user's learned terms, for Whisper's initial prompt.
+    pub fn user_terms(&self) -> Vec<String> {
+        self.user_terms.read().clone()
+    }
+
+    /// Process raw transcription text for a generic application.
     pub async fn process(&self, raw_text: &str) -> Result<String> {
-        info!("🔄 Processing: '{}'", raw_text);
+        self.process_for(raw_text, &ProcessingContext::default())
+            .await
+    }
+
+    /// Process raw transcription text the way the focused application wants it.
+    pub async fn process_for(&self, raw_text: &str, context: &ProcessingContext) -> Result<String> {
+        info!("🔄 Processing: '{}' ({})", raw_text, context.kind.label());
+        let profile = context.kind.profile();
 
         // Detect application context and intent
         let app_context = self.context_detector.last_context();
@@ -132,7 +178,12 @@ impl TextProcessor {
         debug!("Detected intent: {:?}", intent);
 
         // Stage 1: Rule-based cleanup (fast, always applied)
-        let cleaned = self.filler_remover.remove(raw_text, self.config.mode);
+        let cleaned = self.filler_remover.remove_with(
+            raw_text,
+            self.config.mode,
+            profile.capitalize_first,
+            profile.ending_punctuation,
+        );
         debug!("After filler removal: '{}'", cleaned);
 
         // Stage 2: Apply domain vocabularies
@@ -158,7 +209,20 @@ impl TextProcessor {
                 session_context.as_deref(),
             );
 
-            llm.polish(&enhanced_text, self.config.mode).await?
+            let place = context.window.as_ref().map(|w| {
+                format!(
+                    "The text goes into {} (window \"{}\").",
+                    context.kind.label(),
+                    w.title.chars().take(80).collect::<String>()
+                )
+            });
+            llm.polish_with_context(
+                &enhanced_text,
+                self.config.mode,
+                Some(profile.tone),
+                place.as_deref(),
+            )
+            .await?
         } else {
             capitalized
         };

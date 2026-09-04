@@ -15,6 +15,7 @@ language = "en"
 use_gpu = true
 beam_size = 5
 no_speech_threshold = 0.6
+context_prompt = true     # prime Whisper with the focused window's title and learned terms
 
 [hotkey]
 enabled = true
@@ -33,3 +34,15 @@ audio_enabled = true # start, stop, cancel, and warning tones
 [insertion]
 method = "auto"      # auto: uinput typing, clipboard paste for text uinput cannot type; or "uinput", "clipboard"
 typing_delay_ms = 10
+
+[profiles]
+# Tone by application. The focused window's class picks a profile: terminal
+# and editor keep lowercase and skip the trailing period, chat stays casual,
+# mail and docs get full sentences. Add window classes to extend a profile.
+enabled = true
+terminal = []
+editor = []
+chat = []
+mail = []
+docs = []
+browser = []
