@@ -1,0 +1,19 @@
+config/default.toml
+  s_229a35bbae3466::t_7b60a7030ffc1c 22-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "f37bb4fbb5b753c07128b036c3e56c5e3734c878",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
