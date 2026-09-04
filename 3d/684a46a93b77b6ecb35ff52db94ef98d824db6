@@ -1,0 +1,35 @@
+CLAUDE.md
+  s_229a35bbae3466::t_b6719e0e151f48 39,98
+README.md
+  s_229a35bbae3466::t_9be7f2931d43f5 31,55
+config/default.toml
+  s_229a35bbae3466::t_d9929f0b93a607 22
+docs/plans/2026-09-03-open-source-launch.md
+  s_229a35bbae3466::t_962cabb522c2b4 160-169
+install.sh
+  s_229a35bbae3466::t_4495dfe42fbf53 96
+src/cli/commands/setup.rs
+  s_229a35bbae3466::t_ebf629b79403cb 207,323,408-409,415
+src/cli/commands/utils.rs
+  s_229a35bbae3466::t_b33092e906d3c4 104
+src/config/settings.rs
+  s_229a35bbae3466::t_1a0e5b4a0a5278 168,401
+src/overlay/state.rs
+  s_229a35bbae3466::t_7eed2f0632470b 236
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "3d684a46a93b77b6ecb35ff52db94ef98d824db6",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
