@@ -13,6 +13,7 @@ Hush runs OpenAI's Whisper models on your machine, on the GPU through Vulkan whe
 |---|---|
 | Ubuntu, Debian, Fedora, openSUSE, anything else | `curl -fsSL https://raw.githubusercontent.com/andymai/hush/main/install.sh \| sh` |
 | Arch | `paru -S hush-bin` |
+| Fedora (repository) | `sudo dnf copr enable andymai/hush && sudo dnf install hush` |
 | Manual | Grab the `.deb`, `.rpm`, AppImage, or tarball from the [latest release](https://github.com/andymai/hush/releases/latest) |
 
 The installer picks the package for your distro, verifies its checksum, and installs it through your package manager. It needs only your normal graphics driver: NVIDIA, AMD, and Intel all work through Vulkan, and everything falls back to the CPU.

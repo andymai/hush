@@ -1,0 +1,46 @@
+# Repackages the release tarball for Fedora COPR. Filled in by the release
+# workflow from packaging/hush.spec.template; the binary itself is built by
+# release.yml, so this spec only installs files.
+%global debug_package %{nil}
+%{!?_udevrulesdir:%global _udevrulesdir /usr/lib/udev/rules.d}
+%{!?_userunitdir:%global _userunitdir /usr/lib/systemd/user}
+
+Name:           hush
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        Local voice-to-text for Linux desktops
+License:        MIT
+URL:            https://github.com/andymai/hush
+Source0:        https://github.com/andymai/hush/releases/download/v%{version}/hush-%{version}-x86_64-linux.tar.gz
+ExclusiveArch:  x86_64
+Requires:       vulkan-loader
+Requires:       alsa-lib
+Requires:       libX11
+
+%description
+Hush runs OpenAI's Whisper models locally, on the GPU through Vulkan when one
+is present, and types the result at the cursor through uinput, so it works in
+every application, VM, and password field on X11 and Wayland.
+
+%prep
+%setup -q -n hush-%{version}-x86_64-linux
+
+%install
+install -Dm755 hush %{buildroot}%{_bindir}/hush
+install -Dm644 io.github.andymai.hush.desktop %{buildroot}%{_datadir}/applications/io.github.andymai.hush.desktop
+install -Dm644 io.github.andymai.hush.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.github.andymai.hush.svg
+install -Dm644 70-hush.rules %{buildroot}%{_udevrulesdir}/70-hush.rules
+install -Dm644 hush.service %{buildroot}%{_userunitdir}/hush.service
+
+%files
+%license LICENSE
+%doc README.md
+%{_bindir}/hush
+%{_datadir}/applications/io.github.andymai.hush.desktop
+%{_datadir}/icons/hicolor/scalable/apps/io.github.andymai.hush.svg
+%{_udevrulesdir}/70-hush.rules
+%{_userunitdir}/hush.service
+
+%changelog
+* Thu Sep 03 2026 Andy Aragon <hi@andymai.com> - @VERSION@-1
+- Release v@VERSION@
