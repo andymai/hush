@@ -106,6 +106,9 @@ pub struct HotkeyConfig {
     /// Which backend reads the keyboard
     #[serde(default)]
     pub backend: HotkeyBackend,
+    /// Grab the hotkey's device so applications never see the hotkey (evdev)
+    #[serde(default)]
+    pub exclusive: bool,
 }
 
 /// User feedback and notification settings
@@ -338,6 +341,7 @@ model_size = "small"
         let config = Config::defaults().unwrap();
         assert_eq!(config.hotkey.mode, HotkeyMode::Hold);
         assert_eq!(config.hotkey.backend, HotkeyBackend::Auto);
+        assert!(!config.hotkey.exclusive);
         let config =
             Config::parse_over_defaults("[hotkey]\nmode = \"toggle\"\nbackend = \"x11\"\n")
                 .unwrap();

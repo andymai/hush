@@ -49,9 +49,10 @@ Hold `Ctrl+Shift+Space`, speak, release. Done.
 | `transcription.model_size` | tiny, base, small, medium, large, large-v2, large-v3 | base |
 | `transcription.language` | Whisper language code, or `auto` | en |
 | `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
-| `hotkey.combination` | The key. `RightAlt` or `F13` never reach applications; `Ctrl+Shift+Space` also goes to the focused app | Ctrl+Shift+Space |
+| `hotkey.combination` | The key or mouse button: `Ctrl+Shift+Space`, `RightAlt`, `F13`, `Mouse4` | Ctrl+Shift+Space |
 | `hotkey.mode` | `hold` or `toggle` | hold |
 | `hotkey.backend` | `auto`, `evdev`, or `x11` | auto |
+| `hotkey.exclusive` | Grab the hotkey's device so applications never see the key or button (a browser stops treating `Mouse4` as Back) | false |
 | `insertion.method` | `auto` (type, paste what uinput cannot type), `uinput`, or `clipboard` | auto |
 | `audio.device` | Microphone name from `hush status --devices` | system default |
 

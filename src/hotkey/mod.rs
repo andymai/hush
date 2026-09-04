@@ -72,24 +72,27 @@ pub struct HotkeyManager {
 impl HotkeyManager {
     /// Parse the combination and pick the backend automatically.
     pub fn new(combination: &str) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
-        Self::with_backend(combination, HotkeyBackend::Auto)
+        Self::with_backend(combination, HotkeyBackend::Auto, false)
     }
 
+    /// `exclusive` makes the evdev backend grab the hotkey's device and hide
+    /// the hotkey from applications; the X11 grab is exclusive by nature.
     pub fn with_backend(
         combination: &str,
         choice: HotkeyBackend,
+        exclusive: bool,
     ) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
         let combination = KeyCombination::parse(combination)?;
         let (backend, receiver) = match choice {
             HotkeyBackend::Evdev => {
-                let (hotkey, rx) = evdev::EvdevHotkey::new(combination.clone())?;
+                let (hotkey, rx) = evdev::EvdevHotkey::new(combination.clone(), exclusive)?;
                 (Backend::Evdev(hotkey), rx)
             },
             HotkeyBackend::X11 => {
                 let (hotkey, rx) = x11::X11Hotkey::new(combination.clone())?;
                 (Backend::X11(hotkey), rx)
             },
-            HotkeyBackend::Auto => match evdev::EvdevHotkey::new(combination.clone()) {
+            HotkeyBackend::Auto => match evdev::EvdevHotkey::new(combination.clone(), exclusive) {
                 Ok((hotkey, rx)) => (Backend::Evdev(hotkey), rx),
                 Err(evdev_err) if std::env::var_os("DISPLAY").is_some() => {
                     warn!("{}; falling back to X11 hotkeys", evdev_err);
