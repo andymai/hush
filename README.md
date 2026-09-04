@@ -49,7 +49,7 @@ Hold `Ctrl+Shift+Space`, speak, release. Done.
 | `transcription.model_size` | tiny, base, small, medium, large, large-v2, large-v3 | base |
 | `transcription.language` | Whisper language code, or `auto` | en |
 | `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
-| `hotkey.combination` | The key | Ctrl+Shift+Space |
+| `hotkey.combination` | The key. `RightAlt` or `F13` never reach applications; `Ctrl+Shift+Space` also goes to the focused app | Ctrl+Shift+Space |
 | `hotkey.mode` | `hold` or `toggle` | hold |
 | `hotkey.backend` | `auto`, `evdev`, or `x11` | auto |
 | `insertion.method` | `auto` (type, paste what uinput cannot type), `uinput`, or `clipboard` | auto |
