@@ -381,7 +381,7 @@ pub enum ModelCommands {
 
     /// Download a Whisper model
     Download {
-        /// Model size to download (tiny, base, small, medium, large)
+        /// Model name (tiny, base, small, medium, large, large-v2, large-v3)
         model_size: String,
 
         /// Force re-download even if model exists
