@@ -70,6 +70,7 @@ impl InputTrigger for HotkeyTriggerAdapter {
         match self.async_receiver.recv().await {
             Some(HotkeyEvent::Pressed) => Some(TriggerEvent::StartRecording),
             Some(HotkeyEvent::Released) => Some(TriggerEvent::StopRecording),
+            Some(HotkeyEvent::Cancel) => Some(TriggerEvent::Cancel),
             None => None, // Channel closed
         }
     }

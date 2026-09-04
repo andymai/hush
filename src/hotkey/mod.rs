@@ -3,8 +3,8 @@
 //! [`HotkeyManager`] picks a backend: evdev reads `/dev/input` directly and
 //! works on every session type; X11 hotkeys are the fallback when the event
 //! devices are not readable but an X11 display is. Both report raw
-//! [`HotkeyEvent`]s; [`HotkeyMode`] decides whether a press means hold-to-talk
-//! or toggle.
+//! [`HotkeyEvent`]s; [`GestureDetector`] turns them into recording actions
+//! according to the [`HotkeyMode`].
 //!
 //! ```no_run
 //! use hush::hotkey::{HotkeyEvent, HotkeyManager};
@@ -15,6 +15,7 @@
 //!     match event {
 //!         HotkeyEvent::Pressed => println!("recording"),
 //!         HotkeyEvent::Released => println!("stopped"),
+//!         HotkeyEvent::Cancel => println!("discarded"),
 //!     }
 //! }
 //! # Ok::<(), anyhow::Error>(())
@@ -22,6 +23,7 @@
 
 pub mod combination;
 pub mod evdev;
+pub mod gesture;
 pub mod x11;
 
 use crate::Result;
@@ -30,11 +32,41 @@ use std::sync::mpsc;
 use tracing::warn;
 
 pub use combination::KeyCombination;
+pub use gesture::{GestureAction, GestureDetector};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotkeyEvent {
     Pressed,
     Released,
+    /// The cancel key went down.
+    Cancel,
+}
+
+/// The keys a backend watches: the dictation hotkey and an optional cancel key.
+#[derive(Debug, Clone)]
+pub struct HotkeyBindings {
+    pub primary: KeyCombination,
+    pub cancel: Option<KeyCombination>,
+}
+
+impl HotkeyBindings {
+    pub fn parse(primary: &str, cancel: Option<&str>) -> Result<Self> {
+        let primary = KeyCombination::parse(primary)?;
+        let cancel = match cancel.map(str::trim).filter(|c| !c.is_empty()) {
+            Some(text) => Some(KeyCombination::parse(text)?),
+            None => None,
+        };
+        if let Some(cancel) = &cancel {
+            if cancel.evdev_key() == primary.evdev_key() {
+                return Err(anyhow::anyhow!(
+                    "The cancel key {} cannot share a key with the hotkey {}",
+                    cancel,
+                    primary
+                ));
+            }
+        }
+        Ok(Self { primary, cancel })
+    }
 }
 
 /// What a hotkey press means.
@@ -72,31 +104,35 @@ pub struct HotkeyManager {
 impl HotkeyManager {
     /// Parse the combination and pick the backend automatically.
     pub fn new(combination: &str) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
-        Self::with_backend(combination, HotkeyBackend::Auto, false)
+        Self::with_backend(
+            HotkeyBindings::parse(combination, None)?,
+            HotkeyBackend::Auto,
+            false,
+        )
     }
 
     /// `exclusive` makes the evdev backend grab the hotkey's device and hide
     /// the hotkey from applications; the X11 grab is exclusive by nature.
     pub fn with_backend(
-        combination: &str,
+        bindings: HotkeyBindings,
         choice: HotkeyBackend,
         exclusive: bool,
     ) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
-        let combination = KeyCombination::parse(combination)?;
+        let combination = bindings.primary.clone();
         let (backend, receiver) = match choice {
             HotkeyBackend::Evdev => {
-                let (hotkey, rx) = evdev::EvdevHotkey::new(combination.clone(), exclusive)?;
+                let (hotkey, rx) = evdev::EvdevHotkey::new(bindings, exclusive)?;
                 (Backend::Evdev(hotkey), rx)
             },
             HotkeyBackend::X11 => {
-                let (hotkey, rx) = x11::X11Hotkey::new(combination.clone())?;
+                let (hotkey, rx) = x11::X11Hotkey::new(bindings)?;
                 (Backend::X11(hotkey), rx)
             },
-            HotkeyBackend::Auto => match evdev::EvdevHotkey::new(combination.clone(), exclusive) {
+            HotkeyBackend::Auto => match evdev::EvdevHotkey::new(bindings.clone(), exclusive) {
                 Ok((hotkey, rx)) => (Backend::Evdev(hotkey), rx),
                 Err(evdev_err) if std::env::var_os("DISPLAY").is_some() => {
                     warn!("{}; falling back to X11 hotkeys", evdev_err);
-                    let (hotkey, rx) = x11::X11Hotkey::new(combination.clone())
+                    let (hotkey, rx) = x11::X11Hotkey::new(bindings)
                         .map_err(|x11_err| anyhow::anyhow!("{}. {}", evdev_err, x11_err))?;
                     (Backend::X11(hotkey), rx)
                 },
@@ -166,5 +202,16 @@ mod tests {
     #[test]
     fn invalid_combination_fails_before_any_backend() {
         assert!(HotkeyManager::new("Ctrl+Bogus").is_err());
+    }
+
+    #[test]
+    fn bindings_parse_an_optional_cancel_key() {
+        let b = HotkeyBindings::parse("RightAlt", Some("Escape")).unwrap();
+        assert_eq!(b.cancel.unwrap().to_string(), "Escape");
+        assert!(HotkeyBindings::parse("RightAlt", Some("  "))
+            .unwrap()
+            .cancel
+            .is_none());
+        assert!(HotkeyBindings::parse("Escape", Some("Escape")).is_err());
     }
 }

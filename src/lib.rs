@@ -29,6 +29,9 @@ pub mod permissions;
 // Daemon control socket
 pub mod ipc;
 
+/// Desktop notifications
+pub mod notify;
+
 // Re-export main types for convenience (legacy)
 pub use audio::{AudioCapture, AudioFeedback};
 pub use config::Config;

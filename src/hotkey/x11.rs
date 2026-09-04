@@ -3,7 +3,7 @@
 //! `/dev/input` is not readable and an X11 display is available.
 
 use super::combination::KeyCombination;
-use super::HotkeyEvent;
+use super::{HotkeyBindings, HotkeyEvent};
 use crate::Result;
 use global_hotkey::{hotkey::HotKey, GlobalHotKeyManager};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,7 +21,11 @@ pub struct X11Hotkey {
 }
 
 impl X11Hotkey {
-    pub fn new(combination: KeyCombination) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
+    pub fn new(bindings: HotkeyBindings) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
+        let combination = bindings.primary;
+        if bindings.cancel.is_some() {
+            info!("The cancel key is not available on the X11 backend");
+        }
         let code = combination.x11_code().ok_or_else(|| {
             anyhow::anyhow!(
                 "{} is a mouse button, which only the evdev backend can read",

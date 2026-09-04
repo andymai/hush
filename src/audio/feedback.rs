@@ -1,33 +1,34 @@
 use crate::Result;
 use anyhow::Context;
-use rodio::{OutputStream, OutputStreamBuilder, Sink, Source};
-use std::sync::Arc;
+use rodio::{OutputStreamBuilder, Sink, Source};
 use std::time::Duration;
 use tracing::warn;
 
-/// Audio feedback system for providing sound cues
+/// Sound cues for recording state changes. Each cue opens its own output
+/// stream on a short-lived thread, so the value is cheap to copy anywhere.
+#[derive(Debug, Clone, Copy)]
 pub struct AudioFeedback {
-    _stream: Option<Arc<OutputStream>>,
     enabled: bool,
 }
 
 impl AudioFeedback {
-    /// Create a new audio feedback system
-    #[allow(clippy::arc_with_non_send_sync)]
+    /// Probe the default output; without one the cues are silent.
     pub fn new() -> Result<Self> {
-        // Try to initialize audio output, but don't fail if unavailable
-        let (_stream, enabled) = match OutputStreamBuilder::open_default_stream() {
-            Ok(stream) => (Some(Arc::new(stream)), true),
+        let enabled = match OutputStreamBuilder::open_default_stream() {
+            Ok(_stream) => true,
             Err(e) => {
                 warn!(
                     "Audio feedback unavailable: {}. Continuing without sound feedback.",
                     e
                 );
-                (None, false)
+                false
             },
         };
+        Ok(Self { enabled })
+    }
 
-        Ok(Self { _stream, enabled })
+    pub fn silent() -> Self {
+        Self { enabled: false }
     }
 
     /// Play recording start sound (ascending tone, 440 Hz -> 880 Hz)
@@ -36,8 +37,7 @@ impl AudioFeedback {
             return Ok(());
         }
 
-        // Use tokio's blocking task pool instead of spawning a new thread
-        tokio::task::spawn_blocking(|| {
+        std::thread::spawn(|| {
             if let Err(e) = play_tone(440.0, 100) {
                 warn!("Failed to play start sound: {}", e);
             }
@@ -52,8 +52,7 @@ impl AudioFeedback {
             return Ok(());
         }
 
-        // Use tokio's blocking task pool instead of spawning a new thread
-        tokio::task::spawn_blocking(|| {
+        std::thread::spawn(|| {
             if let Err(e) = play_tone(880.0, 100) {
                 warn!("Failed to play stop sound: {}", e);
             }
@@ -68,13 +67,38 @@ impl AudioFeedback {
             return Ok(());
         }
 
-        // Use tokio's blocking task pool instead of spawning a new thread
-        tokio::task::spawn_blocking(|| {
+        std::thread::spawn(|| {
             if let Err(e) = play_double_beep(220.0, 150, 50) {
                 warn!("Failed to play error sound: {}", e);
             }
         });
 
+        Ok(())
+    }
+
+    /// A recording was discarded: one low tone.
+    pub fn play_cancel(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        std::thread::spawn(|| {
+            if let Err(e) = play_tone(330.0, 120) {
+                warn!("Failed to play cancel sound: {}", e);
+            }
+        });
+        Ok(())
+    }
+
+    /// The recording cap is close: two mid tones.
+    pub fn play_warning(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        std::thread::spawn(|| {
+            if let Err(e) = play_double_beep(660.0, 120, 60) {
+                warn!("Failed to play warning sound: {}", e);
+            }
+        });
         Ok(())
     }
 
@@ -84,8 +108,7 @@ impl AudioFeedback {
             return Ok(());
         }
 
-        // Use tokio's blocking task pool instead of spawning a new thread
-        tokio::task::spawn_blocking(|| {
+        std::thread::spawn(|| {
             if let Err(e) = play_tone(1320.0, 80) {
                 warn!("Failed to play success sound: {}", e);
             }
@@ -97,10 +120,7 @@ impl AudioFeedback {
 
 impl Default for AudioFeedback {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| Self {
-            _stream: None,
-            enabled: false,
-        })
+        Self::new().unwrap_or_else(|_| Self::silent())
     }
 }
 

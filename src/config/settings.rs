@@ -54,6 +54,14 @@ pub struct AudioConfig {
     pub buffer_size: usize,
     /// Optional specific audio device name (None uses system default)
     pub device: Option<String>,
+    /// A recording stops and transcribes after this long, with a warning a
+    /// minute earlier; 0 disables the cap
+    #[serde(default = "default_max_recording_secs")]
+    pub max_recording_secs: u64,
+}
+
+fn default_max_recording_secs() -> u64 {
+    600
 }
 
 /// Whisper transcription model configuration
@@ -109,6 +117,21 @@ pub struct HotkeyConfig {
     /// Grab the hotkey's device so applications never see the hotkey (evdev)
     #[serde(default)]
     pub exclusive: bool,
+    /// Key that discards a recording in progress; empty disables it
+    #[serde(default = "default_cancel_key")]
+    pub cancel: String,
+    /// A press shorter than this is a tap: in hold mode a tap discards and a
+    /// double-tap locks hands-free, in toggle mode a tap locks
+    #[serde(default = "default_tap_ms")]
+    pub tap_ms: u64,
+}
+
+fn default_cancel_key() -> String {
+    "Escape".to_string()
+}
+
+fn default_tap_ms() -> u64 {
+    300
 }
 
 /// User feedback and notification settings
@@ -183,6 +206,11 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if self.hotkey.tap_ms > 2000 {
+            return Err(anyhow::anyhow!(
+                "Invalid hotkey.tap_ms: must be 2000 or less"
+            ));
+        }
         // Validate audio configuration
         if self.audio.sample_rate < 8000 || self.audio.sample_rate > 48000 {
             return Err(anyhow::anyhow!(
