@@ -5,7 +5,8 @@
 use super::combination::KeyCombination;
 use super::HotkeyEvent;
 use anyhow::{anyhow, Result};
-use evdev::{Device, EventSummary, KeyCode};
+use evdev::uinput::VirtualDevice;
+use evdev::{AttributeSetRef, BusType, Device, EventSummary, InputEvent, InputId, KeyCode};
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -30,6 +31,14 @@ pub struct HotkeyMatcher {
     active: bool,
 }
 
+/// Outcome of one key event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Processed {
+    pub event: Option<HotkeyEvent>,
+    /// The event belongs to the hotkey and must not reach applications.
+    pub swallow: bool,
+}
+
 const MODIFIER_PAIRS: [(KeyCode, KeyCode); 4] = [
     (KeyCode::KEY_LEFTCTRL, KeyCode::KEY_RIGHTCTRL),
     (KeyCode::KEY_LEFTSHIFT, KeyCode::KEY_RIGHTSHIFT),
@@ -48,6 +57,15 @@ impl HotkeyMatcher {
 
     /// Feed one key event (`value`: 1 press, 0 release, 2 repeat).
     pub fn feed(&mut self, code: KeyCode, value: i32) -> Option<HotkeyEvent> {
+        self.process(code, value).event
+    }
+
+    /// Feed one key event and also learn whether an exclusive reader should
+    /// keep it from the application: the hotkey's own key while the chord is
+    /// active, including its release and repeats.
+    pub fn process(&mut self, code: KeyCode, value: i32) -> Processed {
+        let key = self.combination.evdev_key();
+        let was_active = self.active;
         match value {
             1 => {
                 self.held.insert(code);
@@ -55,20 +73,25 @@ impl HotkeyMatcher {
             0 => {
                 self.held.remove(&code);
             },
-            _ => return None,
+            _ => {},
         }
 
-        let key = self.combination.evdev_key();
-        if !self.active {
-            if value == 1 && code == key && self.modifiers_match() {
-                self.active = true;
-                return Some(HotkeyEvent::Pressed);
+        let mut event = None;
+        if value == 1 || value == 0 {
+            if !self.active {
+                if value == 1 && code == key && self.modifiers_match() {
+                    self.active = true;
+                    event = Some(HotkeyEvent::Pressed);
+                }
+            } else if value == 0 && (code == key || !self.modifiers_match()) {
+                self.active = false;
+                event = Some(HotkeyEvent::Released);
             }
-        } else if value == 0 && (code == key || !self.modifiers_match()) {
-            self.active = false;
-            return Some(HotkeyEvent::Released);
         }
-        None
+        Processed {
+            event,
+            swallow: code == key && (was_active || self.active),
+        }
     }
 
     /// The hotkey's own key never counts as a held modifier, so a bare
@@ -88,17 +111,45 @@ impl HotkeyMatcher {
     }
 }
 
-fn is_keyboard(device: &Device, key: KeyCode) -> bool {
+/// Vendor id stamped on every uinput device Hush creates (the typing
+/// keyboard and exclusive-mode proxies) so the hotkey reader can skip its
+/// own output instead of grabbing a proxy and chaining another onto it.
+pub const VIRTUAL_VENDOR: u16 = 0x4855;
+pub const VIRTUAL_PRODUCT_KEYBOARD: u16 = 0x0001;
+pub const VIRTUAL_PRODUCT_PROXY: u16 = 0x0002;
+
+/// Whether an input identity belongs to one of Hush's own virtual devices.
+pub fn is_hush_virtual(id: InputId) -> bool {
+    id.bus_type() == BusType::BUS_VIRTUAL && id.vendor() == VIRTUAL_VENDOR
+}
+
+/// A device is interesting when it carries the hotkey's key (a keyboard, or
+/// a mouse for a button), or when it is a keyboard and the chord needs
+/// modifiers from one.
+pub fn device_matches(keys: &AttributeSetRef<KeyCode>, combination: &KeyCombination) -> bool {
+    let is_keyboard = keys.contains(KeyCode::KEY_A) && keys.contains(KeyCode::KEY_LEFTCTRL);
+    let has_key = keys.contains(combination.evdev_key());
+    has_key && (is_keyboard || combination.is_mouse_button())
+        || (combination.has_modifiers() && is_keyboard)
+}
+
+fn carries_key(device: &Device, key: KeyCode) -> bool {
     device
         .supported_keys()
-        .map(|keys| keys.contains(key) && keys.contains(KeyCode::KEY_A))
+        .map(|keys| keys.contains(key))
         .unwrap_or(false)
 }
 
-/// Paths and devices of every readable keyboard that has the hotkey's key.
-pub fn keyboards(key: KeyCode) -> Vec<(PathBuf, Device)> {
+/// Paths and devices of every readable device the combination needs.
+pub fn devices_for(combination: &KeyCombination) -> Vec<(PathBuf, Device)> {
     evdev::enumerate()
-        .filter(|(_, device)| is_keyboard(device, key))
+        .filter(|(_, device)| !is_hush_virtual(device.input_id()))
+        .filter(|(_, device)| {
+            device
+                .supported_keys()
+                .map(|keys| device_matches(keys, combination))
+                .unwrap_or(false)
+        })
         .collect()
 }
 
@@ -132,15 +183,26 @@ fn explain_no_keyboard() -> anyhow::Error {
 
 pub struct EvdevHotkey {
     combination: KeyCombination,
+    exclusive: bool,
     running: Arc<AtomicBool>,
     matcher: Arc<Mutex<HotkeyMatcher>>,
     sender: mpsc::Sender<HotkeyEvent>,
 }
 
 impl EvdevHotkey {
-    pub fn new(combination: KeyCombination) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
-        let found = keyboards(combination.evdev_key());
-        if found.is_empty() {
+    /// With `exclusive`, the device that carries the hotkey's key is grabbed
+    /// and every other event it produces is replayed through a uinput proxy,
+    /// so applications never see the hotkey itself.
+    pub fn new(
+        combination: KeyCombination,
+        exclusive: bool,
+    ) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
+        let found = devices_for(&combination);
+        if found.is_empty()
+            || !found
+                .iter()
+                .any(|(_, d)| carries_key(d, combination.evdev_key()))
+        {
             return Err(explain_no_keyboard());
         }
         for (path, device) in &found {
@@ -151,9 +213,10 @@ impl EvdevHotkey {
             );
         }
         info!(
-            "evdev hotkey '{}' watching {} keyboard(s)",
+            "evdev hotkey '{}' watching {} device(s){}",
             combination,
-            found.len()
+            found.len(),
+            if exclusive { ", exclusive" } else { "" }
         );
 
         let (sender, receiver) = mpsc::channel();
@@ -161,6 +224,7 @@ impl EvdevHotkey {
             Self {
                 matcher: Arc::new(Mutex::new(HotkeyMatcher::new(combination.clone()))),
                 combination,
+                exclusive,
                 running: Arc::new(AtomicBool::new(false)),
                 sender,
             },
@@ -180,10 +244,11 @@ impl EvdevHotkey {
         let running = Arc::clone(&self.running);
         let matcher = Arc::clone(&self.matcher);
         let sender = self.sender.clone();
-        let key = self.combination.evdev_key();
+        let combination = self.combination.clone();
+        let exclusive = self.exclusive;
         thread::Builder::new()
             .name("hush-hotkey-scan".into())
-            .spawn(move || supervise(running, matcher, sender, key))
+            .spawn(move || supervise(running, matcher, sender, combination, exclusive))
             .map_err(|e| anyhow!("Failed to start hotkey thread: {}", e))?;
         Ok(())
     }
@@ -204,12 +269,13 @@ fn supervise(
     running: Arc<AtomicBool>,
     matcher: Arc<Mutex<HotkeyMatcher>>,
     sender: mpsc::Sender<HotkeyEvent>,
-    key: KeyCode,
+    combination: KeyCombination,
+    exclusive: bool,
 ) {
     let mut readers: HashMap<PathBuf, thread::JoinHandle<()>> = HashMap::new();
     while running.load(Ordering::Acquire) {
         readers.retain(|_, handle| !handle.is_finished());
-        for (path, device) in keyboards(key) {
+        for (path, device) in devices_for(&combination) {
             if readers.contains_key(&path) {
                 continue;
             }
@@ -218,9 +284,12 @@ fn supervise(
             let sender = sender.clone();
             let name = format!("hush-hotkey-{}", path.display());
             let spawn_path = path.clone();
+            // Only the device that carries the hotkey's key is grabbed; a
+            // keyboard read for modifiers stays untouched.
+            let grab = exclusive && carries_key(&device, combination.evdev_key());
             match thread::Builder::new()
                 .name(name)
-                .spawn(move || read_device(&spawn_path, device, running, matcher, sender))
+                .spawn(move || read_device(&spawn_path, device, running, matcher, sender, grab))
             {
                 Ok(handle) => {
                     readers.insert(path, handle);
@@ -232,13 +301,63 @@ fn supervise(
     }
 }
 
+/// Clone a device's buttons, keys, and relative axes into a uinput device so
+/// a grabbed device's other events can be replayed to the system.
+fn build_proxy(device: &Device) -> Result<VirtualDevice> {
+    // uinput caps names at 80 bytes including the terminator.
+    const MAX_NAME: usize = 79;
+    let suffix = " (hush)";
+    let mut base = device.name().unwrap_or("input").to_string();
+    while base.len() + suffix.len() > MAX_NAME {
+        base.pop();
+    }
+    let name = base + suffix;
+    let id = InputId::new(
+        BusType::BUS_VIRTUAL,
+        VIRTUAL_VENDOR,
+        VIRTUAL_PRODUCT_PROXY,
+        1,
+    );
+    let mut builder = VirtualDevice::builder()?.name(name.as_str()).input_id(id);
+    if let Some(keys) = device.supported_keys() {
+        builder = builder.with_keys(keys)?;
+    }
+    if let Some(axes) = device.supported_relative_axes() {
+        builder = builder.with_relative_axes(axes)?;
+    }
+    Ok(builder.build()?)
+}
+
 fn read_device(
     path: &Path,
     mut device: Device,
     running: Arc<AtomicBool>,
     matcher: Arc<Mutex<HotkeyMatcher>>,
     sender: mpsc::Sender<HotkeyEvent>,
+    grab: bool,
 ) {
+    let mut proxy = if grab {
+        match build_proxy(&device).and_then(|proxy| {
+            device.grab()?;
+            Ok(proxy)
+        }) {
+            Ok(proxy) => {
+                info!("Grabbed {} exclusively for the hotkey", path.display());
+                Some(proxy)
+            },
+            Err(e) => {
+                warn!(
+                    "Could not grab {} ({}); the hotkey stays visible to applications",
+                    path.display(),
+                    e
+                );
+                None
+            },
+        }
+    } else {
+        None
+    };
+    let mut batch: Vec<InputEvent> = Vec::new();
     while running.load(Ordering::Acquire) {
         match wait_readable(device.as_raw_fd(), POLL_INTERVAL_MS) {
             Ok(false) => continue,
@@ -257,18 +376,46 @@ fn read_device(
             },
         };
         for event in events {
-            if let EventSummary::Key(_, code, value) = event.destructure() {
-                let hotkey_event = matcher.lock().feed(code, value);
-                if let Some(hotkey_event) = hotkey_event {
-                    debug!("Hotkey {:?} from {}", hotkey_event, path.display());
-                    if sender.send(hotkey_event).is_err() {
-                        running.store(false, Ordering::Release);
-                        return;
+            let raw = InputEvent::new(event.event_type().0, event.code(), event.value());
+            let mut forward = true;
+            match event.destructure() {
+                EventSummary::Key(_, code, value) => {
+                    let processed = matcher.lock().process(code, value);
+                    if let Some(hotkey_event) = processed.event {
+                        debug!("Hotkey {:?} from {}", hotkey_event, path.display());
+                        if sender.send(hotkey_event).is_err() {
+                            running.store(false, Ordering::Release);
+                            return;
+                        }
                     }
-                }
+                    forward = !processed.swallow;
+                },
+                EventSummary::Synchronization(..) => {
+                    // The proxy adds its own SYN_REPORT per emit, so replay each
+                    // frame as one batch and drop the original sync event.
+                    if let Some(proxy) = proxy.as_mut() {
+                        if !batch.is_empty() {
+                            if let Err(e) = proxy.emit(&batch) {
+                                warn!("Proxy emit failed for {}: {}", path.display(), e);
+                            }
+                            batch.clear();
+                        }
+                    }
+                    forward = false;
+                },
+                _ => {},
+            }
+            if forward && proxy.is_some() {
+                batch.push(raw);
             }
         }
     }
+    if let Some(proxy) = proxy.as_mut() {
+        if !batch.is_empty() {
+            let _ = proxy.emit(&batch);
+        }
+    }
+    let _ = device.ungrab();
 }
 
 /// Block until the descriptor is readable or the timeout passes. An error
@@ -374,11 +521,95 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_enumeration_does_not_panic() {
-        let found = keyboards(KeyCode::KEY_SPACE);
-        for (path, device) in &found {
+    fn exclusive_readers_swallow_only_the_hotkey() {
+        let mut m = matcher("Ctrl+Space");
+        assert!(
+            !m.process(KeyCode::KEY_SPACE, 1).swallow,
+            "plain space is typed"
+        );
+        assert!(!m.process(KeyCode::KEY_SPACE, 0).swallow);
+        m.process(KeyCode::KEY_LEFTCTRL, 1);
+        let press = m.process(KeyCode::KEY_SPACE, 1);
+        assert_eq!(press.event, Some(HotkeyEvent::Pressed));
+        assert!(press.swallow);
+        assert!(
+            m.process(KeyCode::KEY_SPACE, 2).swallow,
+            "repeats while active"
+        );
+        let release = m.process(KeyCode::KEY_SPACE, 0);
+        assert_eq!(release.event, Some(HotkeyEvent::Released));
+        assert!(release.swallow);
+        assert!(
+            !m.process(KeyCode::KEY_LEFTCTRL, 0).swallow,
+            "modifiers pass through"
+        );
+    }
+
+    #[test]
+    fn mouse_button_hotkey_matches_mice_and_keyboards_for_chords() {
+        use evdev::AttributeSet;
+        let mut mouse = AttributeSet::<KeyCode>::new();
+        for k in [
+            KeyCode::BTN_LEFT,
+            KeyCode::BTN_RIGHT,
+            KeyCode::BTN_SIDE,
+            KeyCode::BTN_EXTRA,
+        ] {
+            mouse.insert(k);
+        }
+        let mut keyboard = AttributeSet::<KeyCode>::new();
+        for k in [KeyCode::KEY_A, KeyCode::KEY_LEFTCTRL, KeyCode::KEY_SPACE] {
+            keyboard.insert(k);
+        }
+        let mouse4 = KeyCombination::parse("Mouse4").unwrap();
+        assert!(device_matches(&mouse, &mouse4));
+        assert!(!device_matches(&keyboard, &mouse4));
+        let chord = KeyCombination::parse("Ctrl+Mouse4").unwrap();
+        assert!(device_matches(&mouse, &chord));
+        assert!(
+            device_matches(&keyboard, &chord),
+            "keyboard supplies the modifier"
+        );
+        let space = KeyCombination::parse("Space").unwrap();
+        assert!(device_matches(&keyboard, &space));
+        assert!(!device_matches(&mouse, &space));
+    }
+
+    #[test]
+    fn own_virtual_devices_are_recognised() {
+        assert!(is_hush_virtual(InputId::new(
+            BusType::BUS_VIRTUAL,
+            VIRTUAL_VENDOR,
+            VIRTUAL_PRODUCT_PROXY,
+            1
+        )));
+        assert!(is_hush_virtual(InputId::new(
+            BusType::BUS_VIRTUAL,
+            VIRTUAL_VENDOR,
+            VIRTUAL_PRODUCT_KEYBOARD,
+            1
+        )));
+        assert!(!is_hush_virtual(InputId::new(
+            BusType::BUS_USB,
+            VIRTUAL_VENDOR,
+            1,
+            1
+        )));
+        assert!(!is_hush_virtual(InputId::new(
+            BusType::BUS_VIRTUAL,
+            0x046d,
+            1,
+            1
+        )));
+    }
+
+    #[test]
+    fn device_enumeration_does_not_panic() {
+        let combination = KeyCombination::parse("Ctrl+Shift+Space").unwrap();
+        for (path, device) in devices_for(&combination) {
             assert!(path.starts_with("/dev/input"));
-            assert!(is_keyboard(device, KeyCode::KEY_SPACE));
+            assert!(device.supported_keys().is_some());
+            assert!(!is_hush_virtual(device.input_id()));
         }
     }
 }

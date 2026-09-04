@@ -25,7 +25,8 @@ pub struct KeyCombination {
 struct KeyDef {
     names: &'static [&'static str],
     evdev: KeyCode,
-    x11: Code,
+    /// `None` for mouse buttons, which only the evdev backend can read.
+    x11: Option<Code>,
 }
 
 impl fmt::Debug for KeyDef {
@@ -43,7 +44,7 @@ impl Eq for KeyDef {}
 
 macro_rules! keys {
     ($( [$($name:literal),+] => $ev:ident / $x11:ident ),* $(,)?) => {
-        &[$( KeyDef { names: &[$($name),+], evdev: KeyCode::$ev, x11: Code::$x11 } ),*]
+        &[$( KeyDef { names: &[$($name),+], evdev: KeyCode::$ev, x11: Some(Code::$x11) } ),*]
     };
 }
 
@@ -94,6 +95,41 @@ const KEYS: &[KeyDef] = keys![
     ["menu"] => KEY_COMPOSE / ContextMenu, ["numlock"] => KEY_NUMLOCK / NumLock,
 ];
 
+/// Mouse buttons: "mouse4" is the side (back) button, "mouse5" the extra
+/// (forward) button. Pair them with `hotkey.exclusive` so browsers never see them.
+const MOUSE_BUTTONS: &[KeyDef] = &[
+    KeyDef {
+        names: &["mouse3", "mousemiddle"],
+        evdev: KeyCode::BTN_MIDDLE,
+        x11: None,
+    },
+    KeyDef {
+        names: &["mouse4", "mouseside", "mouseback"],
+        evdev: KeyCode::BTN_SIDE,
+        x11: None,
+    },
+    KeyDef {
+        names: &["mouse5", "mouseextra", "mouseforward"],
+        evdev: KeyCode::BTN_EXTRA,
+        x11: None,
+    },
+    KeyDef {
+        names: &["mouse6"],
+        evdev: KeyCode::BTN_FORWARD,
+        x11: None,
+    },
+    KeyDef {
+        names: &["mouse7"],
+        evdev: KeyCode::BTN_BACK,
+        x11: None,
+    },
+    KeyDef {
+        names: &["mouse8"],
+        evdev: KeyCode::BTN_TASK,
+        x11: None,
+    },
+];
+
 impl KeyCombination {
     /// Parse `Ctrl+Shift+Space` style text. Case and surrounding spaces are ignored.
     pub fn parse(text: &str) -> Result<Self> {
@@ -112,6 +148,7 @@ impl KeyCombination {
                     }
                     key = Some(
                         KEYS.iter()
+                            .chain(MOUSE_BUTTONS.iter())
                             .find(|def| def.names.contains(&name))
                             .ok_or_else(|| {
                                 anyhow!("Unknown key '{}' in hotkey '{}'", part, text)
@@ -130,9 +167,19 @@ impl KeyCombination {
         self.key.evdev
     }
 
-    /// The main key as an X11 key code.
-    pub fn x11_code(&self) -> Code {
+    /// The main key as an X11 key code; mouse buttons have none.
+    pub fn x11_code(&self) -> Option<Code> {
         self.key.x11
+    }
+
+    /// Whether the main key is a mouse button.
+    pub fn is_mouse_button(&self) -> bool {
+        self.key.x11.is_none()
+    }
+
+    /// Whether the chord needs a keyboard for its modifiers.
+    pub fn has_modifiers(&self) -> bool {
+        self.modifiers != Modifiers::default()
     }
 
     pub fn x11_modifiers(&self) -> X11Modifiers {
@@ -199,7 +246,7 @@ mod tests {
         assert!(combo.modifiers.ctrl && combo.modifiers.shift);
         assert!(!combo.modifiers.alt && !combo.modifiers.super_key);
         assert_eq!(combo.evdev_key(), KeyCode::KEY_SPACE);
-        assert_eq!(combo.x11_code(), Code::Space);
+        assert_eq!(combo.x11_code(), Some(Code::Space));
         assert_eq!(combo.to_string(), "Ctrl+Shift+Space");
     }
 
@@ -224,7 +271,7 @@ mod tests {
     fn bare_modifiers_and_high_function_keys_are_keys() {
         let alt = KeyCombination::parse("RightAlt").unwrap();
         assert_eq!(alt.evdev_key(), KeyCode::KEY_RIGHTALT);
-        assert_eq!(alt.x11_code(), Code::AltRight);
+        assert_eq!(alt.x11_code(), Some(Code::AltRight));
         assert_eq!(alt.modifiers, Modifiers::default());
         assert_eq!(alt.to_string(), "RightAlt");
         assert_eq!(
@@ -241,7 +288,23 @@ mod tests {
             KeyCombination::parse("F13").unwrap().evdev_key(),
             KeyCode::KEY_F13
         );
-        assert_eq!(KeyCombination::parse("f24").unwrap().x11_code(), Code::F24);
+        assert_eq!(
+            KeyCombination::parse("f24").unwrap().x11_code(),
+            Some(Code::F24)
+        );
+    }
+
+    #[test]
+    fn mouse_buttons_are_evdev_only() {
+        let side = KeyCombination::parse("Mouse4").unwrap();
+        assert_eq!(side.evdev_key(), KeyCode::BTN_SIDE);
+        assert_eq!(side.x11_code(), None);
+        assert!(side.is_mouse_button());
+        assert!(!side.has_modifiers());
+        assert_eq!(side.to_string(), "Mouse4");
+        let chord = KeyCombination::parse("Ctrl+Mouse5").unwrap();
+        assert_eq!(chord.evdev_key(), KeyCode::BTN_EXTRA);
+        assert!(chord.has_modifiers());
     }
 
     #[test]

@@ -17,9 +17,10 @@ no_speech_threshold = 0.6
 
 [hotkey]
 enabled = true
-combination = "Ctrl+Shift+Space" # "RightAlt" or "F13" keep the key away from applications
+combination = "Ctrl+Shift+Space" # or a key applications ignore: "RightAlt", "F13", "Mouse4"
 mode = "hold"                    # hold: record while held; toggle: press to start, press again to stop
 backend = "auto"                 # auto: evdev (Wayland and X11), falling back to x11; or "evdev", "x11"
+exclusive = false                # true: grab the hotkey's device so applications never see the key or button
 
 [feedback]
 audio_enabled = false

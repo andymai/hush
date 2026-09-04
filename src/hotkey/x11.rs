@@ -22,7 +22,13 @@ pub struct X11Hotkey {
 
 impl X11Hotkey {
     pub fn new(combination: KeyCombination) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
-        let hotkey = HotKey::new(Some(combination.x11_modifiers()), combination.x11_code());
+        let code = combination.x11_code().ok_or_else(|| {
+            anyhow::anyhow!(
+                "{} is a mouse button, which only the evdev backend can read",
+                combination
+            )
+        })?;
+        let hotkey = HotKey::new(Some(combination.x11_modifiers()), code);
         let manager = GlobalHotKeyManager::new()
             .map_err(|e| anyhow::anyhow!("Failed to create X11 hotkey manager: {:?}", e))?;
         manager.register(hotkey).map_err(|e| {

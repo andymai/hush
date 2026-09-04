@@ -177,8 +177,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     }
 
     // Create hotkey manager
-    let (hotkey_manager, hotkey_rx) =
-        HotkeyManager::with_backend(&hotkey_combination, config.hotkey.backend)?;
+    let (hotkey_manager, hotkey_rx) = HotkeyManager::with_backend(
+        &hotkey_combination,
+        config.hotkey.backend,
+        config.hotkey.exclusive,
+    )?;
     hotkey_manager.start_listening()?;
     info!(
         "✅ Hotkey '{}' registered via {}",
