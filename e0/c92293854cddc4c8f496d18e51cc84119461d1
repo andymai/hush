@@ -1,0 +1,21 @@
+README.md
+  s_229a35bbae3466::t_d1780769c6143f 18
+install.sh
+  s_229a35bbae3466::t_d9034ac0964be8 8,40-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "e0c92293854cddc4c8f496d18e51cc84119461d1",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
