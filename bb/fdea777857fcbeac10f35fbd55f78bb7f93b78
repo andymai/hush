@@ -1,0 +1,58 @@
+src/text/selection.rs
+  s_229a35bbae3466::t_10d24904db20a1 1-28
+src/text_processing/learn.rs
+  s_229a35bbae3466::t_0abc67f1d328b6 1-120
+  s_229a35bbae3466::t_9f14e9bd511094 121-124
+README.md
+  s_229a35bbae3466::t_15f16e005912f5 39,59-60
+config/default.toml
+  s_229a35bbae3466::t_efd5107a7fa1cd 27-28
+src/adapters/hotkey/hotkey_adapter.rs
+  s_229a35bbae3466::t_176cf109e89330 70-77
+src/cli/commands/daemon.rs
+  s_229a35bbae3466::t_9c2cb3d61d5ec3 127-130
+src/cli/commands/listen.rs
+  s_229a35bbae3466::t_421a500317d4ec 12-15,20,194-196,358-367,517-518,524-525,534-539,649-691
+src/cli/dispatcher.rs
+  s_229a35bbae3466::t_e653284926abb9 62-63,158-162,522-524
+src/cli_main.rs
+  s_229a35bbae3466::t_d5b13e27343aaf 87-95
+src/config/settings.rs
+  s_229a35bbae3466::t_de266c3b49054d 127-132
+src/hotkey/evdev.rs
+  s_229a35bbae3466::t_3326e143dd2519 6,118,126-130,134-135,143-148,188-191,679-697
+src/hotkey/gesture.rs
+  s_229a35bbae3466::t_13575e78ee7704 74
+src/hotkey/mod.rs
+  s_229a35bbae3466::t_f46f5451a96089 19,44-45,48-56,61,80-111,260-275
+src/hotkey/x11.rs
+  s_229a35bbae3466::t_b461e514c2cf41 26-27
+src/ipc/protocol.rs
+  s_229a35bbae3466::t_2a85000387778c 5,16-22,58-60,69,78,81-85,100-128
+src/ipc/server.rs
+  s_229a35bbae3466::t_cb699216486c76 6,24-29,41-42,45,58,62-69,216-227,259-273
+src/text/insertion.rs
+  s_229a35bbae3466::t_7c563cd513e0d8 148-158
+src/text/mod.rs
+  s_229a35bbae3466::t_d350a0d2828861 36-37
+src/text_processing/mod.rs
+  s_229a35bbae3466::t_2b7c1e25768935 34,40,49,65,98,104-122,139,240,251
+src/text_processing/vocabulary.rs
+  s_229a35bbae3466::t_b221f94d5aea47 96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "bbfdea777857fcbeac10f35fbd55f78bb7f93b78",
+  "prompts": {},
+  "sessions": {
+    "s_229a35bbae3466": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6805407e-2253-4ca1-ae18-1a7413cd6397",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
