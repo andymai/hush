@@ -49,7 +49,7 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
     hint(
         ui,
         "Runs on your machine. Larger models are more accurate and slower; \
-         base is a good start, turbo or large if you have a GPU.",
+         base is a good start, and the model suggested below is sized for your hardware.",
     );
 
     let downloading = gui.download.lock().size;
