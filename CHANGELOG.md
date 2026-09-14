@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/andymai/hush/compare/v0.6.0...v0.6.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **deps:** bump rustls to 0.23.45 for RUSTSEC-2026-0285 ([#159](https://github.com/andymai/hush/issues/159)) ([6e9891d](https://github.com/andymai/hush/commit/6e9891df6f15055272c0ba7009505e134433ac22))
+
 ## [0.6.0](https://github.com/andymai/hush/compare/v0.5.0...v0.6.0) (2026-09-04)
 
 
