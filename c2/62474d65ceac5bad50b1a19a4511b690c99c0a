@@ -1,0 +1,19 @@
+src/gui/setup.rs
+  s_ebeb1f15411051::t_f727ebed800250 52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c262474d65ceac5bad50b1a19a4511b690c99c0a",
+  "prompts": {},
+  "sessions": {
+    "s_ebeb1f15411051": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21dd6f85-e059-40dc-84f1-d22232223894",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
