@@ -1,0 +1,26 @@
+src/gui/pages/speech.rs
+  s_2695bc864215ae::t_250aab7708e799 6,8,40,45-47,49-55,58,78,113,326
+src/transcription/models.rs
+  s_2695bc864215ae::t_414fe62458df28 83-95
+  s_2695bc864215ae::t_8524e2970b5551 7
+src/cli/dispatcher.rs
+  s_2695bc864215ae::t_f07fd3a4d646f8 137-139
+src/gui/mod.rs
+  s_2695bc864215ae::t_be79d41d1b3eba 25,110-118,126-128,147,167-174,182-183,198,245-266,298,314,370,372-373
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "48e3dcb9bba199acd3f1fbc3be1440f751de372b",
+  "prompts": {},
+  "sessions": {
+    "s_2695bc864215ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "86449f3f-0bf6-4a69-af7e-d26940ff18a9",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
