@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/andymai/hush/compare/v0.7.0...v0.7.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* **gui:** keep the settings window responsive ([#164](https://github.com/andymai/hush/issues/164)) ([a6e1587](https://github.com/andymai/hush/commit/a6e1587dd8d37407dce1bc8b034f4f57323fae03))
+
 ## [0.7.0](https://github.com/andymai/hush/compare/v0.6.1...v0.7.0) (2026-09-21)
 
 
