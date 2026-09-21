@@ -3,9 +3,9 @@
 
 use crate::gui::meter::{self, Meter};
 use crate::gui::theme::{quiet_button, row, section, slider, toggle_row, FIELD_WIDTH, GOOD};
-use crate::gui::{megabytes, Gui, MODEL_ORDER};
+use crate::gui::{megabytes, Gui};
 use crate::transcription::device::GpuAvailability;
-use crate::transcription::models::{recommended_model, ModelManager, ModelSize};
+use crate::transcription::models::{ModelManager, ModelSize};
 use std::sync::Arc;
 
 /// The languages Whisper handles best, plus detection.
@@ -37,20 +37,25 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn models(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Model");
-    let Some(manager) = ModelManager::new(crate::config::paths::models_dir()).ok() else {
+    if gui.catalogue.is_empty() {
         row("The models directory is not readable")
             .status(false)
             .show(ui, |_| {});
         return;
-    };
-    let recommended = recommended_model();
+    }
+    let recommended = gui.recommended;
+    let sizes: Vec<ModelSize> = gui.catalogue.iter().map(|(size, _)| *size).collect();
     let selected: Option<ModelSize> = gui.config.transcription.model_size.parse().ok();
+    let size_of = |size: ModelSize| -> String {
+        gui.catalogue
+            .iter()
+            .find(|(candidate, _)| *candidate == size)
+            .map(|(_, bytes)| megabytes(*bytes))
+            .unwrap_or_default()
+    };
     let describe = |size: ModelSize| -> String {
         let installed = gui.machine.installed_models.contains(&size);
-        let bytes = manager
-            .get_model_info(&size)
-            .map(|info| megabytes(info.expected_size))
-            .unwrap_or_default();
+        let bytes = size_of(size);
         if installed {
             format!("{} ({})", size_key(size), bytes)
         } else {
@@ -70,10 +75,7 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
                     .unwrap_or_else(|| gui.config.transcription.model_size.clone()),
             )
             .show_ui(ui, |ui| {
-                for size in MODEL_ORDER {
-                    if manager.get_model_info(&size).is_none() {
-                        continue;
-                    }
+                for size in sizes {
                     ui.selectable_value(
                         &mut gui.config.transcription.model_size,
                         size_key(size).to_string(),
@@ -108,11 +110,7 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
     if let Some(size) = selected {
         if !gui.machine.installed_models.contains(&size) {
             let title = format!("{} is not downloaded yet", size_key(size));
-            let bytes = manager
-                .get_model_info(&size)
-                .map(|info| megabytes(info.expected_size))
-                .unwrap_or_default();
-            let description = format!("{} from Hugging Face, once.", bytes);
+            let description = format!("{} from Hugging Face, once.", size_of(size));
             row(&title)
                 .status(false)
                 .describe(&description)
@@ -325,6 +323,7 @@ pub fn size_key(size: ModelSize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gui::MODEL_ORDER;
 
     #[test]
     fn every_model_name_parses_back() {

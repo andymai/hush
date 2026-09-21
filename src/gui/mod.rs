@@ -22,6 +22,7 @@ use meter::Meter;
 use pages::hotkeys::KeyField;
 use pages::Page;
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::warn;
@@ -106,6 +107,15 @@ struct Restart {
     went_down: bool,
 }
 
+/// The machine is read on a thread of its own, because the read opens every
+/// input device, runs `id`, and waits on the daemon's socket: none of that
+/// belongs on the thread that draws the window.
+#[derive(Default)]
+struct Poll {
+    latest: Arc<Mutex<Option<Machine>>>,
+    in_flight: Arc<AtomicBool>,
+}
+
 pub struct Gui {
     pub config: Config,
     pub saved: Config,
@@ -113,6 +123,9 @@ pub struct Gui {
     pub saved_vocabulary: DomainVocabulary,
     pub page: Page,
     pub machine: Machine,
+    /// Every model the catalogue knows, with its download size in bytes.
+    pub catalogue: Vec<(ModelSize, u64)>,
+    pub recommended: ModelSize,
     pub download: Arc<Mutex<Download>>,
     pub runtime: tokio::runtime::Runtime,
     pub toast: Option<(String, Instant)>,
@@ -131,6 +144,7 @@ pub struct Gui {
     pub new_term: String,
     pub try_text: String,
     restart: Option<Restart>,
+    poll: Poll,
     last_poll: Instant,
 }
 
@@ -150,6 +164,14 @@ impl Gui {
             .context("Failed to start the background runtime")?;
         let machine = Machine::read();
         let vocabulary = load_vocabulary();
+        let manager = ModelManager::new(crate::config::paths::models_dir()).ok();
+        let catalogue = MODEL_ORDER
+            .iter()
+            .filter_map(|size| {
+                let info = manager.as_ref()?.get_model_info(size)?;
+                Some((*size, info.expected_size))
+            })
+            .collect();
         Ok(Self {
             page: Page::from_env().unwrap_or(Page::Overview),
             saved: config.clone(),
@@ -157,6 +179,8 @@ impl Gui {
             saved_vocabulary: vocabulary.clone(),
             vocabulary,
             machine,
+            catalogue,
+            recommended: crate::transcription::models::recommended_model(),
             download: Arc::new(Mutex::new(Download::default())),
             runtime,
             toast: None,
@@ -171,6 +195,7 @@ impl Gui {
             new_term: String::new(),
             try_text: String::new(),
             restart: None,
+            poll: Poll::default(),
             last_poll: Instant::now(),
         })
     }
@@ -217,8 +242,28 @@ impl Gui {
         self.editing_key = None;
     }
 
-    pub fn refresh(&mut self) {
-        self.machine = Machine::read();
+    /// Read the machine on a background thread; `take_refresh` picks up the
+    /// result on a later frame.
+    pub fn request_refresh(&mut self, ctx: &egui::Context) {
+        if self.poll.in_flight.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let latest = Arc::clone(&self.poll.latest);
+        let in_flight = Arc::clone(&self.poll.in_flight);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let machine = Machine::read();
+            *latest.lock() = Some(machine);
+            in_flight.store(false, Ordering::Release);
+            ctx.request_repaint();
+        });
+    }
+
+    fn take_refresh(&mut self) {
+        let Some(machine) = self.poll.latest.lock().take() else {
+            return;
+        };
+        self.machine = machine;
         let Some(restart) = self.restart.as_mut() else {
             return;
         };
@@ -250,7 +295,7 @@ impl Gui {
         }
     }
 
-    fn finish_download(&mut self) {
+    fn finish_download(&mut self, ctx: &egui::Context) {
         let finished = {
             let mut download = self.download.lock();
             let finished = download.finished.take();
@@ -266,7 +311,7 @@ impl Gui {
                     self.config.transcription.model_size = size_key(size).to_string();
                 }
                 self.say("Model ready. Save to use it.");
-                self.refresh();
+                self.request_refresh(ctx);
             },
             Some((Err(e), _)) => self.say(format!("Download failed: {}", e)),
             None => {},
@@ -322,9 +367,10 @@ impl eframe::App for Gui {
         theme::apply(ctx);
         if self.last_poll.elapsed() >= self.poll_interval() {
             self.last_poll = Instant::now();
-            self.refresh();
+            self.request_refresh(ctx);
         }
-        self.finish_download();
+        self.take_refresh();
+        self.finish_download(ctx);
         self.finish_capture();
         if self.page != Page::Speech {
             self.meter = None;
