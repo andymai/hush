@@ -4,6 +4,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, info, warn};
 
@@ -79,14 +80,19 @@ impl std::fmt::Display for ModelSize {
 /// The model this machine should start with: a GPU can carry a larger one,
 /// and a small machine should not swap while transcribing.
 pub fn recommended_model() -> ModelSize {
-    let gpu = crate::transcription::device::GpuAvailability::detect().available;
-    let memory_gb = sysinfo::System::new_all().total_memory() / 1024 / 1024 / 1024;
-    match (gpu, memory_gb) {
-        (true, 16..) => ModelSize::Medium,
-        (true, _) => ModelSize::Small,
-        (false, 16..) => ModelSize::Base,
-        (false, _) => ModelSize::Tiny,
-    }
+    static RECOMMENDED: OnceLock<ModelSize> = OnceLock::new();
+    *RECOMMENDED.get_or_init(|| {
+        let gpu = crate::transcription::device::GpuAvailability::detect().available;
+        let mut system = sysinfo::System::new();
+        system.refresh_memory();
+        let memory_gb = system.total_memory() / 1024 / 1024 / 1024;
+        match (gpu, memory_gb) {
+            (true, 16..) => ModelSize::Medium,
+            (true, _) => ModelSize::Small,
+            (false, 16..) => ModelSize::Base,
+            (false, _) => ModelSize::Tiny,
+        }
+    })
 }
 
 pub struct ModelManager {

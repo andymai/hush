@@ -134,7 +134,9 @@ impl CommandDispatcher {
             Commands::Stop => handle_client_command(DaemonCommand::Stop).await,
             Commands::Cancel => handle_client_command(DaemonCommand::Cancel).await,
             Commands::Doctor => handle_doctor().await,
-            Commands::Settings => crate::gui::run(),
+            // The window owns a runtime of its own; dropping it inside this
+            // async context panics unless the thread leaves the runtime first.
+            Commands::Settings => tokio::task::block_in_place(crate::gui::run),
             Commands::PasteLast => handle_client_command(DaemonCommand::PasteLast).await,
             Commands::Learn { text } => {
                 let text = (!text.is_empty()).then(|| text.join(" "));
