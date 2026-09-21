@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/andymai/hush/compare/v0.6.1...v0.7.0) (2026-09-21)
+
+
+### Features
+
+* **gui:** redesign the settings window ([#163](https://github.com/andymai/hush/issues/163)) ([5ed510c](https://github.com/andymai/hush/commit/5ed510cb1240a986fa765293d4bc4f9322f69c83))
+
+
+### Bug Fixes
+
+* **gui:** drop the non-existent turbo model from the setup hint ([#161](https://github.com/andymai/hush/issues/161)) ([08f7df5](https://github.com/andymai/hush/commit/08f7df5ff5977bfbda3214b5641d29b8dc6f6e73))
+
 ## [0.6.1](https://github.com/andymai/hush/compare/v0.6.0...v0.6.1) (2026-09-14)
 
 
