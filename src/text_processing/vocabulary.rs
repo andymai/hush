@@ -34,7 +34,7 @@ fn get_cached_regex(pattern: &str) -> Option<Arc<Regex>> {
 }
 
 /// Domain-specific vocabulary configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct DomainVocabulary {
     /// Abbreviations and their expansions
     #[serde(default)]

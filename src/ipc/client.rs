@@ -4,6 +4,7 @@ use super::paths;
 use super::protocol::{DaemonCommand, DaemonResponse, DaemonState};
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
@@ -37,6 +38,23 @@ pub async fn send_to(path: &Path, command: DaemonCommand) -> Result<DaemonRespon
 /// The daemon's state when it answers, `None` when nothing is listening.
 pub async fn status() -> Option<DaemonState> {
     send(DaemonCommand::Status).await.ok()?.state
+}
+
+/// `status` for code that is not on an async runtime, or is on one it must
+/// not block: a plain socket with a short timeout.
+pub fn status_blocking(timeout: Duration) -> Option<DaemonState> {
+    use std::io::{BufRead, BufReader, Write};
+    let mut stream = std::os::unix::net::UnixStream::connect(paths::socket_path()).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    let mut payload = serde_json::to_string(&DaemonCommand::Status).ok()?;
+    payload.push('\n');
+    stream.write_all(payload.as_bytes()).ok()?;
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line).ok()?;
+    serde_json::from_str::<DaemonResponse>(line.trim())
+        .ok()?
+        .state
 }
 
 pub async fn is_running() -> bool {

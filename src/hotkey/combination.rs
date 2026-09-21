@@ -130,7 +130,29 @@ const MOUSE_BUTTONS: &[KeyDef] = &[
     },
 ];
 
+impl Modifiers {
+    /// Add the class a modifier key belongs to; other keys leave it unchanged.
+    pub fn add_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::KEY_LEFTCTRL | KeyCode::KEY_RIGHTCTRL => self.ctrl = true,
+            KeyCode::KEY_LEFTSHIFT | KeyCode::KEY_RIGHTSHIFT => self.shift = true,
+            KeyCode::KEY_LEFTALT | KeyCode::KEY_RIGHTALT => self.alt = true,
+            KeyCode::KEY_LEFTMETA | KeyCode::KEY_RIGHTMETA => self.super_key = true,
+            _ => {},
+        }
+    }
+}
+
 impl KeyCombination {
+    /// The chord for a key read from `/dev/input` with the modifiers held at
+    /// the time, or `None` for a key no hotkey can use.
+    pub fn from_evdev(code: KeyCode, modifiers: Modifiers) -> Option<Self> {
+        KEYS.iter()
+            .chain(MOUSE_BUTTONS.iter())
+            .find(|def| def.evdev == code)
+            .map(|key| Self { modifiers, key })
+    }
+
     /// Parse `Ctrl+Shift+Space` style text. Case and surrounding spaces are ignored.
     pub fn parse(text: &str) -> Result<Self> {
         let mut modifiers = Modifiers::default();
@@ -248,6 +270,27 @@ mod tests {
         assert_eq!(combo.evdev_key(), KeyCode::KEY_SPACE);
         assert_eq!(combo.x11_code(), Some(Code::Space));
         assert_eq!(combo.to_string(), "Ctrl+Shift+Space");
+    }
+
+    #[test]
+    fn evdev_keys_become_chords_with_the_held_modifiers() {
+        let mut held = Modifiers::default();
+        held.add_key(KeyCode::KEY_LEFTCTRL);
+        held.add_key(KeyCode::KEY_A);
+        assert!(held.ctrl && !held.shift);
+
+        let chord = KeyCombination::from_evdev(KeyCode::KEY_RIGHTALT, held).unwrap();
+        assert_eq!(chord.to_string(), "Ctrl+RightAlt");
+        assert_eq!(chord, KeyCombination::parse("ctrl+rightalt").unwrap());
+
+        let bare = KeyCombination::from_evdev(KeyCode::KEY_RIGHTALT, Modifiers::default()).unwrap();
+        assert_eq!(bare.to_string(), "RightAlt");
+        let button = KeyCombination::from_evdev(KeyCode::BTN_SIDE, Modifiers::default()).unwrap();
+        assert_eq!(button.to_string(), "Mouse4");
+        assert!(
+            KeyCombination::from_evdev(KeyCode::BTN_LEFT, Modifiers::default()).is_none(),
+            "a plain click is not a hotkey"
+        );
     }
 
     #[test]
