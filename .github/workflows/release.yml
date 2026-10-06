@@ -83,7 +83,7 @@ jobs:
           glslc --version | head -n 1
           pkg-config --modversion vulkan
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-      - uses: taiki-e/install-action@dfae9bf3d6f6c6f20ef4ebb3486c01a51341ff12 # v2.62.30
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.62.30
         with:
           tool: cargo-deb@3.8.0
       - run: cargo install --locked cargo-generate-rpm@0.21.0
