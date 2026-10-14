@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/andymai/hush/compare/v0.7.1...v0.7.2) (2026-10-14)
+
+
+### Bug Fixes
+
+* **transcription:** drop Whisper non-speech tags like [BLANK_AUDIO] ([#175](https://github.com/andymai/hush/issues/175)) ([c42545f](https://github.com/andymai/hush/commit/c42545f3ecc676011ac66eee62c2a3cb5c3b158e))
+
 ## [0.7.1](https://github.com/andymai/hush/compare/v0.7.0...v0.7.1) (2026-09-21)
 
 
