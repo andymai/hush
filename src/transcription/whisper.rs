@@ -253,17 +253,42 @@ fn run_full(
 
     let mut text = String::new();
     for segment in state.as_iter() {
-        let segment = segment.to_string();
-        let segment = segment.trim();
+        let segment = strip_non_speech(&segment.to_string());
         if segment.is_empty() {
             continue;
         }
         if !text.is_empty() {
             text.push(' ');
         }
-        text.push_str(segment);
+        text.push_str(&segment);
     }
     Ok(text)
+}
+
+/// Whisper writes non-speech as tags like `[BLANK_AUDIO]`, `[MUSIC]` or
+/// `(upbeat music)`. Square brackets never hold dictated words, so they are
+/// dropped anywhere. Parentheses are dropped only when they make up the whole
+/// segment, because an inline aside can be real speech.
+fn strip_non_speech(segment: &str) -> String {
+    let segment = segment.trim();
+    if let Some(inner) = segment.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+        if !inner.contains(['(', ')']) {
+            return String::new();
+        }
+    }
+
+    let mut kept = String::with_capacity(segment.len());
+    let mut rest = segment;
+    while let Some(open) = rest.find('[') {
+        let Some(close) = rest[open..].find(']') else {
+            break;
+        };
+        kept.push_str(&rest[..open]);
+        kept.push(' ');
+        rest = &rest[open + close + 1..];
+    }
+    kept.push_str(rest);
+    kept.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn cpu_threads() -> i32 {
@@ -344,6 +369,28 @@ mod tests {
         let output = resample(&input, 48_000, 16_000).unwrap();
         assert_eq!(output.len(), 16_000);
         assert!(output.iter().all(|s| s.is_finite()));
+    }
+
+    #[test]
+    fn non_speech_tags_are_dropped() {
+        assert_eq!(strip_non_speech("[BLANK_AUDIO]"), "");
+        assert_eq!(strip_non_speech(" [ Silence ] "), "");
+        assert_eq!(strip_non_speech("(upbeat music)"), "");
+        assert_eq!(
+            strip_non_speech("Hello [BLANK_AUDIO] world."),
+            "Hello world."
+        );
+        assert_eq!(strip_non_speech("[MUSIC] Okay, ship it."), "Okay, ship it.");
+    }
+
+    #[test]
+    fn speech_with_brackets_or_parentheses_is_kept() {
+        assert_eq!(
+            strip_non_speech("Use the API (the public one) here."),
+            "Use the API (the public one) here."
+        );
+        assert_eq!(strip_non_speech("(one) and (two)"), "(one) and (two)");
+        assert_eq!(strip_non_speech("an open [ bracket"), "an open [ bracket");
     }
 
     #[test]

@@ -946,7 +946,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             "subscribe",
                             "like and subscribe",
                         ];
-                        if hallucinations.iter().any(|h| text == *h) {
+                        if text.is_empty() || hallucinations.iter().any(|h| text == *h) {
                             *state_handle.lock() = OverlayState::idle();
                             shared.set_idle();
                             continue;
