@@ -136,9 +136,13 @@ fn default_max_recording_secs() -> u64 {
 /// Whisper transcription model configuration
 #[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
 pub struct TranscriptionConfig {
-    /// Explicit model file. When unset, the file for `model_size` inside the
-    /// models directory is used.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Explicit model file. When unset or empty, the file for `model_size`
+    /// inside the models directory is used.
+    #[serde(
+        default,
+        deserialize_with = "empty_path_as_none",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub model_path: Option<PathBuf>,
     /// Model size identifier (tiny, base, small, medium, large, large-v2, large-v3)
     pub model_size: String,
@@ -157,6 +161,14 @@ pub struct TranscriptionConfig {
 
 fn default_true() -> bool {
     true
+}
+
+fn empty_path_as_none<'de, D>(deserializer: D) -> std::result::Result<Option<PathBuf>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let path = Option::<PathBuf>::deserialize(deserializer)?;
+    Ok(path.filter(|path| !path.as_os_str().is_empty()))
 }
 
 impl TranscriptionConfig {
@@ -510,6 +522,13 @@ model_size = "small"
             config.transcription.model_path(),
             PathBuf::from("/tmp/custom.bin")
         );
+    }
+
+    #[test]
+    fn empty_model_path_falls_back_to_the_catalogue() {
+        let config = Config::parse_over_defaults("[transcription]\nmodel_path = \"\"\n").unwrap();
+        assert!(config.transcription.model_path.is_none());
+        assert!(config.transcription.model_path().ends_with("ggml-base.bin"));
     }
 
     #[test]
