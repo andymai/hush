@@ -10,6 +10,13 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # egui_overlay 0.9 requires egui ^0.29, and the settings window shares
+      # that egui through eframe, so both stay on 0.29 while the overlay does.
+      - dependency-name: eframe
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: egui
+        update-types: [version-update:semver-minor, version-update:semver-major]
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
