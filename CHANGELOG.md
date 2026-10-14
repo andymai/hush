@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/andymai/hush/compare/v0.7.2...v0.7.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* **config:** treat an empty model_path as unset ([#178](https://github.com/andymai/hush/issues/178)) ([ae8d520](https://github.com/andymai/hush/commit/ae8d520c9a06271b743964489c4269df57bd61fd))
+
 ## [0.7.2](https://github.com/andymai/hush/compare/v0.7.1...v0.7.2) (2026-10-14)
 
 
