@@ -110,7 +110,7 @@ dotenvy = "0.15" # Environment variable loading
 global-hotkey = "0.8"
 
 # Desktop notifications over D-Bus (pure Rust through zbus)
-notify-rust = { version = ">=4.17, <4.18", default-features = false, features = [
+notify-rust = { version = ">=4.17, <4.19", default-features = false, features = [
   "z",
 ] } # 4.18 needs Rust 1.89, above the MSRV
 zbus = { version = "5", default-features = false, features = [
