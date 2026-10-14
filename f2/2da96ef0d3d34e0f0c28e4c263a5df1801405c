@@ -1,0 +1,24 @@
+src/cli/commands/listen.rs
+  s_68ac6570c93832::t_1f14373a0e2ada 949
+src/transcription/whisper.rs
+  s_68ac6570c93832::t_d0e01300d69909 374-378,383-395
+  s_68ac6570c93832::t_cdd841b525b5d5 256,263,268-291
+  s_68ac6570c93832::t_ad22855c7b9ab0 379-382
+  s_68ac6570c93832::t_c46c474bc4457c 292-293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f22da96ef0d3d34e0f0c28e4c263a5df1801405c",
+  "prompts": {},
+  "sessions": {
+    "s_68ac6570c93832": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2b40cfb3-6f20-4fa0-9816-6530132cf752",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
