@@ -1,0 +1,25 @@
+.github/workflows/ci.yml
+  s_4f67ef7694bf14::t_5ffdeca79f4c19 81,93,95
+CLAUDE.md
+  s_4f67ef7694bf14::t_5ffdeca79f4c19 108
+Cargo.toml
+  s_4f67ef7694bf14::t_5ffdeca79f4c19 10
+README.md
+  s_4f67ef7694bf14::t_5ffdeca79f4c19 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a712bc01f168c3fd969bc24e36ccf156aa0e74b7",
+  "prompts": {},
+  "sessions": {
+    "s_4f67ef7694bf14": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aecda30c-05b9-41ae-a760-914d9bc09aa9",
+        "model": "unknown"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
