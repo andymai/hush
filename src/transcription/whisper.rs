@@ -4,7 +4,7 @@ use crate::logging::{transcription as logging, RequestContext};
 use crate::transcription::device::GpuAvailability;
 use crate::Result;
 use parking_lot::Mutex;
-use rubato::{Fft, FixedSync, Indexing, Resampler};
+use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
 use std::path::Path;
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
@@ -304,15 +304,16 @@ pub fn resample(audio: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>>
         return Ok(audio.to_vec());
     }
 
-    use audioadapter_buffers::direct::SequentialSlice;
+    use rubato::audioadapter_buffers::direct::SequentialSlice;
 
     let chunk_size = 1024;
-    let mut resampler = Fft::<f32>::new(
+    let mut resampler = Fft::<f32>::new_custom(
         from_rate as usize,
         to_rate as usize,
         chunk_size,
         1,
         1,
+        WindowFunction::BlackmanHarris2,
         FixedSync::Both,
     )
     .map_err(|e| anyhow::anyhow!("Failed to create resampler: {}", e))?;

@@ -92,7 +92,6 @@ rodio = { version = "0.21", default-features = false, features = [
   "wav",
 ] }
 rubato = "5.0"
-audioadapter-buffers = "2.0" # Buffer adapters for rubato resampler; must match rubato's own version
 
 sha2 = "0.10"        # SHA256 checksum validation for model integrity
 indicatif = "0.18"   # Model download progress

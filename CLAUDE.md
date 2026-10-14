@@ -92,8 +92,8 @@ Transcribed text flows through: filler word removal → vocabulary expansion →
 These versions are constrained:
 - dirs 5.0 (6.0 breaking API)
 - egui 0.29 (must match egui_overlay 0.9)
-- audioadapter-buffers 2.0 (must match the version rubato depends on; a mismatch
-  makes `SequentialSlice` fail rubato's `Adapter`/`AdapterMut` bounds)
+- `SequentialSlice` comes from rubato's `audioadapter_buffers` re-export, not a
+  direct dependency, so its `Adapter`/`AdapterMut` impls always match rubato's
 - rodio needs the `playback` feature explicitly, since it uses
   `default-features = false` and `playback` gates `OutputStream`
 
