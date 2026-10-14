@@ -175,7 +175,7 @@ eframe = { version = "0.29", default-features = false, features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # X11 window system
-x11rb = "0.13"
+x11rb = "0.14"
 
 # Kernel-level keyboard emulation (uinput)
 input-linux = "0.7"
