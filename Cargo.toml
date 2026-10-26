@@ -128,7 +128,7 @@ egui_overlay = "0.9"
 raw-window-handle = "0.6"
 
 # Application directories (XDG)
-dirs = "5.0" # Keep at 7.0 - 6.0 has breaking API changes
+dirs = "7.0"
 
 # Async runtime
 tokio = { version = "1.48", features = ["full"] }
