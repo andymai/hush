@@ -1,0 +1,19 @@
+Cargo.toml
+  s_b59294d1f6ab91::t_41c939cd85f93e 131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ea834c1c20b065197d64b8cb26efe5dc312b9af3",
+  "prompts": {},
+  "sessions": {
+    "s_b59294d1f6ab91": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d066ae07-3f26-4053-8085-781d24d62ed6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
