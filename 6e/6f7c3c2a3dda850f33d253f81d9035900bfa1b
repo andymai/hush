@@ -1,0 +1,19 @@
+Cargo.lock
+  s_b59294d1f6ab91::t_4da304f29304f1 195,1392,3250,3534,3832,3845,3874,3876,4360,4363,4506,4508,5175,5177,5334
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6e6f7c3c2a3dda850f33d253f81d9035900bfa1b",
+  "prompts": {},
+  "sessions": {
+    "s_b59294d1f6ab91": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d066ae07-3f26-4053-8085-781d24d62ed6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
