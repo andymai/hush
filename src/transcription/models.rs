@@ -369,6 +369,7 @@ impl ModelManager {
 
     /// Computes the SHA256 checksum of a file
     fn compute_sha256(path: &Path) -> Result<String> {
+        use std::fmt::Write;
         use std::io::Read;
 
         let mut file =
@@ -387,8 +388,12 @@ impl ModelManager {
             hasher.update(&buffer[..bytes_read]);
         }
 
-        let result = hasher.finalize();
-        Ok(format!("{:x}", result))
+        let digest = hasher.finalize();
+        let mut hex = String::with_capacity(digest.len() * 2);
+        for byte in digest.iter() {
+            write!(hex, "{byte:02x}")?;
+        }
+        Ok(hex)
     }
 
     async fn is_model_valid(&self, path: &Path, info: &ModelInfo) -> Result<bool> {
