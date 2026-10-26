@@ -1,6 +1,6 @@
 use crate::Result;
 use anyhow::Context;
-use rodio::{OutputStreamBuilder, Sink, Source};
+use rodio::{nz, ChannelCount, DeviceSinkBuilder, Player, SampleRate, Source};
 use std::time::Duration;
 use tracing::warn;
 
@@ -14,9 +14,9 @@ pub struct AudioFeedback {
 impl AudioFeedback {
     /// Probe the default output; without one the cues are silent.
     pub fn new() -> Result<Self> {
-        let enabled = match OutputStreamBuilder::open_default_stream() {
-            Ok(mut stream) => {
-                stream.log_on_drop(false);
+        let enabled = match DeviceSinkBuilder::open_default_sink() {
+            Ok(mut sink) => {
+                sink.log_on_drop(false);
                 true
             },
             Err(e) => {
@@ -129,47 +129,48 @@ impl Default for AudioFeedback {
 
 /// Play a single tone at the specified frequency and duration
 fn play_tone(frequency: f32, duration_ms: u64) -> Result<()> {
-    let mut stream =
-        OutputStreamBuilder::open_default_stream().context("Failed to get audio output stream")?;
-    stream.log_on_drop(false);
+    let mut sink =
+        DeviceSinkBuilder::open_default_sink().context("Failed to get audio output stream")?;
+    sink.log_on_drop(false);
 
-    let sink = Sink::connect_new(stream.mixer());
+    let player = Player::connect_new(sink.mixer());
 
     let source = SineWave::new(frequency)
         .take_duration(Duration::from_millis(duration_ms))
         .amplify(0.20); // 20% volume to avoid being too loud
 
-    sink.append(source);
-    sink.sleep_until_end();
+    player.append(source);
+    player.sleep_until_end();
 
     Ok(())
 }
 
 /// Play two tones in sequence (for error sound)
 fn play_double_beep(frequency: f32, duration_ms: u64, gap_ms: u64) -> Result<()> {
-    let mut stream =
-        OutputStreamBuilder::open_default_stream().context("Failed to get audio output stream")?;
-    stream.log_on_drop(false);
+    let mut sink =
+        DeviceSinkBuilder::open_default_sink().context("Failed to get audio output stream")?;
+    sink.log_on_drop(false);
 
-    let sink = Sink::connect_new(stream.mixer());
+    let player = Player::connect_new(sink.mixer());
 
     // First beep
     let source1 = SineWave::new(frequency)
         .take_duration(Duration::from_millis(duration_ms))
         .amplify(0.20);
-    sink.append(source1);
+    player.append(source1);
 
     // Gap (silence)
-    let silence = rodio::source::Zero::new(1, 48000).take_duration(Duration::from_millis(gap_ms));
-    sink.append(silence);
+    let silence =
+        rodio::source::Zero::new(nz!(1), nz!(48000)).take_duration(Duration::from_millis(gap_ms));
+    player.append(silence);
 
     // Second beep
     let source2 = SineWave::new(frequency)
         .take_duration(Duration::from_millis(duration_ms))
         .amplify(0.20);
-    sink.append(source2);
+    player.append(source2);
 
-    sink.sleep_until_end();
+    player.sleep_until_end();
 
     Ok(())
 }
@@ -177,7 +178,7 @@ fn play_double_beep(frequency: f32, duration_ms: u64, gap_ms: u64) -> Result<()>
 /// Simple sine wave generator
 struct SineWave {
     frequency: f32,
-    sample_rate: u32,
+    sample_rate: SampleRate,
     current_sample: u64,
 }
 
@@ -185,7 +186,7 @@ impl SineWave {
     fn new(frequency: f32) -> Self {
         Self {
             frequency,
-            sample_rate: 48000,
+            sample_rate: nz!(48000),
             current_sample: 0,
         }
     }
@@ -196,7 +197,7 @@ impl Iterator for SineWave {
 
     fn next(&mut self) -> Option<Self::Item> {
         let sample = (self.current_sample as f32 * self.frequency * 2.0 * std::f32::consts::PI
-            / self.sample_rate as f32)
+            / self.sample_rate.get() as f32)
             .sin();
         self.current_sample = self.current_sample.wrapping_add(1);
         Some(sample)
@@ -208,11 +209,11 @@ impl Source for SineWave {
         None
     }
 
-    fn channels(&self) -> u16 {
-        1
+    fn channels(&self) -> ChannelCount {
+        nz!(1)
     }
 
-    fn sample_rate(&self) -> u32 {
+    fn sample_rate(&self) -> SampleRate {
         self.sample_rate
     }
 
