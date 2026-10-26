@@ -29,3 +29,18 @@ reason = "unmaintained number_prefix via hf-hub/indicatif; removed with the cand
 [[IgnoredVulns]]
 id = "RUSTSEC-2024-0436"
 reason = "unmaintained paste via candle/gemm; removed with the candle stack (#85)"
+
+# zvariant, zvariant_derive and zbus_names: merged into zbus 6. hush, ksni
+# and notify-rust all use zbus 5, and ksni 0.3.7 and notify-rust 4.18.2 (the
+# latest releases) still require zbus ^5. They leave with the move to zbus 6.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0370"
+reason = "unmaintained zvariant via zbus 5, merged into zbus 6; removed when hush, ksni and notify-rust move to zbus 6"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0371"
+reason = "unmaintained zbus_names via zbus 5, merged into zbus 6; removed when hush, ksni and notify-rust move to zbus 6"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0372"
+reason = "unmaintained zvariant_derive via zbus 5, merged into zbus 6; removed when hush, ksni and notify-rust move to zbus 6"
