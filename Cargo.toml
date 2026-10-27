@@ -85,7 +85,7 @@ vulkan = ["whisper-rs/vulkan"]
 
 [dependencies]
 # Audio capture and processing
-cpal = "0.17"
+cpal = "0.18"
 hound = "3.5"
 rodio = { version = "0.23", default-features = false, features = [
   "playback",
