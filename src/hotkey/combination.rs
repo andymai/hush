@@ -216,7 +216,7 @@ impl KeyCombination {
             mods |= X11Modifiers::ALT;
         }
         if self.modifiers.super_key {
-            mods |= X11Modifiers::SUPER;
+            mods |= X11Modifiers::META;
         }
         mods
     }
@@ -363,7 +363,7 @@ mod tests {
         let combo = KeyCombination::parse("Ctrl+Alt+Super+Shift+A").unwrap();
         assert_eq!(
             combo.x11_modifiers(),
-            X11Modifiers::CONTROL | X11Modifiers::ALT | X11Modifiers::SUPER | X11Modifiers::SHIFT
+            X11Modifiers::CONTROL | X11Modifiers::ALT | X11Modifiers::META | X11Modifiers::SHIFT
         );
     }
 }
