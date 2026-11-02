@@ -19,11 +19,14 @@ permissions: {}
 
 # rust-toolchain.toml pins the Rust version and includes rustfmt and clippy,
 # so rustup installs the right toolchain without a setup action.
+#
+# Jobs pin ubuntu-24.04: on ubuntu-26.04, whisper-rs-sys 0.14 generates
+# bindings that fail their own layout checks.
 
 jobs:
   fmt:
     name: Format
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -34,7 +37,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -48,7 +51,7 @@ jobs:
   # the ggml-vulkan build are linted on every PR.
   clippy-vulkan:
     name: Clippy (vulkan)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -61,7 +64,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -79,7 +82,7 @@ jobs:
 
   msrv:
     name: MSRV (1.89)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -96,7 +99,7 @@ jobs:
 
   docs:
     name: Rustdoc
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -110,7 +113,7 @@ jobs:
 
   deny:
     name: Cargo Deny
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -124,7 +127,7 @@ jobs:
   # fails every run.
   audit:
     name: Security Audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -138,7 +141,7 @@ jobs:
 
   machete:
     name: Unused Dependencies
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -152,7 +155,7 @@ jobs:
 
   taplo:
     name: TOML Format
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -174,7 +177,7 @@ jobs:
     name: CI Pass
     if: ${{ !cancelled() }}
     needs: [fmt, clippy, clippy-vulkan, test, msrv, docs, deny, audit, machete, taplo]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check all jobs
         env:
