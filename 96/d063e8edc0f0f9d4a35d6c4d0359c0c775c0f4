@@ -1,0 +1,27 @@
+src/gui/meter.rs
+  s_5a82da45ced147::t_c0a121363356e9 106
+src/audio/capture.rs
+  s_5a82da45ced147::t_7ac02c8ee8cdc5 312-317,320-321
+  s_5a82da45ced147::t_66c96962cc1a55 193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "96d063e8edc0f0f9d4a35d6c4d0359c0c775c0f4",
+  "prompts": {},
+  "humans": {
+    "h_b755e1950659f4": {
+      "author": "Andy Aragon <hi@andymai.com>"
+    }
+  },
+  "sessions": {
+    "s_5a82da45ced147": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a9fab01-056b-4ad2-8570-01423f7609e3",
+        "model": "unknown"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
