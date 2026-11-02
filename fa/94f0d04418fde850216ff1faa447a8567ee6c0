@@ -1,0 +1,14 @@
+Cargo.lock
+  h_b755e1950659f4 1022,1345,2043,2706,3175,3459,3770,4288,5259
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fa94f0d04418fde850216ff1faa447a8567ee6c0",
+  "prompts": {},
+  "humans": {
+    "h_b755e1950659f4": {
+      "author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
