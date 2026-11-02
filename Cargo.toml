@@ -107,7 +107,7 @@ regex = "1.12" # Pattern matching for filler words
 dotenvy = "0.15" # Environment variable loading
 
 # Hotkey management
-global-hotkey = "0.8"
+global-hotkey = "0.9"
 
 # Desktop notifications over D-Bus (pure Rust through zbus)
 notify-rust = { version = ">=4.17, <4.19", default-features = false, features = [
