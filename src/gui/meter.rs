@@ -103,7 +103,7 @@ fn start(device: &Device, level: Arc<AtomicU32>) -> Result<cpal::Stream> {
     };
     let stream = device
         .build_input_stream(
-            &config,
+            config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
                 level.store(rms(data).to_bits(), Ordering::Relaxed);
             },
