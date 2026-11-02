@@ -190,7 +190,7 @@ impl AudioCapture {
 
         let stream = device
             .build_input_stream(
-                &config,
+                config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     if is_recording_clone.load(Ordering::Acquire) {
                         buffer_clone.lock().extend_from_slice(data);
@@ -210,11 +210,6 @@ impl AudioCapture {
                 None,
             )
             .map_err(|e| anyhow::anyhow!("Failed to build input stream: {}", e))?;
-
-        // Start paused - will be resumed on first start_recording() call
-        stream
-            .pause()
-            .map_err(|e| anyhow::anyhow!("Failed to pause initial stream: {}", e))?;
 
         info!("Audio stream pre-created (paused) for faster recording start");
 
@@ -314,19 +309,17 @@ impl AudioCapture {
 
         // Pause the audio stream (keep it alive for fast resume on next recording)
         if let Some(ref stream) = self.stream {
-            if let Err(e) = stream.pause() {
-                error!(
+            match stream.pause() {
+                Ok(()) => debug!(
+                    request_id = %ctx.request_id,
+                    "Audio stream paused (kept alive for fast resume)"
+                ),
+                Err(e) => warn!(
                     request_id = %ctx.request_id,
                     error = %e,
-                    "Failed to pause audio stream"
-                );
-                return Err(anyhow::anyhow!("Failed to pause audio stream: {}", e));
+                    "Could not pause audio stream; the recording flag already stopped capture"
+                ),
             }
-
-            debug!(
-                request_id = %ctx.request_id,
-                "Audio stream paused (kept alive for fast resume)"
-            );
         }
 
         // Extract recorded data from buffer using take() to avoid clone
