@@ -98,7 +98,7 @@ indicatif = "0.18"   # Model download progress
 futures-util = "0.3" # Streaming download bodies
 
 # whisper.cpp; GPU backends are enabled through the cuda and vulkan features
-whisper-rs = { version = "0.15", features = ["tracing_backend", "raw-api"] }
+whisper-rs = { version = "0.16", features = ["tracing_backend", "raw-api"] }
 
 # Text processing
 regex = "1.12" # Pattern matching for filler words
