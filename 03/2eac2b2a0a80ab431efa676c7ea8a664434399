@@ -1,0 +1,20 @@
+.github/workflows/ci.yml
+  h_b755e1950659f4 84,96,98
+CLAUDE.md
+  h_b755e1950659f4 108
+Cargo.toml
+  h_b755e1950659f4 10,115,143
+README.md
+  h_b755e1950659f4 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "032eac2b2a0a80ab431efa676c7ea8a664434399",
+  "prompts": {},
+  "humans": {
+    "h_b755e1950659f4": {
+      "author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
