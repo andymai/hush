@@ -7,7 +7,7 @@ authors = ["Andy Aragon"]
 license = "MIT"
 repository = "https://github.com/andymai/hush"
 readme = "README.md"
-rust-version = "1.89"
+rust-version = "1.95"
 keywords = ["voice", "speech-to-text", "whisper", "linux"]
 categories = ["multimedia::audio", "accessibility"]
 default-run = "hush"
@@ -112,7 +112,7 @@ global-hotkey = "0.9"
 # Desktop notifications over D-Bus (pure Rust through zbus)
 notify-rust = { version = ">=4.17, <4.19", default-features = false, features = [
   "z",
-] } # 4.18 needs Rust 1.89, above the MSRV
+] }
 zbus = { version = "5", default-features = false, features = [
   "blocking-api",
 ] } # KWin window queries
@@ -140,7 +140,7 @@ thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
-sysinfo = "0.32"                                                            # Conservative update, 0.37 has breaking changes
+sysinfo = "0.32"
 chrono = { version = "0.4", features = ["serde"] }
 
 # HTTP client for downloading models
