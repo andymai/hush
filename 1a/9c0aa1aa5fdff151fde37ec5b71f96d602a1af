@@ -1,0 +1,21 @@
+Cargo.toml
+  s_4ecf15858ba803::t_b5897f3e326e03 143-145
+Cargo.lock
+  s_4ecf15858ba803::t_a92fbf6923ecee 941-959,3564-3583,4296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1a9c0aa1aa5fdff151fde37ec5b71f96d602a1af",
+  "prompts": {},
+  "sessions": {
+    "s_4ecf15858ba803": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7d83c32-0b6c-4c63-8bf0-06b44f67c75f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
