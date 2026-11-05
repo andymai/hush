@@ -83,9 +83,10 @@ pub fn recommended_model() -> ModelSize {
     static RECOMMENDED: OnceLock<ModelSize> = OnceLock::new();
     *RECOMMENDED.get_or_init(|| {
         let gpu = crate::transcription::device::GpuAvailability::detect().available;
-        let mut system = sysinfo::System::new();
-        system.refresh_memory();
-        let memory_gb = system.total_memory() / 1024 / 1024 / 1024;
+        let memory_gb = sysinfo::System::new().map_or(0, |mut system| {
+            system.refresh_memory();
+            system.total_memory() / 1024 / 1024 / 1024
+        });
         match (gpu, memory_gb) {
             (true, 16..) => ModelSize::Medium,
             (true, _) => ModelSize::Small,

@@ -7,12 +7,10 @@
 /// - Health monitoring and system diagnostics
 /// - Component-specific log levels and filtering
 use anyhow::Result;
-use parking_lot::Mutex;
 use serde_json::json;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::System;
 use tracing::{Event, Level, Subscriber};
@@ -80,17 +78,14 @@ pub struct PerformanceMetrics {
 
 impl PerformanceMetrics {
     pub fn collect() -> Self {
-        let mut system = System::new_all();
-        system.refresh_all();
-
-        let cpu_usage = system.global_cpu_usage();
-
-        let memory_usage_mb =
-            if let Some(process) = system.processes_by_name(OsStr::new("hush")).next() {
-                process.memory() / 1024 / 1024
-            } else {
-                0
-            };
+        let (cpu_usage, memory_usage_mb) = System::new_all().map_or((0.0, 0), |mut system| {
+            system.refresh_all();
+            let memory_usage_mb = system
+                .processes_by_name(OsStr::new("hush"))
+                .next()
+                .map_or(0, |process| process.memory() / 1024 / 1024);
+            (system.global_cpu_usage(), memory_usage_mb)
+        });
 
         // Calculate disk usage for hush cache directory
         let disk_usage_mb = Self::calculate_disk_usage();
@@ -311,17 +306,13 @@ impl Default for LoggingConfig {
 pub struct LoggingSystem {
     config: LoggingConfig,
     _guards: Vec<WorkerGuard>,
-    system_info: Arc<Mutex<System>>,
 }
 
 impl LoggingSystem {
     pub fn new(config: LoggingConfig) -> Result<Self> {
-        let system_info = Arc::new(Mutex::new(System::new_all()));
-
         Ok(Self {
             config,
             _guards: Vec::new(),
-            system_info,
         })
     }
 
@@ -399,18 +390,23 @@ impl LoggingSystem {
 
     /// Log comprehensive system information at startup
     fn log_system_info(&self) {
-        let mut system = self.system_info.lock();
-        system.refresh_all();
+        let (total_memory_gb, cpu_count) = System::new_all().map_or((0, 0), |mut system| {
+            system.refresh_all();
+            (
+                system.total_memory() / 1024 / 1024 / 1024,
+                system.cpus().len(),
+            )
+        });
 
-        let os_name = System::name().unwrap_or_else(|| "Unknown".to_string());
-        let kernel_version = System::kernel_version().unwrap_or_else(|| "Unknown".to_string());
+        let os_name = System::name().unwrap_or_else(|_| "Unknown".to_string());
+        let kernel_version = System::kernel_version().unwrap_or_else(|_| "Unknown".to_string());
         let os_info = format!("{} {}", os_name, kernel_version);
 
         tracing::info!(
             session_id = %*SESSION_ID,
             os_info = %os_info,
-            total_memory_gb = %(system.total_memory() / 1024 / 1024 / 1024),
-            cpu_count = %system.cpus().len(),
+            total_memory_gb = %total_memory_gb,
+            cpu_count = %cpu_count,
             "🖥️ System information logged"
         );
     }
