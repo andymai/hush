@@ -1,0 +1,41 @@
+src/text/clipboard.rs
+  s_115995023cd6f3::t_ecc3ae92c0b915 1-922
+  s_115995023cd6f3::t_37025f10856613 923-971
+src/text/clock.rs
+  s_115995023cd6f3::t_810aa73a21f036 1-62
+  s_115995023cd6f3::t_7de56f64bf3395 63-68
+src/hotkey/modifiers.rs
+  s_115995023cd6f3::t_a358342fcf7b5b 1-98
+src/text/modifiers.rs
+  s_115995023cd6f3::t_89e239cced1914 1-129
+Cargo.lock
+  s_115995023cd6f3::t_aa723bfdfee0d8 1974
+Cargo.toml
+  s_115995023cd6f3::t_dd9be0174fb5a0 185-187
+src/cli/commands/doctor.rs
+  s_115995023cd6f3::t_21c3399b4a1a0c 116,298-314,510-519
+src/hotkey/evdev.rs
+  s_115995023cd6f3::t_c3df3ad9ede253 432
+src/hotkey/mod.rs
+  s_115995023cd6f3::t_f81648aa402c96 29
+src/text/insertion.rs
+  s_115995023cd6f3::t_903deaf71ecb0e 7-8,10-12,18,25-26,56,72,76,82-84,136,144,147,149-151,153-158,160-162,174,177-178,184,200-230
+src/text/mod.rs
+  s_115995023cd6f3::t_1aea3ac3d6f3b6 6-7,34-37,45-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "baad1aa6885224766c2770b6949613c66e0edfb6",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
