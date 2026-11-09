@@ -6,6 +6,7 @@ use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::{debug, error, info, trace, warn};
 
 // Pre-allocate audio buffer for typical recording durations
@@ -20,6 +21,8 @@ pub struct AudioCapture {
     stream: Option<Stream>,
     buffer: Arc<Mutex<Vec<f32>>>,
     is_recording: Arc<AtomicBool>,
+    /// When the first audio of the current recording arrived
+    first_frame: Arc<Mutex<Option<Instant>>>,
     simulated_mode: bool,
     /// Shared sender for amplitude updates - set via enable_amplitude_monitoring()
     amplitude_tx: Arc<Mutex<Option<mpsc::Sender<f32>>>>,
@@ -156,6 +159,7 @@ impl AudioCapture {
                             stream: None,
                             buffer: Arc::new(Mutex::new(Vec::with_capacity(PREALLOCATED_SAMPLES))),
                             is_recording: Arc::new(AtomicBool::new(false)),
+                            first_frame: Arc::new(Mutex::new(None)),
                             simulated_mode: true,
                             amplitude_tx: Arc::new(Mutex::new(None)),
                         });
@@ -180,12 +184,14 @@ impl AudioCapture {
         // Pre-allocate buffer to avoid reallocations during recording
         let buffer = Arc::new(Mutex::new(Vec::with_capacity(PREALLOCATED_SAMPLES)));
         let is_recording = Arc::new(AtomicBool::new(false));
+        let first_frame: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
         let amplitude_tx: Arc<Mutex<Option<mpsc::Sender<f32>>>> = Arc::new(Mutex::new(None));
 
         // Pre-create the audio stream for faster recording start
         // Stream starts paused and is resumed on start_recording()
         let buffer_clone = Arc::clone(&buffer);
         let is_recording_clone = Arc::clone(&is_recording);
+        let first_frame_clone = Arc::clone(&first_frame);
         let amplitude_tx_clone = Arc::clone(&amplitude_tx);
 
         let stream = device
@@ -194,6 +200,9 @@ impl AudioCapture {
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     if is_recording_clone.load(Ordering::Acquire) {
                         buffer_clone.lock().extend_from_slice(data);
+                        if !data.is_empty() {
+                            first_frame_clone.lock().get_or_insert_with(Instant::now);
+                        }
 
                         // Calculate and send amplitude for waveform visualization
                         // Clone sender outside lock to avoid holding lock during send
@@ -219,6 +228,7 @@ impl AudioCapture {
             stream: Some(stream),
             buffer,
             is_recording,
+            first_frame,
             simulated_mode: false,
             amplitude_tx,
         })
@@ -247,6 +257,7 @@ impl AudioCapture {
             buffer.clear();
             len
         };
+        *self.first_frame.lock() = None;
         self.is_recording.store(true, Ordering::Release);
 
         debug!(
@@ -261,6 +272,7 @@ impl AudioCapture {
                 request_id = %ctx.request_id,
                 "🧪 Using simulated audio recording for testing"
             );
+            *self.first_frame.lock() = Some(Instant::now());
             return Ok(());
         }
 
@@ -307,7 +319,8 @@ impl AudioCapture {
             return Ok(simulated_data);
         }
 
-        // Pause the audio stream (keep it alive for fast resume on next recording)
+        // A paused stream lets PipeWire suspend the source, which then needs
+        // time to wake for the next take: see `first_frame_at`.
         if let Some(ref stream) = self.stream {
             match stream.pause() {
                 Ok(()) => debug!(
@@ -354,6 +367,12 @@ impl AudioCapture {
 
     pub fn is_recording(&self) -> bool {
         self.is_recording.load(Ordering::Acquire)
+    }
+
+    /// When the first audio of the current recording arrived. `None` while
+    /// the source wakes up.
+    pub fn first_frame_at(&self) -> Option<Instant> {
+        *self.first_frame.lock()
     }
 
     pub fn get_device_name(&self) -> String {

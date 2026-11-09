@@ -46,6 +46,7 @@ Hold `Right Alt`, speak, release. Done.
 ## Features
 
 - **Hold to talk, or lock hands-free.** Holding the hotkey while you speak is the default. Double-tap it to keep recording hands-free, then press once to stop; a lone tap records nothing. `Esc` discards a recording, and hands-free recording stops on its own after ten minutes, with a warning a minute before. Set `mode = "toggle"` under `[hotkey]` to lock on a single tap instead.
+- **Speak at the tone.** Hush plays the start tone and shows the recording overlay when the first audio from the microphone arrives, not when you press the key. A microphone that sleeps between recordings can need a moment to wake, and the tone tells you that Hush hears you. If no audio arrives in five seconds, Hush discards the recording and shows a notification.
 - **Bind any key to it.** `hush toggle`, `hush start`, `hush stop`, and `hush cancel` talk to the daemon over a socket, so any compositor keybind can drive dictation. Hyprland: `bind = , F9, exec, hush toggle`. Sway: `bindsym F9 exec hush toggle`.
 - **Tone by application.** Text lands the way the focused app expects: lowercase and unpunctuated in terminals and editors, casual in chat, full sentences in mail and documents. The window title and your learned terms also prime Whisper, so names come out spelled your way. Works on X11, Hyprland, Sway, and KDE Plasma on Wayland.
 - **Any language Whisper knows.** Set `language = "auto"` under `[transcription]` to detect what you speak, or pick one in the settings window. On a keyboard layout other than plain US (Dvorak, Colemak, and US variants such as US International included), Hush pastes rather than typing key by key, so the letters come out right.
@@ -179,6 +180,8 @@ hush status --devices            # microphones
 hush test audio -d 3             # record and play back
 hush -vv daemon start --foreground
 ```
+
+If a notification says that the microphone did not start, Hush got no audio for five seconds. Run `hush test audio -d 3` to test the microphone, or set `audio.device` to a different one from `hush status --devices`.
 
 If `hush setup permissions` cannot run where you are (a container, an SSH session), `hush setup permissions --print` prints the udev rule to apply as root.
 

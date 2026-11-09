@@ -149,6 +149,10 @@ fn try_it(gui: &mut Gui, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         match gui.machine.daemon {
             None => state_line(ui, false, "Start Hush first."),
+            Some(DaemonState::Starting) => {
+                ui.spinner();
+                ui.label("Starting the microphone…");
+            },
             Some(DaemonState::Recording { elapsed_ms }) => {
                 dot(ui, GOOD);
                 ui.label(format!("Listening… {:.1} s", elapsed_ms as f64 / 1000.0));

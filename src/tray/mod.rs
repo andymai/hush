@@ -31,8 +31,12 @@ impl HushTray {
         }
     }
 
-    fn is_recording(&self) -> bool {
-        matches!(self.state, DaemonState::Recording { .. })
+    /// A take is in progress, including one that waits for the microphone.
+    fn in_take(&self) -> bool {
+        matches!(
+            self.state,
+            DaemonState::Starting | DaemonState::Recording { .. }
+        )
     }
 
     fn icon_state(&self) -> IconState {
@@ -47,6 +51,7 @@ impl HushTray {
     fn summary(&self) -> String {
         match self.state {
             DaemonState::Idle => format!("Idle. Hold {} to dictate.", self.hotkey),
+            DaemonState::Starting => "Starting the microphone.".to_string(),
             DaemonState::Recording { elapsed_ms } => {
                 format!("Recording, {} s.", elapsed_ms / 1000)
             },
@@ -88,7 +93,7 @@ impl Tray for HushTray {
 
     /// A left click starts or stops dictation, like `hush toggle`.
     fn activate(&mut self, _x: i32, _y: i32) {
-        if self.is_recording() {
+        if self.in_take() {
             self.send(SessionCommand::StopRecording);
         } else {
             self.send(SessionCommand::StartRecording);
@@ -96,7 +101,7 @@ impl Tray for HushTray {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        let recording = self.is_recording();
+        let recording = self.in_take();
         let busy = !recording && !matches!(self.state, DaemonState::Idle);
         vec![
             StandardItem {
@@ -251,6 +256,14 @@ mod tests {
 
         let (busy, _rx) = tray(DaemonState::Transcribing);
         assert_eq!(busy.icon_state(), IconState::Busy);
+
+        let (starting, _rx) = tray(DaemonState::Starting);
+        assert_eq!(
+            starting.icon_state(),
+            IconState::Busy,
+            "the recording look waits for the first audio frame"
+        );
+        assert_eq!(starting.summary(), "Starting the microphone.");
     }
 
     #[test]
@@ -261,6 +274,10 @@ mod tests {
 
         let (mut recording, rx) = tray(DaemonState::Recording { elapsed_ms: 0 });
         recording.activate(0, 0);
+        assert_eq!(rx.try_recv(), Ok(SessionCommand::StopRecording));
+
+        let (mut starting, rx) = tray(DaemonState::Starting);
+        starting.activate(0, 0);
         assert_eq!(rx.try_recv(), Ok(SessionCommand::StopRecording));
     }
 
