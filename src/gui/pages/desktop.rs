@@ -1,4 +1,5 @@
-//! The panel icon, the sounds, the update check, and the file behind every page.
+//! The panel icon, the sounds, the media players, the update check, and the
+//! file behind every page.
 
 use crate::gui::theme::{row, section, toggle_row};
 use crate::gui::Gui;
@@ -16,6 +17,12 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         "Play a sound when recording starts and stops",
         "A short tone on start, stop, cancel, and the warning before a cap.",
         &mut gui.config.feedback.audio_enabled,
+    );
+    toggle_row(
+        ui,
+        "Pause music and video while you record",
+        "Pauses the players that play, then resumes them when the recording stops. The players must support MPRIS, as most do.",
+        &mut gui.config.audio.pause_media,
     );
     let title = "Check for new releases";
     if crate::updates::InstallKind::current().checks() {

@@ -40,6 +40,7 @@
 pub mod capture;
 pub mod feedback;
 pub mod level;
+pub mod media;
 pub mod silence;
 pub mod take;
 

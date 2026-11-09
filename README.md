@@ -212,6 +212,7 @@ Give each state a color in the Waybar style sheet, for example `#custom-hush.rec
 | `profiles.enabled` | Adapt output to the focused application, including one-line text in terminals and Shift+Enter line breaks in chat; per-profile keys add window classes | true |
 | `audio.max_recording_secs` | Stop and transcribe after this long, with a warning a minute before; 0 disables | 600 |
 | `audio.silence_stop_secs` | Stop a hands-free recording after this many seconds of silence that follow speech; 0 disables | 0 |
+| `audio.pause_media` | Pause the media players that play while you record, and resume them when the recording stops. Hush resumes only the players that it paused, and only when they are still paused. The players must support MPRIS, as most do | false |
 | `audio.device` | Microphone name from `hush status --devices` | system default |
 | `feedback.audio_enabled` | Tones on start, stop, cancel, and the cap warning | true |
 | `insertion.method` | `auto` (type, then paste what uinput cannot type), `uinput`, or `clipboard` | auto |
