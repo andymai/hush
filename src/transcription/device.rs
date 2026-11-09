@@ -84,6 +84,12 @@ impl GpuAvailability {
         })
     }
 
+    /// Whether [`GpuAvailability::detect`] ran in this process. ggml looks
+    /// for devices only once, so a GPU that comes up later stays unseen.
+    pub fn is_detected() -> bool {
+        GPU_AVAILABILITY.get().is_some()
+    }
+
     /// Check if any GPU is available
     pub fn is_gpu_available() -> bool {
         Self::detect().available

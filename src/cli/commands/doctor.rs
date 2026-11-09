@@ -10,6 +10,7 @@ use crate::text::WindowProvider;
 use crate::text_processing::hook::{self, Program};
 use crate::transcription::cpu;
 use crate::transcription::device::GpuAvailability;
+use crate::transcription::gpu_fallback::GpuFailure;
 use crate::transcription::models::{recommended_model, ModelManager, ModelSize};
 use crate::AudioCapture;
 use anyhow::Result;
@@ -123,6 +124,11 @@ pub async fn checks() -> Vec<Check> {
         if cpu_supported {
             checks.push(gpu_check(&config));
         }
+        let failure = GpuFailure::path();
+        checks.extend(gpu_failure_report(
+            GpuFailure::load_from(&failure).as_ref(),
+            &failure,
+        ));
     }
     checks.push(microphone_check(&config));
     if config.audio.pause_media {
@@ -310,6 +316,22 @@ fn gpu_check(config: &Config) -> Check {
             "check your graphics driver; Hush falls back to the CPU",
         )
     }
+}
+
+/// A line only when a GPU failed a take and Hush keeps it on the CPU.
+fn gpu_failure_report(record: Option<&GpuFailure>, path: &Path) -> Option<Check> {
+    let record = record?;
+    Some(Check::warn(
+        "GPU failure",
+        format!(
+            "{} via {} failed a take with driver {}, so Whisper uses the CPU until the driver changes",
+            record.gpu, record.backend, record.driver
+        ),
+        format!(
+            "rm {} && hush daemon restart (tries the GPU again)",
+            path.display()
+        ),
+    ))
 }
 
 fn microphone_check(config: &Config) -> Check {
@@ -794,6 +816,33 @@ mod tests {
         let fix = check.fix.unwrap();
         assert!(fix.contains("make release"), "{fix}");
         assert!(fix.contains("backend = \"groq\""), "{fix}");
+    }
+
+    #[test]
+    fn a_remembered_gpu_failure_names_the_file_to_delete() {
+        let path = Path::new("/home/me/.local/state/hush/gpu-failure.json");
+        assert!(gpu_failure_report(None, path).is_none());
+
+        let record = GpuFailure {
+            gpu: "NVIDIA GeForce RTX 4080".to_string(),
+            backend: "Vulkan".to_string(),
+            driver: "NVIDIA 580.95.05".to_string(),
+        };
+        let check = gpu_failure_report(Some(&record), path).unwrap();
+        assert_eq!(check.level, Level::Warn);
+        assert!(
+            check.detail.starts_with(
+                "NVIDIA GeForce RTX 4080 via Vulkan failed a take with driver NVIDIA 580.95.05"
+            ),
+            "{}",
+            check.detail
+        );
+        assert_eq!(
+            check.fix.as_deref(),
+            Some(
+                "rm /home/me/.local/state/hush/gpu-failure.json && hush daemon restart (tries the GPU again)"
+            )
+        );
     }
 
     #[test]

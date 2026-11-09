@@ -4,10 +4,13 @@ use crate::audio::level;
 use crate::logging::{transcription as logging, RequestContext};
 use crate::transcription::cpu;
 use crate::transcription::device::GpuAvailability;
+use crate::transcription::gpu_fallback;
 use crate::Result;
+use anyhow::Context;
 use parking_lot::Mutex;
 use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -48,18 +51,20 @@ struct Engine {
 }
 
 pub struct WhisperTranscriber {
-    engine: Arc<Engine>,
+    /// A CPU engine takes the place of a GPU engine that fails a take.
+    engine: Mutex<Arc<Engine>>,
     /// whisper-rs runs `whisper_full_with_state`, which ignores the VAD
     /// fields of `FullParams`, so Hush runs the Silero model itself.
     vad: Option<Arc<Mutex<WhisperVadContext>>>,
     gpu: &'static GpuAvailability,
-    using_gpu: bool,
+    using_gpu: AtomicBool,
+    model_path: PathBuf,
     language: String,
-    threads: i32,
 }
 
 impl WhisperTranscriber {
-    /// Load a ggml model. `use_gpu` is honored when a GPU backend exists.
+    /// Load a ggml model. `use_gpu` is honored when a GPU backend exists,
+    /// unless that GPU failed a take with the same driver before.
     pub async fn new(model_path: &Path, use_gpu: bool) -> Result<Self> {
         cpu::ensure_supported()?;
         let ctx = RequestContext::new("whisper_transcriber_init")
@@ -78,11 +83,20 @@ impl WhisperTranscriber {
         static LOGGING_HOOKS: Once = Once::new();
         LOGGING_HOOKS.call_once(whisper_rs::install_logging_hooks);
 
+        gpu_fallback::wait_for_gpu(use_gpu).await;
         let gpu = GpuAvailability::detect();
-        let using_gpu = use_gpu && gpu.available;
         if use_gpu && !gpu.available {
-            warn!("GPU acceleration requested but no GPU backend is available; using CPU");
+            if gpu_fallback::GPU_BUILD {
+                warn!(
+                    "Whisper loads on the CPU, because ggml found no GPU. The graphics driver \
+                     was probably not ready when Hush started, for example at login. \
+                     Run `hush daemon restart` to use the GPU"
+                );
+            } else {
+                warn!("GPU acceleration requested but no GPU backend is available; using CPU");
+            }
         }
+        let using_gpu = use_gpu && gpu.available && !gpu_fallback::avoid_gpu(gpu);
         info!(
             request_id = %ctx.request_id,
             model_path = %model_path.display(),
@@ -91,47 +105,17 @@ impl WhisperTranscriber {
             "Loading Whisper model"
         );
 
-        let path = model_path
-            .to_str()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Model path contains invalid UTF-8: {}",
-                    model_path.display()
-                )
-            })?
-            .to_owned();
-        let mut params = WhisperContextParameters::default();
-        params.use_gpu(using_gpu);
-
-        // Loading a large model takes seconds, so keep it off the async runtime.
-        let context =
-            tokio::task::spawn_blocking(move || WhisperContext::new_with_params(&path, params))
-                .await
-                .map_err(|e| anyhow::anyhow!("Model loading task failed: {}", e))?
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to load Whisper model {}: {}",
-                        model_path.display(),
-                        e
-                    )
-                })?;
-        let state = context
-            .create_state()
-            .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
-
-        info!("Whisper model loaded on {}", gpu);
-
-        Ok(Self {
-            engine: Arc::new(Engine {
-                context,
-                state: Mutex::new(state),
-            }),
+        let engine = load_engine(model_path, using_gpu).await?;
+        let transcriber = Self {
+            engine: Mutex::new(Arc::new(engine)),
             vad: None,
             gpu,
-            using_gpu,
+            using_gpu: AtomicBool::new(using_gpu),
+            model_path: model_path.to_path_buf(),
             language: "en".to_string(),
-            threads: if using_gpu { 1 } else { cpu_threads() },
-        })
+        };
+        info!("Whisper model loaded on {}", transcriber.get_device_info());
+        Ok(transcriber)
     }
 
     /// Set the spoken language as a Whisper language code. `auto` or an empty
@@ -189,7 +173,7 @@ impl WhisperTranscriber {
         // whisper-rs reads a negative "too many tokens" answer as a length,
         // so the capacity must never run out: whisper.cpp makes at most one
         // token of each byte.
-        self.engine
+        self.engine()
             .context
             .tokenize(prompt, prompt.len() + 1)
             .ok()
@@ -200,7 +184,19 @@ impl WhisperTranscriber {
     /// less the token that starts the prompt. It drops the rest from the
     /// front.
     pub fn prompt_token_budget(&self) -> usize {
-        usize::try_from(self.engine.context.n_text_ctx() / 2 - 1).unwrap_or(0)
+        usize::try_from(self.engine().context.n_text_ctx() / 2 - 1).unwrap_or(0)
+    }
+
+    fn engine(&self) -> Arc<Engine> {
+        Arc::clone(&self.engine.lock())
+    }
+
+    fn threads(&self) -> i32 {
+        if self.is_using_gpu() {
+            1
+        } else {
+            cpu_threads()
+        }
     }
 
     pub async fn transcribe_async(
@@ -244,36 +240,19 @@ impl WhisperTranscriber {
             "Processing audio for transcription"
         );
 
-        let samples = if sample_rate == WHISPER_SAMPLE_RATE {
-            audio_data.to_vec()
+        let samples: Arc<[f32]> = if sample_rate == WHISPER_SAMPLE_RATE {
+            Arc::from(audio_data)
         } else {
-            resample(audio_data, sample_rate, WHISPER_SAMPLE_RATE)?
+            resample(audio_data, sample_rate, WHISPER_SAMPLE_RATE)?.into()
         };
-
-        let engine = Arc::clone(&self.engine);
-        let vad = self.vad.clone();
-        let language = self.language.clone();
-        let threads = self.threads;
         let prompt = prompt
             .map(|p| p.replace('\0', ""))
             .filter(|p| !p.trim().is_empty());
-        let text = tokio::task::spawn_blocking(move || {
-            let trimmed = vad.as_deref().and_then(|vad| match speech_in(vad, &samples) {
-                Ok(speech) => Some(speech),
-                Err(e) => {
-                    warn!("Voice activity detection failed, so Whisper gets the whole take: {e:#}");
-                    None
-                },
-            });
-            let Some(samples) = whisper_input(&samples, trimmed.as_deref()) else {
-                debug!("Voice activity detection found no speech in a quiet take");
-                return Ok(String::new());
-            };
-            run_full(&engine, samples, &language, threads, prompt.as_deref())
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("Transcription task failed: {}", e))?;
 
+        let text = match self.run_take(Arc::clone(&samples), prompt.clone()).await {
+            Err(e) if self.is_using_gpu() => self.retry_on_cpu(e, samples, prompt).await,
+            text => text,
+        };
         let text = match text {
             Ok(text) => text,
             Err(e) => {
@@ -299,17 +278,107 @@ impl WhisperTranscriber {
         })
     }
 
+    async fn run_take(&self, samples: Arc<[f32]>, prompt: Option<String>) -> Result<String> {
+        let engine = self.engine();
+        let vad = self.vad.clone();
+        let language = self.language.clone();
+        let threads = self.threads();
+        tokio::task::spawn_blocking(move || {
+            let trimmed = vad.as_deref().and_then(|vad| match speech_in(vad, &samples) {
+                Ok(speech) => Some(speech),
+                Err(e) => {
+                    warn!("Voice activity detection failed, so Whisper gets the whole take: {e:#}");
+                    None
+                },
+            });
+            let Some(samples) = whisper_input(&samples, trimmed.as_deref()) else {
+                debug!("Voice activity detection found no speech in a quiet take");
+                return Ok(String::new());
+            };
+            run_full(&engine, samples, &language, threads, prompt.as_deref())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Transcription task failed: {}", e))?
+    }
+
+    /// Run the take again on the CPU after the GPU failed it, and keep the
+    /// CPU for the rest of the session.
+    async fn retry_on_cpu(
+        &self,
+        gpu_error: anyhow::Error,
+        samples: Arc<[f32]>,
+        prompt: Option<String>,
+    ) -> Result<String> {
+        warn!(
+            "Whisper failed on the GPU, so the take runs again on the CPU, \
+             and the CPU stays in use for this session: {:#}",
+            gpu_error
+        );
+        gpu_fallback::remember(self.gpu);
+        let engine = load_engine(&self.model_path, false)
+            .await
+            .with_context(|| {
+                format!(
+                    "The GPU failed the take ({:#}), and the model did not load on the CPU",
+                    gpu_error
+                )
+            })?;
+        let failed = std::mem::replace(&mut *self.engine.lock(), Arc::new(engine));
+        self.using_gpu.store(false, Ordering::Release);
+        // A failed GPU can be slow to free its memory.
+        tokio::task::spawn_blocking(move || drop(failed));
+        info!("Whisper model loaded on {}", self.get_device_info());
+        self.run_take(samples, prompt).await
+    }
+
     pub fn is_using_gpu(&self) -> bool {
-        self.using_gpu
+        self.using_gpu.load(Ordering::Acquire)
     }
 
     pub fn get_device_info(&self) -> String {
-        if self.using_gpu {
+        if self.is_using_gpu() {
             format!("GPU: {} ({})", self.gpu.device_name, self.gpu.gpu_type)
+        } else if self.gpu.available {
+            "CPU".to_string()
         } else {
             format!("CPU: {}", self.gpu.device_name)
         }
     }
+}
+
+/// Load a ggml model and make its state, on the GPU when `use_gpu` is true.
+async fn load_engine(model_path: &Path, use_gpu: bool) -> Result<Engine> {
+    let path = model_path
+        .to_str()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Model path contains invalid UTF-8: {}",
+                model_path.display()
+            )
+        })?
+        .to_owned();
+    let mut params = WhisperContextParameters::default();
+    params.use_gpu(use_gpu);
+
+    // Loading a large model takes seconds, so keep it off the async runtime.
+    let context =
+        tokio::task::spawn_blocking(move || WhisperContext::new_with_params(&path, params))
+            .await
+            .map_err(|e| anyhow::anyhow!("Model loading task failed: {}", e))?
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to load Whisper model {}: {}",
+                    model_path.display(),
+                    e
+                )
+            })?;
+    let state = context
+        .create_state()
+        .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
+    Ok(Engine {
+        context,
+        state: Mutex::new(state),
+    })
 }
 
 fn run_full(
