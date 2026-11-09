@@ -25,6 +25,7 @@ It is built to disappear into a keyboard-driven workflow: bind any key to it, tu
 | Install script (Ubuntu, Debian, Fedora, openSUSE, Arch, and most others) | `curl -fsSL https://raw.githubusercontent.com/andymai/hush/main/install.sh \| sh` |
 | Fedora (repository) | `sudo dnf copr enable veroz/hush && sudo dnf install hush` |
 | Manual | Grab the `.deb`, `.rpm`, `AppImage`, or tarball from the [latest release](https://github.com/andymai/hush/releases/latest) |
+| NixOS (flake) | `nix profile install github:andymai/hush`, and see [INSTALL.md](INSTALL.md#nix-and-nixos) for the system module |
 
 The script detects your distribution, verifies the download's checksum, and installs through your package manager, so removal is a normal `apt remove hush` or `dnf remove hush`. On Arch it installs the tarball under `~/.local` until an AUR package is published. It needs only your usual graphics driver: NVIDIA, AMD, and Intel all work through Vulkan, with a CPU fallback everywhere else.
 

@@ -43,6 +43,38 @@ make release-cpu    # CPU only
 ./hush status --full          # Verify
 ```
 
+## Nix and NixOS
+
+The flake builds Hush with Vulkan:
+
+```bash
+nix run github:andymai/hush -- --version
+nix profile install github:andymai/hush
+nix develop                   # Build dependencies, clippy, and cargo-nextest
+```
+
+On NixOS, add the flake as an input named `hush` and add this module to the system configuration. Its udev rule replaces `hush setup permissions`, which cannot write to `/etc` on NixOS.
+
+```nix
+{ inputs, ... }:
+let
+  hush = inputs.hush.packages.x86_64-linux.default;
+in
+{
+  environment.systemPackages = [ hush ];
+  services.udev.packages = [ hush ];
+  hardware.uinput.enable = true;
+  systemd.packages = [ hush ];
+  systemd.user.services.hush = {
+    wantedBy = [ "graphical-session.target" ];
+    # Hush runs hyprctl, swaymsg, and setxkbmap to find the focused window and the layout.
+    path = [ "/run/current-system/sw" "/etc/profiles/per-user/%u" ];
+  };
+}
+```
+
+The user service starts the daemon at login. Use it instead of `hush install --autostart`, because that entry points at a store path, and garbage collection can remove the path after an upgrade.
+
 ## GPU Acceleration
 
 The Vulkan build needs `glslc` and the Vulkan headers at build time and only the
