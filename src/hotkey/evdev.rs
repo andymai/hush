@@ -429,6 +429,7 @@ fn read_device(
     } else {
         None
     };
+    let _modifiers = super::modifiers::register(path, &device);
     let mut batch: Vec<InputEvent> = Vec::new();
     while running.load(Ordering::Acquire) {
         match wait_readable(device.as_raw_fd(), POLL_INTERVAL_MS) {

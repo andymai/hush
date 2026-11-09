@@ -1,9 +1,10 @@
 use crate::config::paths;
 use crate::hotkey::{HotkeyBackend, HotkeyMode, KeyCombination};
-use crate::text::InsertionMethod;
+use crate::text::{InsertionMethod, PasteChord};
 use crate::transcription::models::ModelSize;
 use crate::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 const DEFAULTS: &str = include_str!("../../config/default.toml");
@@ -141,6 +142,8 @@ pub struct InsertionConfig {
     pub uinput_apps: Vec<String>,
     /// Window classes that always paste, whatever `method` says
     pub clipboard_apps: Vec<String>,
+    /// The paste chord by window class, ahead of the built-in choice
+    pub paste_keys: BTreeMap<String, PasteChord>,
 }
 
 impl Default for InsertionConfig {
@@ -150,6 +153,7 @@ impl Default for InsertionConfig {
             typing_delay_ms: 10,
             uinput_apps: Vec::new(),
             clipboard_apps: Vec::new(),
+            paste_keys: BTreeMap::new(),
         }
     }
 }
@@ -174,6 +178,17 @@ impl InsertionConfig {
             (Some(_), None) => InsertionMethod::Uinput,
             (None, None) => self.method,
         }
+    }
+
+    /// The `paste_keys` chord for a window class. A rule names the whole
+    /// class or its last dot-separated part, so `st` never matches `steam`.
+    /// When two rules match, the longer one wins.
+    pub fn paste_rule(&self, class: &str) -> Option<PasteChord> {
+        self.paste_keys
+            .iter()
+            .filter(|(rule, _)| crate::text::class_matches(rule, class))
+            .max_by_key(|(rule, _)| rule.trim().len())
+            .map(|(_, chord)| *chord)
     }
 }
 
@@ -677,6 +692,35 @@ model_size = "small"
             ..InsertionConfig::default()
         };
         assert_eq!(tie.method_for("kitty"), InsertionMethod::Clipboard);
+    }
+
+    #[test]
+    fn paste_keys_name_whole_window_classes() {
+        let config = Config::parse_over_defaults(
+            "[insertion.paste_keys]\nst = \"ctrl+shift+v\"\nkonsole = \"ctrl+shift+v\"\n\"org.kde.konsole\" = \"Shift+Insert\"\nCode = \"ctrl+v\"\n",
+        )
+        .unwrap();
+        let rules = &config.insertion;
+        assert_eq!(rules.paste_rule("st"), Some(PasteChord::CtrlShiftV));
+        assert_eq!(rules.paste_rule("steam"), None, "st is not steam");
+        assert_eq!(
+            rules.paste_rule("org.kde.konsole"),
+            Some(PasteChord::ShiftInsert),
+            "the longer rule is the more specific one"
+        );
+        assert_eq!(rules.paste_rule("konsole"), Some(PasteChord::CtrlShiftV));
+        assert_eq!(rules.paste_rule("code\0Code"), Some(PasteChord::CtrlV));
+        assert_eq!(rules.paste_rule("codium"), None);
+        assert!(Config::defaults().unwrap().insertion.paste_keys.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_paste_chord_is_a_config_error() {
+        let err = Config::parse_over_defaults("[insertion.paste_keys]\nkitty = \"ctrl+insert\"\n")
+            .unwrap_err();
+        let message = format!("{:#}", err);
+        assert!(message.contains("ctrl+insert"), "{message}");
+        assert!(message.contains("shift+insert"), "{message}");
     }
 
     #[test]

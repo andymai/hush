@@ -182,6 +182,9 @@ x11rb = "0.14"
 # Kernel-level keyboard emulation (uinput)
 input-linux = "0.7"
 
+# Every clipboard format through Wayland data-control, for the paste restore
+wl-clipboard-rs = "0.9"
+
 
 [profile.release]
 opt-level = 3

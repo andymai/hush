@@ -1,5 +1,6 @@
 /// Linux uinput-based keyboard emulation using input-linux crate
 /// This provides hardware-level keyboard emulation that works with all applications
+use super::PasteChord;
 use crate::Result;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -169,15 +170,20 @@ impl UinputKeyboard {
             .all(|ch| matches!(ch, '\n' | '\t') || CHAR_TO_KEY_MAP.contains_key(&ch))
     }
 
-    /// Ctrl+V
-    pub fn send_paste_shortcut(&mut self) -> Result<()> {
+    /// Hold the chord's modifiers, tap its key, and release the modifiers.
+    pub fn send_paste_shortcut(&mut self, chord: PasteChord) -> Result<()> {
         if !self.ready {
             return Err(anyhow::anyhow!("Uinput keyboard not ready"));
         }
-        self.send_key_event(Key::LeftCtrl, KeyState::PRESSED)?;
-        self.send_sync()?;
-        self.send_key(Key::V, false)?;
-        self.send_key_event(Key::LeftCtrl, KeyState::RELEASED)?;
+        let (modifiers, key) = chord_keys(chord);
+        for modifier in modifiers {
+            self.send_key_event(*modifier, KeyState::PRESSED)?;
+            self.send_sync()?;
+        }
+        self.send_key(key, false)?;
+        for modifier in modifiers.iter().rev() {
+            self.send_key_event(*modifier, KeyState::RELEASED)?;
+        }
         self.send_sync()
     }
 
@@ -309,6 +315,7 @@ impl UinputKeyboard {
             Key::Enter,
             Key::Tab,
             Key::Backspace,
+            Key::Insert,
             Key::Dot,
             Key::Comma,
             Key::Semicolon,
@@ -436,6 +443,15 @@ impl Drop for UinputKeyboard {
     }
 }
 
+/// The modifiers and the key of a paste chord.
+fn chord_keys(chord: PasteChord) -> (&'static [Key], Key) {
+    match chord {
+        PasteChord::CtrlV => (&[Key::LeftCtrl], Key::V),
+        PasteChord::CtrlShiftV => (&[Key::LeftCtrl, Key::LeftShift], Key::V),
+        PasteChord::ShiftInsert => (&[Key::LeftShift], Key::Insert),
+    }
+}
+
 // Helper function to check uinput availability
 pub fn check_uinput_availability() -> Result<()> {
     use std::path::Path;
@@ -468,5 +484,21 @@ mod tests {
         assert_eq!(CHAR_TO_KEY_MAP.get(&'1'), Some(&(Key::Num1, false)));
         assert_eq!(CHAR_TO_KEY_MAP.get(&'!'), Some(&(Key::Num1, true)));
         assert_eq!(CHAR_TO_KEY_MAP.get(&' '), Some(&(Key::Space, false)));
+    }
+
+    #[test]
+    fn each_paste_chord_presses_its_keys() {
+        assert_eq!(
+            chord_keys(PasteChord::CtrlV),
+            (&[Key::LeftCtrl][..], Key::V)
+        );
+        assert_eq!(
+            chord_keys(PasteChord::CtrlShiftV),
+            (&[Key::LeftCtrl, Key::LeftShift][..], Key::V)
+        );
+        assert_eq!(
+            chord_keys(PasteChord::ShiftInsert),
+            (&[Key::LeftShift][..], Key::Insert)
+        );
     }
 }

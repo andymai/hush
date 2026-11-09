@@ -288,6 +288,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let text_inserter = match TextInserter::new() {
         Ok(mut inserter) => {
             inserter.configure(&config.insertion);
+            inserter.set_profiles(&config.profiles);
             info!("✅ Text inserter initialized");
             Some(Arc::new(Mutex::new(inserter)))
         },

@@ -54,7 +54,7 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
     app_list(
         ui,
         "Always type in",
-        "For terminals that paste with Ctrl+Shift+V, where a paste does nothing.",
+        "For applications where a paste does nothing.",
         &mut gui.config.insertion.uinput_apps,
         &mut gui.new_uinput_app,
     );
