@@ -13,15 +13,16 @@ pub use pages::speech::size_key;
 
 use crate::config::settings::{TranscriptionBackend, TranscriptionConfig};
 use crate::config::Config;
+use crate::hotkey::Role;
 use crate::ipc::{client, DaemonState};
 use crate::permissions::PermissionStatus;
+use crate::text::layout::Layout;
 use crate::text_processing::DomainVocabulary;
 use crate::transcription::models::{ModelManager, ModelSize};
 use anyhow::{Context, Result};
 use capture::{Capture, Outcome};
 use meter::Meter;
 use pages::history::HistoryView;
-use pages::hotkeys::KeyField;
 use pages::text::TermEdit;
 use pages::Page;
 use parking_lot::Mutex;
@@ -170,10 +171,13 @@ pub struct Gui {
     pub runtime: tokio::runtime::Runtime,
     pub toast: Option<(String, Instant)>,
     /// The hotkey field waiting for a key press, and the reader collecting it.
-    pub capture: Option<(KeyField, Capture)>,
-    /// The hotkey field showing a text box instead of a capture button.
-    pub editing_key: Option<KeyField>,
+    pub capture: Option<(Role, Capture)>,
+    /// The hotkey field showing a text box instead of a capture button, and
+    /// its chord from before the edit.
+    pub editing_key: Option<(Role, String)>,
     pub focus_editor: bool,
+    /// The keyboard layout when the window opened.
+    pub layout: Option<Layout>,
     pub meter: Option<Meter>,
     pub meter_error: Option<String>,
     /// The microphone the meter was last asked to open, so a failure is
@@ -231,6 +235,7 @@ impl Gui {
             capture: None,
             editing_key: None,
             focus_editor: false,
+            layout: crate::text::layout::current(),
             meter: None,
             meter_error: None,
             meter_wanted: None,
@@ -369,15 +374,18 @@ impl Gui {
     }
 
     fn finish_capture(&mut self) {
-        let Some((field, capture)) = &self.capture else {
+        let Some((role, capture)) = &self.capture else {
             return;
         };
         match capture.outcome() {
             Outcome::Listening => {},
             Outcome::Chord(chord) => {
-                let field = *field;
-                *field.value(&mut self.config) = chord;
+                let role = *role;
                 self.capture = None;
+                match pages::hotkeys::refusal(&self.config.hotkey, role, &chord) {
+                    Some(message) => self.say(message),
+                    None => *self.config.hotkey.chord_mut(role) = chord,
+                }
             },
             Outcome::Ended => self.capture = None,
         }

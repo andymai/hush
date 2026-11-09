@@ -167,6 +167,11 @@ pub fn hint(ui: &mut egui::Ui, text: &str) {
     ui.add(egui::Label::new(egui::RichText::new(text).size(12.5).color(MUTED)).wrap());
 }
 
+/// One line of caution in amber, wrapped to the page.
+pub fn caution(ui: &mut egui::Ui, text: &str) {
+    ui.add(egui::Label::new(egui::RichText::new(text).size(12.5).color(WARN)).wrap());
+}
+
 /// A small filled circle, painted rather than typed because the bundled
 /// font has no glyph for it.
 pub fn dot(ui: &mut egui::Ui, colour: Color32) {
@@ -286,6 +291,7 @@ pub struct Row<'a> {
     title: &'a str,
     description: Option<&'a str>,
     error: Option<&'a str>,
+    caution: Option<&'a str>,
     status: Option<bool>,
     reserve: f32,
 }
@@ -295,6 +301,7 @@ pub fn row(title: &str) -> Row<'_> {
         title,
         description: None,
         error: None,
+        caution: None,
         status: None,
         reserve: CONTROL_COLUMN,
     }
@@ -309,6 +316,12 @@ impl<'a> Row<'a> {
     /// Red text under the description when the value cannot be used.
     pub fn problem(mut self, text: Option<&'a str>) -> Self {
         self.error = text;
+        self
+    }
+
+    /// Amber text under the description when the value works but has a catch.
+    pub fn caution(mut self, text: Option<&'a str>) -> Self {
+        self.caution = text;
         self
     }
 
@@ -346,6 +359,9 @@ impl<'a> Row<'a> {
                             egui::Label::new(egui::RichText::new(text).size(12.5).color(BAD))
                                 .wrap(),
                         );
+                    }
+                    if let Some(text) = self.caution {
+                        caution(ui, text);
                     }
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add)

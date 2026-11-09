@@ -199,6 +199,14 @@ impl KeyCombination {
         self.key.x11.is_none()
     }
 
+    /// Whether the main key types a character: a letter, a digit,
+    /// punctuation, Space, or Enter. In `KEYS`, exactly those keys have a
+    /// first name of one character, or are `space` and `enter`.
+    pub fn types_character(&self) -> bool {
+        let name = self.key.names[0];
+        name.chars().count() == 1 || matches!(name, "space" | "enter")
+    }
+
     /// Whether the chord needs a keyboard for its modifiers.
     pub fn has_modifiers(&self) -> bool {
         self.modifiers != Modifiers::default()
@@ -348,6 +356,27 @@ mod tests {
         let chord = KeyCombination::parse("Ctrl+Mouse5").unwrap();
         assert_eq!(chord.evdev_key(), KeyCode::BTN_EXTRA);
         assert!(chord.has_modifiers());
+    }
+
+    #[test]
+    fn only_letters_digits_punctuation_space_and_enter_type_a_character() {
+        let typing: Vec<&str> = KEYS
+            .iter()
+            .chain(MOUSE_BUTTONS.iter())
+            .filter(|def| {
+                KeyCombination::parse(def.names[0])
+                    .unwrap()
+                    .types_character()
+            })
+            .map(|def| def.names[0])
+            .collect();
+        assert_eq!(typing.len(), 26 + 10 + 11 + 2, "{typing:?}");
+        for name in ["q", "0", "9", ";", "\\", "space", "enter"] {
+            assert!(typing.contains(&name), "{name}");
+        }
+        for name in ["f13", "mouse4", "rightalt", "escape", "tab", "backspace"] {
+            assert!(!typing.contains(&name), "{name}");
+        }
     }
 
     #[test]

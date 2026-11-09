@@ -2,39 +2,19 @@
 //! button that captures the next key pressed, with a text box behind it for
 //! keys the capture cannot see.
 
-use crate::config::Config;
+use crate::config::settings::HotkeyConfig;
 use crate::gui::capture::Capture;
 use crate::gui::theme::{
-    field, hint, quiet_button, row, section, slider, toggle_row, ACCENT, CONTROL_HEIGHT,
+    caution, field, hint, quiet_button, row, section, slider, toggle_row, ACCENT, CONTROL_HEIGHT,
     FIELD_WIDTH, MUTED,
 };
 use crate::gui::Gui;
-use crate::hotkey::{HotkeyBackend, HotkeyMode, KeyCombination};
+use crate::hotkey::warnings;
+use crate::hotkey::{HotkeyBackend, HotkeyMode, KeyCombination, Role};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyField {
-    Dictate,
-    Cancel,
-    Command,
-    PasteLast,
-    Learn,
-}
-
-impl KeyField {
-    pub fn value(self, config: &mut Config) -> &mut String {
-        match self {
-            KeyField::Dictate => &mut config.hotkey.combination,
-            KeyField::Cancel => &mut config.hotkey.cancel,
-            KeyField::Command => &mut config.hotkey.command,
-            KeyField::PasteLast => &mut config.hotkey.paste_last,
-            KeyField::Learn => &mut config.hotkey.learn,
-        }
-    }
-
-    /// Dictation cannot be unbound; every other key can.
-    fn required(self) -> bool {
-        self == KeyField::Dictate
-    }
+/// Dictation cannot be unbound; every other key can.
+fn required(role: Role) -> bool {
+    role == Role::Dictate
 }
 
 /// Width of the key button plus its Type and Clear actions.
@@ -48,19 +28,63 @@ pub fn combination_error(text: &str, required: bool) -> Option<String> {
     KeyCombination::parse(text).err().map(|e| e.to_string())
 }
 
+/// The other actions that already use `chord`, as a sentence.
+pub fn taken(hotkey: &HotkeyConfig, role: Role, chord: &str) -> Option<String> {
+    let holders = warnings::holders(hotkey.chords(), role, chord);
+    if holders.is_empty() {
+        return None;
+    }
+    let shown = KeyCombination::parse(chord)
+        .map(|chord| chord.to_string())
+        .unwrap_or_else(|_| chord.trim().to_string());
+    let verb = if holders.len() == 1 { "uses" } else { "use" };
+    Some(format!(
+        "{} already {} {}.",
+        warnings::labels(&holders),
+        verb,
+        shown
+    ))
+}
+
+/// Why `chord` cannot go to `role`, when another action uses it.
+pub fn refusal(hotkey: &HotkeyConfig, role: Role, chord: &str) -> Option<String> {
+    taken(hotkey, role, chord).map(|message| format!("{} Pick another key.", message))
+}
+
+/// Amber text under a hotkey field whose key types a character that the
+/// focused app also gets.
+fn printable_caution(hotkey: &HotkeyConfig, role: Role) -> Option<String> {
+    warnings::printable(hotkey.chords(), hotkey.hides_keys())
+        .into_iter()
+        .find(|(found, _)| *found == role)
+        .map(|(_, chord)| {
+            format!(
+                "{} also reaches the focused app. To hide it, turn on Keep the key from \
+                 other applications.",
+                chord
+            )
+        })
+}
+
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     hint(
         ui,
         "Click a key, then press the one you want. A modifier on its own, such as \
          RightAlt, never reaches other applications.",
     );
+    if let Some(altgr) = warnings::altgr(gui.config.hotkey.chords(), gui.layout.as_ref()) {
+        ui.add_space(4.0);
+        caution(
+            ui,
+            &format!("{}. Use RightCtrl in place of RightAlt.", altgr),
+        );
+    }
     ui.add_space(4.0);
 
     key_row(
         gui,
         ui,
-        KeyField::Dictate,
-        "Dictate",
+        Role::Dictate,
         match gui.config.hotkey.mode {
             HotkeyMode::Hold => {
                 "Hold to talk. Double-tap to keep recording hands-free until you tap again."
@@ -83,15 +107,13 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     key_row(
         gui,
         ui,
-        KeyField::Cancel,
-        "Cancel",
+        Role::Cancel,
         "Discards the recording in progress. Clear it for none.",
     );
     key_row(
         gui,
         ui,
-        KeyField::Command,
-        "Command",
+        Role::Command,
         "Hold, say what to change, release. Rewrites the text you selected, or the \
          last thing Hush typed.",
     );
@@ -100,15 +122,13 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     key_row(
         gui,
         ui,
-        KeyField::PasteLast,
-        "Type last again",
+        Role::PasteLast,
         "Types the last transcript once more.",
     );
     key_row(
         gui,
         ui,
-        KeyField::Learn,
-        "Learn selection",
+        Role::Learn,
         "Adds the selected word to the vocabulary with its exact spelling.",
     );
     row("Read keys through")
@@ -163,23 +183,26 @@ fn backend_name(backend: HotkeyBackend) -> &'static str {
     }
 }
 
-fn key_row(gui: &mut Gui, ui: &mut egui::Ui, field_id: KeyField, label: &str, hint_text: &str) {
-    let capturing = gui.capture.as_ref().is_some_and(|(f, _)| *f == field_id);
-    let editing = gui.editing_key == Some(field_id);
-    let value = field_id.value(&mut gui.config).clone();
-    let error = combination_error(&value, field_id.required());
-    row(label)
+fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
+    let capturing = gui.capture.as_ref().is_some_and(|(r, _)| *r == role);
+    let editing = gui.editing_key.as_ref().is_some_and(|(r, _)| *r == role);
+    let value = gui.config.hotkey.chord(role).to_string();
+    let error = combination_error(&value, required(role))
+        .or_else(|| taken(&gui.config.hotkey, role, &value));
+    let notice = printable_caution(&gui.config.hotkey, role);
+    row(role.label())
         .describe(hint_text)
         .problem(error.as_deref())
+        .caution(notice.as_deref())
         .reserve(KEY_COLUMN)
         .show(ui, |ui| {
             if editing {
-                let response = field(ui, field_id.value(&mut gui.config), "Ctrl+Shift+Space");
+                let response = field(ui, gui.config.hotkey.chord_mut(role), "Ctrl+Shift+Space");
                 if gui.focus_editor {
                     response.request_focus();
                     gui.focus_editor = false;
                 } else if response.lost_focus() {
-                    gui.editing_key = None;
+                    finish_typing(gui);
                 }
                 return;
             }
@@ -204,40 +227,56 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, field_id: KeyField, label: &str, hi
                 if capturing {
                     gui.capture = None;
                 } else {
-                    start_capture(gui, field_id);
+                    start_capture(gui, role);
                 }
             }
-            if !field_id.required() && !value.is_empty() && quiet_button(ui, "Clear").clicked() {
+            if !required(role) && !value.is_empty() && quiet_button(ui, "Clear").clicked() {
                 gui.capture = None;
-                field_id.value(&mut gui.config).clear();
+                gui.config.hotkey.chord_mut(role).clear();
             }
             if quiet_button(ui, "Type")
                 .on_hover_text("Type the key's name instead")
                 .clicked()
             {
                 gui.capture = None;
-                gui.editing_key = Some(field_id);
-                gui.focus_editor = true;
+                start_typing(gui, role);
             }
         });
 }
 
-fn start_capture(gui: &mut Gui, field: KeyField) {
+fn start_typing(gui: &mut Gui, role: Role) {
+    finish_typing(gui);
+    gui.editing_key = Some((role, gui.config.hotkey.chord(role).to_string()));
+    gui.focus_editor = true;
+}
+
+/// Keep the typed chord, unless another action uses it: then put back the
+/// chord from before the edit.
+fn finish_typing(gui: &mut Gui) {
+    let Some((role, before)) = gui.editing_key.take() else {
+        return;
+    };
+    let typed = gui.config.hotkey.chord(role).to_string();
+    if let Some(message) = refusal(&gui.config.hotkey, role, &typed) {
+        *gui.config.hotkey.chord_mut(role) = before;
+        gui.say(message);
+    }
+}
+
+fn start_capture(gui: &mut Gui, role: Role) {
     if gui.machine.permissions.readable_event_nodes == 0 {
         gui.say("Grant keyboard access on Overview, or type the key's name.");
-        gui.editing_key = Some(field);
-        gui.focus_editor = true;
+        start_typing(gui, role);
         return;
     }
     match Capture::start() {
         Ok(capture) => {
-            gui.editing_key = None;
-            gui.capture = Some((field, capture));
+            finish_typing(gui);
+            gui.capture = Some((role, capture));
         },
         Err(e) => {
             gui.say(format!("Could not read the keyboard: {}", e));
-            gui.editing_key = Some(field);
-            gui.focus_editor = true;
+            start_typing(gui, role);
         },
     }
 }
@@ -245,6 +284,7 @@ fn start_capture(gui: &mut Gui, field: KeyField) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
 
     #[test]
     fn only_unparseable_or_missing_required_keys_are_flagged() {
@@ -262,11 +302,41 @@ mod tests {
     }
 
     #[test]
-    fn every_field_maps_to_its_setting() {
-        let mut config = Config::defaults().unwrap();
-        *KeyField::Learn.value(&mut config) = "Super+RightAlt".to_string();
-        assert_eq!(config.hotkey.learn, "Super+RightAlt");
-        assert_eq!(KeyField::Dictate.value(&mut config), "RightAlt");
-        assert!(KeyField::Dictate.required() && !KeyField::Cancel.required());
+    fn only_dictation_is_required() {
+        assert!(required(Role::Dictate));
+        for role in [Role::Cancel, Role::Command, Role::PasteLast, Role::Learn] {
+            assert!(!required(role), "{role:?}");
+        }
+    }
+
+    #[test]
+    fn a_chord_another_action_uses_is_refused_by_name() {
+        let mut hotkey = Config::defaults().unwrap().hotkey;
+        assert_eq!(
+            refusal(&hotkey, Role::Learn, "ctrl+rightalt").as_deref(),
+            Some("Command already uses Ctrl+RightAlt. Pick another key.")
+        );
+        assert_eq!(refusal(&hotkey, Role::Command, "Ctrl+RightAlt"), None);
+        assert_eq!(refusal(&hotkey, Role::Learn, "Super+RightAlt"), None);
+        assert_eq!(refusal(&hotkey, Role::Learn, ""), None);
+
+        hotkey.paste_last = "F12".into();
+        hotkey.learn = "F12".into();
+        assert_eq!(
+            taken(&hotkey, Role::Dictate, "f12").as_deref(),
+            Some("Type last again and Learn selection already use F12.")
+        );
+    }
+
+    #[test]
+    fn a_key_that_types_is_flagged_until_it_is_hidden() {
+        let mut hotkey = Config::defaults().unwrap().hotkey;
+        assert_eq!(printable_caution(&hotkey, Role::Dictate), None);
+        hotkey.combination = "Ctrl+Space".into();
+        let caution = printable_caution(&hotkey, Role::Dictate).unwrap();
+        assert!(caution.starts_with("Ctrl+Space also reaches"), "{caution}");
+        assert_eq!(printable_caution(&hotkey, Role::Command), None);
+        hotkey.exclusive = true;
+        assert_eq!(printable_caution(&hotkey, Role::Dictate), None);
     }
 }
