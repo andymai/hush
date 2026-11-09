@@ -6,7 +6,7 @@ use std::thread;
 use tracing::{error, info, warn};
 
 // Import Hush components
-use crate::audio::AudioFeedback;
+use crate::audio::{AudioFeedback, SilenceDetector};
 use crate::cli::commands::daemon::{self, SessionOptions};
 use crate::config::Config;
 use crate::hotkey::{
@@ -355,6 +355,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let egui_context_clone = egui_context_handle.clone();
     let shared_hotkey = Arc::clone(&shared);
     let tap_window = std::time::Duration::from_millis(config.hotkey.tap_ms);
+    // A held key ends its own session, so silence must never end it.
+    let key_held = Arc::new(AtomicBool::new(false));
+    let key_held_hotkey = Arc::clone(&key_held);
     let hotkey_thread = thread::spawn(move || {
         let mut gesture = GestureDetector::new(hotkey_mode, tap_window);
         loop {
@@ -429,6 +432,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     break;
                 }
             }
+            // After the send, so a release's Stop or Cancel reaches the
+            // session before silence can stop it.
+            key_held_hotkey.store(gesture.is_holding(), Ordering::Release);
         }
     });
 
@@ -643,6 +649,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     };
     let mut cap_warned = false;
     let mut cap_shown: Option<u64> = None;
+    let silence_pause = (config.audio.silence_stop_secs > 0)
+        .then(|| std::time::Duration::from_secs(config.audio.silence_stop_secs));
+    let silence_heard = Arc::new(AtomicBool::new(false));
+    let mut silence_sent = false;
     let context_prompt = config.transcription.context_prompt;
     let mut current_window: Option<WindowInfo> = None;
     let mut command_target: Option<CommandTarget> = None;
@@ -652,6 +662,19 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         let command = match audio_cmd_rx.recv_timeout(std::time::Duration::from_millis(16)) {
             Ok(cmd) => cmd,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if !silence_sent
+                    && command_target.is_none()
+                    && audio_capture.is_recording()
+                    && silence_heard.load(Ordering::Acquire)
+                    && !key_held.load(Ordering::Acquire)
+                {
+                    silence_sent = true;
+                    info!("Speech ended, stopping the hands-free recording");
+                    if audio_cmd_tx.send(SessionCommand::StopRecording).is_err() {
+                        break;
+                    }
+                    continue;
+                }
                 if max_secs == 0 || !audio_capture.is_recording() {
                     continue;
                 }
@@ -799,10 +822,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     });
                     cap_warned = false;
                     cap_shown = None;
+                    silence_sent = false;
+                    silence_heard.store(false, Ordering::Release);
                     let _ = feedback.play_start();
                     // Start polling amplitude updates with batching for performance
                     let state_handle_amp = state_handle.clone();
                     let stop_signal = amplitude_stop_signal.clone();
+                    let mut silence = silence_pause.map(SilenceDetector::new);
+                    let silence_heard_amp = Arc::clone(&silence_heard);
 
                     // Batch amplitude updates to match overlay repaint rate (20 FPS during recording)
                     // This reduces mutex contention and provides smoother averaged values
@@ -820,6 +847,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             match amplitude_rx.try_recv() {
                                 Ok(amplitude) => {
                                     amplitude_buffer.push(amplitude);
+                                    if silence.as_mut().is_some_and(|detector| {
+                                        detector.feed(amplitude, std::time::Instant::now())
+                                    }) {
+                                        silence_heard_amp.store(true, Ordering::Release);
+                                    }
 
                                     // Update state every 50ms with averaged amplitude
                                     if last_update.elapsed() >= update_interval {

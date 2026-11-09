@@ -127,6 +127,10 @@ pub struct AudioConfig {
     /// minute earlier; 0 disables the cap
     #[serde(default = "default_max_recording_secs")]
     pub max_recording_secs: u64,
+    /// A hands-free recording stops and transcribes after this many seconds
+    /// of silence that follow speech; 0 disables it
+    #[serde(default)]
+    pub silence_stop_secs: u64,
 }
 
 fn default_max_recording_secs() -> u64 {
@@ -558,6 +562,14 @@ model_size = "small"
         assert_eq!(config.hotkey.cancel, "Escape");
         assert_eq!(config.hotkey.tap_ms, 300);
         assert_eq!(config.audio.max_recording_secs, 600);
+        assert_eq!(config.audio.silence_stop_secs, 0);
+        assert_eq!(
+            Config::parse_over_defaults("[audio]\nsilence_stop_secs = 3\n")
+                .unwrap()
+                .audio
+                .silence_stop_secs,
+            3
+        );
         assert!(config.feedback.audio_enabled);
         assert!(config.transcription.context_prompt);
         assert!(config.profiles.enabled);

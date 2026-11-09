@@ -190,6 +190,26 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
                 gui.config.audio.max_recording_secs = u64::from(minutes) * 60;
             }
         });
+
+    let mut pause = gui.config.audio.silence_stop_secs.min(10) as u32;
+    row("Stop after a pause")
+        .describe("Ends a hands-free recording when you stop talking for this long.")
+        .show(ui, |ui| {
+            if slider(
+                ui,
+                egui::Slider::new(&mut pause, 0..=10).custom_formatter(|v, _| {
+                    if v == 0.0 {
+                        "Never".to_string()
+                    } else {
+                        format!("{} s", v)
+                    }
+                }),
+            )
+            .changed()
+            {
+                gui.config.audio.silence_stop_secs = u64::from(pause);
+            }
+        });
 }
 
 fn microphone(gui: &mut Gui, ui: &mut egui::Ui) {
