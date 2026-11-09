@@ -43,6 +43,7 @@ pub use session::{SessionEntry, SessionMemory};
 pub use vocabulary::{DomainVocabularies, DomainVocabulary, VocabularyManager};
 
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
 /// Where the text is going: the focused window and the kind of app it is.
@@ -73,11 +74,13 @@ pub struct TextProcessor {
     user_terms: parking_lot::RwLock<Vec<String>>,
     session_memory: SessionMemory,
     config: ProcessingConfig,
+    vocabulary_path: Option<PathBuf>,
 }
 
 impl TextProcessor {
-    /// Create a new text processor
-    pub fn new(config: ProcessingConfig) -> Result<Self> {
+    /// `vocabulary_path` is the user's vocabulary file, normally
+    /// `DomainVocabulary::default_path()`. `None` uses only the built-in terms.
+    pub fn new(config: ProcessingConfig, vocabulary_path: Option<PathBuf>) -> Result<Self> {
         info!("Initializing text processor with mode: {:?}", config.mode);
 
         let filler_remover = FillerWordRemover::new();
@@ -86,7 +89,7 @@ impl TextProcessor {
         let intent_detector = IntentDetector::new();
         let session_memory = SessionMemory::new();
 
-        let (vocabulary_manager, user_terms) = Self::build_vocabulary();
+        let (vocabulary_manager, user_terms) = Self::build_vocabulary(vocabulary_path.as_deref());
 
         let llm_processor = match &config.llm_provider {
             LlmProvider::None => {
@@ -123,18 +126,18 @@ impl TextProcessor {
             user_terms: parking_lot::RwLock::new(user_terms),
             session_memory,
             config,
+            vocabulary_path,
         })
     }
 
     /// The built-in programming vocabulary plus the user's vocabulary file,
     /// and the user's own terms for the transcription prompt.
-    fn build_vocabulary() -> (VocabularyManager, Vec<String>) {
+    fn build_vocabulary(path: Option<&Path>) -> (VocabularyManager, Vec<String>) {
         let mut manager = VocabularyManager::new();
         manager.add(DomainVocabularies::general_programming());
-        let path = DomainVocabulary::default_path();
         let mut terms = Vec::new();
-        if path.exists() {
-            match DomainVocabulary::load_from_file(&path) {
+        if let Some(path) = path.filter(|path| path.exists()) {
+            match DomainVocabulary::load_from_file(path) {
                 Ok(vocab) => {
                     let mut values: Vec<String> = vocab.technical_terms.values().cloned().collect();
                     values.sort();
@@ -149,7 +152,7 @@ impl TextProcessor {
 
     /// Re-read the vocabulary file after `hush learn`; returns the entry count.
     pub fn reload_vocabulary(&self) -> usize {
-        let (manager, terms) = Self::build_vocabulary();
+        let (manager, terms) = Self::build_vocabulary(self.vocabulary_path.as_deref());
         let total = manager.total_entries();
         *self.vocabulary_manager.write() = manager;
         *self.user_terms.write() = terms;
@@ -379,7 +382,7 @@ mod tests {
             temperature: 0.3,
         };
 
-        let processor = TextProcessor::new(config).unwrap();
+        let processor = TextProcessor::new(config, None).unwrap();
 
         let raw = "um so like I think um you know we should uh do this";
         let result = processor.process(raw).await.unwrap();
@@ -391,14 +394,40 @@ mod tests {
     }
 
     fn processor_with(provider: LlmProvider) -> TextProcessor {
-        TextProcessor::new(ProcessingConfig {
-            mode: EditingMode::Medium,
-            llm_provider: provider,
-            polish: true,
-            max_tokens: 200,
-            temperature: 0.3,
-        })
+        TextProcessor::new(
+            ProcessingConfig {
+                mode: EditingMode::Medium,
+                llm_provider: provider,
+                polish: true,
+                max_tokens: 200,
+                temperature: 0.3,
+            },
+            None,
+        )
         .unwrap()
+    }
+
+    #[test]
+    fn the_vocabulary_comes_from_the_given_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vocabulary.json");
+        let config = ProcessingConfig {
+            llm_provider: LlmProvider::None,
+            ..ProcessingConfig::default()
+        };
+        let processor = TextProcessor::new(config, Some(path.clone())).unwrap();
+        assert!(processor.user_terms().is_empty());
+
+        let mut vocab = DomainVocabulary::new();
+        vocab.add_technical_term("hushd".into(), "HushD".into());
+        vocab.save_to_file(&path).unwrap();
+        processor.reload_vocabulary();
+        assert_eq!(processor.user_terms(), vec!["HushD".to_string()]);
+    }
+
+    #[test]
+    fn no_vocabulary_file_means_no_user_terms() {
+        assert!(processor_with(LlmProvider::None).user_terms().is_empty());
     }
 
     fn ollama_at(url: String) -> LlmProvider {

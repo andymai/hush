@@ -1,5 +1,7 @@
 use crate::config::keys;
-use crate::text_processing::{EditingMode, LlmProvider, ProcessingConfig, TextProcessor};
+use crate::text_processing::{
+    DomainVocabulary, EditingMode, LlmProvider, ProcessingConfig, TextProcessor,
+};
 use crate::transcription::SpeechToText;
 use crate::{AudioCapture, Config};
 
@@ -123,7 +125,7 @@ pub async fn handle_record(
                 temperature: 0.3,
             };
 
-            TextProcessor::new(processing_config).ok()
+            TextProcessor::new(processing_config, Some(DomainVocabulary::default_path())).ok()
         };
 
         match transcriber
