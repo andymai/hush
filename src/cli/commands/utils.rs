@@ -5,7 +5,20 @@ use crate::{AudioCapture, Config};
 /// Utility functions shared across command handlers
 ///
 /// This module contains helper functions used by multiple command implementations.
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::io::Write;
+
+/// Print one line on stdout for a script. A reader that closed the pipe
+/// early is not an error.
+pub fn print_line(line: &str) -> Result<()> {
+    let mut out = std::io::stdout().lock();
+    match writeln!(out, "{}", line).and_then(|()| out.flush()) {
+        Err(e) if e.kind() != std::io::ErrorKind::BrokenPipe => {
+            Err(e).context("Failed to write to stdout")
+        },
+        _ => Ok(()),
+    }
+}
 
 /// Display configuration status information
 pub async fn show_config_status() -> Result<()> {

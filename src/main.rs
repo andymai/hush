@@ -1,4 +1,5 @@
 use anyhow::Result;
+use hush::cli::exit::{error_report, ExitStatus};
 use hush::cli::{Cli, CommandDispatcher};
 use hush::logging::{LoggingConfig, LoggingSystem};
 use once_cell::sync::Lazy;
@@ -55,7 +56,7 @@ static TRACE_LEVELS: Lazy<HashMap<String, Level>> = Lazy::new(|| {
 });
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> std::process::ExitCode {
     // Parse command line arguments
     let cli = Cli::parse_args();
     if let Some(path) = &cli.config_file {
@@ -109,10 +110,13 @@ async fn main() -> Result<()> {
                 error_chain = ?e.chain().collect::<Vec<_>>(),
                 "Hush application failed"
             );
+            if let Some(report) = error_report(e) {
+                eprintln!("{}", report);
+            }
         },
     }
 
-    result
+    std::process::ExitCode::from(ExitStatus::of(&result).code())
 }
 
 fn initialize_logging(cli: &Cli) -> Result<LoggingSystem> {

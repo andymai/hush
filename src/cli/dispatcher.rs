@@ -1,7 +1,8 @@
 use crate::cli::commands::{
     handle_client_command, handle_daemon_restart, handle_daemon_start, handle_daemon_status,
     handle_daemon_stop, handle_doctor, handle_listen, handle_manual, handle_models, handle_record,
-    handle_setup, handle_status, handle_test, SessionOptions,
+    handle_setup, handle_status, handle_status_follow, handle_status_json, handle_stop,
+    handle_test, SessionOptions,
 };
 use crate::cli::{Commands, DaemonCommands};
 use crate::ipc::DaemonCommand;
@@ -33,7 +34,7 @@ impl CommandDispatcher {
             Commands::Daemon { .. } => "daemon",
             Commands::Toggle => "toggle",
             Commands::Start => "start",
-            Commands::Stop => "stop",
+            Commands::Stop { .. } => "stop",
             Commands::Cancel => "cancel",
             Commands::Doctor => "doctor",
             Commands::Settings => "settings",
@@ -131,7 +132,7 @@ impl CommandDispatcher {
             },
             Commands::Toggle => handle_client_command(DaemonCommand::Toggle).await,
             Commands::Start => handle_client_command(DaemonCommand::Start).await,
-            Commands::Stop => handle_client_command(DaemonCommand::Stop).await,
+            Commands::Stop { print, json } => handle_stop(print, json).await,
             Commands::Cancel => handle_client_command(DaemonCommand::Cancel).await,
             Commands::Doctor => handle_doctor().await,
             // The window owns a runtime of its own; dropping it inside this
@@ -149,15 +150,25 @@ impl CommandDispatcher {
                 config,
                 devices,
                 full,
+                json,
+                follow,
             } => {
                 debug!(
                     request_id = %ctx.request_id,
                     config = %config,
                     devices = %devices,
                     full = %full,
+                    json = %json,
+                    follow = %follow,
                     "Status command parameters"
                 );
-                handle_status(config, devices, full).await
+                if follow {
+                    handle_status_follow().await
+                } else if json {
+                    handle_status_json().await
+                } else {
+                    handle_status(config, devices, full).await
+                }
             },
             Commands::Install {
                 autostart,

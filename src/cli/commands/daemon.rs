@@ -1,8 +1,14 @@
 //! `hush daemon start|stop|restart|status` and the one-shot clients
 //! `hush toggle|start|stop|cancel`.
 
-use crate::ipc::{self, client, lock, paths, DaemonCommand, DaemonState};
+use super::utils::print_line;
+use crate::cli::exit::{Exit, ExitStatus};
+use crate::ipc::protocol::PRINT_TIMEOUT;
+use crate::ipc::{
+    self, client, lock, paths, DaemonCommand, DaemonResponse, DaemonState, TakeResult,
+};
 use anyhow::{anyhow, Context, Result};
+use serde::Serialize;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -121,27 +127,135 @@ pub async fn handle_daemon_status() -> Result<()> {
     Ok(())
 }
 
-/// `hush toggle`, `hush start`, `hush stop`, `hush cancel`
+/// `hush toggle`, `hush start`, `hush cancel`, `hush paste-last`, `hush learn`
 pub async fn handle_client_command(command: DaemonCommand) -> Result<()> {
     let response = client::send(command).await?;
-    if let (true, Some(message)) = (response.ok, &response.message) {
-        println!("{}", message);
-        return Ok(());
+    if !response.ok {
+        return Err(anyhow!(rejection(response)));
     }
-    match (response.ok, response.state) {
-        (true, Some(DaemonState::Starting)) => println!("Starting the microphone."),
-        (true, Some(DaemonState::Recording { .. })) => println!("Recording."),
-        (true, Some(DaemonState::Transcribing)) => println!("Transcribing."),
-        (true, Some(DaemonState::Idle)) => println!("Idle."),
-        (true, Some(state)) => println!("{}.", state),
-        (true, None) => println!("Done."),
-        (false, _) => {
-            return Err(anyhow!(response
-                .error
-                .unwrap_or_else(|| "The daemon rejected the command".to_string())))
-        },
+    match response.message {
+        Some(message) => println!("{}", message),
+        None => println!("{}", state_line(response.state)),
     }
     Ok(())
+}
+
+fn rejection(response: DaemonResponse) -> String {
+    response
+        .error
+        .unwrap_or_else(|| "The daemon rejected the command".to_string())
+}
+
+fn state_line(state: Option<DaemonState>) -> String {
+    match state {
+        Some(DaemonState::Starting) => "Starting the microphone.".to_string(),
+        Some(DaemonState::Recording { .. }) => "Recording.".to_string(),
+        Some(DaemonState::Transcribing) => "Transcribing.".to_string(),
+        Some(DaemonState::Idle) => "Idle.".to_string(),
+        Some(state) => format!("{}.", state),
+        None => "Done.".to_string(),
+    }
+}
+
+const NO_SPEECH: &str = "Hush heard no speech.";
+const OLD_DAEMON: &str =
+    "The running daemon is older than this client and typed the text. Restart it with: hush daemon restart";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StopStatus {
+    Ok,
+    NoSpeech,
+    Error,
+}
+
+/// What `hush stop --json` prints. Every key is present; absent values are null.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct StopReport {
+    pub status: StopStatus,
+    pub text: Option<String>,
+    pub chars: Option<usize>,
+    pub message: Option<String>,
+    #[serde(skip)]
+    pub exit: ExitStatus,
+}
+
+impl StopReport {
+    fn ok(text: Option<String>, message: Option<String>) -> Self {
+        Self {
+            status: StopStatus::Ok,
+            chars: text.as_ref().map(|text| text.chars().count()),
+            text,
+            message,
+            exit: ExitStatus::Success,
+        }
+    }
+
+    fn no_speech() -> Self {
+        Self {
+            status: StopStatus::NoSpeech,
+            text: None,
+            chars: None,
+            message: Some(NO_SPEECH.to_string()),
+            exit: ExitStatus::NoSpeech,
+        }
+    }
+
+    fn error(exit: ExitStatus, message: impl Into<String>) -> Self {
+        Self {
+            status: StopStatus::Error,
+            text: None,
+            chars: None,
+            message: Some(message.into()),
+            exit,
+        }
+    }
+
+    pub fn from_reply(reply: Result<DaemonResponse>, print: bool) -> Self {
+        let response = match reply {
+            Ok(response) => response,
+            Err(e) => return Self::error(ExitStatus::of_error(&e), format!("{:#}", e)),
+        };
+        if !response.ok {
+            return Self::error(ExitStatus::Error, rejection(response));
+        }
+        if !print {
+            return Self::ok(None, Some(state_line(response.state)));
+        }
+        match response.take {
+            Some(TakeResult::Ok { text }) => Self::ok(Some(text), None),
+            Some(TakeResult::NoSpeech) => Self::no_speech(),
+            Some(TakeResult::Error { message }) => Self::error(ExitStatus::Error, message),
+            None => Self::error(ExitStatus::Error, OLD_DAEMON),
+        }
+    }
+}
+
+/// `hush stop [--print] [--json]`
+pub async fn handle_stop(print: bool, json: bool) -> Result<()> {
+    let command = DaemonCommand::Stop { print };
+    let reply = if print {
+        tokio::time::timeout(PRINT_TIMEOUT, client::send(command))
+            .await
+            .unwrap_or_else(|_| {
+                Err(anyhow!(
+                    "Hush did not finish the take within {} s",
+                    PRINT_TIMEOUT.as_secs()
+                ))
+            })
+    } else {
+        client::send(command).await
+    };
+    let report = StopReport::from_reply(reply, print);
+    if json {
+        print_line(&serde_json::to_string(&report)?)?;
+        return Exit::quiet_result(report.exit);
+    }
+    match (report.exit, report.text, report.message) {
+        (ExitStatus::Success, Some(text), _) => print_line(&text),
+        (ExitStatus::Success, None, message) => print_line(&message.unwrap_or_default()),
+        (exit, _, message) => Err(Exit::new(exit, message.unwrap_or_default()).into()),
+    }
 }
 
 /// Shared by the session: runtime directory, PID lock, and IPC server.
@@ -167,4 +281,89 @@ pub async fn claim(control: std::sync::mpsc::Sender<ipc::SessionCommand>) -> Res
         _lock: lock,
         _server: server,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ipc::client::NotRunning;
+    use crate::ipc::protocol::NO_TAKE;
+
+    fn printed(take: TakeResult) -> StopReport {
+        StopReport::from_reply(
+            Ok(DaemonResponse::ok(DaemonState::Idle).with_take(take)),
+            true,
+        )
+    }
+
+    #[test]
+    fn a_printed_take_reports_its_text_and_length() {
+        let report = printed(TakeResult::Ok {
+            text: "Héllo, world.".to_string(),
+        });
+        assert_eq!(report.exit, ExitStatus::Success);
+        assert_eq!(
+            serde_json::to_string(&report).unwrap(),
+            r#"{"status":"ok","text":"Héllo, world.","chars":13,"message":null}"#
+        );
+    }
+
+    #[test]
+    fn silence_and_failures_have_their_own_status() {
+        let report = printed(TakeResult::NoSpeech);
+        assert_eq!(report.exit, ExitStatus::NoSpeech);
+        assert_eq!(
+            serde_json::to_string(&report).unwrap(),
+            r#"{"status":"no_speech","text":null,"chars":null,"message":"Hush heard no speech."}"#
+        );
+
+        let report = printed(TakeResult::Error {
+            message: "Transcription failed".to_string(),
+        });
+        assert_eq!(report.exit, ExitStatus::Error);
+        assert_eq!(
+            serde_json::to_string(&report).unwrap(),
+            r#"{"status":"error","text":null,"chars":null,"message":"Transcription failed"}"#
+        );
+    }
+
+    #[test]
+    fn a_print_stop_without_a_take_is_an_error() {
+        let report = printed(TakeResult::Error {
+            message: NO_TAKE.to_string(),
+        });
+        assert_eq!(report.status, StopStatus::Error);
+        assert_eq!(report.exit, ExitStatus::Error);
+        assert_eq!(report.message.as_deref(), Some(NO_TAKE));
+
+        let rejected = StopReport::from_reply(Ok(DaemonResponse::error("busy")), true);
+        assert_eq!(rejected.exit, ExitStatus::Error);
+        assert_eq!(rejected.message.as_deref(), Some("busy"));
+    }
+
+    #[test]
+    fn an_older_daemon_reply_is_an_error() {
+        let report =
+            StopReport::from_reply(Ok(DaemonResponse::ok(DaemonState::Transcribing)), true);
+        assert_eq!(report.exit, ExitStatus::Error);
+        assert_eq!(report.message.as_deref(), Some(OLD_DAEMON));
+    }
+
+    #[test]
+    fn no_daemon_maps_to_its_exit_code() {
+        let report = StopReport::from_reply(Err(NotRunning.into()), true);
+        assert_eq!(report.status, StopStatus::Error);
+        assert_eq!(report.exit, ExitStatus::NoDaemon);
+    }
+
+    #[test]
+    fn a_plain_stop_reports_the_next_state() {
+        let report =
+            StopReport::from_reply(Ok(DaemonResponse::ok(DaemonState::Transcribing)), false);
+        assert_eq!(report.exit, ExitStatus::Success);
+        assert_eq!(
+            serde_json::to_string(&report).unwrap(),
+            r#"{"status":"ok","text":null,"chars":null,"message":"Transcribing."}"#
+        );
+    }
 }

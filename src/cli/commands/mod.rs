@@ -1,5 +1,6 @@
 pub mod daemon;
 pub mod doctor;
+pub mod follow;
 pub mod listen;
 pub mod manual;
 pub mod models;
@@ -34,15 +35,16 @@ pub mod utils;
 // Re-export command handlers
 pub use daemon::{
     handle_client_command, handle_daemon_restart, handle_daemon_start, handle_daemon_status,
-    handle_daemon_stop, SessionOptions,
+    handle_daemon_stop, handle_stop, SessionOptions,
 };
 pub use doctor::handle_doctor;
+pub use follow::handle_status_follow;
 pub use listen::handle_listen;
 pub use manual::handle_manual;
 pub use models::handle_models;
 pub use record::handle_record;
 pub use setup::handle_setup;
-pub use status::handle_status;
+pub use status::{handle_status, handle_status_json};
 pub use test::handle_test;
 
 // Re-export utilities for use by other commands

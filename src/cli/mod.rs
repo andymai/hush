@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod dispatcher;
+pub mod exit;
 
 pub use dispatcher::CommandDispatcher;
 
