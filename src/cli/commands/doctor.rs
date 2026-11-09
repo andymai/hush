@@ -4,7 +4,8 @@
 use crate::config::server::{self, Sends};
 use crate::config::settings::{LlmSetting, TranscriptionBackend, TranscriptionConfig};
 use crate::config::{keys, Config};
-use crate::hotkey::HotkeyBindings;
+use crate::hotkey::{warnings, HotkeyBindings};
+use crate::text::layout::Layout;
 use crate::text::WindowProvider;
 use crate::text_processing::hook::{self, Program};
 use crate::transcription::cpu;
@@ -128,6 +129,10 @@ pub async fn checks() -> Vec<Check> {
         checks.push(media_report(crate::audio::media::probe().await));
     }
     checks.push(hotkey_check(&config));
+    checks.extend(hotkeys_checks(
+        &config,
+        crate::text::layout::current().as_ref(),
+    ));
     checks.push(window_check());
     checks.push(clipboard_check(crate::text::clipboard::support()));
     checks.push(llm_check(&config).await);
@@ -353,6 +358,48 @@ fn hotkey_check(config: &Config) -> Check {
             }
         ),
     )
+}
+
+/// Chords that two actions share, Right Alt on an AltGr layout, and keys
+/// that type a character: one line for each kind of problem.
+fn hotkeys_checks(config: &Config, layout: Option<&Layout>) -> Vec<Check> {
+    const NAME: &str = "Hotkeys";
+    let chords = config.hotkey.chords();
+    let mut checks = Vec::new();
+
+    let conflicts = warnings::conflicts(chords);
+    if !conflicts.is_empty() {
+        let each: Vec<String> = conflicts.iter().map(ToString::to_string).collect();
+        checks.push(Check::fail(
+            NAME,
+            each.join("; "),
+            "give each action its own chord in hush settings, or under [hotkey]",
+        ));
+    }
+    if let Some(altgr) = warnings::altgr(chords, layout) {
+        checks.push(Check::warn(
+            NAME,
+            altgr.to_string(),
+            "use RightCtrl in place of RightAlt in hush settings, or under [hotkey]",
+        ));
+    }
+    let printable = warnings::printable(chords, config.hotkey.hides_keys());
+    if !printable.is_empty() {
+        let each: Vec<String> = printable
+            .iter()
+            .map(|(role, chord)| format!("{} ({})", chord, role.label()))
+            .collect();
+        let verb = if each.len() == 1 { "reaches" } else { "reach" };
+        checks.push(Check::warn(
+            NAME,
+            format!("{} also {} the focused app", warnings::join(&each), verb),
+            "set exclusive = true under [hotkey], or pick a key that types no character",
+        ));
+    }
+    if checks.is_empty() {
+        checks.push(Check::ok(NAME, "each action has its own chord"));
+    }
+    checks
 }
 
 fn window_check() -> Check {
@@ -756,6 +803,51 @@ mod tests {
         let check = hotkey_check(&config);
         assert_eq!(check.level, Level::Fail);
         assert!(check.detail.contains("Nope"));
+    }
+
+    #[test]
+    fn the_hotkeys_line_names_conflicts_altgr_and_typing_keys() {
+        let us = Layout::Xkb {
+            layout: "us".into(),
+            variant: String::new(),
+        };
+        let german = Layout::Xkb {
+            layout: "de".into(),
+            variant: String::new(),
+        };
+        let mut config = Config::defaults().unwrap();
+        let clean = hotkeys_checks(&config, Some(&us));
+        assert_eq!(clean.len(), 1);
+        assert_eq!(clean[0].level, Level::Ok);
+        assert_eq!(clean[0].name, "Hotkeys");
+
+        let altgr = hotkeys_checks(&config, Some(&german));
+        assert_eq!(altgr.len(), 1);
+        assert_eq!(altgr[0].level, Level::Warn);
+        assert!(altgr[0].detail.contains("AltGr"), "{}", altgr[0].detail);
+        assert!(altgr[0].fix.as_ref().unwrap().contains("RightCtrl"));
+
+        config.hotkey.combination = "F12".into();
+        config.hotkey.paste_last = "f12".into();
+        config.hotkey.learn = "ctrl+rightalt".into();
+        config.hotkey.cancel = "Space".into();
+        let checks = hotkeys_checks(&config, Some(&us));
+        assert_eq!(checks.len(), 2);
+        assert_eq!(checks[0].level, Level::Fail);
+        assert_eq!(
+            checks[0].detail,
+            "Dictate and Type last again use F12; Command and Learn selection use Ctrl+RightAlt"
+        );
+        assert!(checks[0].fix.as_ref().unwrap().contains("own chord"));
+        assert_eq!(checks[1].level, Level::Warn);
+        assert_eq!(
+            checks[1].detail,
+            "Space (Cancel) also reaches the focused app"
+        );
+        assert!(checks[1].fix.as_ref().unwrap().contains("exclusive = true"));
+
+        config.hotkey.exclusive = true;
+        assert_eq!(hotkeys_checks(&config, Some(&us)).len(), 1);
     }
 
     #[test]

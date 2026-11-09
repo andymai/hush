@@ -27,6 +27,7 @@ pub mod combination;
 pub mod evdev;
 pub mod gesture;
 pub mod modifiers;
+pub mod warnings;
 pub mod x11;
 
 use crate::Result;
@@ -36,6 +37,7 @@ use tracing::warn;
 
 pub use combination::KeyCombination;
 pub use gesture::{GestureAction, GestureDetector};
+pub use warnings::Role;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotkeyEvent {

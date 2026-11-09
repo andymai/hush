@@ -1,11 +1,12 @@
 use crate::config::{paths, server};
-use crate::hotkey::{HotkeyBackend, HotkeyMode, KeyCombination};
+use crate::hotkey::{warnings, HotkeyBackend, HotkeyMode, KeyCombination, Role};
 use crate::text::{InsertionMethod, PasteChord};
 use crate::transcription::models::ModelSize;
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 const DEFAULTS: &str = include_str!("../../config/default.toml");
 
@@ -485,6 +486,55 @@ pub struct HotkeyConfig {
     pub command: String,
 }
 
+impl HotkeyConfig {
+    /// The chord text for an action; empty means unbound.
+    pub fn chord(&self, role: Role) -> &str {
+        match role {
+            Role::Dictate => &self.combination,
+            Role::Cancel => &self.cancel,
+            Role::Command => &self.command,
+            Role::PasteLast => &self.paste_last,
+            Role::Learn => &self.learn,
+        }
+    }
+
+    pub fn chord_mut(&mut self, role: Role) -> &mut String {
+        match role {
+            Role::Dictate => &mut self.combination,
+            Role::Cancel => &mut self.cancel,
+            Role::Command => &mut self.command,
+            Role::PasteLast => &mut self.paste_last,
+            Role::Learn => &mut self.learn,
+        }
+    }
+
+    /// Every action with its chord text.
+    pub fn chords(&self) -> [(Role, &str); 5] {
+        Role::ALL.map(|role| (role, self.chord(role)))
+    }
+
+    /// Whether applications never see the chords: the evdev backend grabs
+    /// the device, or the X11 backend, whose grab is exclusive by nature.
+    pub fn hides_keys(&self) -> bool {
+        self.exclusive || self.backend == HotkeyBackend::X11
+    }
+
+    fn warn_conflicts(&self) {
+        for conflict in warnings::conflicts(self.chords()) {
+            let keys: Vec<String> = conflict
+                .roles
+                .iter()
+                .map(|role| format!("hotkey.{}", role.config_key()))
+                .collect();
+            warn!(
+                "{} use the same chord {}; Hush does not start until each has its own chord",
+                warnings::join(&keys),
+                conflict.chord
+            );
+        }
+    }
+}
+
 fn default_command_chord() -> String {
     "Ctrl+RightAlt".to_string()
 }
@@ -550,8 +600,11 @@ impl Config {
                 e
             )
         })?;
-        Self::parse_over_defaults(&user)
-            .map_err(|e| anyhow::anyhow!("Invalid config file {}: {}", path.as_ref().display(), e))
+        let config = Self::parse_over_defaults(&user).map_err(|e| {
+            anyhow::anyhow!("Invalid config file {}: {}", path.as_ref().display(), e)
+        })?;
+        config.hotkey.warn_conflicts();
+        Ok(config)
     }
 
     fn parse_over_defaults(user_toml: &str) -> Result<Self> {
@@ -983,6 +1036,38 @@ model_size = "small"
         let config = Config::parse_over_defaults("[profiles]\nchat = [\"myapp\"]\n").unwrap();
         assert_eq!(config.profiles.chat, vec!["myapp".to_string()]);
         assert!(config.profiles.enabled);
+    }
+
+    #[test]
+    fn each_role_maps_to_its_hotkey_key() {
+        let mut config = Config::defaults().unwrap().hotkey;
+        *config.chord_mut(Role::Learn) = "Super+RightAlt".to_string();
+        assert_eq!(config.learn, "Super+RightAlt");
+        assert_eq!(
+            config.chords(),
+            [
+                (Role::Dictate, "RightAlt"),
+                (Role::Cancel, "Escape"),
+                (Role::Command, "Ctrl+RightAlt"),
+                (Role::PasteLast, ""),
+                (Role::Learn, "Super+RightAlt"),
+            ]
+        );
+        assert!(!config.hides_keys());
+        config.backend = HotkeyBackend::X11;
+        assert!(config.hides_keys(), "the X11 grab is exclusive");
+        config.backend = HotkeyBackend::Evdev;
+        config.exclusive = true;
+        assert!(config.hides_keys());
+    }
+
+    #[test]
+    fn a_hotkey_conflict_is_no_load_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[hotkey]\nlearn = \"ctrl+rightalt\"\n").unwrap();
+        let config = Config::load_from(Some(&path)).unwrap();
+        assert_eq!(warnings::conflicts(config.hotkey.chords()).len(), 1);
     }
 
     #[test]
