@@ -68,6 +68,13 @@ clipboard_apps = [] # always paste, e.g. applications that drop typed letters
 # ctrl+v. A rule names the whole class or its last part after a dot:
 # "konsole" matches org.kde.konsole, and "st" does not match steam.
 paste_keys = {} # e.g. { kitty = "ctrl+v", "org.wezfurlong.wezterm" = "shift+insert" }
+# Window classes where Hush presses Enter after it inserts a dictation, for
+# example to send a chat message or to run a command: 150 ms after typed
+# text, 400 ms after a paste. A rule names the whole class or its last part
+# after a dot, as in paste_keys, so a browser rule presses Enter in every tab.
+# Hush does not press Enter after a failed or empty insertion, when the
+# transcript hook types nothing, after Command Mode, or for `hush stop --print`.
+submit_apps = [] # e.g. ["Slack", "kitty"]
 
 [history]
 # Each delivered transcript, kept in $XDG_DATA_HOME/hush/history.jsonl
@@ -79,6 +86,10 @@ max_entries = 500 # when there are more, the oldest go
 # Tone by application. The focused window's class picks a profile: terminal
 # and editor keep lowercase and skip the trailing period, chat stays casual,
 # mail and docs get full sentences. Add window classes to extend a profile.
+# In a terminal, each line break becomes a space and Hush removes other
+# control characters, so the text cannot run a command. In a chat
+# application, Hush types a line break as Shift+Enter, so the line break does
+# not send the message, and a paste keeps the line breaks.
 enabled = true
 terminal = []
 editor = []
