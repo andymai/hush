@@ -49,6 +49,20 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
+    # whisper-rs-sys passes GGML_* variables to ggml's CMake. Without them, ggml
+    # builds with -march=native for the runner CPU, and the binary can stop
+    # with SIGILL on an older CPU. HUSH_CPU_FLOOR turns on the runtime check
+    # that names the fix on a CPU below x86-64-v3.
+    env:
+      GGML_NATIVE: "OFF"
+      GGML_SSE42: "ON"
+      GGML_AVX: "ON"
+      GGML_AVX2: "ON"
+      GGML_FMA: "ON"
+      GGML_F16C: "ON"
+      GGML_BMI2: "ON"
+      GGML_AVX512: "OFF"
+      HUSH_CPU_FLOOR: x86-64-v3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -82,7 +96,11 @@ jobs:
           fi
           glslc --version | head -n 1
           pkg-config --modversion vulkan
+      # Cargo does not rebuild whisper-rs-sys when a GGML_* variable changes, so
+      # the cache key includes them.
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+        with:
+          env-vars: GGML HUSH
       - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.62.30
         with:
           tool: cargo-deb@3.8.0
@@ -100,6 +118,45 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - run: cargo build --release --features vulkan
+
+      # Inlined, like the dependencies step, so that a dispatch for an older tag
+      # also runs it. ggml and whisper.cpp take their instruction set from
+      # compile flags, so AVX-512 in C or C++ code means ggml was built for the
+      # runner CPU. Rust code targets baseline x86-64, so AVX-512 in a Rust
+      # function is a #[target_feature] path that its crate selects after a
+      # runtime CPU check, as crc32fast does. Function names cannot limit the
+      # check to ggml, because some ggml functions, such as quantize_row_q8_1,
+      # do not have "ggml" in their name.
+      - name: Check that C and C++ code has no AVX-512
+        run: |
+          set -euo pipefail
+          objdump -d --no-show-raw-insn target/release/hush | awk '
+            /^[0-9a-f]+ <.+>:$/ {
+              fn = $0
+              sub(/^[0-9a-f]+ </, "", fn)
+              sub(/>:$/, "", fn)
+              next
+            }
+            # Only AVX-512 has zmm registers, opmask registers k0 to k7, and
+            # xmm16 to xmm31 or ymm16 to ymm31.
+            /%zmm|%k[0-7]|%[xy]mm(1[6-9]|2[0-9]|3[01])/ { hits[fn]++ }
+            END {
+              bad = 0
+              for (f in hits) {
+                # Rust v0 mangling, or legacy mangling with its hash
+                if (f ~ /^_R/ || f ~ /^_ZN.*17h[0-9a-f]+E(\.llvm\.[0-9]+)?$/) {
+                  printf "allowed: %d AVX-512 instructions in Rust function %s\n", hits[f], f
+                } else {
+                  printf "::error::%d AVX-512 instructions in %s\n", hits[f], f
+                  bad++
+                }
+              }
+              if (bad > 0) {
+                printf "::error::%d C or C++ functions use AVX-512. Build ggml with GGML_NATIVE=OFF and the x86-64-v3 flags.\n", bad
+                exit 1
+              }
+              print "ok: no C or C++ function uses AVX-512"
+            }'
 
       - name: Build .deb, .rpm, and tarball
         run: |
