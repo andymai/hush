@@ -115,6 +115,7 @@ pub async fn checks() -> Vec<Check> {
     checks.push(window_check());
     checks.push(llm_check(&config).await);
     checks.push(tray_check(&config));
+    checks.push(updates_check(&config));
     checks.push(autostart_check());
     checks.push(daemon_check().await);
     checks
@@ -323,6 +324,56 @@ fn tray_check(config: &Config) -> Check {
     Check::ok("Panel icon", "on; the panel decides whether to show it")
 }
 
+fn updates_check(config: &Config) -> Check {
+    use crate::updates::{InstallKind, UpdateState};
+    updates_report(
+        config.updates.check,
+        InstallKind::current(),
+        &UpdateState::load_from(&UpdateState::path()),
+    )
+}
+
+fn updates_report(
+    on: bool,
+    kind: crate::updates::InstallKind,
+    state: &crate::updates::UpdateState,
+) -> Check {
+    use crate::updates::CURRENT_VERSION;
+    if !kind.checks() {
+        return Check::ok("Updates", "your package manager handles updates");
+    }
+    if !on {
+        return Check::ok("Updates", format!("check off ({})", kind.describe()));
+    }
+    if let Some((version, url)) = state.newer_than(CURRENT_VERSION) {
+        return Check::warn(
+            "Updates",
+            format!("{} is available, you use {}", version, CURRENT_VERSION),
+            format!("get it from {}", url),
+        );
+    }
+    let when = |time: chrono::DateTime<chrono::Utc>| {
+        time.with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M")
+            .to_string()
+    };
+    match (state.last_checked, state.latest_version.is_some()) {
+        (Some(checked), true) => Check::ok(
+            "Updates",
+            format!(
+                "on, {} is the newest (checked {})",
+                CURRENT_VERSION,
+                when(checked)
+            ),
+        ),
+        (Some(checked), false) => Check::ok(
+            "Updates",
+            format!("on, the last check got no answer ({})", when(checked)),
+        ),
+        (None, _) => Check::ok("Updates", "on, the daemon checks soon after it starts"),
+    }
+}
+
 fn autostart_check() -> Check {
     if crate::desktop::autostart_installed() {
         Check::ok("Starts at login", "yes")
@@ -443,6 +494,31 @@ mod tests {
         let mut config = Config::defaults().unwrap();
         config.tray.enabled = false;
         assert_eq!(tray_check(&config).level, Level::Ok);
+    }
+
+    #[test]
+    fn the_update_line_follows_the_install_and_the_last_check() {
+        use crate::updates::{InstallKind, Release, UpdateState};
+        let empty = UpdateState::default();
+        let managed = updates_report(true, InstallKind::PackageManager, &empty);
+        assert_eq!(managed.level, Level::Ok);
+        assert!(managed.detail.contains("package manager"));
+        assert!(updates_report(false, InstallKind::SelfManaged, &empty)
+            .detail
+            .starts_with("check off"));
+
+        let mut state = UpdateState::default();
+        state.record(
+            chrono::Utc::now(),
+            Some(Release {
+                version: "999.0.0".to_string(),
+                url: "https://github.com/andymai/hush/releases/tag/v999.0.0".to_string(),
+            }),
+        );
+        let newer = updates_report(true, InstallKind::AppImage, &state);
+        assert_eq!(newer.level, Level::Warn);
+        assert!(newer.detail.starts_with("999.0.0 is available"));
+        assert!(newer.fix.unwrap().ends_with("v999.0.0"));
     }
 
     #[tokio::test]

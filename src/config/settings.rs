@@ -34,6 +34,18 @@ pub struct Config {
     /// Delivered transcripts kept for the History page
     #[serde(default)]
     pub history: HistoryConfig,
+    /// Opt-in check for a newer release
+    #[serde(default)]
+    pub updates: UpdatesConfig,
+}
+
+/// Update check settings
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct UpdatesConfig {
+    /// Ask GitHub once a day whether a newer release exists. AppImage and
+    /// tarball installs only: a package-manager install never checks.
+    pub check: bool,
 }
 
 /// Transcript history settings

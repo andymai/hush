@@ -1,4 +1,4 @@
-//! The panel icon, the sounds, and the file behind every page.
+//! The panel icon, the sounds, the update check, and the file behind every page.
 
 use crate::gui::theme::{row, section, toggle_row};
 use crate::gui::Gui;
@@ -17,6 +17,20 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         "A short tone on start, stop, cancel, and the warning before a cap.",
         &mut gui.config.feedback.audio_enabled,
     );
+    let title = "Check for new releases";
+    if crate::updates::InstallKind::current().checks() {
+        toggle_row(
+            ui,
+            title,
+            "Once a day, ask GitHub for the newest release and show a notification when it is newer. The request sends only the Hush version.",
+            &mut gui.config.updates.check,
+        );
+    } else {
+        ui.add_enabled_ui(false, |ui| {
+            let mut off = false;
+            toggle_row(ui, title, "Your package manager handles updates.", &mut off);
+        });
+    }
 
     section(ui, "Configuration file");
     let path = crate::config::paths::config_path();

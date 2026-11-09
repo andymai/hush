@@ -106,7 +106,7 @@ struct CommandTarget {
 /// - All processing is local-first
 /// - LLM calls only if ANTHROPIC_API_KEY is set
 /// - Audio never leaves device unless LLM enabled
-/// - No telemetry or external connections (except optional LLM)
+/// - No telemetry or external connections (except optional LLM and the opt-in update check)
 pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let SessionOptions {
         editing_mode: editing_mode_str,
@@ -231,6 +231,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     } else {
         None
     };
+
+    if config.updates.check {
+        tokio::spawn(crate::updates::run(crate::updates::InstallKind::current()));
+    }
 
     // Initialize audio capture (main thread - !Send)
     let mut audio_capture = AudioCapture::new(config.audio.device.as_deref())?;
