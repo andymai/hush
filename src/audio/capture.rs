@@ -1,5 +1,6 @@
 use crate::logging::{audio as logging, RequestContext};
 use crate::Result;
+use anyhow::Context;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Host, Stream, StreamConfig};
 use parking_lot::Mutex;
@@ -17,8 +18,8 @@ const PREALLOCATED_SAMPLES: usize = MAX_RECORDING_SECONDS * SAMPLES_PER_SECOND;
 
 pub struct AudioCapture {
     host: Host,
-    /// The `audio.device` setting. Without it, the capture follows the
-    /// default input device.
+    /// The `audio.device` setting. Without it, the capture uses the default
+    /// input device.
     configured: Option<String>,
     device: Device,
     config: StreamConfig,
@@ -57,12 +58,6 @@ struct FrameTimes {
 
 fn device_name_of(device: &Device) -> Option<String> {
     device.description().ok().map(|d| d.name().to_string())
-}
-
-/// A take needs a new stream when `audio.device` is not set and the default
-/// input device is not the device of the current stream.
-pub fn needs_new_stream(configured: Option<&str>, current: &str, default: Option<&str>) -> bool {
-    configured.is_none() && default.is_some_and(|default| default != current)
 }
 
 fn open_stream(device: &Device, config: StreamConfig, sink: &Sink) -> Result<Stream> {
@@ -263,45 +258,38 @@ impl AudioCapture {
         })
     }
 
-    /// When `audio.device` is not set and the default input device changed,
-    /// move the capture to the new default. Call it before a take starts.
-    pub fn follow_default_input(&mut self) {
+    /// Build a new input stream for `audio.device`, or for the default input
+    /// device when it is not set. When that fails, the old stream stays.
+    pub fn rebuild_stream(&mut self) {
         if self.is_recording() {
             return;
         }
-        let default = self.host.default_input_device();
-        let default_name = default.as_ref().and_then(device_name_of);
-        let current = self.get_device_name();
-        if !needs_new_stream(
-            self.configured.as_deref(),
-            &current,
-            default_name.as_deref(),
-        ) {
-            return;
-        }
-        let (Some(device), Some(name)) = (default, default_name) else {
-            return;
-        };
-        match open_stream(&device, self.config, &self.sink) {
-            Ok(stream) => {
-                info!(
-                    from = %current,
-                    to = %name,
-                    "The default microphone changed, recording from '{}' now",
-                    name
-                );
+        match self.open_configured() {
+            Ok((device, stream)) => {
+                let name = device_name_of(&device).unwrap_or_else(|| "Unknown".to_string());
+                info!(device = %name, "Built a new input stream for '{}'", name);
                 self.stream = Some(stream);
                 self.device = device;
                 self.simulated_mode = false;
             },
             Err(e) => warn!(
-                device = %name,
-                "Could not open the new default microphone '{}', keeping '{}': {}",
-                name,
-                current,
+                device = %self.get_device_name(),
+                "Could not build a new input stream, keeping the old one: {:#}",
                 e
             ),
         }
+    }
+
+    fn open_configured(&self) -> Result<(Device, Stream)> {
+        let device = match self.configured.as_deref() {
+            Some(name) => Self::find_device_by_name(&self.host, name)?,
+            None => self
+                .host
+                .default_input_device()
+                .context("No default input device")?,
+        };
+        let stream = open_stream(&device, self.config, &self.sink)?;
+        Ok((device, stream))
     }
 
     pub fn start_recording(&mut self) -> Result<()> {
@@ -554,36 +542,5 @@ impl AudioCapture {
         }
 
         Ok(device_names)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const BUILT_IN: &str = "Built-in Audio Analog Stereo";
-    const HEADSET: &str = "USB Headset Mono";
-
-    #[test]
-    fn a_set_device_never_switches() {
-        assert!(!needs_new_stream(Some(BUILT_IN), BUILT_IN, Some(HEADSET)));
-        assert!(!needs_new_stream(Some("Built-in"), BUILT_IN, Some(HEADSET)));
-        assert!(!needs_new_stream(Some(BUILT_IN), BUILT_IN, None));
-    }
-
-    #[test]
-    fn the_same_default_keeps_the_stream() {
-        assert!(!needs_new_stream(None, BUILT_IN, Some(BUILT_IN)));
-    }
-
-    #[test]
-    fn a_new_default_rebuilds_the_stream() {
-        assert!(needs_new_stream(None, BUILT_IN, Some(HEADSET)));
-        assert!(needs_new_stream(None, HEADSET, Some(BUILT_IN)));
-    }
-
-    #[test]
-    fn no_default_device_keeps_the_stream() {
-        assert!(!needs_new_stream(None, BUILT_IN, None));
     }
 }

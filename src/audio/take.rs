@@ -26,6 +26,24 @@ pub fn is_stalled(last_frame: Option<Instant>, now: Instant, live: bool) -> bool
     live && last_frame.is_some_and(|last| now.saturating_duration_since(last) >= STALL_TIMEOUT)
 }
 
+/// What the input stream did in a take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StreamOutcome {
+    /// The stream gave audio, or the take ended before it had to.
+    #[default]
+    Worked,
+    /// No audio frame arrived in [`START_TIMEOUT`].
+    NoStart,
+    /// The audio of a live take stopped for [`STALL_TIMEOUT`].
+    Stalled,
+}
+
+/// The next take builds a new input stream when the stream of the last take
+/// did not start or stalled.
+pub fn needs_new_stream(last_take: StreamOutcome) -> bool {
+    matches!(last_take, StreamOutcome::NoStart | StreamOutcome::Stalled)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartEvent {
     /// The first frame arrived `delay` after the stream started. Give the
@@ -351,6 +369,22 @@ mod tests {
     fn a_take_without_a_frame_time_does_not_stall() {
         let base = Instant::now();
         assert!(!is_stalled(None, at(base, 60_000), true));
+    }
+
+    #[test]
+    fn a_stream_that_worked_is_kept() {
+        assert!(!needs_new_stream(StreamOutcome::Worked));
+        assert!(!needs_new_stream(StreamOutcome::default()));
+    }
+
+    #[test]
+    fn a_stream_that_did_not_start_is_built_again() {
+        assert!(needs_new_stream(StreamOutcome::NoStart));
+    }
+
+    #[test]
+    fn a_stream_that_stalled_is_built_again() {
+        assert!(needs_new_stream(StreamOutcome::Stalled));
     }
 
     #[test]

@@ -213,7 +213,7 @@ Give each state a color in the Waybar style sheet, for example `#custom-hush.rec
 | `audio.max_recording_secs` | Stop and transcribe after this long, with a warning a minute before; 0 disables | 600 |
 | `audio.silence_stop_secs` | Stop a hands-free recording after this many seconds of silence that follow speech; 0 disables | 0 |
 | `audio.pause_media` | Pause the media players that play while you record, and resume them when the recording stops. Hush resumes only the players that it paused, and only when they are still paused. The players must support MPRIS, as most do | false |
-| `audio.device` | Microphone name from `hush status --devices`. Without it, Hush finds the system default again before each recording | system default |
+| `audio.device` | Microphone name from `hush status --devices`. Without it, Hush uses the default microphone. On PipeWire, Hush follows a change of the default, because PipeWire moves its stream. With a name set, Hush keeps that device | system default |
 | `feedback.audio_enabled` | Tones on start, stop, cancel, and the cap warning | true |
 | `insertion.method` | `auto` (type, then paste what uinput cannot type), `uinput`, or `clipboard` | auto |
 | `insertion.uinput_apps`, `insertion.clipboard_apps` | Window classes that always type or always paste, whatever `insertion.method` says; part of the class is enough | none |
@@ -278,9 +278,9 @@ hush test audio -d 3             # record and play back
 hush -vv daemon start --foreground
 ```
 
-If a notification says that the microphone did not start, Hush got no audio for five seconds. Run `hush test audio -d 3` to test the microphone, or set `audio.device` to a different one from `hush status --devices`.
+If a notification says that the microphone did not start, Hush got no audio for five seconds. Hush opens the microphone again before the next recording. If the problem stays, run `hush test audio -d 3` to test the microphone, or set `audio.device` to a different one from `hush status --devices`.
 
-If a notification says that the microphone stopped, the audio stopped for two seconds during a recording. Hush inserts what it heard until then.
+If a notification says that the microphone stopped, the audio stopped for two seconds during a recording. Hush inserts what it heard until then, and opens the microphone again before the next recording.
 
 If `hush setup permissions` cannot run where you are (a container, an SSH session), `hush setup permissions --print` prints the udev rule to apply as root.
 
