@@ -1,3 +1,4 @@
+pub mod config;
 pub mod daemon;
 pub mod doctor;
 pub mod follow;
@@ -33,6 +34,7 @@ pub mod test;
 pub mod utils;
 
 // Re-export command handlers
+pub use config::handle_config;
 pub use daemon::{
     handle_client_command, handle_daemon_restart, handle_daemon_start, handle_daemon_status,
     handle_daemon_stop, handle_stop, SessionOptions,

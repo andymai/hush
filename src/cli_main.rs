@@ -125,6 +125,12 @@ pub enum Commands {
         model_command: ModelCommands,
     },
 
+    /// Move the settings and the vocabulary to another machine
+    Config {
+        #[command(subcommand)]
+        config_command: ConfigCommands,
+    },
+
     /// Show application status and configuration
     Status {
         /// Show detailed configuration
@@ -220,6 +226,29 @@ pub enum DaemonCommands {
 
     /// Show what the daemon is doing
     Status,
+}
+
+#[derive(Subcommand)]
+pub enum ConfigCommands {
+    /// Write the settings and the vocabulary to one TOML file, without API keys
+    Export {
+        /// The file to write
+        file: PathBuf,
+
+        /// Replace the file if it exists
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Load the settings and the vocabulary from a file that `config export` wrote
+    Import {
+        /// The file to read
+        file: PathBuf,
+
+        /// Keep the current values and add only the missing ones
+        #[arg(long)]
+        merge: bool,
+    },
 }
 
 #[derive(Subcommand)]

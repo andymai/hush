@@ -108,6 +108,7 @@ Setup:
 | `hush setup init [--defaults] [-f]` | Guided config: model, GPU, hotkey |
 | `hush setup wizard [--auto]` | Full interactive setup |
 | `hush setup audio` / `hotkeys` / `uinput` / `diagnose-uinput` | Configure or diagnose one subsystem |
+| `hush config export <file> [-f]` / `import <file> [--merge]` | Move the settings and the vocabulary to another machine. See [Move your setup](#move-your-setup) |
 
 Diagnostics and lifecycle:
 
@@ -224,6 +225,22 @@ Give each state a color in the Waybar style sheet, for example `#custom-hush.rec
 | `updates.check` | Ask GitHub once a day whether a newer release exists (AppImage and tarball installs only) | false |
 
 Point at a different file with `hush -c other.toml …` or `HUSH_CONFIG=other.toml`.
+
+### Move your setup
+
+Write your settings and your vocabulary to one file, then load that file on the other machine:
+
+```sh
+hush config export hush-setup.toml
+hush config import hush-setup.toml
+```
+
+- The file has only the keys in your `config.toml` and the entries in your `vocabulary.json`. It has no API keys, so copy `~/.config/hush/.env` yourself.
+- `export` does not replace a file that exists. Add `--force` to replace it.
+- `import` replaces the settings and the vocabulary. With `--merge`, it keeps your current values and adds only the keys and entries that you do not have.
+- Before `import` writes a file, it checks the whole file and keeps the old file next to it as `config.toml.bak` or `vocabulary.json.bak`. A running daemon restarts with the new settings.
+
+The Text page of `hush settings` also imports and exports the vocabulary as a plain-text list, with one word on each line.
 
 ### Transcript hook
 

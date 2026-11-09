@@ -608,10 +608,16 @@ impl Config {
     }
 
     fn parse_over_defaults(user_toml: &str) -> Result<Self> {
+        let user: toml::Table = toml::from_str(user_toml)
+            .map_err(|e| anyhow::anyhow!("Failed to parse TOML config: {}", e))?;
+        Self::from_user_table(user)
+    }
+
+    /// The user's keys merged over the compiled-in defaults, with the same
+    /// checks as a file load.
+    pub fn from_user_table(mut user: toml::Table) -> Result<Self> {
         let mut merged: toml::Table = toml::from_str(DEFAULTS)
             .map_err(|e| anyhow::anyhow!("Built-in defaults are invalid TOML: {}", e))?;
-        let mut user: toml::Table = toml::from_str(user_toml)
-            .map_err(|e| anyhow::anyhow!("Failed to parse TOML config: {}", e))?;
         rename_legacy_keys(&mut user);
         merge_tables(&mut merged, user);
         let config: Config = toml::Value::Table(merged)
@@ -745,7 +751,7 @@ impl Config {
 
 /// Keys from earlier config layouts, renamed before the merge so they neither
 /// collide with the current key nor fail as unknown.
-fn rename_legacy_keys(user: &mut toml::Table) {
+pub(crate) fn rename_legacy_keys(user: &mut toml::Table) {
     if let Some(toml::Value::Table(transcription)) = user.get_mut("transcription") {
         if let Some(value) = transcription.remove("use_cuda") {
             transcription.entry("use_gpu").or_insert(value);

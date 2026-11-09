@@ -201,6 +201,26 @@ impl DomainVocabulary {
         }
     }
 
+    /// Add the entries of `other` whose key this vocabulary lacks, and keep
+    /// every entry it has; returns how many were added.
+    pub fn add_missing(&mut self, other: &DomainVocabulary) -> usize {
+        let before = self.total_entries();
+        for (mine, theirs) in [
+            (&mut self.abbreviations, &other.abbreviations),
+            (&mut self.technical_terms, &other.technical_terms),
+            (&mut self.entities, &other.entities),
+            (&mut self.phrases, &other.phrases),
+        ] {
+            for (key, value) in theirs {
+                mine.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        for word in &other.preserve_exact {
+            self.add_preserve_exact(word.clone());
+        }
+        self.total_entries() - before
+    }
+
     /// Get total number of entries
     pub fn total_entries(&self) -> usize {
         self.abbreviations.len()
@@ -409,6 +429,26 @@ mod tests {
 
         let result = vocab1.apply("api connects to db");
         assert_eq!(result, "API connects to database");
+    }
+
+    #[test]
+    fn add_missing_keeps_every_current_entry() {
+        let mut current = DomainVocabulary::new();
+        current.add_technical_term("kubernetes".into(), "Kubernetes".into());
+        current.add_preserve_exact("iOS".into());
+        let mut incoming = DomainVocabulary::new();
+        incoming.add_technical_term("kubernetes".into(), "KUBERNETES".into());
+        incoming.add_technical_term("postgres".into(), "Postgres".into());
+        incoming.add_abbreviation("k8s".into(), "Kubernetes".into());
+        incoming.add_preserve_exact("iOS".into());
+        incoming.add_preserve_exact("macOS".into());
+
+        assert_eq!(current.add_missing(&incoming), 3);
+        assert_eq!(current.technical_terms["kubernetes"], "Kubernetes");
+        assert_eq!(current.technical_terms["postgres"], "Postgres");
+        assert_eq!(current.abbreviations["k8s"], "Kubernetes");
+        assert_eq!(current.preserve_exact, ["iOS", "macOS"]);
+        assert_eq!(current.add_missing(&incoming), 0);
     }
 
     fn phrases(entries: &[(&str, &str)]) -> DomainVocabulary {

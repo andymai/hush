@@ -1,16 +1,20 @@
 //! What happens to the words after Whisper: tone by application, polishing
 //! with a language model, and the words Hush must spell your way.
 
-use crate::config::server;
 use crate::config::settings::LlmSetting;
+use crate::config::{server, transfer};
 use crate::gui::theme::{
     field, hint, quiet_button, row, section, toggle, toggle_row, FIELD_WIDTH, MUTED, TOGGLE_COLUMN,
 };
 use crate::gui::Gui;
-use crate::text_processing::learn;
+use crate::text_processing::learn::{self, ListImport};
+use std::path::{Path, PathBuf};
 
 const VOCABULARY_HEIGHT: f32 = 220.0;
 const EDIT_COLUMN: f32 = 340.0;
+const LIST_COLUMN: f32 = FIELD_WIDTH + 140.0;
+
+pub const DEFAULT_WORD_LIST: &str = "~/hush-vocabulary.txt";
 
 /// A vocabulary term open for editing.
 pub struct TermEdit {
@@ -136,6 +140,7 @@ fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
             Err(e) => gui.say(e.to_string()),
         }
     }
+    word_list(gui, ui);
 
     let mut terms: Vec<String> = gui.vocabulary.technical_terms.values().cloned().collect();
     terms.sort_by_key(|term| term.to_lowercase());
@@ -211,6 +216,102 @@ fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
     }
 }
 
+fn word_list(gui: &mut Gui, ui: &mut egui::Ui) {
+    let has_path = !gui.word_list.trim().is_empty();
+    let has_terms = !gui.vocabulary.technical_terms.is_empty();
+    let (import, export) = row("Word list")
+        .describe(
+            "A text file with one word on each line. Import adds each word that \
+             the vocabulary does not have. Export writes every word to a new file.",
+        )
+        .reserve(LIST_COLUMN)
+        .show(ui, |ui| {
+            let export = ui
+                .add_enabled(has_path && has_terms, egui::Button::new("Export"))
+                .clicked();
+            let import = ui
+                .add_enabled(has_path, egui::Button::new("Import"))
+                .clicked();
+            field(ui, &mut gui.word_list, DEFAULT_WORD_LIST);
+            (import, export)
+        });
+    if !import && !export {
+        return;
+    }
+    let path = list_path(&gui.word_list, &dirs::home_dir().unwrap_or_default());
+    if import {
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                let result = learn::import_list(&mut gui.vocabulary, &text);
+                gui.say(import_message(result));
+            },
+            Err(e) => gui.say(format!("Could not read {}: {}", path.display(), e)),
+        }
+    }
+    if export {
+        if path.exists() {
+            gui.say(format!(
+                "{} already exists. Type the name of a new file.",
+                path.display()
+            ));
+            return;
+        }
+        let text = learn::to_list(&gui.vocabulary);
+        match transfer::write_atomic(&path, text.as_bytes(), false) {
+            Ok(()) => gui.say(format!(
+                "Wrote {} to {}.",
+                words(text.lines().count()),
+                path.display()
+            )),
+            Err(e) => gui.say(format!("Could not export: {:#}", e)),
+        }
+    }
+}
+
+/// `~/` is the home folder. A relative path also starts there, because the
+/// window has no working folder that the user chose.
+fn list_path(text: &str, home: &Path) -> PathBuf {
+    let text = text.trim();
+    home.join(text.strip_prefix("~/").unwrap_or(text))
+}
+
+fn import_message(result: ListImport) -> String {
+    let mut message = format!("Added {}.", words(result.added));
+    if result.skipped == 1 {
+        message.push_str(" Skipped 1 duplicate.");
+    } else if result.skipped > 1 {
+        message.push_str(&format!(" Skipped {} duplicates.", result.skipped));
+    }
+    if result.invalid > 0 {
+        message.push_str(&format!(
+            " Ignored {} longer than {} words or {} characters.",
+            lines(result.invalid),
+            learn::MAX_WORDS,
+            learn::MAX_CHARS
+        ));
+    }
+    if result.added > 0 {
+        message.push_str(" Save to keep them.");
+    }
+    message
+}
+
+fn words(n: usize) -> String {
+    if n == 1 {
+        "1 word".to_string()
+    } else {
+        format!("{} words", n)
+    }
+}
+
+fn lines(n: usize) -> String {
+    if n == 1 {
+        "1 line".to_string()
+    } else {
+        format!("{} lines", n)
+    }
+}
+
 fn provider_name(provider: LlmSetting) -> &'static str {
     match provider {
         LlmSetting::Auto => "Ollama, else Anthropic",
@@ -235,6 +336,44 @@ mod tests {
         assert_eq!(
             server_reach("https://llm.example.com"),
             "llm.example.com receives the text."
+        );
+    }
+
+    #[test]
+    fn a_word_list_path_starts_at_home() {
+        let home = Path::new("/home/me");
+        assert_eq!(
+            list_path(" ~/words.txt ", home),
+            Path::new("/home/me/words.txt")
+        );
+        assert_eq!(
+            list_path("words.txt", home),
+            Path::new("/home/me/words.txt")
+        );
+        assert_eq!(
+            list_path("/tmp/words.txt", home),
+            Path::new("/tmp/words.txt")
+        );
+    }
+
+    #[test]
+    fn the_import_message_counts_each_outcome() {
+        let result = ListImport {
+            added: 2,
+            skipped: 1,
+            invalid: 3,
+        };
+        assert_eq!(
+            import_message(result),
+            "Added 2 words. Skipped 1 duplicate. Ignored 3 lines longer than \
+             5 words or 64 characters. Save to keep them."
+        );
+        assert_eq!(
+            import_message(ListImport {
+                skipped: 4,
+                ..ListImport::default()
+            }),
+            "Added 0 words. Skipped 4 duplicates."
         );
     }
 }

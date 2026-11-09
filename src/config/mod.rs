@@ -17,5 +17,6 @@ pub mod keys;
 pub mod paths;
 pub mod server;
 pub mod settings;
+pub mod transfer;
 
 pub use settings::Config;

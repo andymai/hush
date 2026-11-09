@@ -187,6 +187,8 @@ pub struct Gui {
     pub level_shown: f32,
     pub new_term: String,
     pub editing_term: Option<TermEdit>,
+    /// The plain-text word list that the Text page imports and exports
+    pub word_list: String,
     pub new_uinput_app: String,
     pub new_clipboard_app: String,
     pub history: HistoryView,
@@ -243,6 +245,7 @@ impl Gui {
             level_shown: 0.0,
             new_term: String::new(),
             editing_term: None,
+            word_list: pages::text::DEFAULT_WORD_LIST.to_string(),
             new_uinput_app: String::new(),
             new_clipboard_app: String::new(),
             history: HistoryView::default(),
