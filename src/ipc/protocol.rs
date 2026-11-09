@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::time::Duration;
+
+/// How long `hush stop --print` waits for the final text.
+pub const PRINT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The reply to a print stop while no take records.
+pub const NO_TAKE: &str = "No recording is in progress. Start one with: hush start";
 
 /// Sent by a client, one JSON object per line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -8,10 +15,17 @@ pub enum DaemonCommand {
     /// Start recording if idle, otherwise stop and transcribe
     Toggle,
     Start,
-    Stop,
+    /// Stop recording and transcribe; with `print`, reply with the final text
+    /// and type nothing
+    Stop {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        print: bool,
+    },
     /// Stop recording and discard the audio
     Cancel,
     Status,
+    /// Keep the connection open and send the state at once and on each change
+    Watch,
     Quit,
     /// Type the last transcript again
     PasteLast,
@@ -37,6 +51,20 @@ pub enum DaemonState {
     Stopping,
 }
 
+impl DaemonState {
+    /// The lowercase state name that scripts read.
+    pub fn name(&self) -> &'static str {
+        match self {
+            DaemonState::Idle => "idle",
+            DaemonState::Starting => "starting",
+            DaemonState::Recording { .. } => "recording",
+            DaemonState::Transcribing => "transcribing",
+            DaemonState::Inserting => "inserting",
+            DaemonState::Stopping => "stopping",
+        }
+    }
+}
+
 impl fmt::Display for DaemonState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -52,6 +80,26 @@ impl fmt::Display for DaemonState {
     }
 }
 
+/// How a take ended, for a client that asked for its text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum TakeResult {
+    Ok { text: String },
+    NoSpeech,
+    Error { message: String },
+}
+
+impl TakeResult {
+    /// `NoSpeech` when processing left only whitespace.
+    pub fn from_text(text: String) -> Self {
+        if text.trim().is_empty() {
+            TakeResult::NoSpeech
+        } else {
+            TakeResult::Ok { text }
+        }
+    }
+}
+
 /// One reply per command.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonResponse {
@@ -63,6 +111,9 @@ pub struct DaemonResponse {
     /// A line for the user, such as the term that was learned
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// The result of the take that a print stop ended
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub take: Option<TakeResult>,
 }
 
 impl DaemonResponse {
@@ -72,6 +123,7 @@ impl DaemonResponse {
             state: Some(state),
             error: None,
             message: None,
+            take: None,
         }
     }
 
@@ -81,11 +133,17 @@ impl DaemonResponse {
             state: None,
             error: Some(message.into()),
             message: None,
+            take: None,
         }
     }
 
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.message = Some(message.into());
+        self
+    }
+
+    pub fn with_take(mut self, take: TakeResult) -> Self {
+        self.take = Some(take);
         self
     }
 }
@@ -117,6 +175,110 @@ mod tests {
             DaemonCommand::Learn {
                 text: Some("Kubernetes".to_string())
             }
+        );
+    }
+
+    #[test]
+    fn stop_keeps_the_old_form_and_adds_print() {
+        assert_eq!(
+            serde_json::to_string(&DaemonCommand::Stop { print: false }).unwrap(),
+            r#"{"command":"stop"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&DaemonCommand::Stop { print: true }).unwrap(),
+            r#"{"command":"stop","print":true}"#
+        );
+        let old: DaemonCommand = serde_json::from_str(r#"{"command":"stop"}"#).unwrap();
+        assert_eq!(old, DaemonCommand::Stop { print: false });
+        let new: DaemonCommand =
+            serde_json::from_str(r#"{"command":"stop","print":true}"#).unwrap();
+        assert_eq!(new, DaemonCommand::Stop { print: true });
+        assert_eq!(
+            serde_json::to_string(&DaemonCommand::Watch).unwrap(),
+            r#"{"command":"watch"}"#
+        );
+    }
+
+    #[test]
+    fn an_older_daemon_reads_a_print_stop_as_a_plain_stop() {
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(tag = "command", rename_all = "snake_case")]
+        enum OldCommand {
+            Stop,
+        }
+        let parsed: OldCommand =
+            serde_json::from_str(r#"{"command":"stop","print":true}"#).unwrap();
+        assert_eq!(parsed, OldCommand::Stop);
+    }
+
+    #[test]
+    fn take_results_carry_a_status_tag() {
+        let cases = [
+            (
+                TakeResult::Ok {
+                    text: "Hello there.".to_string(),
+                },
+                r#"{"status":"ok","text":"Hello there."}"#,
+            ),
+            (TakeResult::NoSpeech, r#"{"status":"no_speech"}"#),
+            (
+                TakeResult::Error {
+                    message: "Transcription failed".to_string(),
+                },
+                r#"{"status":"error","message":"Transcription failed"}"#,
+            ),
+        ];
+        for (take, json) in cases {
+            assert_eq!(serde_json::to_string(&take).unwrap(), json);
+            assert_eq!(serde_json::from_str::<TakeResult>(json).unwrap(), take);
+        }
+        let reply = DaemonResponse::ok(DaemonState::Idle).with_take(TakeResult::NoSpeech);
+        assert_eq!(
+            serde_json::to_string(&reply).unwrap(),
+            r#"{"ok":true,"state":{"state":"idle"},"take":{"status":"no_speech"}}"#
+        );
+        let old: DaemonResponse =
+            serde_json::from_str(r#"{"ok":true,"state":{"state":"transcribing"}}"#).unwrap();
+        assert_eq!(old.take, None);
+    }
+
+    #[test]
+    fn blank_text_is_no_speech() {
+        assert_eq!(
+            TakeResult::from_text(" \n".to_string()),
+            TakeResult::NoSpeech
+        );
+        assert_eq!(
+            TakeResult::from_text("ok".to_string()),
+            TakeResult::Ok {
+                text: "ok".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn state_names_are_lowercase_words() {
+        let names: Vec<&str> = [
+            DaemonState::Idle,
+            DaemonState::Starting,
+            DaemonState::Recording { elapsed_ms: 5 },
+            DaemonState::Transcribing,
+            DaemonState::Inserting,
+            DaemonState::Stopping,
+        ]
+        .iter()
+        .map(DaemonState::name)
+        .collect();
+        assert_eq!(
+            names,
+            [
+                "idle",
+                "starting",
+                "recording",
+                "transcribing",
+                "inserting",
+                "stopping"
+            ]
         );
     }
 

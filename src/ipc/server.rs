@@ -1,17 +1,20 @@
 //! Daemon side of the socket. Each connection carries one command and gets
 //! one reply. Commands that change state are forwarded to the session loop;
-//! the reply names the state that request leads to.
+//! the reply names the state that request leads to. A print stop replies
+//! when the take ends, and a watch replies once for each state change.
 
-use super::protocol::{DaemonCommand, DaemonResponse, DaemonState};
+use super::protocol::{DaemonCommand, DaemonResponse, DaemonState, TakeResult, PRINT_TIMEOUT};
 use crate::text_processing::{learn, Trigger};
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
-use std::time::Instant;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use std::time::{Duration, Instant};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
@@ -41,11 +44,23 @@ enum Phase {
     Stopping,
 }
 
+/// The client of a print stop. The take it ends types nothing and sends its
+/// text here instead.
+pub struct TakeWaiter(oneshot::Sender<TakeResult>);
+
+impl TakeWaiter {
+    pub fn finish(self, result: TakeResult) {
+        let _ = self.0.send(result);
+    }
+}
+
 /// Current phase and the last transcript, written by the session and read
 /// by IPC.
 pub struct SharedState {
     phase: Mutex<Phase>,
     last_text: Mutex<Option<String>>,
+    waiter: Mutex<Option<oneshot::Sender<TakeResult>>>,
+    changes: watch::Sender<()>,
 }
 
 impl Default for SharedState {
@@ -59,7 +74,36 @@ impl SharedState {
         Self {
             phase: Mutex::new(Phase::Idle),
             last_text: Mutex::new(None),
+            waiter: Mutex::new(None),
+            changes: watch::channel(()).0,
         }
+    }
+
+    fn set(&self, phase: Phase) {
+        *self.phase.lock() = phase;
+        self.changes.send_replace(());
+    }
+
+    /// Fires after each phase change.
+    pub fn subscribe(&self) -> watch::Receiver<()> {
+        self.changes.subscribe()
+    }
+
+    /// Make the next stop deliver its take here. A second print stop
+    /// replaces the first, whose client then gets an error.
+    pub fn wait_for_take(&self) -> oneshot::Receiver<TakeResult> {
+        let (tx, rx) = oneshot::channel();
+        *self.waiter.lock() = Some(tx);
+        rx
+    }
+
+    /// Called by the session when it handles a stop.
+    pub fn take_waiter(&self) -> Option<TakeWaiter> {
+        self.waiter
+            .lock()
+            .take()
+            .filter(|tx| !tx.is_closed())
+            .map(TakeWaiter)
     }
 
     pub fn set_last_text(&self, text: String) {
@@ -71,29 +115,29 @@ impl SharedState {
     }
 
     pub fn set_idle(&self) {
-        *self.phase.lock() = Phase::Idle;
+        self.set(Phase::Idle);
     }
 
     /// The stream started and waits for its first audio frame.
     pub fn set_starting(&self) {
-        *self.phase.lock() = Phase::Starting;
+        self.set(Phase::Starting);
     }
 
     /// `since` is the time of the first audio frame.
     pub fn set_recording(&self, since: Instant) {
-        *self.phase.lock() = Phase::Recording(since);
+        self.set(Phase::Recording(since));
     }
 
     pub fn set_transcribing(&self) {
-        *self.phase.lock() = Phase::Transcribing;
+        self.set(Phase::Transcribing);
     }
 
     pub fn set_inserting(&self) {
-        *self.phase.lock() = Phase::Inserting;
+        self.set(Phase::Inserting);
     }
 
     pub fn set_stopping(&self) {
-        *self.phase.lock() = Phase::Stopping;
+        self.set(Phase::Stopping);
     }
 
     /// A take is in progress, whether or not its first frame arrived.
@@ -177,22 +221,77 @@ async fn handle_client(
     control: &mpsc::Sender<SessionCommand>,
 ) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
     let mut line = String::new();
-    BufReader::new(reader)
+    reader
         .read_line(&mut line)
         .await
         .context("Failed to read IPC command")?;
     let response = match serde_json::from_str::<DaemonCommand>(line.trim()) {
+        Ok(DaemonCommand::Watch) => return watch(reader, writer, shared).await,
+        Ok(DaemonCommand::Stop { print: true }) => {
+            stop_and_print(shared, control, PRINT_TIMEOUT).await
+        },
         Ok(command) => respond(command, shared, control),
         Err(e) => DaemonResponse::error(format!("Invalid command: {}", e)),
     };
-    let mut payload = serde_json::to_string(&response)?;
+    write_response(&mut writer, &response).await
+}
+
+async fn write_response(writer: &mut OwnedWriteHalf, response: &DaemonResponse) -> Result<()> {
+    let mut payload = serde_json::to_string(response)?;
     payload.push('\n');
     writer
         .write_all(payload.as_bytes())
         .await
-        .context("Failed to write IPC response")?;
-    Ok(())
+        .context("Failed to write IPC response")
+}
+
+/// Send the state now and after each change, until the client hangs up.
+async fn watch(
+    mut reader: BufReader<OwnedReadHalf>,
+    mut writer: OwnedWriteHalf,
+    shared: &SharedState,
+) -> Result<()> {
+    let mut changes = shared.subscribe();
+    let mut scratch = [0u8; 64];
+    loop {
+        write_response(&mut writer, &DaemonResponse::ok(shared.snapshot())).await?;
+        tokio::select! {
+            changed = changes.changed() => {
+                if changed.is_err() {
+                    return Ok(());
+                }
+            },
+            read = reader.read(&mut scratch) => {
+                if matches!(read, Ok(0) | Err(_)) {
+                    return Ok(());
+                }
+            },
+        }
+    }
+}
+
+/// Stop the take and reply with its text when the session finishes it. The
+/// session decides whether a take records, because a start sent just before
+/// can still wait in the command channel.
+pub async fn stop_and_print(
+    shared: &SharedState,
+    control: &mpsc::Sender<SessionCommand>,
+    timeout: Duration,
+) -> DaemonResponse {
+    let result = shared.wait_for_take();
+    if control.send(SessionCommand::StopRecording).is_err() {
+        return DaemonResponse::error("The daemon session is no longer running");
+    }
+    match tokio::time::timeout(timeout, result).await {
+        Ok(Ok(take)) => DaemonResponse::ok(shared.snapshot()).with_take(take),
+        Ok(Err(_)) => DaemonResponse::error("The take ended without a result"),
+        Err(_) => DaemonResponse::error(format!(
+            "Hush did not finish the take within {} s",
+            timeout.as_secs()
+        )),
+    }
 }
 
 /// Map a command onto the session and describe the state it leads to.
@@ -208,10 +307,11 @@ pub fn respond(
     // A stop before the first audio frame discards the take.
     let after_stop = match shared.snapshot() {
         DaemonState::Starting => DaemonState::Idle,
-        _ => DaemonState::Transcribing,
+        DaemonState::Recording { .. } => DaemonState::Transcribing,
+        other => other,
     };
     match command {
-        DaemonCommand::Status => DaemonResponse::ok(shared.snapshot()),
+        DaemonCommand::Status | DaemonCommand::Watch => DaemonResponse::ok(shared.snapshot()),
         DaemonCommand::Toggle => {
             if shared.in_take() {
                 forward(SessionCommand::StopRecording, after_stop)
@@ -226,7 +326,7 @@ pub fn respond(
             SessionCommand::StartRecording(Trigger::Ipc),
             DaemonState::Starting,
         ),
-        DaemonCommand::Stop => forward(SessionCommand::StopRecording, after_stop),
+        DaemonCommand::Stop { .. } => forward(SessionCommand::StopRecording, after_stop),
         DaemonCommand::Cancel => forward(SessionCommand::CancelRecording, DaemonState::Idle),
         DaemonCommand::Quit => forward(SessionCommand::Quit, DaemonState::Stopping),
         DaemonCommand::PasteLast => {
@@ -306,6 +406,100 @@ mod tests {
         let response = respond(DaemonCommand::Start, &shared, &tx);
         assert!(!response.ok);
         assert!(response.error.unwrap().contains("no longer running"));
+    }
+
+    #[test]
+    fn a_plain_stop_without_a_take_keeps_the_state() {
+        let shared = SharedState::new();
+        let (tx, _rx) = mpsc::channel();
+        assert_eq!(
+            respond(DaemonCommand::Stop { print: false }, &shared, &tx).state,
+            Some(DaemonState::Idle)
+        );
+    }
+
+    #[tokio::test]
+    async fn print_stop_gives_up_after_the_timeout() {
+        let shared = SharedState::new();
+        let (tx, rx) = mpsc::channel();
+        let response = stop_and_print(&shared, &tx, Duration::from_millis(20)).await;
+        assert_eq!(rx.try_recv(), Ok(SessionCommand::StopRecording));
+        assert!(!response.ok);
+        assert!(response.error.unwrap().contains("did not finish"));
+        assert!(
+            shared.take_waiter().is_none(),
+            "the next stop types its take again"
+        );
+    }
+
+    #[tokio::test]
+    async fn print_stop_reports_a_dead_session() {
+        let shared = SharedState::new();
+        let (tx, rx) = mpsc::channel();
+        drop(rx);
+        let response = stop_and_print(&shared, &tx, Duration::from_secs(1)).await;
+        assert!(!response.ok);
+        assert!(response.error.unwrap().contains("no longer running"));
+    }
+
+    #[test]
+    fn a_waiter_whose_client_left_is_dropped() {
+        let shared = SharedState::new();
+        drop(shared.wait_for_take());
+        assert!(shared.take_waiter().is_none());
+        let _rx = shared.wait_for_take();
+        assert!(shared.take_waiter().is_some());
+        assert!(shared.take_waiter().is_none(), "a waiter serves one take");
+    }
+
+    #[tokio::test]
+    async fn print_stop_replies_with_the_take_over_the_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hush.sock");
+        let shared = Arc::new(SharedState::new());
+        let (tx, rx) = mpsc::channel();
+        let _guard = start(&path, Arc::clone(&shared), tx).await.unwrap();
+        shared.set_recording(Instant::now());
+
+        let session_shared = Arc::clone(&shared);
+        let session = std::thread::spawn(move || {
+            assert_eq!(rx.recv().unwrap(), SessionCommand::StopRecording);
+            let waiter = session_shared.take_waiter().expect("a print stop waits");
+            session_shared.set_idle();
+            waiter.finish(TakeResult::Ok {
+                text: "Ship it.".to_string(),
+            });
+        });
+
+        let response = client::send_to(&path, DaemonCommand::Stop { print: true })
+            .await
+            .unwrap();
+        session.join().unwrap();
+        assert!(response.ok);
+        assert_eq!(
+            response.take,
+            Some(TakeResult::Ok {
+                text: "Ship it.".to_string()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn watch_sends_the_state_now_and_on_each_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hush.sock");
+        let shared = Arc::new(SharedState::new());
+        let (tx, _rx) = mpsc::channel();
+        let guard = start(&path, Arc::clone(&shared), tx).await.unwrap();
+
+        let mut watcher = client::Watcher::connect(&path).await.unwrap();
+        let first = watcher.next().await.unwrap().unwrap();
+        assert_eq!(first.state, Some(DaemonState::Idle));
+
+        shared.set_starting();
+        let next = watcher.next().await.unwrap().unwrap();
+        assert_eq!(next.state, Some(DaemonState::Starting));
+        drop(guard);
     }
 
     #[tokio::test]

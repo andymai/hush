@@ -1,8 +1,14 @@
-use super::utils::{show_config_status, show_device_status, show_system_info};
+use super::utils::{print_line, show_config_status, show_device_status, show_system_info};
+use crate::cli::exit::{Exit, ExitStatus};
+use crate::config::settings::TranscriptionBackend;
+use crate::ipc::DaemonState;
+use crate::transcription::GpuAvailability;
+use crate::{AudioCapture, Config};
 /// Status command implementation
 ///
 /// Displays system status including configuration, devices, and component health.
 use anyhow::Result;
+use serde::Serialize;
 
 /// Handle the status command
 ///
@@ -35,10 +41,16 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
     println!();
 
     print!("Daemon: ");
-    match crate::ipc::client::status().await {
-        Some(state) => println!("✅ running ({})", state),
-        None => println!("not running (start with `hush daemon start`)"),
-    }
+    let running = match crate::ipc::client::status().await {
+        Some(state) => {
+            println!("✅ running ({})", state);
+            true
+        },
+        None => {
+            println!("not running (start with `hush daemon start`)");
+            false
+        },
+    };
     println!();
 
     // Always show basic status
@@ -50,15 +62,163 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
 
     if full {
         println!();
-        return super::doctor::handle_doctor().await;
+        super::doctor::handle_doctor().await?;
     }
 
-    Ok(())
+    if running {
+        Ok(())
+    } else {
+        Exit::quiet_result(ExitStatus::NoDaemon)
+    }
+}
+
+/// What `hush status --json` prints. Every key is present; unknown values
+/// are null. The README lists the keys.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct StatusReport {
+    pub state: &'static str,
+    pub running: bool,
+    pub elapsed_ms: Option<u64>,
+    pub backend: Option<TranscriptionBackend>,
+    pub model: Option<String>,
+    pub model_path: Option<String>,
+    pub use_gpu: Option<bool>,
+    pub gpu: Option<String>,
+    pub gpu_type: String,
+    pub sample_rate: Option<u32>,
+    pub hotkey: Option<String>,
+    pub devices: Vec<String>,
+    pub os: &'static str,
+    pub arch: &'static str,
+    pub config_error: Option<String>,
+}
+
+impl StatusReport {
+    pub fn new(
+        state: Option<DaemonState>,
+        config: Result<Config>,
+        gpu: &GpuAvailability,
+        devices: Vec<String>,
+    ) -> Self {
+        let (config, config_error) = match config {
+            Ok(config) => (Some(config), None),
+            Err(e) => (None, Some(format!("{:#}", e))),
+        };
+        let transcription = config.as_ref().map(|config| &config.transcription);
+        Self {
+            state: state.as_ref().map_or("stopped", DaemonState::name),
+            running: state.is_some(),
+            elapsed_ms: match state {
+                Some(DaemonState::Recording { elapsed_ms }) => Some(elapsed_ms),
+                _ => None,
+            },
+            backend: transcription.map(|t| t.backend),
+            model: transcription.map(|t| match t.cloud_model() {
+                Some(model) => model.to_string(),
+                None => t.model_size.clone(),
+            }),
+            model_path: transcription
+                .filter(|t| !t.backend.is_cloud())
+                .map(|t| t.model_path().display().to_string()),
+            use_gpu: transcription.map(|t| t.use_gpu),
+            gpu: gpu.available.then(|| gpu.device_name.clone()),
+            gpu_type: gpu.gpu_type.to_string().to_lowercase(),
+            sample_rate: config.as_ref().map(|config| config.audio.sample_rate),
+            hotkey: config
+                .as_ref()
+                .map(|config| config.hotkey.combination.clone()),
+            devices,
+            os: std::env::consts::OS,
+            arch: std::env::consts::ARCH,
+            config_error,
+        }
+    }
+}
+
+/// `hush status --json`
+pub async fn handle_status_json() -> Result<()> {
+    let state = crate::ipc::client::status().await;
+    let report = StatusReport::new(
+        state,
+        Config::load(),
+        GpuAvailability::detect(),
+        AudioCapture::list_devices().unwrap_or_default(),
+    );
+    print_line(&serde_json::to_string(&report)?)?;
+    if report.running {
+        Ok(())
+    } else {
+        Exit::quiet_result(ExitStatus::NoDaemon)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcription::GpuType;
+
+    fn cpu() -> GpuAvailability {
+        GpuAvailability {
+            gpu_type: GpuType::Cpu,
+            device_name: "CPU".to_string(),
+            available: false,
+        }
+    }
+
+    #[test]
+    fn json_status_has_stable_keys() {
+        let report = StatusReport::new(
+            Some(DaemonState::Recording { elapsed_ms: 1500 }),
+            Config::defaults(),
+            &cpu(),
+            vec!["Built-in Microphone".to_string()],
+        );
+        let value = serde_json::to_value(&report).unwrap();
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "arch",
+                "backend",
+                "config_error",
+                "devices",
+                "elapsed_ms",
+                "gpu",
+                "gpu_type",
+                "hotkey",
+                "model",
+                "model_path",
+                "os",
+                "running",
+                "sample_rate",
+                "state",
+                "use_gpu"
+            ]
+        );
+        assert_eq!(value["state"], "recording");
+        assert_eq!(value["running"], true);
+        assert_eq!(value["elapsed_ms"], 1500);
+        assert_eq!(value["backend"], "local");
+        assert_eq!(value["model"], "base");
+        assert_eq!(value["gpu"], serde_json::Value::Null);
+        assert_eq!(value["gpu_type"], "cpu");
+        assert_eq!(value["hotkey"], "RightAlt");
+    }
+
+    #[test]
+    fn json_status_without_a_daemon_or_config() {
+        let report = StatusReport::new(None, Err(anyhow::anyhow!("bad toml")), &cpu(), vec![]);
+        assert_eq!(report.state, "stopped");
+        assert!(!report.running);
+        assert_eq!(report.backend, None);
+        assert_eq!(report.config_error.as_deref(), Some("bad toml"));
+    }
 
     #[tokio::test]
     async fn test_status_command_runs() {

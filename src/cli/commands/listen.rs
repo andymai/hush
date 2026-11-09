@@ -19,8 +19,8 @@ use crate::hotkey::{
     GestureAction, GestureDetector, HotkeyAction, HotkeyBindings, HotkeyEvent, HotkeyManager,
     HotkeyMode,
 };
-use crate::ipc::protocol::DaemonState;
-use crate::ipc::SessionCommand;
+use crate::ipc::protocol::{DaemonState, NO_TAKE};
+use crate::ipc::{SessionCommand, TakeResult, TakeWaiter};
 use crate::notify::notify;
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
 use crate::text::WindowInfo;
@@ -181,6 +181,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             window: Option<WindowInfo>,
             command: Option<CommandTarget>,
             trigger: Trigger,
+            printer: Option<TakeWaiter>,
         },
         Error(String),
     }
@@ -443,6 +444,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     window,
                     command,
                     trigger,
+                    printer,
                 } => {
                     shared_result.set_inserting();
                     let context = ProcessingContext::new(window.clone(), &profiles);
@@ -477,6 +479,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
                     // Execute commands
                     let exec_result = command_executor_clone.execute(&parsed);
+
+                    // An undo types backspaces, and a printed take must type nothing.
+                    if exec_result.undo_requested && printer.is_some() {
+                        *state_handle_clone2.lock() = OverlayState::idle();
+                        shared_result.set_idle();
+                        finish(printer, TakeResult::NoSpeech);
+                        continue;
+                    }
 
                     // Handle undo request
                     if exec_result.undo_requested {
@@ -532,6 +542,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         Some(text) => text,
                         None => {
                             shared_result.set_idle();
+                            finish(printer, TakeResult::NoSpeech);
                             continue;
                         },
                     };
@@ -568,6 +579,12 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         processed_text,
                         &hook_env,
                     ) else {
+                        finish(
+                            printer,
+                            TakeResult::Ok {
+                                text: String::new(),
+                            },
+                        );
                         *state_handle_clone2.lock() = OverlayState::idle();
                         shared_result.set_idle();
                         continue;
@@ -577,7 +594,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
                     // Insert text
                     #[cfg(target_os = "linux")]
-                    if let Some(ref inserter) = text_inserter_clone {
+                    if let (Some(inserter), None) = (&text_inserter_clone, &printer) {
                         thread::sleep(std::time::Duration::from_millis(200));
 
                         let mut inserter = inserter.lock();
@@ -616,6 +633,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         ) {
                             warn!("Could not save the transcript to the history: {}", e);
                         }
+                    }
+                    if let Some(printer) = printer {
+                        printer.finish(TakeResult::from_text(processed_text.clone()));
                     }
 
                     // Update overlay
@@ -956,7 +976,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 }
             },
             SessionCommand::StopRecording => {
+                let printer = shared.take_waiter();
                 let Some(clock) = take.take() else {
+                    finish(
+                        printer,
+                        TakeResult::Error {
+                            message: NO_TAKE.to_string(),
+                        },
+                    );
                     continue;
                 };
                 if clock.stop_action() == StopAction::Discard {
@@ -969,6 +996,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     command_target = None;
                     show(OverlayState::idle());
                     shared.set_idle();
+                    finish(printer, TakeResult::NoSpeech);
                     continue;
                 }
                 shared.set_transcribing();
@@ -989,6 +1017,12 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     Err(e) => {
                         error!("Failed to stop recording: {}", e);
                         shared.set_idle();
+                        finish(
+                            printer,
+                            TakeResult::Error {
+                                message: "Failed to stop recording".to_string(),
+                            },
+                        );
                         if transcription_tx
                             .send(TranscriptionResult::Error(
                                 "Failed to stop recording".to_string(),
@@ -1003,6 +1037,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
                 if audio_data.is_empty() {
                     shared.set_idle();
+                    finish(printer, TakeResult::NoSpeech);
                     if transcription_tx
                         .send(TranscriptionResult::Error("No audio recorded".to_string()))
                         .is_err()
@@ -1026,11 +1061,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     report_empty_take(empty, &audio_capture.get_device_name(), feedback);
                     show(OverlayState::idle());
                     shared.set_idle();
+                    finish(printer, TakeResult::NoSpeech);
                     continue;
                 }
 
                 let window = current_window.take();
-                let command = command_target.take();
+                // A printed take is plain dictation: Command Mode would type
+                // over the selection.
+                let command = command_target.take().filter(|_| printer.is_none());
                 let initial_prompt = if context_prompt {
                     let terms = text_processor
                         .as_ref()
@@ -1061,6 +1099,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             );
                             show(OverlayState::idle());
                             shared.set_idle();
+                            finish(printer, TakeResult::NoSpeech);
                             continue;
                         }
                         TranscriptionResult::Success {
@@ -1068,6 +1107,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             window,
                             command,
                             trigger: current_trigger,
+                            printer,
                         }
                     },
                     Err(e) => {
@@ -1077,6 +1117,12 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         if transcriber.is_cloud() {
                             notify("Transcription failed", &format!("{:#}", e));
                         }
+                        finish(
+                            printer,
+                            TakeResult::Error {
+                                message: format!("Transcription failed: {:#}", e),
+                            },
+                        );
                         TranscriptionResult::Error("Transcription failed".to_string())
                     },
                 };
@@ -1136,6 +1182,13 @@ fn report_empty_take(take: EmptyTake, device: &str, feedback: AudioFeedback) {
             );
         },
         EmptyTake::NoSpeech => info!("No speech detected"),
+    }
+}
+
+/// Send a print stop its result. A take without a printer was typed.
+fn finish(printer: Option<TakeWaiter>, result: TakeResult) {
+    if let Some(printer) = printer {
+        printer.finish(result);
     }
 }
 

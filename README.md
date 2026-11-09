@@ -75,6 +75,7 @@ Everyday dictation:
 |---|---|
 | `hush toggle` | Start or stop recording over the daemon socket |
 | `hush start` / `hush stop` / `hush cancel` | Start, stop, or discard a recording |
+| `hush stop --print [--json]` | Stop, wait for the text, and print it instead of typing it |
 | `hush listen` | Run a dictation session attached to the terminal |
 | `hush record [-d secs]` | Record for N seconds (default 30) and transcribe |
 | `hush learn [words…]` | Add the selection, or the given words, to the vocabulary |
@@ -113,11 +114,67 @@ Diagnostics and lifecycle:
 | Command | Does |
 |---|---|
 | `hush status [--full] [--devices] [--config]` | System diagnostics; `--devices` lists microphones |
+| `hush status --json [--follow]` | Daemon state and setup as JSON; `--follow` prints a Waybar line for each change |
 | `hush test audio\|transcription\|text-insertion\|hotkeys\|window\|pipeline\|all` | Targeted self-tests |
 | `hush install [--autostart] [--desktop] [--system]` | Set up autostart and the desktop entry |
 | `hush uninstall [--autostart] [--desktop] [--system]` | Reverse the above |
 
 Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another config file; `-v`, `-vv`, `-vvv` set INFO, DEBUG, and TRACE logging; `--no-notifications` silences desktop notifications. `hush --help` lists everything.
+
+## Scripts
+
+`hush toggle`, `hush start`, `hush stop`, `hush cancel`, `hush status`, and `hush paste-last` use fixed exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | An error |
+| 2 | A usage error |
+| 3 | No daemon runs |
+| 4 | The recording has no speech (`hush stop --print`) |
+
+`hush stop --print` stops the recording, waits up to 60 seconds for the final text, and prints it. Hush types nothing, and the history keeps the transcript. With no recording in progress, it prints a message on stderr and exits with 1. If you set `audio.silence_stop_secs`, a pause can stop the recording before your script does, and then Hush types the text.
+
+```bash
+hush start
+sleep 5
+text="$(hush stop --print)" && notify-send "Hush heard" "$text"
+```
+
+`hush stop --json` prints one JSON object with the keys `status` (`ok`, `no_speech`, or `error`), `text`, `chars`, and `message`. A key without a value is `null`. Add `--print` to get the text in `text`.
+
+`hush status --json` prints one JSON object:
+
+| Key | Value |
+|---|---|
+| `state` | `idle`, `starting`, `recording`, `transcribing`, `inserting`, `stopping`, or `stopped` when no daemon runs |
+| `running` | `true` when the daemon answers |
+| `elapsed_ms` | Length of the current recording, else `null` |
+| `backend` | `local`, `groq`, `openai`, or `openai-compatible` |
+| `model` | Model size for `local`, model name for a cloud backend |
+| `model_path` | Model file for `local`, else `null` |
+| `use_gpu` | The `transcription.use_gpu` setting |
+| `gpu` | Name of the GPU that Hush can use, else `null` |
+| `gpu_type` | `cuda`, `vulkan`, or `cpu` |
+| `sample_rate` | Audio sample rate in Hz |
+| `hotkey` | The dictation hotkey |
+| `devices` | Names of the audio input devices |
+| `os`, `arch` | Operating system and CPU architecture |
+| `config_error` | Why the configuration did not load, else `null` |
+
+### Waybar
+
+`hush status --follow --json` prints one line at start and one line for each state change, in the JSON format of a Waybar custom module. `alt` and `class` are the state name. When the daemon stops, the module shows `stopped`, and it recovers when the daemon starts again.
+
+```json
+"custom/hush": {
+    "return-type": "json",
+    "exec": "hush status --follow --json",
+    "on-click": "hush toggle"
+}
+```
+
+Give each state a color in the Waybar style sheet, for example `#custom-hush.recording { color: #e5484d; }`.
 
 ## Configure
 

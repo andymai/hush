@@ -79,7 +79,15 @@ pub enum Commands {
     Start,
 
     /// Stop recording and transcribe (talks to the daemon)
-    Stop,
+    Stop {
+        /// Wait for the final text and print it instead of typing it
+        #[arg(long)]
+        print: bool,
+
+        /// Print one JSON object: status, text, chars, message
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Stop recording and discard the audio (talks to the daemon)
     Cancel,
@@ -128,8 +136,16 @@ pub enum Commands {
         devices: bool,
 
         /// Check all systems
-        #[arg(long)]
+        #[arg(long, conflicts_with = "json")]
         full: bool,
+
+        /// Print one JSON object for scripts
+        #[arg(long)]
+        json: bool,
+
+        /// With --json, print one Waybar line at once and on each state change
+        #[arg(long, requires = "json")]
+        follow: bool,
     },
 
     /// Install desktop integration (autostart, .desktop file)

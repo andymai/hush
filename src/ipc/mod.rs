@@ -8,5 +8,5 @@ pub mod paths;
 pub mod protocol;
 pub mod server;
 
-pub use protocol::{DaemonCommand, DaemonResponse, DaemonState};
-pub use server::{SessionCommand, SharedState};
+pub use protocol::{DaemonCommand, DaemonResponse, DaemonState, TakeResult};
+pub use server::{SessionCommand, SharedState, TakeWaiter};
