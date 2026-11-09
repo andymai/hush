@@ -27,7 +27,11 @@ pub enum DaemonCommand {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum DaemonState {
     Idle,
-    Recording { elapsed_ms: u64 },
+    /// A take waits for the first audio from the microphone
+    Starting,
+    Recording {
+        elapsed_ms: u64,
+    },
     Transcribing,
     Inserting,
     Stopping,
@@ -37,6 +41,7 @@ impl fmt::Display for DaemonState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DaemonState::Idle => f.write_str("idle"),
+            DaemonState::Starting => f.write_str("starting"),
             DaemonState::Recording { elapsed_ms } => {
                 write!(f, "recording ({:.1} s)", *elapsed_ms as f64 / 1000.0)
             },
@@ -132,6 +137,7 @@ mod tests {
     fn states_round_trip_with_payloads() {
         for state in [
             DaemonState::Idle,
+            DaemonState::Starting,
             DaemonState::Recording { elapsed_ms: 1500 },
             DaemonState::Transcribing,
             DaemonState::Inserting,

@@ -118,7 +118,10 @@ impl Machine {
         matches!(
             self.daemon,
             Some(
-                DaemonState::Recording { .. } | DaemonState::Transcribing | DaemonState::Inserting
+                DaemonState::Starting
+                    | DaemonState::Recording { .. }
+                    | DaemonState::Transcribing
+                    | DaemonState::Inserting
             )
         )
     }
@@ -589,6 +592,8 @@ mod tests {
         let mut machine = ready_machine();
         assert!(machine.running() && !machine.busy());
         machine.daemon = Some(DaemonState::Recording { elapsed_ms: 10 });
+        assert!(machine.busy());
+        machine.daemon = Some(DaemonState::Starting);
         assert!(machine.busy());
         machine.daemon = None;
         assert!(!machine.running() && !machine.busy());

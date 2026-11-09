@@ -3,10 +3,14 @@ use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-use tracing::{error, info, warn};
+use std::time::{Duration, Instant};
+use tracing::{debug, error, info, warn};
 
 // Import Hush components
-use crate::audio::{AudioFeedback, SilenceDetector};
+use crate::audio::take::{is_slow_start, START_TIMEOUT};
+use crate::audio::{
+    AudioFeedback, CapCheck, LengthCap, SilenceDetector, StartEvent, StopAction, TakeClock,
+};
 use crate::cli::commands::daemon::{self, SessionOptions};
 use crate::config::{keys, Config};
 use crate::hotkey::{
@@ -62,7 +66,7 @@ struct CommandTarget {
 ///
 /// 2. **Multi-threaded Execution**
 ///    - **Hotkey Thread**: Listens for Ctrl+Shift+Space press/release
-///      - On press: Start recording, update overlay
+///      - On press: Start recording
 ///      - On release: Stop recording
 ///    - **Result Handler Thread**: Processes transcription results
 ///      - Parse voice commands (undo, new line, etc.)
@@ -74,6 +78,8 @@ struct CommandTarget {
 ///    - **Overlay Thread**: Manages visual feedback window
 ///    - **Main Thread**: Handles audio recording pipeline
 ///      - Start/stop recording on commands
+///      - Give the start cue and show the overlay at the first audio frame,
+///        or cancel when no audio arrives in 2 s
 ///      - Monitor amplitude during recording
 ///      - Transcribe audio with Whisper
 ///      - Send results to handler thread
@@ -322,12 +328,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     // Hotkey handler thread: raw presses become gestures, gestures become commands
     let audio_cmd_tx_clone = audio_cmd_tx.clone();
     let state_handle_clone = state_handle.clone();
-    let egui_context_clone = egui_context_handle.clone();
     let shared_hotkey = Arc::clone(&shared);
     let tap_window = std::time::Duration::from_millis(config.hotkey.tap_ms);
     // A held key ends its own session, so silence must never end it.
     let key_held = Arc::new(AtomicBool::new(false));
     let key_held_hotkey = Arc::clone(&key_held);
+    // The overlay shows the lock when the first audio frame arrives.
+    let hands_free = Arc::new(AtomicBool::new(false));
+    let hands_free_hotkey = Arc::clone(&hands_free);
     let hotkey_thread = thread::spawn(move || {
         let mut gesture = GestureDetector::new(hotkey_mode, tap_window);
         loop {
@@ -343,12 +351,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             let now = std::time::Instant::now();
             if let Some(HotkeyEvent::Command(pressed)) = event {
                 let command = if pressed {
-                    let mut state = OverlayState::start_recording();
-                    state.set_warning(Some("cmd".to_string()));
-                    *state_handle_clone.lock() = state;
-                    if let Some(ctx) = egui_context_clone.lock().as_ref() {
-                        ctx.request_repaint();
-                    }
                     SessionCommand::StartCommand
                 } else {
                     SessionCommand::StopRecording
@@ -368,7 +370,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 }
                 continue;
             }
-            if !matches!(shared_hotkey.snapshot(), DaemonState::Recording { .. }) {
+            if !matches!(
+                shared_hotkey.snapshot(),
+                DaemonState::Starting | DaemonState::Recording { .. }
+            ) {
                 gesture.session_ended();
             }
             let action = match event {
@@ -379,15 +384,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 },
             };
             let command = match action {
-                Some(GestureAction::Start) => {
-                    let mut state = OverlayState::start_recording();
-                    state.set_locked(gesture.is_locked());
-                    *state_handle_clone.lock() = state;
-                    if let Some(ctx) = egui_context_clone.lock().as_ref() {
-                        ctx.request_repaint();
-                    }
-                    Some(SessionCommand::StartRecording)
-                },
+                Some(GestureAction::Start) => Some(SessionCommand::StartRecording),
                 // The overlay stays in Recording until transcription completes
                 Some(GestureAction::Stop) => Some(SessionCommand::StopRecording),
                 Some(GestureAction::Cancel) => Some(SessionCommand::CancelRecording),
@@ -405,6 +402,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             // After the send, so a release's Stop or Cancel reaches the
             // session before silence can stop it.
             key_held_hotkey.store(gesture.is_holding(), Ordering::Release);
+            hands_free_hotkey.store(gesture.is_locked(), Ordering::Release);
         }
     });
 
@@ -624,12 +622,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     // Stop signal for amplitude thread - shared between main loop and amplitude thread
     let amplitude_stop_signal = Arc::new(AtomicBool::new(false));
 
-    let max_secs = config.audio.max_recording_secs;
-    let warn_secs = if max_secs > 90 {
-        max_secs - 60
-    } else {
-        max_secs * 2 / 3
+    let show = |next: OverlayState| {
+        *state_handle.lock() = next;
+        if let Some(ctx) = egui_context_handle.lock().as_ref() {
+            ctx.request_repaint();
+        }
     };
+    let mut take: Option<TakeClock> = None;
+    let cap = LengthCap::new(config.audio.max_recording_secs);
     let mut cap_warned = false;
     let mut cap_shown: Option<u64> = None;
     let silence_pause = (config.audio.silence_stop_secs > 0)
@@ -645,9 +645,67 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         let command = match audio_cmd_rx.recv_timeout(std::time::Duration::from_millis(16)) {
             Ok(cmd) => cmd,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                let now = Instant::now();
+                let Some(clock) = take.as_mut() else {
+                    continue;
+                };
+                match clock.poll(audio_capture.first_frame_at(), now) {
+                    Some(StartEvent::Live { delay }) => {
+                        let delay_ms = delay.as_millis() as u64;
+                        debug!(delay_ms, "First audio frame arrived");
+                        if is_slow_start(delay) {
+                            warn!(
+                                delay_ms,
+                                device = %audio_capture.get_device_name(),
+                                "The microphone took {} ms to deliver audio",
+                                delay_ms
+                            );
+                        }
+                        shared.set_recording(clock.live_since().unwrap_or(now));
+                        let mut recording = OverlayState::start_recording();
+                        recording.set_locked(hands_free.load(Ordering::Acquire));
+                        if command_target.is_some() {
+                            recording.set_warning(Some("cmd".to_string()));
+                        }
+                        show(recording);
+                        let _ = feedback.play_start();
+                    },
+                    Some(StartEvent::TimedOut) => {
+                        let device = audio_capture.get_device_name();
+                        error!(
+                            device = %device,
+                            "No audio from the microphone {} s after the stream started",
+                            START_TIMEOUT.as_secs()
+                        );
+                        discard_audio(
+                            &mut audio_capture,
+                            &amplitude_stop_signal,
+                            &mut current_amplitude_thread,
+                        );
+                        take = None;
+                        command_target = None;
+                        let _ = feedback.play_error();
+                        notify(
+                            "The microphone did not start",
+                            &format!(
+                                "Hush got no audio from '{}'. Check the input device.",
+                                device
+                            ),
+                        );
+                        show(OverlayState::error(
+                            "The microphone did not start",
+                            Duration::from_secs(4),
+                        ));
+                        shared.set_idle();
+                        continue;
+                    },
+                    None => {},
+                }
+                let Some(clock) = take.filter(TakeClock::is_live) else {
+                    continue;
+                };
                 if !silence_sent
                     && command_target.is_none()
-                    && audio_capture.is_recording()
                     && silence_heard.load(Ordering::Acquire)
                     && !key_held.load(Ordering::Acquire)
                 {
@@ -658,45 +716,39 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     }
                     continue;
                 }
-                if max_secs == 0 || !audio_capture.is_recording() {
-                    continue;
-                }
-                let DaemonState::Recording { elapsed_ms } = shared.snapshot() else {
-                    continue;
-                };
-                let elapsed = elapsed_ms / 1000;
-                if elapsed >= max_secs {
-                    info!("Recording reached the {} second cap", max_secs);
-                    notify(
-                        "Recording stopped",
-                        &format!(
-                            "Hush stops after {} minutes and inserts what it heard.",
-                            max_secs / 60
-                        ),
-                    );
-                    if audio_cmd_tx.send(SessionCommand::StopRecording).is_err() {
-                        break;
-                    }
-                    continue;
-                }
-                if elapsed >= warn_secs {
-                    if !cap_warned {
-                        cap_warned = true;
-                        let _ = feedback.play_warning();
+                match cap.check(clock.elapsed(now)) {
+                    CapCheck::Under => {},
+                    CapCheck::Reached => {
+                        info!("Recording reached the {} second cap", cap.max_secs());
                         notify(
-                            "Recording stops soon",
-                            &format!("Hush stops recording in {} seconds.", max_secs - elapsed),
+                            "Recording stopped",
+                            &format!(
+                                "Hush stops after {} minutes and inserts what it heard.",
+                                cap.max_secs() / 60
+                            ),
                         );
-                    }
-                    let remaining = max_secs - elapsed;
-                    if cap_shown != Some(remaining) {
-                        cap_shown = Some(remaining);
-                        state_handle.lock().set_warning(Some(format!(
-                            "{}:{:02}",
-                            remaining / 60,
-                            remaining % 60
-                        )));
-                    }
+                        if audio_cmd_tx.send(SessionCommand::StopRecording).is_err() {
+                            break;
+                        }
+                    },
+                    CapCheck::Warn { remaining_secs } => {
+                        if !cap_warned {
+                            cap_warned = true;
+                            let _ = feedback.play_warning();
+                            notify(
+                                "Recording stops soon",
+                                &format!("Hush stops recording in {} seconds.", remaining_secs),
+                            );
+                        }
+                        if cap_shown != Some(remaining_secs) {
+                            cap_shown = Some(remaining_secs);
+                            state_handle.lock().set_warning(Some(format!(
+                                "{}:{:02}",
+                                remaining_secs / 60,
+                                remaining_secs % 60
+                            )));
+                        }
+                    },
                 }
                 continue;
             },
@@ -709,7 +761,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 break;
             },
             SessionCommand::PasteLast => {
-                if audio_capture.is_recording() {
+                if take.is_some() {
                     warn!("Ignoring paste-last while recording");
                     continue;
                 }
@@ -752,25 +804,25 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 }
             },
             SessionCommand::CancelRecording => {
-                if !audio_capture.is_recording() {
+                let Some(clock) = take.take() else {
                     continue;
-                }
-                amplitude_stop_signal.store(true, Ordering::Release);
-                audio_capture.disable_amplitude_monitoring();
-                if let Some(thread) = current_amplitude_thread.take() {
-                    let _ = thread.join();
-                }
-                if let Err(e) = audio_capture.stop_recording() {
-                    error!("Failed to stop recording: {}", e);
-                }
+                };
+                discard_audio(
+                    &mut audio_capture,
+                    &amplitude_stop_signal,
+                    &mut current_amplitude_thread,
+                );
                 info!("Recording cancelled");
                 command_target = None;
-                let _ = feedback.play_cancel();
-                *state_handle.lock() = OverlayState::idle();
+                // Only a take that gave the start cue gets a closing cue.
+                if clock.is_live() {
+                    let _ = feedback.play_cancel();
+                }
+                show(OverlayState::idle());
                 shared.set_idle();
             },
             SessionCommand::StartRecording | SessionCommand::StartCommand => {
-                if audio_capture.is_recording() {
+                if take.is_some() {
                     continue;
                 }
                 let is_command = command == SessionCommand::StartCommand;
@@ -780,19 +832,18 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 // Create fresh amplitude channel for this recording session
                 let amplitude_rx = audio_capture.enable_amplitude_monitoring();
 
+                let stream_started = Instant::now();
                 if let Err(e) = audio_capture.start_recording() {
                     error!("Failed to start recording: {}", e);
                     audio_capture.disable_amplitude_monitoring();
-                    if transcription_tx
-                        .send(TranscriptionResult::Error(
-                            "Failed to start recording".to_string(),
-                        ))
-                        .is_err()
-                    {
-                        warn!("Channel send failed - receiver dropped");
-                    }
+                    let _ = feedback.play_error();
+                    show(OverlayState::error(
+                        "Failed to start recording",
+                        Duration::from_secs(4),
+                    ));
                 } else {
-                    shared.set_recording();
+                    take = Some(TakeClock::new(stream_started));
+                    shared.set_starting();
                     #[cfg(target_os = "linux")]
                     {
                         current_window = text_inserter
@@ -807,7 +858,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     cap_shown = None;
                     silence_sent = false;
                     silence_heard.store(false, Ordering::Release);
-                    let _ = feedback.play_start();
                     // Start polling amplitude updates with batching for performance
                     let state_handle_amp = state_handle.clone();
                     let stop_signal = amplitude_stop_signal.clone();
@@ -869,7 +919,19 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 }
             },
             SessionCommand::StopRecording => {
-                if !audio_capture.is_recording() {
+                let Some(clock) = take.take() else {
+                    continue;
+                };
+                if clock.stop_action() == StopAction::Discard {
+                    discard_audio(
+                        &mut audio_capture,
+                        &amplitude_stop_signal,
+                        &mut current_amplitude_thread,
+                    );
+                    info!("Recording stopped before the microphone delivered audio, discarding it");
+                    command_target = None;
+                    show(OverlayState::idle());
+                    shared.set_idle();
                     continue;
                 }
                 shared.set_transcribing();
@@ -1010,6 +1072,22 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     info!("Listen mode ended");
     Ok(())
+}
+
+/// Stop the capture and the level thread, and drop the audio.
+fn discard_audio(
+    audio_capture: &mut AudioCapture,
+    stop_signal: &AtomicBool,
+    amplitude_thread: &mut Option<thread::JoinHandle<()>>,
+) {
+    stop_signal.store(true, Ordering::Release);
+    audio_capture.disable_amplitude_monitoring();
+    if let Some(thread) = amplitude_thread.take() {
+        let _ = thread.join();
+    }
+    if let Err(e) = audio_capture.stop_recording() {
+        error!("Failed to stop recording: {}", e);
+    }
 }
 
 #[cfg(target_os = "linux")]

@@ -140,6 +140,25 @@ mod tests {
     }
 
     #[test]
+    fn the_pause_counts_from_the_first_block() {
+        let mut detector = SilenceDetector::new(PAUSE);
+        let mut clock = Instant::now() + Duration::from_secs(3);
+        speak(&mut detector, &mut clock, 0.5, Duration::from_secs(1));
+        assert!(!feed_for(
+            &mut detector,
+            &mut clock,
+            0.01,
+            Duration::from_millis(1800)
+        ));
+        assert!(feed_for(
+            &mut detector,
+            &mut clock,
+            0.01,
+            Duration::from_millis(400)
+        ));
+    }
+
+    #[test]
     fn silence_alone_never_stops() {
         let mut detector = SilenceDetector::new(PAUSE);
         let mut clock = Instant::now();

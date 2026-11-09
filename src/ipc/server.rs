@@ -34,6 +34,7 @@ pub enum SessionCommand {
 
 enum Phase {
     Idle,
+    Starting,
     Recording(Instant),
     Transcribing,
     Inserting,
@@ -73,8 +74,14 @@ impl SharedState {
         *self.phase.lock() = Phase::Idle;
     }
 
-    pub fn set_recording(&self) {
-        *self.phase.lock() = Phase::Recording(Instant::now());
+    /// The stream started and waits for its first audio frame.
+    pub fn set_starting(&self) {
+        *self.phase.lock() = Phase::Starting;
+    }
+
+    /// `since` is the time of the first audio frame.
+    pub fn set_recording(&self, since: Instant) {
+        *self.phase.lock() = Phase::Recording(since);
     }
 
     pub fn set_transcribing(&self) {
@@ -89,13 +96,15 @@ impl SharedState {
         *self.phase.lock() = Phase::Stopping;
     }
 
-    pub fn is_recording(&self) -> bool {
-        matches!(*self.phase.lock(), Phase::Recording(_))
+    /// A take is in progress, whether or not its first frame arrived.
+    pub fn in_take(&self) -> bool {
+        matches!(*self.phase.lock(), Phase::Starting | Phase::Recording(_))
     }
 
     pub fn snapshot(&self) -> DaemonState {
         match *self.phase.lock() {
             Phase::Idle => DaemonState::Idle,
+            Phase::Starting => DaemonState::Starting,
             Phase::Recording(since) => DaemonState::Recording {
                 elapsed_ms: since.elapsed().as_millis() as u64,
             },
@@ -196,23 +205,22 @@ pub fn respond(
         Ok(()) => DaemonResponse::ok(next),
         Err(_) => DaemonResponse::error("The daemon session is no longer running"),
     };
+    // A stop before the first audio frame discards the take.
+    let after_stop = match shared.snapshot() {
+        DaemonState::Starting => DaemonState::Idle,
+        _ => DaemonState::Transcribing,
+    };
     match command {
         DaemonCommand::Status => DaemonResponse::ok(shared.snapshot()),
         DaemonCommand::Toggle => {
-            if shared.is_recording() {
-                forward(SessionCommand::StopRecording, DaemonState::Transcribing)
+            if shared.in_take() {
+                forward(SessionCommand::StopRecording, after_stop)
             } else {
-                forward(
-                    SessionCommand::StartRecording,
-                    DaemonState::Recording { elapsed_ms: 0 },
-                )
+                forward(SessionCommand::StartRecording, DaemonState::Starting)
             }
         },
-        DaemonCommand::Start => forward(
-            SessionCommand::StartRecording,
-            DaemonState::Recording { elapsed_ms: 0 },
-        ),
-        DaemonCommand::Stop => forward(SessionCommand::StopRecording, DaemonState::Transcribing),
+        DaemonCommand::Start => forward(SessionCommand::StartRecording, DaemonState::Starting),
+        DaemonCommand::Stop => forward(SessionCommand::StopRecording, after_stop),
         DaemonCommand::Cancel => forward(SessionCommand::CancelRecording, DaemonState::Idle),
         DaemonCommand::Quit => forward(SessionCommand::Quit, DaemonState::Stopping),
         DaemonCommand::PasteLast => {
@@ -236,16 +244,24 @@ mod tests {
     use crate::ipc::client;
 
     #[test]
-    fn toggle_follows_the_recording_flag() {
+    fn toggle_follows_the_take() {
         let shared = SharedState::new();
         let (tx, rx) = mpsc::channel();
         assert_eq!(
             respond(DaemonCommand::Toggle, &shared, &tx).state,
-            Some(DaemonState::Recording { elapsed_ms: 0 })
+            Some(DaemonState::Starting)
         );
         assert_eq!(rx.try_recv(), Ok(SessionCommand::StartRecording));
 
-        shared.set_recording();
+        shared.set_starting();
+        assert_eq!(
+            respond(DaemonCommand::Toggle, &shared, &tx).state,
+            Some(DaemonState::Idle),
+            "a stop before the first frame discards the take"
+        );
+        assert_eq!(rx.try_recv(), Ok(SessionCommand::StopRecording));
+
+        shared.set_recording(Instant::now());
         assert_eq!(
             respond(DaemonCommand::Toggle, &shared, &tx).state,
             Some(DaemonState::Transcribing)
@@ -295,10 +311,7 @@ mod tests {
         assert_eq!(status.state, Some(DaemonState::Idle));
 
         let started = client::send_to(&path, DaemonCommand::Start).await.unwrap();
-        assert_eq!(
-            started.state,
-            Some(DaemonState::Recording { elapsed_ms: 0 })
-        );
+        assert_eq!(started.state, Some(DaemonState::Starting));
         assert_eq!(rx.recv().unwrap(), SessionCommand::StartRecording);
 
         drop(guard);

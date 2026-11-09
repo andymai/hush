@@ -129,6 +129,7 @@ pub async fn handle_client_command(command: DaemonCommand) -> Result<()> {
         return Ok(());
     }
     match (response.ok, response.state) {
+        (true, Some(DaemonState::Starting)) => println!("Starting the microphone."),
         (true, Some(DaemonState::Recording { .. })) => println!("Recording."),
         (true, Some(DaemonState::Transcribing)) => println!("Transcribing."),
         (true, Some(DaemonState::Idle)) => println!("Idle."),
