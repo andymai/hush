@@ -11,6 +11,7 @@ mod theme;
 
 pub use pages::speech::size_key;
 
+use crate::config::settings::{TranscriptionBackend, TranscriptionConfig};
 use crate::config::Config;
 use crate::ipc::{client, DaemonState};
 use crate::permissions::PermissionStatus;
@@ -61,6 +62,8 @@ pub struct Machine {
     pub daemon: Option<DaemonState>,
     pub installed_models: Vec<ModelSize>,
     pub autostart: bool,
+    /// The cloud transcription key variables that hold a key.
+    pub cloud_keys: Vec<&'static str>,
 }
 
 impl Machine {
@@ -80,11 +83,29 @@ impl Machine {
             daemon: client::status_blocking(STATUS_TIMEOUT),
             installed_models,
             autostart: crate::desktop::autostart_installed(),
+            cloud_keys: TranscriptionBackend::ALL
+                .iter()
+                .filter_map(|backend| backend.key_var())
+                .filter(|var| crate::config::keys::api_key(var).is_some())
+                .collect(),
         }
     }
 
-    pub fn ready(&self) -> bool {
-        self.permissions.ready() && !self.installed_models.is_empty()
+    /// Whether the cloud service `backend` names has its key.
+    pub fn has_key(&self, backend: TranscriptionBackend) -> bool {
+        backend
+            .key_var()
+            .is_some_and(|var| self.cloud_keys.contains(&var))
+    }
+
+    /// Keyboard access, plus a downloaded model or the cloud service's key.
+    pub fn ready(&self, transcription: &TranscriptionConfig) -> bool {
+        let speech = if transcription.backend.is_cloud() {
+            self.has_key(transcription.backend)
+        } else {
+            !self.installed_models.is_empty()
+        };
+        self.permissions.ready() && speech
     }
 
     pub fn running(&self) -> bool {
@@ -404,7 +425,7 @@ impl eframe::App for Gui {
                     if response.clicked() {
                         self.page = page;
                     }
-                    if page == Page::Overview && !self.machine.ready() {
+                    if page == Page::Overview && !self.machine.ready(&self.config.transcription) {
                         let centre =
                             egui::pos2(response.rect.right() - 12.0, response.rect.center().y);
                         ui.painter().circle_filled(centre, 4.0, theme::WARN);
@@ -522,17 +543,34 @@ mod tests {
             daemon: Some(DaemonState::Idle),
             installed_models: vec![ModelSize::Base],
             autostart: false,
+            cloud_keys: Vec::new(),
         }
     }
 
     #[test]
     fn readiness_needs_permissions_and_a_model() {
-        assert!(ready_machine().ready());
+        let mut transcription = Config::defaults().unwrap().transcription;
+        assert!(ready_machine().ready(&transcription));
         let missing_model = Machine {
             installed_models: Vec::new(),
             ..ready_machine()
         };
-        assert!(!missing_model.ready(), "a model is required");
+        assert!(!missing_model.ready(&transcription), "a model is required");
+
+        transcription.backend = TranscriptionBackend::Groq;
+        assert!(
+            !missing_model.ready(&transcription),
+            "a cloud service needs its key"
+        );
+        let with_key = Machine {
+            cloud_keys: vec!["GROQ_API_KEY"],
+            ..missing_model
+        };
+        assert!(
+            with_key.ready(&transcription),
+            "and then needs no local model"
+        );
+        assert!(!with_key.has_key(TranscriptionBackend::OpenAi));
     }
 
     #[test]

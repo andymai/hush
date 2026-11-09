@@ -17,7 +17,7 @@ Expect an initial response within 48 hours.
 
 Hush reads keyboard events to detect the hotkey and injects keystrokes to insert text. On Linux both come from device nodes: `/dev/input/event*` for reading and `/dev/uinput` for writing. `hush setup permissions` installs one udev rule (`/etc/udev/rules.d/70-hush.rules`) that tags those nodes with `uaccess`, so systemd-logind grants the physically seated user an ACL on them for the session and removes it at logout. That single rule is the only thing setup runs as root. Any process running as the seated user can then read keystrokes and type; Hush never elevates beyond that.
 
-Transcription runs locally through whisper.cpp, so audio never leaves the machine. Model downloads come from `huggingface.co/ggerganov/whisper.cpp` and are verified against pinned SHA256 checksums. LLM polish is off by default; when enabled it sends transcribed text, never audio, to the configured provider.
+Transcription runs locally through whisper.cpp by default, so audio stays on the machine. Cloud transcription through Groq or OpenAI is opt-in only (`transcription.backend`). It sends the audio of each dictation over HTTPS with a key from `GROQ_API_KEY` or `OPENAI_API_KEY`, and it never starts as a fallback. Model downloads come from `huggingface.co/ggerganov/whisper.cpp` and are verified against pinned SHA256 checksums. LLM polish is off by default; when enabled it sends transcribed text, never audio, to the configured provider.
 
 ## Supply Chain
 

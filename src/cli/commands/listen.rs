@@ -8,7 +8,7 @@ use tracing::{error, info, warn};
 // Import Hush components
 use crate::audio::{AudioFeedback, SilenceDetector};
 use crate::cli::commands::daemon::{self, SessionOptions};
-use crate::config::Config;
+use crate::config::{keys, Config};
 use crate::hotkey::{
     GestureAction, GestureDetector, HotkeyAction, HotkeyBindings, HotkeyEvent, HotkeyManager,
     HotkeyMode,
@@ -23,8 +23,7 @@ use crate::text_processing::{
     CommandExecutor, CommandParser, EditingMode, InsertionHistory, LlmProvider, ProcessingConfig,
     TextProcessor,
 };
-use crate::transcription::models::{ModelManager, ModelSize};
-use crate::transcription::{WhisperTranscriber, WHISPER_SAMPLE_RATE};
+use crate::transcription::{SpeechToText, WHISPER_SAMPLE_RATE};
 use crate::tray;
 use crate::AudioCapture;
 
@@ -54,7 +53,7 @@ struct CommandTarget {
 ///    - Parse editing mode (light/medium/aggressive)
 ///    - Initialize hotkey manager (Ctrl+Shift+Space)
 ///    - Setup audio capture with amplitude monitoring
-///    - Load Whisper transcriber model
+///    - Load the Whisper model, or prepare the cloud service `transcription.backend` names
 ///    - Initialize text processor with LLM (if enabled)
 ///    - Initialize text inserter
 ///    - Setup voice command system (parser, executor, history)
@@ -240,44 +239,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         audio_capture.get_device_name()
     );
 
-    // Initialize transcriber - try config first, then fall back to ModelManager
-    let model_path = {
-        let configured = config.transcription.model_path();
-        if configured.exists() {
-            configured
-        } else {
-            let model_size: ModelSize = config
-                .transcription
-                .model_size
-                .parse()
-                .unwrap_or(ModelSize::Base);
-            ModelManager::new(crate::config::paths::models_dir())
-                .ok()
-                .and_then(|manager| manager.get_model_path(&model_size))
-                .unwrap_or(configured)
-        }
-    };
+    // First, because a cloud backend reads its key from these files
+    keys::load_env_files();
 
-    info!("Using model path: {:?}", model_path);
-
-    let transcriber = WhisperTranscriber::new(&model_path, config.transcription.use_gpu)
-        .await
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "{}\nDownload a model with: hush models download {}",
-                e,
-                config.transcription.model_size
-            )
-        })?
-        .with_language(&config.transcription.language);
-    info!(
-        "✅ Whisper transcriber ready ({})",
-        transcriber.get_device_info()
-    );
-
-    // API keys: ~/.config/hush/.env for installed daemons, ./.env for source checkouts
-    let _ = dotenvy::from_path(crate::config::paths::config_dir().join(".env"));
-    let _ = dotenvy::dotenv();
+    let transcriber = SpeechToText::from_config(&config.transcription).await?;
+    info!("✅ Transcriber ready: {}", transcriber.describe());
 
     // Initialize text processor
     let text_processor = if !no_processing {
@@ -990,7 +956,12 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         }
                     },
                     Err(e) => {
-                        error!("Transcription failed: {}", e);
+                        error!("Transcription failed: {:#}", e);
+                        // The overlay is too narrow for the service's reason,
+                        // and a bad key or quota needs the user to act.
+                        if transcriber.is_cloud() {
+                            notify("Transcription failed", &format!("{:#}", e));
+                        }
                         TranscriptionResult::Error("Transcription failed".to_string())
                     },
                 };

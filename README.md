@@ -14,7 +14,7 @@ Local voice-to-text for Linux. Hold a key, speak, release; your words land at th
 
 </div>
 
-Hush turns speech into text on any Linux desktop. Hold a key, talk, let go, and the words appear wherever your cursor is. It runs OpenAI's Whisper models on your own machine (on the GPU through Vulkan when you have one) and types the result through the kernel's input layer, so it works in terminals, browsers, editors, chat, VMs, games, and password fields, on both Wayland and X11. Audio never leaves your computer.
+Hush turns speech into text on any Linux desktop. Hold a key, talk, let go, and the words appear wherever your cursor is. It runs OpenAI's Whisper models on your own machine (on the GPU through Vulkan when you have one) and types the result through the kernel's input layer, so it works in terminals, browsers, editors, chat, VMs, games, and password fields, on both Wayland and X11. Audio stays on your computer unless you choose a cloud service for transcription.
 
 It is built to disappear into a keyboard-driven workflow: bind any key to it, tune the output per application, and teach it the words you use.
 
@@ -59,7 +59,7 @@ Hold `Right Alt`, speak, release. Done.
 
 Hush deliberately does not:
 
-- **Send audio anywhere.** Transcription runs entirely on your machine. The only network traffic is the one-time model download and, if you turn it on, text-only LLM polishing.
+- **Send audio without asking.** Transcription runs on your machine. Groq and OpenAI transcription are an explicit choice (`transcription.backend`), and Hush never falls back to them on its own. Otherwise the only network traffic is the one-time model download and, if you turn it on, text-only LLM polishing.
 - **Act as a voice assistant.** It types what you say. It does not answer questions, run commands, or wake on a phrase.
 - **Run on macOS or Windows.** Linux-only, by design. It depends on `/dev/uinput`, evdev, and Linux window protocols.
 - **Stream partial words.** It transcribes when you release the key, not live as you speak.
@@ -127,6 +127,8 @@ Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another co
 | `transcription.language` | Two-letter code, or `auto` to detect what you speak | en |
 | `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
 | `transcription.context_prompt` | Prime Whisper with the focused window's title and learned terms | true |
+| `transcription.backend` | `local` (whisper.cpp), or `groq` or `openai`, which send the audio of each dictation to that service. The key comes from `GROQ_API_KEY` or `OPENAI_API_KEY` | local |
+| `transcription.groq_model`, `transcription.openai_model` | The model each service runs | whisper-large-v3-turbo, gpt-4o-mini-transcribe |
 | `hotkey.combination` | Key or button: `RightAlt`, `RightCtrl`, `F13`, `Mouse4`, or a chord like `Ctrl+Shift+Space` | RightAlt |
 | `hotkey.mode` | `hold` (double-tap locks hands-free) or `toggle` (a tap locks) | hold |
 | `hotkey.backend` | `auto`, `evdev`, or `x11` | auto |
@@ -177,7 +179,7 @@ If `hush setup permissions` cannot run where you are (a container, an SSH sessio
 
 ## Privacy and security
 
-Everything runs locally. The only network traffic is the one-time model download, and text-only LLM polishing if you turn it on (never audio). Hush reads keyboard events and types through `/dev/input` and `/dev/uinput`; one udev rule grants the logged-in user access to those for the length of the session. Details in [SECURITY.md](SECURITY.md).
+Everything runs locally by default. The only network traffic is the one-time model download, and text-only LLM polishing if you turn it on (never audio). If you set `transcription.backend` to `groq` or `openai`, Hush sends the audio of each dictation to that service, with the focused window's title when `transcription.context_prompt` is on. When that service fails, Hush reports the error and does not try another service. Hush reads keyboard events and types through `/dev/input` and `/dev/uinput`; one udev rule grants the logged-in user access to those for the length of the session. Details in [SECURITY.md](SECURITY.md).
 
 ## Contributing
 

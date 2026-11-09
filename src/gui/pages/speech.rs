@@ -1,8 +1,10 @@
-//! What Hush listens with and how it turns speech into words: the model, the
-//! language, the GPU, the microphone, and how long a recording may run.
+//! What Hush listens with and how it turns speech into words: where the
+//! transcription runs, the model, the language, the GPU, the microphone, and
+//! how long a recording may run.
 
+use crate::config::settings::TranscriptionBackend;
 use crate::gui::meter::{self, Meter};
-use crate::gui::theme::{quiet_button, row, section, slider, toggle_row, FIELD_WIDTH, GOOD};
+use crate::gui::theme::{field, quiet_button, row, section, slider, toggle_row, FIELD_WIDTH, GOOD};
 use crate::gui::{megabytes, Gui};
 use crate::transcription::device::GpuAvailability;
 use crate::transcription::models::{ModelManager, ModelSize};
@@ -30,9 +32,90 @@ const LANGUAGES: &[(&str, &str)] = &[
 ];
 
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
-    models(gui, ui);
+    backend(gui, ui);
+    if !gui.config.transcription.backend.is_cloud() {
+        models(gui, ui);
+    }
     listening(gui, ui);
     microphone(gui, ui);
+}
+
+fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
+    section(ui, "Transcription");
+    row("Transcribe on")
+        .describe(
+            "This machine keeps the audio here. Groq and OpenAI can be faster on a slow \
+             computer, and they receive the audio of every dictation.",
+        )
+        .show(ui, |ui| {
+            egui::ComboBox::from_id_salt("backend")
+                .width(FIELD_WIDTH)
+                .selected_text(backend_label(gui.config.transcription.backend))
+                .show_ui(ui, |ui| {
+                    for backend in TranscriptionBackend::ALL {
+                        ui.selectable_value(
+                            &mut gui.config.transcription.backend,
+                            backend,
+                            backend_label(backend),
+                        );
+                    }
+                });
+        });
+
+    let backend = gui.config.transcription.backend;
+    let Some(var) = backend.key_var() else {
+        return;
+    };
+    let service = backend.name();
+    let has_key = gui.machine.has_key(backend);
+    let sent = if gui.config.transcription.context_prompt {
+        "the audio of each dictation and the focused window's title"
+    } else {
+        "the audio of each dictation"
+    };
+    let (title, description) = if has_key {
+        (
+            format!("Audio leaves this machine for {}", service),
+            format!("Hush sends {} to {}.", sent, service),
+        )
+    } else {
+        (
+            format!("{} needs an API key", service),
+            format!(
+                "Put {} in ~/.config/hush/.env. Until then dictation fails, \
+                 and Hush never falls back to another service.",
+                var
+            ),
+        )
+    };
+    row(&title)
+        .status(has_key)
+        .describe(&description)
+        .show(ui, |_| {});
+
+    let (model, placeholder) = match backend {
+        TranscriptionBackend::Groq => (
+            &mut gui.config.transcription.groq_model,
+            "whisper-large-v3-turbo",
+        ),
+        TranscriptionBackend::OpenAi => (
+            &mut gui.config.transcription.openai_model,
+            "gpt-4o-mini-transcribe",
+        ),
+        TranscriptionBackend::Local => return,
+    };
+    let title = format!("{} model", service);
+    row(&title).show(ui, |ui| {
+        field(ui, model, placeholder);
+    });
+}
+
+fn backend_label(backend: TranscriptionBackend) -> &'static str {
+    match backend {
+        TranscriptionBackend::Local => "This machine",
+        TranscriptionBackend::Groq => "Groq (cloud)",
+        TranscriptionBackend::OpenAi => "OpenAI (cloud)",
+    }
 }
 
 fn models(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -152,22 +235,33 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
                 });
         });
 
-    let gpu = GpuAvailability::detect();
-    let gpu_text = if gpu.available {
-        format!("{} via {}.", gpu.device_name, gpu.gpu_type)
+    let backend = gui.config.transcription.backend;
+    if !backend.is_cloud() {
+        let gpu = GpuAvailability::detect();
+        let gpu_text = if gpu.available {
+            format!("{} via {}.", gpu.device_name, gpu.gpu_type)
+        } else {
+            "No GPU found, so transcription runs on the CPU.".to_string()
+        };
+        toggle_row(
+            ui,
+            "Use the GPU",
+            &gpu_text,
+            &mut gui.config.transcription.use_gpu,
+        );
+    }
+    let context_text = if backend.is_cloud() {
+        format!(
+            "Sends the focused window's title and your vocabulary to {} with the audio.",
+            backend.name()
+        )
     } else {
-        "No GPU found, so transcription runs on the CPU.".to_string()
+        "Primes Whisper with the focused window's title and your vocabulary.".to_string()
     };
     toggle_row(
         ui,
-        "Use the GPU",
-        &gpu_text,
-        &mut gui.config.transcription.use_gpu,
-    );
-    toggle_row(
-        ui,
         "Spell names from context",
-        "Primes Whisper with the focused window's title and your vocabulary.",
+        &context_text,
         &mut gui.config.transcription.context_prompt,
     );
 
@@ -353,6 +447,17 @@ mod tests {
                 key.parse::<ModelSize>().ok(),
                 Some(size),
                 "{key} round trips"
+            );
+        }
+    }
+
+    #[test]
+    fn cloud_services_are_labelled_as_cloud() {
+        for backend in TranscriptionBackend::ALL {
+            assert_eq!(
+                backend_label(backend).contains("(cloud)"),
+                backend.is_cloud(),
+                "{backend:?}"
             );
         }
     }

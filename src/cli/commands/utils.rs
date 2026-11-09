@@ -11,8 +11,30 @@ pub async fn show_config_status() -> Result<()> {
 
     match Config::load() {
         Ok(config) => {
-            println!("  Model: {}", config.transcription.model_path().display());
-            println!("  Use GPU: {}", config.transcription.use_gpu);
+            let transcription = &config.transcription;
+            match transcription.cloud_model() {
+                Some(model) => {
+                    let key = transcription
+                        .backend
+                        .key_var()
+                        .map(|var| match crate::config::keys::api_key(var) {
+                            Some(_) => format!("{} set", var),
+                            None => format!("{} missing", var),
+                        })
+                        .unwrap_or_default();
+                    println!(
+                        "  Transcription: {} {} (cloud, audio leaves this machine; {})",
+                        transcription.backend.name(),
+                        model,
+                        key
+                    );
+                },
+                None => {
+                    println!("  Transcription: local");
+                    println!("  Model: {}", transcription.model_path().display());
+                    println!("  Use GPU: {}", transcription.use_gpu);
+                },
+            }
             println!("  Sample Rate: {}Hz", config.audio.sample_rate);
             println!("  Hotkey: {}", config.hotkey.combination);
         },

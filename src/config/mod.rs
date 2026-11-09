@@ -13,6 +13,7 @@
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
+pub mod keys;
 pub mod paths;
 pub mod settings;
 

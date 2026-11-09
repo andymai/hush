@@ -1,5 +1,7 @@
+use crate::config::keys;
 use crate::text_processing::{EditingMode, LlmProvider, ProcessingConfig, TextProcessor};
-use crate::{AudioCapture, Config, WhisperTranscriber};
+use crate::transcription::SpeechToText;
+use crate::{AudioCapture, Config};
 
 #[cfg(target_os = "linux")]
 use crate::TextInserter;
@@ -93,17 +95,12 @@ pub async fn handle_record(
     // Transcribe if not print-only mode
     if !print_only {
         println!("🗣️ Transcribing...");
-        let transcriber = WhisperTranscriber::new(
-            &config.transcription.model_path(),
-            config.transcription.use_gpu,
-        )
-        .await?
-        .with_language(&config.transcription.language);
+        keys::load_env_files();
+        let transcriber = SpeechToText::from_config(&config.transcription).await?;
+        info!("Transcriber: {}", transcriber.describe());
 
         // Initialize text processor
         let text_processor = {
-            let _ = dotenvy::from_path(crate::config::paths::config_dir().join(".env"));
-            let _ = dotenvy::dotenv();
             let llm_provider = if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
                 if !api_key.is_empty() {
                     info!("Using Anthropic Claude API for text polishing");

@@ -1,15 +1,21 @@
-//! Speech-to-text with whisper.cpp.
+//! Speech-to-text with whisper.cpp, or with a cloud service the user chose.
 //!
 //! [`WhisperTranscriber`] runs ggml Whisper models through whisper-rs, on a
 //! GPU when the binary was built with the `cuda` or `vulkan` feature and one
-//! is present. [`ModelManager`] downloads and verifies models from the
-//! ggerganov/whisper.cpp catalogue. [`GpuAvailability`] reports what ggml's
-//! backend registry found.
+//! is present. [`CloudTranscriber`] sends the audio to Groq or OpenAI, only
+//! when `transcription.backend` names that service. [`SpeechToText`] builds
+//! whichever the config asks for. [`ModelManager`] downloads and verifies
+//! models from the ggerganov/whisper.cpp catalogue. [`GpuAvailability`]
+//! reports what ggml's backend registry found.
 
+pub mod cloud;
 pub mod device;
+pub mod engine;
 pub mod models;
 pub mod whisper;
 
+pub use cloud::CloudTranscriber;
 pub use device::{BackendDevice, GpuAvailability, GpuType};
+pub use engine::SpeechToText;
 pub use models::{ModelInfo, ModelManager, ModelSize};
 pub use whisper::{TranscriptionResult, WhisperTranscriber, WHISPER_SAMPLE_RATE};

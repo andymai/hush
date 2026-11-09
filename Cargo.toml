@@ -145,11 +145,12 @@ sysinfo = { version = "0.40", features = [
 ] } # the startup log walks every process, about 8x slower single-threaded
 chrono = { version = "0.4", features = ["serde"] }
 
-# HTTP client for downloading models
+# HTTP client for model downloads, LLM polishing, and cloud transcription
 reqwest = { version = "0.12", default-features = false, features = [
   "rustls-tls",
   "stream",
   "json",
+  "multipart",
 ] }
 
 # Utilities
