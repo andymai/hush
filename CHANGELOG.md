@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0](https://github.com/andymai/hush/compare/v0.13.0...v0.14.0) (2026-11-09)
+
+
+### Features
+
+* **audio:** pause media players while Hush records ([#267](https://github.com/andymai/hush/issues/267)) ([875432f](https://github.com/andymai/hush/commit/875432f4230a89ea38c5ea77f24b92d90df8170d))
+* **insertion:** keep terminal output on one line and add an optional Enter ([#265](https://github.com/andymai/hush/issues/265)) ([714e9bf](https://github.com/andymai/hush/commit/714e9bf7cefebe4e9f0e8e186798298a0c09bb65))
+
+
+### Bug Fixes
+
+* **logging:** keep the log file writer alive and keep dictated text out of it ([#266](https://github.com/andymai/hush/issues/266)) ([75cc5ec](https://github.com/andymai/hush/commit/75cc5ec817889ca3b65ffa922d2ec74de7a86f27))
+
 ## [0.13.0](https://github.com/andymai/hush/compare/v0.12.1...v0.13.0) (2026-11-09)
 
 
