@@ -579,6 +579,12 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         processed_text,
                         &hook_env,
                     ) else {
+                        finish(
+                            printer,
+                            TakeResult::Ok {
+                                text: String::new(),
+                            },
+                        );
                         *state_handle_clone2.lock() = OverlayState::idle();
                         shared_result.set_idle();
                         continue;

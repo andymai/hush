@@ -150,7 +150,7 @@ text="$(hush stop --print)" && notify-send "Hush heard" "$text"
 | `state` | `idle`, `starting`, `recording`, `transcribing`, `inserting`, `stopping`, or `stopped` when no daemon runs |
 | `running` | `true` when the daemon answers |
 | `elapsed_ms` | Length of the current recording, else `null` |
-| `backend` | `local`, `groq`, or `openai` |
+| `backend` | `local`, `groq`, `openai`, or `openai-compatible` |
 | `model` | Model size for `local`, model name for a cloud backend |
 | `model_path` | Model file for `local`, else `null` |
 | `use_gpu` | The `transcription.use_gpu` setting |
