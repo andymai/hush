@@ -284,6 +284,8 @@ If a notification says that the microphone stopped, the audio stopped for two se
 
 If `hush setup permissions` cannot run where you are (a container, an SSH session), `hush setup permissions --print` prints the udev rule to apply as root.
 
+In the first three minutes after boot, Hush waits up to five seconds for the graphics driver. If the driver is not ready then, Whisper runs on the CPU until you run `hush daemon restart`. When a take fails on the GPU, Hush runs it again on the CPU. Hush then keeps the CPU for that GPU until the driver version changes. `hush doctor` shows a `GPU failure` line with the command that tries the GPU again.
+
 The prebuilt packages need an x86-64-v3 CPU: Intel Haswell (2013) and newer, or AMD Excavator, Zen, and newer. On an older CPU, `hush doctor` shows a failed `CPU` line. Build from source with `make release`, or use a cloud backend. See [INSTALL.md](INSTALL.md#cpu-requirement).
 
 ## Privacy and security

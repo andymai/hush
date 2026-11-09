@@ -9,14 +9,17 @@
 //! downloads and verifies models from the ggerganov/whisper.cpp catalogue,
 //! and the Silero voice activity detection model that trims silence before
 //! local transcription. [`GpuAvailability`] reports what ggml's backend
-//! registry found. [`cpu`] refuses to call ggml on a CPU below the floor of a
-//! prebuilt binary. [`ModelSlot`] frees the local model after idle minutes,
-//! and the next take loads it again.
+//! registry found. [`gpu_fallback`] waits for the GPU at login, and keeps a
+//! GPU that failed a take on the CPU until its driver changes. [`cpu`]
+//! refuses to call ggml on a CPU below the floor of a prebuilt binary.
+//! [`ModelSlot`] frees the local model after idle minutes, and the next take
+//! loads it again.
 
 pub mod cloud;
 pub mod cpu;
 pub mod device;
 pub mod engine;
+pub mod gpu_fallback;
 pub mod guard;
 pub mod models;
 pub mod slot;
