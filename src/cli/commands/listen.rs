@@ -14,12 +14,13 @@ use crate::audio::{
     TakeLevel,
 };
 use crate::cli::commands::daemon::{self, SessionOptions};
+use crate::config::settings::TranscriptionConfig;
 use crate::config::{keys, Config};
 use crate::hotkey::{
     GestureAction, GestureDetector, HotkeyAction, HotkeyBindings, HotkeyEvent, HotkeyManager,
     HotkeyMode,
 };
-use crate::ipc::protocol::{DaemonState, NO_TAKE};
+use crate::ipc::protocol::{DaemonState, ModelState, NO_TAKE};
 use crate::ipc::{SessionCommand, TakeResult, TakeWaiter};
 use crate::notify::{notify, NoticeKind};
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
@@ -30,7 +31,7 @@ use crate::text_processing::{
     CommandExecutor, CommandParser, DomainVocabulary, EditingMode, HookEnv, InsertionHistory,
     LlmProvider, ProcessingConfig, TextProcessor, TranscriptHook, Trigger,
 };
-use crate::transcription::{SpeechToText, WHISPER_SAMPLE_RATE};
+use crate::transcription::{IdleTimer, ModelSlot, SlotState, SpeechToText, WHISPER_SAMPLE_RATE};
 use crate::tray;
 use crate::AudioCapture;
 
@@ -259,6 +260,24 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     let transcriber = SpeechToText::from_config(&config.transcription).await?;
     info!("✅ Transcriber ready: {}", transcriber.describe());
+    let local_model = !config.transcription.backend.is_cloud();
+    let mut model = ModelSlot::loaded(transcriber, model_loader(&config.transcription));
+    let unload_after_mins = if local_model {
+        config.transcription.unload_after_mins
+    } else {
+        0
+    };
+    let mut idle = IdleTimer::new(unload_after_mins, Instant::now());
+    if idle.is_enabled() {
+        info!(
+            "The model unloads after {} minutes without a take",
+            unload_after_mins
+        );
+    }
+    let publish_model = |model: &ModelSlot<SpeechToText>| {
+        shared.set_model_state(model_state(local_model, model.state()));
+    };
+    publish_model(&model);
 
     // Initialize text processor
     let text_processor = if !no_processing {
@@ -698,6 +717,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             Ok(cmd) => cmd,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
+                model.settle();
+                if idle.poll(take.is_some() || !shared.is_idle(), now) && model.unload() {
+                    info!(
+                        "Unloaded the model after {} minutes without a take",
+                        unload_after_mins
+                    );
+                }
+                publish_model(&model);
                 let Some(clock) = take.as_mut() else {
                     continue;
                 };
@@ -909,6 +936,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     take = Some(TakeClock::new(stream_started));
                     current_trigger = trigger;
                     shared.set_starting();
+                    if model.begin_load() {
+                        publish_model(&model);
+                    }
                     #[cfg(target_os = "linux")]
                     {
                         current_window = text_inserter
@@ -1077,27 +1107,37 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 // A printed take is plain dictation: Command Mode would type
                 // over the selection.
                 let command = command_target.take().filter(|_| printer.is_none());
-                let initial_prompt = if context_prompt {
-                    let terms = text_processor
-                        .as_ref()
-                        .map(|processor| processor.user_terms())
-                        .unwrap_or_default();
-                    prompt::whisper_prompt(window.as_ref(), &terms, |prompt| {
-                        transcriber.prompt_fits(prompt)
-                    })
-                } else {
-                    None
-                };
 
-                // Transcribe
-                let transcription_result = match transcriber
-                    .transcribe_with_prompt(
-                        &audio_data,
-                        WHISPER_SAMPLE_RATE,
-                        initial_prompt.as_deref(),
-                    )
-                    .await
-                {
+                if matches!(model.state(), SlotState::Loading | SlotState::Unloaded) {
+                    info!("The take waits for the model to load");
+                    show(OverlayState::processing("Loading the model"));
+                }
+                let transcription = match model.ready().await {
+                    Ok(transcriber) => {
+                        let initial_prompt = if context_prompt {
+                            let terms = text_processor
+                                .as_ref()
+                                .map(|processor| processor.user_terms())
+                                .unwrap_or_default();
+                            prompt::whisper_prompt(window.as_ref(), &terms, |prompt| {
+                                transcriber.prompt_fits(prompt)
+                            })
+                        } else {
+                            None
+                        };
+                        transcriber
+                            .transcribe_with_prompt(
+                                &audio_data,
+                                WHISPER_SAMPLE_RATE,
+                                initial_prompt.as_deref(),
+                            )
+                            .await
+                    },
+                    Err(e) => Err(e.context("The model did not load")),
+                };
+                publish_model(&model);
+
+                let transcription_result = match transcription {
                     Ok(result) => {
                         if result.text.trim().is_empty() {
                             report_empty_take(
@@ -1122,7 +1162,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         error!("Transcription failed: {:#}", e);
                         // The overlay is too narrow for the service's reason,
                         // and a bad key or quota needs the user to act.
-                        if transcriber.is_cloud() {
+                        if !local_model {
                             notify(
                                 NoticeKind::Problem,
                                 "Transcription failed",
@@ -1166,6 +1206,26 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     info!("Listen mode ended");
     Ok(())
+}
+
+/// Builds the transcriber again after the idle timer freed it.
+fn model_loader(
+    config: &TranscriptionConfig,
+) -> impl Fn() -> futures_util::future::BoxFuture<'static, Result<SpeechToText>> {
+    let config = config.clone();
+    move || {
+        let config = config.clone();
+        Box::pin(async move { SpeechToText::from_config(&config).await })
+    }
+}
+
+fn model_state(local: bool, slot: SlotState) -> ModelState {
+    match slot {
+        _ if !local => ModelState::Remote,
+        SlotState::Loaded => ModelState::Loaded,
+        SlotState::Loading => ModelState::Loading,
+        SlotState::Unloaded | SlotState::Failed => ModelState::Unloaded,
+    }
 }
 
 /// Why a take gave no text.

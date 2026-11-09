@@ -1,7 +1,7 @@
 use super::utils::{print_line, show_config_status, show_device_status, show_system_info};
 use crate::cli::exit::{Exit, ExitStatus};
 use crate::config::settings::TranscriptionBackend;
-use crate::ipc::DaemonState;
+use crate::ipc::{DaemonResponse, DaemonState, ModelState};
 use crate::transcription::GpuAvailability;
 use crate::{AudioCapture, Config};
 /// Status command implementation
@@ -41,7 +41,8 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
     println!();
 
     print!("Daemon: ");
-    let running = match crate::ipc::client::status().await {
+    let reply = crate::ipc::client::status_reply().await;
+    let running = match reply.as_ref().and_then(|reply| reply.state) {
         Some(state) => {
             println!("✅ running ({})", state);
             true
@@ -51,6 +52,9 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
             false
         },
     };
+    if let Some(model) = reply.as_ref().and_then(|reply| reply.model_state) {
+        println!("Model: {}", model);
+    }
     println!();
 
     // Always show basic status
@@ -79,6 +83,7 @@ pub struct StatusReport {
     pub state: &'static str,
     pub running: bool,
     pub elapsed_ms: Option<u64>,
+    pub model_state: Option<ModelState>,
     pub backend: Option<TranscriptionBackend>,
     pub model: Option<String>,
     pub model_path: Option<String>,
@@ -94,8 +99,9 @@ pub struct StatusReport {
 }
 
 impl StatusReport {
+    /// `reply` is the daemon's status reply, `None` when no daemon runs.
     pub fn new(
-        state: Option<DaemonState>,
+        reply: Option<&DaemonResponse>,
         config: Result<Config>,
         gpu: &GpuAvailability,
         devices: Vec<String>,
@@ -105,6 +111,7 @@ impl StatusReport {
             Err(e) => (None, Some(format!("{:#}", e))),
         };
         let transcription = config.as_ref().map(|config| &config.transcription);
+        let state = reply.and_then(|reply| reply.state);
         Self {
             state: state.as_ref().map_or("stopped", DaemonState::name),
             running: state.is_some(),
@@ -112,6 +119,7 @@ impl StatusReport {
                 Some(DaemonState::Recording { elapsed_ms }) => Some(elapsed_ms),
                 _ => None,
             },
+            model_state: reply.and_then(|reply| reply.model_state),
             backend: transcription.map(|t| t.backend),
             model: transcription.map(|t| match t.cloud_model() {
                 Some(model) => model.to_string(),
@@ -137,9 +145,9 @@ impl StatusReport {
 
 /// `hush status --json`
 pub async fn handle_status_json() -> Result<()> {
-    let state = crate::ipc::client::status().await;
+    let reply = crate::ipc::client::status_reply().await;
     let report = StatusReport::new(
-        state,
+        reply.as_ref(),
         Config::load(),
         GpuAvailability::detect(),
         AudioCapture::list_devices().unwrap_or_default(),
@@ -167,8 +175,10 @@ mod tests {
 
     #[test]
     fn json_status_has_stable_keys() {
+        let reply = DaemonResponse::ok(DaemonState::Recording { elapsed_ms: 1500 })
+            .with_model_state(Some(ModelState::Loading));
         let report = StatusReport::new(
-            Some(DaemonState::Recording { elapsed_ms: 1500 }),
+            Some(&reply),
             Config::defaults(),
             &cpu(),
             vec!["Built-in Microphone".to_string()],
@@ -194,6 +204,7 @@ mod tests {
                 "hotkey",
                 "model",
                 "model_path",
+                "model_state",
                 "os",
                 "running",
                 "sample_rate",
@@ -206,6 +217,7 @@ mod tests {
         assert_eq!(value["elapsed_ms"], 1500);
         assert_eq!(value["backend"], "local");
         assert_eq!(value["model"], "base");
+        assert_eq!(value["model_state"], "loading");
         assert_eq!(value["gpu"], serde_json::Value::Null);
         assert_eq!(value["gpu_type"], "cpu");
         assert_eq!(value["hotkey"], "RightAlt");
@@ -216,6 +228,7 @@ mod tests {
         let report = StatusReport::new(None, Err(anyhow::anyhow!("bad toml")), &cpu(), vec![]);
         assert_eq!(report.state, "stopped");
         assert!(!report.running);
+        assert_eq!(report.model_state, None);
         assert_eq!(report.backend, None);
         assert_eq!(report.config_error.as_deref(), Some("bad toml"));
     }

@@ -75,7 +75,12 @@ impl Watcher {
 
 /// The daemon's state when it answers, `None` when nothing is listening.
 pub async fn status() -> Option<DaemonState> {
-    send(DaemonCommand::Status).await.ok()?.state
+    status_reply().await?.state
+}
+
+/// The daemon's whole status reply, `None` when nothing is listening.
+pub async fn status_reply() -> Option<DaemonResponse> {
+    send(DaemonCommand::Status).await.ok()
 }
 
 /// `status` for code that is not on an async runtime, or is on one it must
