@@ -12,10 +12,21 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
+    WhisperVadContext, WhisperVadContextParams, WhisperVadParams,
 };
 
 /// Sample rate whisper.cpp expects
 pub const WHISPER_SAMPLE_RATE: u32 = 16_000;
+
+/// Audio kept on each side of a stretch of speech, so that soft first and
+/// last sounds of a word stay in.
+const VAD_SPEECH_PAD_MS: i32 = 100;
+
+/// Silence put between two stretches of speech, as whisper.cpp does.
+const SPEECH_GAP: usize = WHISPER_SAMPLE_RATE as usize / 10;
+
+/// Audio kept after each stretch of speech but the last, as whisper.cpp does.
+const SPEECH_OVERLAP: usize = WHISPER_SAMPLE_RATE as usize / 10;
 
 #[derive(Debug, Clone)]
 pub struct TranscriptionResult {
@@ -27,13 +38,15 @@ pub struct TranscriptionResult {
 /// The context must outlive the state. The state is created once so that its
 /// GPU buffers are reused across dictations instead of reallocated per call.
 struct Engine {
-    #[allow(dead_code)]
     context: WhisperContext,
     state: Mutex<WhisperState>,
 }
 
 pub struct WhisperTranscriber {
     engine: Arc<Engine>,
+    /// whisper-rs runs `whisper_full_with_state`, which ignores the VAD
+    /// fields of `FullParams`, so Hush runs the Silero model itself.
+    vad: Option<Arc<Mutex<WhisperVadContext>>>,
     gpu: &'static GpuAvailability,
     using_gpu: bool,
     language: String,
@@ -108,6 +121,7 @@ impl WhisperTranscriber {
                 context,
                 state: Mutex::new(state),
             }),
+            vad: None,
             gpu,
             using_gpu,
             language: "en".to_string(),
@@ -129,6 +143,59 @@ impl WhisperTranscriber {
 
     pub fn language(&self) -> &str {
         &self.language
+    }
+
+    /// Load the Silero voice activity detection model, so that Whisper gets
+    /// only the speech in each take.
+    pub fn load_vad(&mut self, model_path: &Path) -> Result<()> {
+        let path = model_path.to_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "VAD model path contains invalid UTF-8: {}",
+                model_path.display()
+            )
+        })?;
+        let mut params = WhisperVadContextParams::new();
+        params.set_n_threads(cpu_threads().min(4));
+        let context = WhisperVadContext::new(path, params).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to load the VAD model {}: {}",
+                model_path.display(),
+                e
+            )
+        })?;
+        self.vad = Some(Arc::new(Mutex::new(context)));
+        info!(
+            "Voice activity detection loaded from {}",
+            model_path.display()
+        );
+        Ok(())
+    }
+
+    pub fn has_vad(&self) -> bool {
+        self.vad.is_some()
+    }
+
+    /// How many tokens whisper.cpp makes of `prompt`, or `None` when it
+    /// cannot tokenize it.
+    pub fn prompt_tokens(&self, prompt: &str) -> Option<usize> {
+        if prompt.contains('\0') {
+            return None;
+        }
+        // whisper-rs reads a negative "too many tokens" answer as a length,
+        // so the capacity must never run out: whisper.cpp makes at most one
+        // token of each byte.
+        self.engine
+            .context
+            .tokenize(prompt, prompt.len() + 1)
+            .ok()
+            .map(|tokens| tokens.len())
+    }
+
+    /// The most prompt tokens whisper.cpp keeps: half of the text context,
+    /// less the token that starts the prompt. It drops the rest from the
+    /// front.
+    pub fn prompt_token_budget(&self) -> usize {
+        usize::try_from(self.engine.context.n_text_ctx() / 2 - 1).unwrap_or(0)
     }
 
     pub async fn transcribe_async(
@@ -179,13 +246,26 @@ impl WhisperTranscriber {
         };
 
         let engine = Arc::clone(&self.engine);
+        let vad = self.vad.clone();
         let language = self.language.clone();
         let threads = self.threads;
         let prompt = prompt
             .map(|p| p.replace('\0', ""))
             .filter(|p| !p.trim().is_empty());
         let text = tokio::task::spawn_blocking(move || {
-            run_full(&engine, &samples, &language, threads, prompt.as_deref())
+            let trimmed = vad.as_deref().and_then(|vad| match speech_in(vad, &samples) {
+                Ok(speech) => Some(speech),
+                Err(e) => {
+                    warn!("Voice activity detection failed, so Whisper gets the whole take: {e:#}");
+                    None
+                },
+            });
+            if trimmed.as_ref().is_some_and(Vec::is_empty) {
+                debug!("Voice activity detection found no speech");
+                return Ok(String::new());
+            }
+            let samples = trimmed.as_deref().unwrap_or(&samples);
+            run_full(&engine, samples, &language, threads, prompt.as_deref())
         })
         .await
         .map_err(|e| anyhow::anyhow!("Transcription task failed: {}", e))?;
@@ -265,6 +345,54 @@ fn run_full(
         text.push_str(&segment);
     }
     Ok(text)
+}
+
+/// The speech in `samples`, as the Silero model finds it.
+fn speech_in(vad: &Mutex<WhisperVadContext>, samples: &[f32]) -> Result<Vec<f32>> {
+    let mut params = WhisperVadParams::new();
+    params.set_speech_pad(VAD_SPEECH_PAD_MS);
+    let segments = vad
+        .lock()
+        .segments_from_samples(params, samples)
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let spans: Vec<(f32, f32)> = segments.map(|s| (s.start, s.end)).collect();
+    let speech = join_speech(samples, &spans);
+    debug!(
+        stretches = spans.len(),
+        kept_samples = speech.len(),
+        take_samples = samples.len(),
+        "Voice activity detection"
+    );
+    Ok(speech)
+}
+
+/// The stretches of `samples` that `spans` mark as speech (start and end in
+/// centiseconds), joined by a short silence. Each stretch but the last keeps
+/// a little audio after its end, without reaching into the next one.
+pub(crate) fn join_speech(samples: &[f32], spans: &[(f32, f32)]) -> Vec<f32> {
+    let at = |centiseconds: f32| -> usize {
+        let index = (centiseconds.max(0.0) / 100.0 * WHISPER_SAMPLE_RATE as f32).round();
+        (index as usize).min(samples.len())
+    };
+    let mut speech = Vec::new();
+    let mut cursor = 0;
+    for (i, &(start, end)) in spans.iter().enumerate() {
+        let start = at(start).max(cursor);
+        let mut end = at(end);
+        if let Some(&(next, _)) = spans.get(i + 1) {
+            end = (end + SPEECH_OVERLAP).min(at(next)).max(end);
+        }
+        let end = end.min(samples.len());
+        if end <= start {
+            continue;
+        }
+        if !speech.is_empty() {
+            speech.resize(speech.len() + SPEECH_GAP, 0.0);
+        }
+        speech.extend_from_slice(&samples[start..end]);
+        cursor = end;
+    }
+    speech
 }
 
 /// Whisper writes non-speech as tags like `[BLANK_AUDIO]`, `[MUSIC]` or
@@ -394,6 +522,42 @@ mod tests {
         );
         assert_eq!(strip_non_speech("(one) and (two)"), "(one) and (two)");
         assert_eq!(strip_non_speech("an open [ bracket"), "an open [ bracket");
+    }
+
+    #[test]
+    fn speech_stretches_are_joined_by_a_short_silence() {
+        let samples: Vec<f32> = (0..48_000).map(|i| 1.0 + i as f32).collect();
+        let speech = join_speech(&samples, &[(50.0, 100.0), (200.0, 250.0)]);
+        let first = 8_000..16_000 + SPEECH_OVERLAP;
+        let second = 32_000..40_000;
+        assert_eq!(speech.len(), first.len() + SPEECH_GAP + second.len());
+        assert_eq!(speech[0], samples[8_000]);
+        assert_eq!(speech[first.len() - 1], samples[first.end - 1]);
+        assert!(speech[first.len()..first.len() + SPEECH_GAP]
+            .iter()
+            .all(|s| *s == 0.0));
+        assert_eq!(speech[speech.len() - 1], samples[39_999]);
+    }
+
+    #[test]
+    fn speech_overlap_never_repeats_audio() {
+        let samples: Vec<f32> = (0..32_000).map(|i| i as f32).collect();
+        let speech = join_speech(&samples, &[(0.0, 100.0), (101.0, 150.0)]);
+        let kept: Vec<f32> = speech.into_iter().filter(|s| *s != 0.0).collect();
+        assert!(
+            kept.windows(2).all(|pair| pair[0] < pair[1]),
+            "no sample is copied twice"
+        );
+        assert_eq!(kept.last(), Some(&23_999.0));
+    }
+
+    #[test]
+    fn no_speech_and_bad_spans_give_nothing() {
+        let samples = vec![0.5f32; 16_000];
+        assert!(join_speech(&samples, &[]).is_empty());
+        assert!(join_speech(&samples, &[(80.0, 40.0)]).is_empty());
+        assert_eq!(join_speech(&samples, &[(90.0, 500.0)]).len(), 1_600);
+        assert!(join_speech(&[], &[(0.0, 100.0)]).is_empty());
     }
 
     #[test]

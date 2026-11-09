@@ -1,17 +1,33 @@
 //! The transcriber the config asks for: whisper.cpp on this machine, or the
 //! service or server the user chose. An HTTP backend never loads the model,
 //! and the local one never opens a connection.
+//!
+//! Every transcript then goes through the checks in [`guard`]: a transcript
+//! that echoes the prompt is made again without the prompt, and text that
+//! Whisper invents for silence is dropped.
 
 use crate::config::paths;
 use crate::config::settings::TranscriptionConfig;
 use crate::transcription::cloud::CloudTranscriber;
 use crate::transcription::cpu;
-use crate::transcription::models::{ModelManager, ModelSize};
+use crate::transcription::guard;
+use crate::transcription::models::{self, ModelManager, ModelSize};
 use crate::transcription::whisper::{TranscriptionResult, WhisperTranscriber};
 use crate::Result;
 use std::path::PathBuf;
+use tracing::{debug, info, warn};
 
-pub enum SpeechToText {
+/// A prompt longer than this is cut when no tokenizer can count it. Whisper
+/// keeps about 224 tokens, and even names and paths make fewer tokens than
+/// half their characters.
+pub const PROMPT_MAX_CHARS: usize = 400;
+
+pub struct SpeechToText {
+    backend: Backend,
+    drop_phrases: Vec<String>,
+}
+
+enum Backend {
     Local(WhisperTranscriber),
     Cloud(CloudTranscriber),
 }
@@ -21,11 +37,15 @@ impl SpeechToText {
     /// Call [`crate::config::keys::load_env_files`] first when the key may
     /// live in `./.env`.
     pub async fn from_config(config: &TranscriptionConfig) -> Result<Self> {
+        let drop_phrases = guard::drop_list(config.drop_phrases.as_deref());
         if config.backend.is_cloud() {
-            return CloudTranscriber::from_config(config).map(Self::Cloud);
+            return Ok(Self {
+                backend: Backend::Cloud(CloudTranscriber::from_config(config)?),
+                drop_phrases,
+            });
         }
         cpu::ensure_supported()?;
-        let whisper = WhisperTranscriber::new(&local_model_path(config), config.use_gpu)
+        let mut whisper = WhisperTranscriber::new(&local_model_path(config), config.use_gpu)
             .await
             .map_err(|e| {
                 anyhow::anyhow!(
@@ -33,40 +53,81 @@ impl SpeechToText {
                     e,
                     config.model_size
                 )
-            })?;
-        Ok(Self::Local(whisper.with_language(&config.language)))
+            })?
+            .with_language(&config.language);
+        if config.vad {
+            load_vad(&mut whisper, &config.model_size);
+        }
+        Ok(Self {
+            backend: Backend::Local(whisper),
+            drop_phrases,
+        })
     }
 
     pub fn is_cloud(&self) -> bool {
-        matches!(self, Self::Cloud(_))
+        matches!(self.backend, Backend::Cloud(_))
     }
 
     /// Where the audio goes, for logs and status lines.
     pub fn describe(&self) -> String {
-        match self {
-            Self::Local(whisper) => format!("Whisper on {}", whisper.get_device_info()),
-            Self::Cloud(cloud) => cloud.describe(),
+        match &self.backend {
+            Backend::Local(whisper) if whisper.has_vad() => format!(
+                "Whisper on {}, speech found by Silero VAD",
+                whisper.get_device_info()
+            ),
+            Backend::Local(whisper) => format!("Whisper on {}", whisper.get_device_info()),
+            Backend::Cloud(cloud) => cloud.describe(),
         }
     }
 
+    /// Whether `prompt` fits the part of Whisper's context that holds the
+    /// prompt. The local model counts its tokens; for a cloud service, and
+    /// when the tokenizer fails, a character limit stands in.
+    pub fn prompt_fits(&self, prompt: &str) -> bool {
+        match &self.backend {
+            Backend::Local(whisper) => match whisper.prompt_tokens(prompt) {
+                Some(tokens) => tokens <= whisper.prompt_token_budget(),
+                None => prompt.chars().count() <= PROMPT_MAX_CHARS,
+            },
+            Backend::Cloud(_) => prompt.chars().count() <= PROMPT_MAX_CHARS,
+        }
+    }
+
+    /// Transcribe, then check the text. When the text only echoes `prompt`,
+    /// transcribe again without it and keep that result only if it has more
+    /// real words and no echo. Text that Whisper invents for silence comes
+    /// back empty.
     pub async fn transcribe_with_prompt(
         &self,
         audio: &[f32],
         sample_rate: u32,
         prompt: Option<&str>,
     ) -> Result<TranscriptionResult> {
-        match self {
-            Self::Local(whisper) => {
-                whisper
-                    .transcribe_with_prompt(audio, sample_rate, prompt)
-                    .await
-            },
-            Self::Cloud(cloud) => {
-                cloud
-                    .transcribe_with_prompt(audio, sample_rate, prompt)
-                    .await
-            },
+        let prompt = prompt.map(str::trim).filter(|p| !p.is_empty());
+        let mut result = self.transcribe_once(audio, sample_rate, prompt).await?;
+
+        if let Some(prompt) = prompt.filter(|p| guard::is_prompt_echo(&result.text, p)) {
+            info!("The transcript echoes the prompt, transcribing again without it");
+            let second = self.transcribe_once(audio, sample_rate, None).await?;
+            result.processing_time += second.processing_time;
+            if guard::keep_second_pass(&result.text, &second.text, prompt) {
+                result.text = second.text;
+                result.confidence = second.confidence;
+            } else {
+                info!("Dropped the transcript: it only echoed the prompt");
+                result.text.clear();
+            }
         }
+
+        if !result.text.is_empty() && guard::is_invented(&result.text, &self.drop_phrases) {
+            info!("Dropped text that Whisper invents for silence");
+            debug!(text = %result.text, "Dropped transcript");
+            result.text.clear();
+        }
+        if result.text.is_empty() {
+            result.confidence = 0.0;
+        }
+        Ok(result)
     }
 
     pub async fn transcribe_async(
@@ -75,6 +136,46 @@ impl SpeechToText {
         sample_rate: u32,
     ) -> Result<TranscriptionResult> {
         self.transcribe_with_prompt(audio, sample_rate, None).await
+    }
+
+    async fn transcribe_once(
+        &self,
+        audio: &[f32],
+        sample_rate: u32,
+        prompt: Option<&str>,
+    ) -> Result<TranscriptionResult> {
+        match &self.backend {
+            Backend::Local(whisper) => {
+                whisper
+                    .transcribe_with_prompt(audio, sample_rate, prompt)
+                    .await
+            },
+            Backend::Cloud(cloud) => {
+                cloud
+                    .transcribe_with_prompt(audio, sample_rate, prompt)
+                    .await
+            },
+        }
+    }
+}
+
+/// Load the Silero model when it is downloaded. Without it, Whisper gets the
+/// whole take, and the log says once how to get the model.
+fn load_vad(whisper: &mut WhisperTranscriber, model_size: &str) {
+    let path = models::vad_model_path();
+    if !path.is_file() {
+        warn!(
+            "Voice activity detection is off: {} is missing. Get it with: hush models download {}",
+            path.display(),
+            model_size
+        );
+        return;
+    }
+    if let Err(e) = whisper.load_vad(&path) {
+        warn!(
+            "Voice activity detection is off: {:#}. Get the model again with: hush models download {}",
+            e, model_size
+        );
     }
 }
 
@@ -167,5 +268,36 @@ mod tests {
             message.contains("hush models download large-v3"),
             "{message}"
         );
+    }
+
+    fn cloud(drop_phrases: Option<Vec<String>>) -> SpeechToText {
+        let backend = CloudTranscriber::new(
+            TranscriptionBackend::Groq,
+            "whisper-large-v3-turbo",
+            "en",
+            Some("gsk_test".to_string()),
+        )
+        .unwrap();
+        SpeechToText {
+            backend: Backend::Cloud(backend),
+            drop_phrases: guard::drop_list(drop_phrases.as_deref()),
+        }
+    }
+
+    #[test]
+    fn a_cloud_prompt_is_capped_by_characters() {
+        let engine = cloud(None);
+        assert!(engine.prompt_fits(&"x".repeat(PROMPT_MAX_CHARS)));
+        assert!(!engine.prompt_fits(&"x".repeat(PROMPT_MAX_CHARS + 1)));
+    }
+
+    #[tokio::test]
+    async fn an_empty_take_needs_no_request_and_no_retry() {
+        let result = cloud(None)
+            .transcribe_with_prompt(&[], 16_000, Some("Kubernetes, PostgreSQL."))
+            .await
+            .unwrap();
+        assert!(result.text.is_empty());
+        assert_eq!(result.confidence, 0.0);
     }
 }

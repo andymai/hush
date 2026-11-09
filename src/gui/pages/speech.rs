@@ -8,7 +8,7 @@ use crate::gui::meter::{self, Meter};
 use crate::gui::theme::{field, quiet_button, row, section, slider, toggle_row, FIELD_WIDTH, GOOD};
 use crate::gui::{megabytes, Gui};
 use crate::transcription::device::GpuAvailability;
-use crate::transcription::models::{ModelManager, ModelSize};
+use crate::transcription::models::{vad_model, ModelManager, ModelSize};
 use std::sync::Arc;
 
 /// The languages Whisper handles best, plus detection.
@@ -257,7 +257,11 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
         } else {
             0.0
         };
-        let title = format!("Downloading {}", size_key(size));
+        let title = if gui.machine.installed_models.contains(&size) {
+            "Downloading voice detection".to_string()
+        } else {
+            format!("Downloading {}", size_key(size))
+        };
         let progress = format!("{} of {}", megabytes(done), megabytes(total));
         row(&title).describe(&progress).show(ui, |ui| {
             ui.add(
@@ -275,6 +279,18 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
             row(&title)
                 .status(false)
                 .describe(&description)
+                .show(ui, |ui| {
+                    if ui.button("Download").clicked() {
+                        start_download(gui, size);
+                    }
+                });
+        } else if gui.config.transcription.vad && !gui.machine.vad_installed {
+            row("Voice detection is not downloaded yet")
+                .status(false)
+                .describe(&format!(
+                    "{} from Hugging Face, once. Until then, Whisper gets the silence in each take too.",
+                    megabytes(vad_model().expected_size)
+                ))
                 .show(ui, |ui| {
                     if ui.button("Download").clicked() {
                         start_download(gui, size);
@@ -326,6 +342,14 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
             "Use the GPU",
             &gpu_text,
             &mut gui.config.transcription.use_gpu,
+        );
+    }
+    if !backend.is_cloud() {
+        toggle_row(
+            ui,
+            "Trim silence",
+            "Sends Whisper only the speech in each take, so silence does not turn into invented text.",
+            &mut gui.config.transcription.vad,
         );
     }
     let context_text = if backend.is_cloud() {
@@ -482,19 +506,34 @@ fn start_download(gui: &mut Gui, size: ModelSize) {
     }
     let shared = Arc::clone(&gui.download);
     let models_dir = crate::config::paths::models_dir();
+    let fetch_model = !gui.machine.installed_models.contains(&size);
+    let fetch_vad = gui.config.transcription.vad && !gui.machine.vad_installed;
     gui.runtime.spawn(async move {
         let result = match ModelManager::new(&models_dir) {
             Ok(manager) => {
                 let progress = shared.clone();
-                manager
-                    .ensure_model_downloaded_with(&size, &move |done, total| {
-                        let mut download = progress.lock();
-                        download.done = done;
-                        download.total = total;
-                    })
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| e.to_string())
+                let report = move |done, total| {
+                    let mut download = progress.lock();
+                    download.done = done;
+                    download.total = total;
+                };
+                let model = if fetch_model {
+                    manager
+                        .ensure_model_downloaded_with(&size, &report)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                } else {
+                    Ok(())
+                };
+                match model {
+                    Ok(()) if fetch_vad => manager
+                        .ensure_vad_downloaded_with(&report)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| format!("the voice detection model: {}", e)),
+                    other => other,
+                }
             },
             Err(e) => Err(e.to_string()),
         };

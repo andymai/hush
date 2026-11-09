@@ -141,7 +141,8 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
     Ok(())
 }
 
-/// Download a Whisper model
+/// Download a Whisper model, and the voice activity detection model when it
+/// is missing.
 ///
 /// Returns the path to the downloaded model file.
 pub async fn download_model(model_size: &str, force: bool) -> Result<std::path::PathBuf> {
@@ -164,16 +165,29 @@ pub async fn download_model(model_size: &str, force: bool) -> Result<std::path::
     }
 
     let manager = ModelManager::new(&cache_dir)?;
-    match manager.ensure_model_downloaded(&size).await {
+    let path = match manager.ensure_model_downloaded(&size).await {
         Ok(path) => {
             println!("✅ Model '{}' downloaded to {:?}", model_size, path);
-            Ok(path)
+            path
         },
         Err(e) => {
             error!("❌ Failed to download model '{}': {}", model_size, e);
-            Err(e)
+            return Err(e);
         },
+    };
+
+    if manager.vad_model_path().is_none() {
+        println!("📥 Downloading the voice activity detection model");
+        match manager.ensure_vad_downloaded().await {
+            Ok(vad) => println!("✅ Voice activity detection model downloaded to {:?}", vad),
+            Err(e) => println!(
+                "⚠️  The voice activity detection model did not download ({:#}). \
+                 Hush works without it; run this command again to get it.",
+                e
+            ),
+        }
     }
+    Ok(path)
 }
 
 /// Set the active model (downloads if needed and updates config)

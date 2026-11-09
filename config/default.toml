@@ -31,6 +31,12 @@ use_gpu = true
 beam_size = 5
 no_speech_threshold = 0.6
 context_prompt = true     # prime Whisper with the focused window's title and learned terms
+vad = true                # local only: send Whisper only the speech that the Silero model finds; `hush models download` gets the model
+# Hush drops a transcript that is only one of these phrases, without case and
+# punctuation. Whisper invents them for silence or noise. When you set this
+# list, it replaces the built-in one ("thanks for watching", "please
+# subscribe", subtitle credits, and similar); [] drops nothing.
+# drop_phrases = ["thanks for watching", "please subscribe"]
 
 [hotkey]
 enabled = true

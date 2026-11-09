@@ -63,6 +63,8 @@ pub struct Machine {
     pub permissions: PermissionStatus,
     pub daemon: Option<DaemonState>,
     pub installed_models: Vec<ModelSize>,
+    /// The Silero voice activity detection model is downloaded.
+    pub vad_installed: bool,
     pub autostart: bool,
     /// The transcription key variables that hold a key: the hosted
     /// services' and the server's.
@@ -72,6 +74,9 @@ pub struct Machine {
 impl Machine {
     fn read(server_key_env: &str) -> Self {
         let manager = ModelManager::new(crate::config::paths::models_dir()).ok();
+        let vad_installed = manager
+            .as_ref()
+            .is_some_and(|manager| manager.vad_model_path().is_some());
         let installed_models = manager
             .map(|manager| {
                 MODEL_ORDER
@@ -85,6 +90,7 @@ impl Machine {
             permissions: crate::permissions::status(),
             daemon: client::status_blocking(STATUS_TIMEOUT),
             installed_models,
+            vad_installed,
             autostart: crate::desktop::autostart_installed(),
             cloud_keys: TranscriptionBackend::ALL
                 .iter()
@@ -565,6 +571,7 @@ mod tests {
             },
             daemon: Some(DaemonState::Idle),
             installed_models: vec![ModelSize::Base],
+            vad_installed: true,
             autostart: false,
             cloud_keys: Vec::new(),
         }
