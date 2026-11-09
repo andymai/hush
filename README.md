@@ -150,6 +150,7 @@ text="$(hush stop --print)" && notify-send "Hush heard" "$text"
 | `state` | `idle`, `starting`, `recording`, `transcribing`, `inserting`, `stopping`, or `stopped` when no daemon runs |
 | `running` | `true` when the daemon answers |
 | `elapsed_ms` | Length of the current recording, else `null` |
+| `model_state` | `loaded`, `loading`, or `unloaded` for the local model; `none` for a cloud or server backend; `null` when no daemon runs |
 | `backend` | `local`, `groq`, `openai`, or `openai-compatible` |
 | `model` | Model size for `local`, model name for a cloud backend |
 | `model_path` | Model file for `local`, else `null` |
@@ -187,6 +188,7 @@ Give each state a color in the Waybar style sheet, for example `#custom-hush.rec
 | `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
 | `transcription.context_prompt` | Prime Whisper with the focused window's title and learned terms | true |
 | `transcription.vad` | Send local Whisper only the speech in each take, found by the Silero model that `hush models download` gets. Without the model, Whisper gets the whole take | true |
+| `transcription.unload_after_mins` | Free the local model's RAM and GPU memory after this many minutes without a take. The next take records at once and loads the model while you speak; 0 never frees it. Cloud and server backends ignore it | 0 |
 | `transcription.drop_phrases` | Drop a transcript that is only one of these phrases, without case and punctuation. When set, it replaces the built-in list of text that Whisper invents for silence, such as "thanks for watching"; `[]` drops nothing | built-in list |
 | `transcription.backend` | `local` (whisper.cpp), or `groq` or `openai`, which send the audio of each dictation to that service. The key comes from `GROQ_API_KEY` or `OPENAI_API_KEY`. `openai-compatible` sends the audio of each dictation to the URL in `transcription.server_url` | local |
 | `transcription.groq_model`, `transcription.openai_model` | The model each service runs | whisper-large-v3-turbo, gpt-4o-mini-transcribe |

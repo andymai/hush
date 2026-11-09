@@ -3,7 +3,9 @@
 //! the reply names the state that request leads to. A print stop replies
 //! when the take ends, and a watch replies once for each state change.
 
-use super::protocol::{DaemonCommand, DaemonResponse, DaemonState, TakeResult, PRINT_TIMEOUT};
+use super::protocol::{
+    DaemonCommand, DaemonResponse, DaemonState, ModelState, TakeResult, PRINT_TIMEOUT,
+};
 use crate::text_processing::{learn, Trigger};
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
@@ -54,10 +56,11 @@ impl TakeWaiter {
     }
 }
 
-/// Current phase and the last transcript, written by the session and read
-/// by IPC.
+/// Current phase, model state, and the last transcript, written by the
+/// session and read by IPC.
 pub struct SharedState {
     phase: Mutex<Phase>,
+    model: Mutex<Option<ModelState>>,
     last_text: Mutex<Option<String>>,
     waiter: Mutex<Option<oneshot::Sender<TakeResult>>>,
     changes: watch::Sender<()>,
@@ -73,6 +76,7 @@ impl SharedState {
     pub fn new() -> Self {
         Self {
             phase: Mutex::new(Phase::Idle),
+            model: Mutex::new(None),
             last_text: Mutex::new(None),
             waiter: Mutex::new(None),
             changes: watch::channel(()).0,
@@ -143,6 +147,28 @@ impl SharedState {
     /// A take is in progress, whether or not its first frame arrived.
     pub fn in_take(&self) -> bool {
         matches!(*self.phase.lock(), Phase::Starting | Phase::Recording(_))
+    }
+
+    /// No take, transcription, or result processing is in progress.
+    pub fn is_idle(&self) -> bool {
+        matches!(*self.phase.lock(), Phase::Idle)
+    }
+
+    /// Watchers hear only a change.
+    pub fn set_model_state(&self, state: ModelState) {
+        let changed = self.model.lock().replace(state) != Some(state);
+        if changed {
+            self.changes.send_replace(());
+        }
+    }
+
+    pub fn model_state(&self) -> Option<ModelState> {
+        *self.model.lock()
+    }
+
+    /// The reply to a status or watch request.
+    pub fn status(&self) -> DaemonResponse {
+        DaemonResponse::ok(self.snapshot()).with_model_state(self.model_state())
     }
 
     pub fn snapshot(&self) -> DaemonState {
@@ -256,7 +282,7 @@ async fn watch(
     let mut changes = shared.subscribe();
     let mut scratch = [0u8; 64];
     loop {
-        write_response(&mut writer, &DaemonResponse::ok(shared.snapshot())).await?;
+        write_response(&mut writer, &shared.status()).await?;
         tokio::select! {
             changed = changes.changed() => {
                 if changed.is_err() {
@@ -311,7 +337,7 @@ pub fn respond(
         other => other,
     };
     match command {
-        DaemonCommand::Status | DaemonCommand::Watch => DaemonResponse::ok(shared.snapshot()),
+        DaemonCommand::Status | DaemonCommand::Watch => shared.status(),
         DaemonCommand::Toggle => {
             if shared.in_take() {
                 forward(SessionCommand::StopRecording, after_stop)
@@ -381,6 +407,33 @@ mod tests {
             respond(DaemonCommand::Status, &shared, &tx).state,
             Some(DaemonState::Recording { .. })
         ));
+    }
+
+    #[test]
+    fn status_carries_the_model_state() {
+        let shared = SharedState::new();
+        let (tx, _rx) = mpsc::channel();
+        assert_eq!(
+            respond(DaemonCommand::Status, &shared, &tx).model_state,
+            None
+        );
+        assert!(shared.is_idle());
+
+        let mut changes = shared.subscribe();
+        changes.mark_unchanged();
+        shared.set_model_state(ModelState::Loaded);
+        assert!(changes.has_changed().unwrap());
+        changes.mark_unchanged();
+        shared.set_model_state(ModelState::Loaded);
+        assert!(!changes.has_changed().unwrap(), "only a change is sent");
+
+        shared.set_model_state(ModelState::Unloaded);
+        let reply = respond(DaemonCommand::Status, &shared, &tx);
+        assert_eq!(reply.state, Some(DaemonState::Idle));
+        assert_eq!(reply.model_state, Some(ModelState::Unloaded));
+
+        shared.set_transcribing();
+        assert!(!shared.is_idle());
     }
 
     #[test]

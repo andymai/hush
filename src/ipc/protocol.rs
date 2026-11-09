@@ -80,6 +80,43 @@ impl fmt::Display for DaemonState {
     }
 }
 
+/// Whether the daemon holds the local model in memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelState {
+    Loaded,
+    /// The next take started a load, and the take waits for it
+    Loading,
+    /// Freed after idle minutes; the next take loads it again
+    Unloaded,
+    /// An HTTP backend runs the model, so the daemon holds none
+    #[serde(rename = "none")]
+    Remote,
+}
+
+impl ModelState {
+    /// The lowercase name that scripts read.
+    pub fn name(&self) -> &'static str {
+        match self {
+            ModelState::Loaded => "loaded",
+            ModelState::Loading => "loading",
+            ModelState::Unloaded => "unloaded",
+            ModelState::Remote => "none",
+        }
+    }
+}
+
+impl fmt::Display for ModelState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ModelState::Loaded => f.write_str("loaded"),
+            ModelState::Loading => f.write_str("loading"),
+            ModelState::Unloaded => f.write_str("unloaded (the next take loads it)"),
+            ModelState::Remote => f.write_str("none (the transcription service runs it)"),
+        }
+    }
+}
+
 /// How a take ended, for a client that asked for its text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -114,6 +151,9 @@ pub struct DaemonResponse {
     /// The result of the take that a print stop ended
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub take: Option<TakeResult>,
+    /// Where the model is, in a status or watch reply
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_state: Option<ModelState>,
 }
 
 impl DaemonResponse {
@@ -124,6 +164,7 @@ impl DaemonResponse {
             error: None,
             message: None,
             take: None,
+            model_state: None,
         }
     }
 
@@ -134,7 +175,13 @@ impl DaemonResponse {
             error: Some(message.into()),
             message: None,
             take: None,
+            model_state: None,
         }
+    }
+
+    pub fn with_model_state(mut self, model_state: Option<ModelState>) -> Self {
+        self.model_state = model_state;
+        self
     }
 
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
@@ -317,6 +364,33 @@ mod tests {
         assert_eq!(
             DaemonState::Recording { elapsed_ms: 1250 }.to_string(),
             "recording (1.2 s)"
+        );
+    }
+
+    #[test]
+    fn status_replies_name_the_model_state() {
+        let reply =
+            DaemonResponse::ok(DaemonState::Idle).with_model_state(Some(ModelState::Unloaded));
+        assert_eq!(
+            serde_json::to_string(&reply).unwrap(),
+            r#"{"ok":true,"state":{"state":"idle"},"model_state":"unloaded"}"#
+        );
+        for state in [
+            ModelState::Loaded,
+            ModelState::Loading,
+            ModelState::Unloaded,
+            ModelState::Remote,
+        ] {
+            let json = serde_json::to_string(&state).unwrap();
+            assert_eq!(json, format!("\"{}\"", state.name()));
+            assert_eq!(serde_json::from_str::<ModelState>(&json).unwrap(), state);
+        }
+        assert_eq!(ModelState::Remote.name(), "none");
+        let old: DaemonResponse =
+            serde_json::from_str(r#"{"ok":true,"state":{"state":"idle"}}"#).unwrap();
+        assert_eq!(
+            old.model_state, None,
+            "an older daemon sends no model state"
         );
     }
 

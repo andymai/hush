@@ -353,6 +353,11 @@ pub struct TranscriptionConfig {
     /// voice activity detection model
     #[serde(default = "default_true")]
     pub vad: bool,
+    /// Free the local model after this many minutes without a take, and
+    /// load it again on the next take; 0 never frees it. HTTP backends
+    /// ignore it.
+    #[serde(default)]
+    pub unload_after_mins: u64,
     /// Transcripts to drop as invented text. When set, this list replaces
     /// the built-in one; an empty list drops nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -908,12 +913,14 @@ model_size = "small"
         assert!(config.feedback.audio_enabled);
         assert!(config.transcription.context_prompt);
         assert!(config.transcription.vad);
+        assert_eq!(config.transcription.unload_after_mins, 0);
         assert_eq!(config.transcription.drop_phrases, None);
         let config = Config::parse_over_defaults(
-            "[transcription]\nvad = false\ndrop_phrases = [\"Over and out.\"]\n",
+            "[transcription]\nvad = false\nunload_after_mins = 15\ndrop_phrases = [\"Over and out.\"]\n",
         )
         .unwrap();
         assert!(!config.transcription.vad);
+        assert_eq!(config.transcription.unload_after_mins, 15);
         assert_eq!(
             config.transcription.drop_phrases,
             Some(vec!["Over and out.".to_string()])
