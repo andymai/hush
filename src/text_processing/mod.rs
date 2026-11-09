@@ -213,18 +213,32 @@ impl TextProcessor {
 
             let place = context.window.as_ref().map(|w| {
                 format!(
-                    "The text goes into {} (window \"{}\").",
+                    "The text goes into {} (window title: {}).",
                     context.kind.label(),
                     w.title.chars().take(80).collect::<String>()
                 )
             });
-            llm.polish_with_context(
-                &enhanced_text,
-                self.config.mode,
-                Some(profile.tone),
-                place.as_deref(),
-            )
-            .await?
+            match llm
+                .polish_with_context(
+                    &enhanced_text,
+                    self.config.mode,
+                    Some(profile.tone),
+                    place.as_deref(),
+                )
+                .await
+            {
+                Ok(output) => match llm::reject_polish(&capitalized, &output) {
+                    Some(reason) => {
+                        info!("Polish discarded ({}), using the unpolished text", reason);
+                        capitalized
+                    },
+                    None => output,
+                },
+                Err(e) => {
+                    warn!("Polish failed ({:#}), using the unpolished text", e);
+                    capitalized
+                },
+            }
         } else {
             capitalized
         };
@@ -372,5 +386,93 @@ mod tests {
         assert!(!result.contains("um"));
         assert!(!result.contains("uh"));
         assert!(!result.contains("like"));
+    }
+
+    fn processor_with(provider: LlmProvider) -> TextProcessor {
+        TextProcessor::new(ProcessingConfig {
+            mode: EditingMode::Medium,
+            llm_provider: provider,
+            polish: true,
+            max_tokens: 200,
+            temperature: 0.3,
+        })
+        .unwrap()
+    }
+
+    fn ollama_at(url: String) -> LlmProvider {
+        LlmProvider::Ollama {
+            url,
+            model: "test".into(),
+        }
+    }
+
+    async fn fake_ollama(reply: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let read = socket.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                let text = String::from_utf8_lossy(&request).to_lowercase();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let body = serde_json::json!({ "message": { "content": reply } }).to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn llm_error_types_the_unpolished_text() {
+        let raw = "um we should not deploy to github on friday";
+        let unpolished = processor_with(LlmProvider::None)
+            .process(raw)
+            .await
+            .unwrap();
+        let unreachable = processor_with(ollama_at("http://127.0.0.1:1".into()));
+        assert_eq!(unreachable.process(raw).await.unwrap(), unpolished);
+    }
+
+    #[tokio::test]
+    async fn polish_that_drops_a_negation_types_the_unpolished_text() {
+        let raw = "we should not ship it";
+        let unpolished = processor_with(LlmProvider::None)
+            .process(raw)
+            .await
+            .unwrap();
+        let url = fake_ollama("We should ship it.").await;
+        let result = processor_with(ollama_at(url)).process(raw).await.unwrap();
+        assert_eq!(result, unpolished);
+    }
+
+    #[tokio::test]
+    async fn accepted_polish_is_typed() {
+        let url = fake_ollama("We shouldn't ship it!").await;
+        let result = processor_with(ollama_at(url))
+            .process("we should not ship it")
+            .await
+            .unwrap();
+        assert_eq!(result, "We shouldn't ship it!");
     }
 }
