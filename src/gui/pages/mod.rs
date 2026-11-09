@@ -1,6 +1,7 @@
 //! One page per group of settings, in the order a person meets them.
 
 pub mod desktop;
+pub mod history;
 pub mod hotkeys;
 pub mod output;
 pub mod overview;
@@ -17,16 +18,18 @@ pub enum Page {
     Text,
     Output,
     Desktop,
+    History,
 }
 
 impl Page {
-    pub const ALL: [Page; 6] = [
+    pub const ALL: [Page; 7] = [
         Page::Overview,
         Page::Hotkeys,
         Page::Speech,
         Page::Text,
         Page::Output,
         Page::Desktop,
+        Page::History,
     ];
 
     /// `HUSH_SETTINGS_PAGE=hotkeys hush settings` opens on that page, for
@@ -46,6 +49,7 @@ impl Page {
             Page::Text => "Text",
             Page::Output => "Output",
             Page::Desktop => "Desktop",
+            Page::History => "History",
         }
     }
 }
@@ -58,6 +62,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         Page::Text => text::show(gui, ui),
         Page::Output => output::show(gui, ui),
         Page::Desktop => desktop::show(gui, ui),
+        Page::History => history::show(gui, ui),
     }
 }
 

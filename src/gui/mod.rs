@@ -19,7 +19,9 @@ use crate::transcription::models::{ModelManager, ModelSize};
 use anyhow::{Context, Result};
 use capture::{Capture, Outcome};
 use meter::Meter;
+use pages::history::HistoryView;
 use pages::hotkeys::KeyField;
+use pages::text::TermEdit;
 use pages::Page;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -142,6 +144,10 @@ pub struct Gui {
     pub microphones: Vec<String>,
     pub level_shown: f32,
     pub new_term: String,
+    pub editing_term: Option<TermEdit>,
+    pub new_uinput_app: String,
+    pub new_clipboard_app: String,
+    pub history: HistoryView,
     pub try_text: String,
     restart: Option<Restart>,
     poll: Poll,
@@ -193,6 +199,10 @@ impl Gui {
             microphones: meter::input_devices(),
             level_shown: 0.0,
             new_term: String::new(),
+            editing_term: None,
+            new_uinput_app: String::new(),
+            new_clipboard_app: String::new(),
+            history: HistoryView::default(),
             try_text: String::new(),
             restart: None,
             poll: Poll::default(),
@@ -240,6 +250,7 @@ impl Gui {
         self.vocabulary = self.saved_vocabulary.clone();
         self.capture = None;
         self.editing_key = None;
+        self.editing_term = None;
     }
 
     /// Read the machine on a background thread; `take_refresh` picks up the

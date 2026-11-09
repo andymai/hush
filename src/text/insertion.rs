@@ -9,6 +9,7 @@
 use super::uinput_keyboard::UinputKeyboard;
 use super::window::{WindowInfo, WindowProvider};
 use super::InsertionMethod;
+use crate::config::settings::InsertionConfig;
 use crate::Result;
 use std::thread;
 use std::time::Duration;
@@ -47,8 +48,7 @@ pub struct TextInserter {
     uinput: UinputKeyboard,
     clipboard: Option<arboard::Clipboard>,
     windows: WindowProvider,
-    method: InsertionMethod,
-    typing_delay_ms: u64,
+    config: InsertionConfig,
     types_like_us: bool,
 }
 
@@ -85,19 +85,14 @@ impl TextInserter {
             uinput,
             clipboard,
             windows,
-            method: InsertionMethod::Auto,
-            typing_delay_ms: 10,
+            config: InsertionConfig::default(),
             types_like_us,
         })
     }
 
-    pub fn set_method(&mut self, method: InsertionMethod) {
-        self.method = method;
-    }
-
-    pub fn set_typing_delay(&mut self, delay_ms: u64) {
-        self.typing_delay_ms = delay_ms;
-        self.uinput.set_typing_delay(delay_ms);
+    pub fn configure(&mut self, config: &InsertionConfig) {
+        self.config = config.clone();
+        self.uinput.set_typing_delay(config.typing_delay_ms);
     }
 
     pub fn get_focused_window(&self) -> Option<WindowInfo> {
@@ -110,11 +105,19 @@ impl TextInserter {
             text.chars().take(50).collect::<String>(),
             text.chars().count()
         );
-        if let Some(window) = self.windows.focused() {
-            debug!("Target window: {} ({})", window.title, window.class);
-        }
+        let method = match self.windows.focused() {
+            Some(window) => {
+                let method = self.config.method_for(&window.class);
+                debug!(
+                    "Target window: {} ({}), method {:?}",
+                    window.title, window.class, method
+                );
+                method
+            },
+            None => self.config.method,
+        };
 
-        match choose_method(self.method, text, self.types_like_us) {
+        match choose_method(method, text, self.types_like_us) {
             Chosen::Uinput => self.type_with_uinput(text),
             Chosen::Clipboard => match self.paste(text) {
                 Ok(()) => Ok(()),
@@ -127,7 +130,7 @@ impl TextInserter {
     }
 
     fn type_with_uinput(&mut self, text: &str) -> Result<()> {
-        self.uinput.set_typing_delay(self.typing_delay_ms);
+        self.uinput.set_typing_delay(self.config.typing_delay_ms);
         self.uinput.type_text(text)?;
         info!("Text inserted via uinput ({} chars)", text.chars().count());
         Ok(())
@@ -174,7 +177,7 @@ impl TextInserter {
         info!("Undoing last insertion ({} chars)", char_count);
         for _ in 0..char_count {
             self.uinput.send_backspace()?;
-            thread::sleep(Duration::from_millis(self.typing_delay_ms));
+            thread::sleep(Duration::from_millis(self.config.typing_delay_ms));
         }
         Ok(())
     }

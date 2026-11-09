@@ -9,6 +9,15 @@ use crate::gui::Gui;
 use crate::text_processing::learn;
 
 const VOCABULARY_HEIGHT: f32 = 220.0;
+const EDIT_COLUMN: f32 = 340.0;
+
+/// A vocabulary term open for editing.
+pub struct TermEdit {
+    pub original: String,
+    pub draft: String,
+    /// Put the cursor in the field on the next frame
+    pub focus: bool,
+}
 
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     tone(gui, ui);
@@ -110,22 +119,62 @@ fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
         return;
     }
     let mut remove: Option<String> = None;
+    let mut start: Option<String> = None;
+    let mut commit = false;
+    let mut cancel = false;
+    let editing = &mut gui.editing_term;
     egui::ScrollArea::vertical()
         .max_height(VOCABULARY_HEIGHT)
         .auto_shrink([false, true])
         .show(ui, |ui| {
             for term in &terms {
-                row(term).show(ui, |ui| {
-                    if quiet_button(ui, "Remove").clicked() {
-                        remove = Some(term.clone());
-                    }
-                });
+                match editing.as_mut().filter(|edit| edit.original == *term) {
+                    Some(edit) => {
+                        row(term).reserve(EDIT_COLUMN).show(ui, |ui| {
+                            cancel |= quiet_button(ui, "Cancel").clicked();
+                            commit |= ui.button("Done").clicked();
+                            let response = field(ui, &mut edit.draft, term);
+                            if std::mem::take(&mut edit.focus) {
+                                response.request_focus();
+                            }
+                            if response.lost_focus() {
+                                commit |= ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
+                            }
+                        });
+                    },
+                    None => {
+                        row(term).show(ui, |ui| {
+                            if quiet_button(ui, "Remove").clicked() {
+                                remove = Some(term.clone());
+                            }
+                            if quiet_button(ui, "Edit").clicked() {
+                                start = Some(term.clone());
+                            }
+                        });
+                    },
+                }
             }
         });
+    if cancel {
+        gui.editing_term = None;
+    } else if commit {
+        if let Some(edit) = gui.editing_term.take() {
+            if let Err(e) = learn::rename_in(&mut gui.vocabulary, &edit.original, &edit.draft) {
+                gui.say(e.to_string());
+                gui.editing_term = Some(edit);
+            }
+        }
+    }
+    if let Some(term) = start {
+        gui.editing_term = Some(TermEdit {
+            draft: term.clone(),
+            original: term,
+            focus: true,
+        });
+    }
     if let Some(term) = remove {
-        gui.vocabulary
-            .technical_terms
-            .retain(|_, value| *value != term);
+        learn::forget_in(&mut gui.vocabulary, &term);
     }
     ui.add_space(4.0);
     let count = terms.len();

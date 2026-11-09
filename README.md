@@ -48,7 +48,8 @@ Hold `Right Alt`, speak, release. Done.
 - **Bind any key to it.** `hush toggle`, `hush start`, `hush stop`, and `hush cancel` talk to the daemon over a socket, so any compositor keybind can drive dictation. Hyprland: `bind = , F9, exec, hush toggle`. Sway: `bindsym F9 exec hush toggle`.
 - **Tone by application.** Text lands the way the focused app expects: lowercase and unpunctuated in terminals and editors, casual in chat, full sentences in mail and documents. The window title and your learned terms also prime Whisper, so names come out spelled your way. Works on X11, Hyprland, Sway, and KDE Plasma on Wayland.
 - **Any language Whisper knows.** Set `language = "auto"` under `[transcription]` to detect what you speak, or pick one in the settings window. On a keyboard layout that is not US, Hush pastes rather than typing key by key, so the letters come out right.
-- **Teach it your words.** Select a term Hush keeps misspelling and run `hush learn` (or `hush learn Kubernetes`); from then on it is written exactly that way. `hush paste-last` re-types the last transcript, and when insertion fails the text waits on the clipboard.
+- **Teach it your words.** Select a term Hush keeps misspelling and run `hush learn` (or `hush learn Kubernetes`); from then on it is written exactly that way. The Text page of `hush settings` lists, edits, and removes your words. `hush paste-last` re-types the last transcript, and when insertion fails the text waits on the clipboard.
+- **History.** Hush keeps the last 500 transcripts on your computer, in a file only you can read. The History page of `hush settings` searches them, copies one again, or deletes them. Turn it off with `history.enabled = false`.
 - **Command Mode.** Hold `Ctrl+Right Alt`, say what to do ("make this friendlier", "turn it into a bullet list"), release. Hush rewrites the selected text, or the last thing it typed when nothing is selected, through a local Ollama server or Anthropic, whichever `[llm]` resolves to. Only text is sent, never audio.
 - **Cleaner text, automatically.** Voice commands cover "new line", "new paragraph", "undo", and "scratch that". Filler words ("um", "uh", "like") are removed. Optional LLM polishing rewrites every transcript.
 - **Panel icon.** A status icon shows whether Hush is idle, recording, or working, and its menu offers the same actions the hotkeys do. Turn it off with `tray.enabled = false`.
@@ -144,6 +145,8 @@ Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another co
 | `audio.device` | Microphone name from `hush status --devices` | system default |
 | `feedback.audio_enabled` | Tones on start, stop, cancel, and the cap warning | true |
 | `insertion.method` | `auto` (type, then paste what uinput cannot type), `uinput`, or `clipboard` | auto |
+| `insertion.uinput_apps`, `insertion.clipboard_apps` | Window classes that always type or always paste, whatever `insertion.method` says; part of the class is enough | none |
+| `history.enabled`, `history.max_entries` | Keep delivered transcripts in `~/.local/share/hush/history.jsonl`, and how many | true, 500 |
 | `tray.enabled` | Status icon on the desktop panel | true |
 
 Point at a different file with `hush -c other.toml …` or `HUSH_CONFIG=other.toml`.
