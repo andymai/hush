@@ -27,8 +27,8 @@ use crate::text::WindowInfo;
 use crate::text_processing::transcripts::{self, Transcript};
 use crate::text_processing::{learn, llm, prompt, ProcessingContext};
 use crate::text_processing::{
-    CommandExecutor, CommandParser, EditingMode, HookEnv, InsertionHistory, LlmProvider,
-    ProcessingConfig, TextProcessor, TranscriptHook, Trigger,
+    CommandExecutor, CommandParser, DomainVocabulary, EditingMode, HookEnv, InsertionHistory,
+    LlmProvider, ProcessingConfig, TextProcessor, TranscriptHook, Trigger,
 };
 use crate::transcription::{SpeechToText, WHISPER_SAMPLE_RATE};
 use crate::tray;
@@ -275,7 +275,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             temperature: config.llm.temperature,
         };
 
-        match TextProcessor::new(processing_config) {
+        match TextProcessor::new(processing_config, Some(DomainVocabulary::default_path())) {
             Ok(processor) => {
                 match processor.llm_name() {
                     Some(name) => info!("✅ Text processor initialized with {}", name),

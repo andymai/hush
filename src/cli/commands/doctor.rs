@@ -13,6 +13,7 @@ use crate::transcription::models::{recommended_model, ModelManager, ModelSize};
 use crate::AudioCapture;
 use anyhow::Result;
 use std::fmt;
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -112,7 +113,7 @@ pub async fn checks() -> Vec<Check> {
         let cpu = cpu_report(cpu::floor(), &cpu::missing());
         let cpu_supported = cpu.level == Level::Ok;
         checks.push(cpu);
-        checks.push(model_check(&config));
+        checks.push(model_check(&config, &crate::config::paths::models_dir()));
         checks.push(vad_check(
             &config.transcription,
             crate::transcription::models::vad_model_path().is_file(),
@@ -174,7 +175,7 @@ fn cpu_report(floor: Option<&str>, missing: &[&str]) -> Check {
     }
 }
 
-fn model_check(config: &Config) -> Check {
+fn model_check(config: &Config, models_dir: &Path) -> Check {
     let size = config.transcription.model_size.clone();
     let path = config.transcription.model_path();
     if path.exists() {
@@ -183,7 +184,7 @@ fn model_check(config: &Config) -> Check {
             .unwrap_or(0);
         return Check::ok("Speech model", format!("{} ({} MB)", size, megabytes));
     }
-    if let Ok(manager) = ModelManager::new(crate::config::paths::models_dir()) {
+    if let Ok(manager) = ModelManager::new(models_dir) {
         if let Ok(parsed) = size.parse::<ModelSize>() {
             if manager.get_model_path(&parsed).is_some() {
                 return Check::ok("Speech model", format!("{} installed", size));
@@ -603,9 +604,11 @@ mod tests {
 
     #[test]
     fn the_model_check_names_the_command_that_fixes_it() {
+        let models = tempfile::tempdir().unwrap();
         let mut config = Config::defaults().unwrap();
         config.transcription.model_size = "definitely-not-a-model".to_string();
-        let check = model_check(&config);
+        config.transcription.model_path = Some("/nowhere/ggml-definitely-not-a-model.bin".into());
+        let check = model_check(&config, models.path());
         assert_eq!(check.level, Level::Fail);
         let fix = check.fix.unwrap();
         assert!(
@@ -619,7 +622,7 @@ mod tests {
 
         config.transcription.model_size = "large-v3".to_string();
         config.transcription.model_path = Some("/nowhere/ggml-large-v3.bin".into());
-        let check = model_check(&config);
+        let check = model_check(&config, models.path());
         assert_eq!(check.level, Level::Fail);
         assert_eq!(
             check.fix.as_deref(),
