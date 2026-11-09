@@ -1,0 +1,81 @@
+name: Beta Report
+description: Tell us how Hush runs on your desktop, GPU, and keyboard layout, even when everything works
+title: "Beta report: "
+labels: [beta report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing Hush. Each report fills one cell of the test matrix for 1.0: KDE Wayland, GNOME Wayland, Hyprland, and X11, with NVIDIA, AMD, and Intel GPUs, and layouts other than US. A report that says "it all works" is as useful as one that finds a bug.
+  - type: dropdown
+    id: desktop
+    attributes:
+      label: Desktop
+      options:
+        - KDE Plasma (Wayland)
+        - GNOME (Wayland)
+        - Hyprland
+        - Sway or another wlroots compositor
+        - X11 (any desktop)
+        - Other (say which below)
+    validations:
+      required: true
+  - type: dropdown
+    id: gpu
+    attributes:
+      label: GPU
+      options:
+        - NVIDIA
+        - AMD
+        - Intel
+        - None (CPU only)
+    validations:
+      required: true
+  - type: input
+    id: layout
+    attributes:
+      label: Keyboard layout
+      description: The layout you type with, from your desktop settings or `localectl status`
+      placeholder: us, de, fr (azerty), us (colemak)
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - .deb
+        - .rpm
+        - AppImage
+        - Tarball or install.sh
+        - COPR
+        - Built from source
+    validations:
+      required: true
+  - type: checkboxes
+    id: works
+    attributes:
+      label: What worked
+      description: Tick each one you tried and saw work. Leave the rest empty.
+      options:
+        - label: Hold the hotkey, speak, release, and the text appears at the cursor
+        - label: Double-tap the hotkey to lock hands-free, then tap to stop
+        - label: Escape cancels a recording
+        - label: "`hush toggle` starts and stops a recording"
+        - label: Characters of your layout (such as é, ü, ñ, or ß) come out right
+        - label: The tray icon shows and its menu works
+        - label: The settings window opens and saves
+        - label: "`hush doctor` names your GPU on its GPU line"
+  - type: textarea
+    id: doctor
+    attributes:
+      label: hush doctor
+      description: Paste the output of `hush --version` and `hush doctor`
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: problems
+    attributes:
+      label: What went wrong
+      description: Anything that did not work or felt wrong. For a crash, add the output of `hush -vv daemon start --foreground`.
