@@ -25,8 +25,8 @@ pub enum Chosen {
     Clipboard,
 }
 
-/// `types_like_us` is false when the session's keyboard layout would turn
-/// Hush's key codes into different characters.
+/// `types_like_us` is false when the session's keyboard layout is not plain
+/// US, so Hush's key codes would turn into different characters.
 pub fn choose_method(configured: InsertionMethod, text: &str, types_like_us: bool) -> Chosen {
     match configured {
         InsertionMethod::Uinput => Chosen::Uinput,
@@ -76,7 +76,7 @@ impl TextInserter {
             if types_like_us {
                 "typed key by key"
             } else {
-                "pasted, because the keyboard layout is not US"
+                "pasted, because the keyboard layout is not plain US"
             },
             if clipboard.is_some() { "ready" } else { "off" },
             windows.name()
