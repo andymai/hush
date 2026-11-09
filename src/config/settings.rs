@@ -183,6 +183,8 @@ pub struct InsertionConfig {
     pub clipboard_apps: Vec<String>,
     /// The paste chord by window class, ahead of the built-in choice
     pub paste_keys: BTreeMap<String, PasteChord>,
+    /// Window classes where Hush presses Enter after it inserts the text
+    pub submit_apps: Vec<String>,
 }
 
 impl Default for InsertionConfig {
@@ -193,6 +195,7 @@ impl Default for InsertionConfig {
             uinput_apps: Vec::new(),
             clipboard_apps: Vec::new(),
             paste_keys: BTreeMap::new(),
+            submit_apps: Vec::new(),
         }
     }
 }
@@ -228,6 +231,14 @@ impl InsertionConfig {
             .filter(|(rule, _)| crate::text::class_matches(rule, class))
             .max_by_key(|(rule, _)| rule.trim().len())
             .map(|(_, chord)| *chord)
+    }
+
+    /// Whether `submit_apps` names this window class, with the same rule
+    /// as `paste_keys`: the whole class or its last dot-separated part.
+    pub fn submits(&self, class: &str) -> bool {
+        self.submit_apps
+            .iter()
+            .any(|rule| crate::text::class_matches(rule, class))
     }
 }
 
@@ -816,6 +827,23 @@ model_size = "small"
         assert_eq!(rules.paste_rule("code\0Code"), Some(PasteChord::CtrlV));
         assert_eq!(rules.paste_rule("codium"), None);
         assert!(Config::defaults().unwrap().insertion.paste_keys.is_empty());
+    }
+
+    #[test]
+    fn submit_apps_name_whole_window_classes() {
+        let config =
+            Config::parse_over_defaults("[insertion]\nsubmit_apps = [\"st\", \"Slack\", \" \"]\n")
+                .unwrap();
+        let rules = &config.insertion;
+        assert!(rules.submits("st"));
+        assert!(!rules.submits("steam"), "st is not steam");
+        assert!(!rules.submits("st-256color"));
+        assert!(rules.submits("com.slack.Slack"), "the last part counts");
+        assert!(rules.submits("slack\0Slack"));
+        assert!(!rules.submits("firefox"), "a blank rule matches nothing");
+        let defaults = Config::defaults().unwrap();
+        assert!(defaults.insertion.submit_apps.is_empty());
+        assert!(!defaults.insertion.submits("slack"));
     }
 
     #[test]

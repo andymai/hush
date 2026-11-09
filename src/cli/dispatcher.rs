@@ -462,7 +462,7 @@ pub async fn test_text_insertion_system(
             tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
             match inserter.insert_text(&text) {
-                Ok(()) => println!("✅ Text insertion successful"),
+                Ok(_) => println!("✅ Text insertion successful"),
                 Err(e) => println!("❌ Text insertion failed: {}", e),
             }
         },
@@ -606,7 +606,7 @@ pub async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()>
                     tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
                     match inserter.insert_text(&result.text) {
-                        Ok(()) => println!("✅ Text inserted successfully"),
+                        Ok(_) => println!("✅ Text inserted successfully"),
                         Err(e) => println!("❌ Text insertion failed: {}", e),
                     }
                 }

@@ -618,11 +618,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
                         let mut inserter = inserter.lock();
                         match inserter.insert_text(&processed_text) {
-                            Ok(_) => {
-                                // Record in history for undo
-                                insertion_history_clone
-                                    .lock()
-                                    .record(processed_text.clone());
+                            Ok(typed) => {
+                                insertion_history_clone.lock().record(typed);
                             },
                             Err(e) => {
                                 error!("Text insertion failed: {}", e);
@@ -859,7 +856,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 if let Some(inserter) = text_inserter.as_ref() {
                     shared.set_inserting();
                     match inserter.lock().insert_text(&text) {
-                        Ok(()) => insertion_history.lock().record(text.clone()),
+                        Ok(typed) => insertion_history.lock().record(typed),
                         Err(e) => {
                             error!("Paste-last failed: {}", e);
                             let _ = feedback.play_error();
@@ -1386,8 +1383,8 @@ fn run_command_mode(
         }
     }
     match inserter.insert_text(&rewritten) {
-        Ok(()) => {
-            history.lock().record(rewritten.clone());
+        Ok(typed) => {
+            history.lock().record(typed);
             shared.set_last_text(rewritten);
             let _ = feedback.play_success();
         },

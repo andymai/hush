@@ -29,7 +29,7 @@ impl TextInserterAdapter {
 #[async_trait]
 impl TextOutput for TextInserterAdapter {
     async fn insert_text(&mut self, text: &str) -> Result<()> {
-        self.inner.lock().insert_text(text)
+        self.inner.lock().insert_text(text).map(|_| ())
     }
 
     async fn focused_window(&self) -> Result<Option<WindowInfo>> {

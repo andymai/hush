@@ -161,7 +161,7 @@ pub async fn handle_record(
                     tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
                     match text_inserter.insert_text(&processed_text) {
-                        Ok(()) => println!("✅ Text inserted successfully"),
+                        Ok(_) => println!("✅ Text inserted successfully"),
                         Err(e) => println!("❌ Text insertion failed: {}", e),
                     }
                 }

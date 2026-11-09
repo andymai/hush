@@ -126,6 +126,47 @@ static CHAR_TO_KEY_MAP: Lazy<HashMap<char, (Key, bool)>> = Lazy::new(|| {
     map
 });
 
+/// The keys a typed line break presses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineBreak {
+    #[default]
+    Enter,
+    /// Chat applications send the message on Enter and start a new line on
+    /// Shift+Enter.
+    ShiftEnter,
+}
+
+/// One key tap, with or without Shift, or a character the key map lacks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stroke {
+    Key(Key, bool),
+    Unmapped(char),
+}
+
+/// The key taps that type a text. `\r\n`, `\r`, and `\n` are each one line
+/// break.
+fn strokes(text: &str, line_break: LineBreak) -> Vec<Stroke> {
+    let enter = Stroke::Key(Key::Enter, line_break == LineBreak::ShiftEnter);
+    let mut strokes = Vec::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        strokes.push(match ch {
+            '\r' => {
+                chars.next_if_eq(&'\n');
+                enter
+            },
+            '\n' => enter,
+            '\t' => Stroke::Key(Key::Tab, false),
+            _ => CHAR_TO_KEY_MAP
+                .get(&ch)
+                .map_or(Stroke::Unmapped(ch), |&(key, shift)| {
+                    Stroke::Key(key, shift)
+                }),
+        });
+    }
+    strokes
+}
+
 pub struct UinputKeyboard {
     device: Option<UInputHandle<File>>,
     typing_delay_ms: u64,
@@ -167,7 +208,7 @@ impl UinputKeyboard {
     /// Whether the US-layout key map covers every character.
     pub fn can_type_all(text: &str) -> bool {
         text.chars()
-            .all(|ch| matches!(ch, '\n' | '\t') || CHAR_TO_KEY_MAP.contains_key(&ch))
+            .all(|ch| matches!(ch, '\n' | '\r' | '\t') || CHAR_TO_KEY_MAP.contains_key(&ch))
     }
 
     /// Hold the chord's modifiers, tap its key, and release the modifiers.
@@ -192,7 +233,7 @@ impl UinputKeyboard {
         debug!("Typing delay set to {}ms", delay_ms);
     }
 
-    pub fn type_text(&mut self, text: &str) -> Result<()> {
+    pub fn type_text(&mut self, text: &str, line_break: LineBreak) -> Result<()> {
         if !self.ready {
             return Err(anyhow::anyhow!("Uinput keyboard not ready"));
         }
@@ -203,15 +244,16 @@ impl UinputKeyboard {
             text.len()
         );
 
-        for (i, ch) in text.char_indices() {
+        for (i, stroke) in strokes(text, line_break).into_iter().enumerate() {
             if i > 0 && i % 100 == 0 {
-                debug!("Typed {} characters so far", i);
+                debug!("Typed {} keys so far", i);
             }
 
-            match ch {
-                '\n' => self.send_key(Key::Enter, false)?,
-                '\t' => self.send_key(Key::Tab, false)?,
-                _ => self.type_character(ch)?,
+            match stroke {
+                Stroke::Key(key, shift) => self.send_key(key, shift)?,
+                Stroke::Unmapped(ch) => {
+                    warn!("Character '{}' is not in the US key map, skipping", ch)
+                },
             }
 
             if self.typing_delay_ms > 0 {
@@ -233,6 +275,14 @@ impl UinputKeyboard {
         }
 
         self.send_key(Key::Backspace, false)
+    }
+
+    pub fn send_enter(&mut self) -> Result<()> {
+        if !self.ready {
+            return Err(anyhow::anyhow!("Uinput keyboard not ready"));
+        }
+
+        self.send_key(Key::Enter, false)
     }
 
     pub fn get_device_info(&self) -> String {
@@ -350,15 +400,6 @@ impl UinputKeyboard {
         self.device = Some(handle);
         info!("✅ Uinput device created successfully");
 
-        Ok(())
-    }
-
-    fn type_character(&mut self, ch: char) -> Result<()> {
-        if let Some((key, needs_shift)) = CHAR_TO_KEY_MAP.get(&ch) {
-            self.send_key(*key, *needs_shift)?;
-        } else {
-            warn!("Character '{}' is not in the US key map, skipping", ch);
-        }
         Ok(())
     }
 
@@ -484,6 +525,42 @@ mod tests {
         assert_eq!(CHAR_TO_KEY_MAP.get(&'1'), Some(&(Key::Num1, false)));
         assert_eq!(CHAR_TO_KEY_MAP.get(&'!'), Some(&(Key::Num1, true)));
         assert_eq!(CHAR_TO_KEY_MAP.get(&' '), Some(&(Key::Space, false)));
+    }
+
+    #[test]
+    fn chat_line_breaks_press_shift_enter() {
+        let a = Stroke::Key(Key::A, false);
+        let b = Stroke::Key(Key::B, false);
+        let c = Stroke::Key(Key::C, false);
+        let shift_enter = Stroke::Key(Key::Enter, true);
+        assert_eq!(strokes("a\nb", LineBreak::ShiftEnter), [a, shift_enter, b]);
+        assert_eq!(
+            strokes("a\r\nb\rc", LineBreak::ShiftEnter),
+            [a, shift_enter, b, shift_enter, c],
+            "\\r\\n is one line break, and so is a lone \\r"
+        );
+        assert_eq!(
+            strokes("a\n\nb", LineBreak::ShiftEnter),
+            [a, shift_enter, shift_enter, b],
+            "a paragraph break is two new lines"
+        );
+    }
+
+    #[test]
+    fn other_line_breaks_press_enter() {
+        let enter = Stroke::Key(Key::Enter, false);
+        assert_eq!(
+            strokes("A\r\n\t!é", LineBreak::Enter),
+            [
+                Stroke::Key(Key::A, true),
+                enter,
+                Stroke::Key(Key::Tab, false),
+                Stroke::Key(Key::Num1, true),
+                Stroke::Unmapped('é'),
+            ]
+        );
+        assert!(UinputKeyboard::can_type_all("one\r\ntwo\tthree"));
+        assert!(!UinputKeyboard::can_type_all("café"));
     }
 
     #[test]
