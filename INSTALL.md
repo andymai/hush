@@ -1,5 +1,22 @@
 # Installation
 
+## CPU requirement
+
+The prebuilt binaries (the tarball, `.deb`, `.rpm`, AppImage, COPR, and AUR
+packages) need an x86-64-v3 CPU: Intel Haswell (2013) and newer, or AMD
+Excavator, Zen, and newer. These CPUs have AVX, AVX2, FMA, F16C, and BMI2.
+Some Intel Pentium, Celeron, and Atom CPUs from the same years do not have
+them.
+
+On an older CPU, Hush does not load the Whisper model and names the missing
+features. The `CPU` line of `hush doctor` shows the same problem. To fix it, do
+one of these:
+
+- Build Hush from source with `make release`. A source build targets the CPU
+  that builds it.
+- Use a cloud backend: set `backend = "groq"` or `backend = "openai"` under
+  `[transcription]`. A cloud backend does not run Whisper on your CPU.
+
 ## Dependencies
 
 ### Ubuntu / Debian
@@ -107,6 +124,10 @@ sudo pacman -S cuda
 
 **Build fails with missing library:** the error names the header; install the
 matching `-dev` (Ubuntu) or `-devel` (Fedora) package from the lists above.
+
+**"This CPU does not have AVX2" or "Illegal instruction":** the prebuilt binary
+needs an x86-64-v3 CPU. Build from source with `make release`, or use a cloud
+backend. See [CPU requirement](#cpu-requirement).
 
 **Text insertion not working:**
 ```bash

@@ -5,6 +5,7 @@ use crate::config::settings::TranscriptionConfig;
 use crate::config::{keys, Config};
 use crate::hotkey::HotkeyBindings;
 use crate::text::WindowProvider;
+use crate::transcription::cpu;
 use crate::transcription::device::GpuAvailability;
 use crate::transcription::models::{recommended_model, ModelManager, ModelSize};
 use crate::AudioCapture;
@@ -107,8 +108,14 @@ pub async fn checks() -> Vec<Check> {
             .and_then(keys::api_key);
         checks.push(cloud_check(&config.transcription, key.is_some()));
     } else {
+        let cpu = cpu_report(cpu::floor(), &cpu::missing());
+        let cpu_supported = cpu.level == Level::Ok;
+        checks.push(cpu);
         checks.push(model_check(&config));
-        checks.push(gpu_check(&config));
+        // Below the floor, ggml lists no devices, so a GPU line would blame the driver.
+        if cpu_supported {
+            checks.push(gpu_check(&config));
+        }
     }
     checks.push(microphone_check(&config));
     checks.push(hotkey_check(&config));
@@ -141,6 +148,24 @@ fn permissions_check() -> Check {
         format!("no readable keyboard ({} devices)", status.event_nodes)
     };
     Check::fail("Keyboard access", detail, "hush setup permissions")
+}
+
+fn cpu_report(floor: Option<&str>, missing: &[&str]) -> Check {
+    match floor {
+        None => Check::ok("CPU", "this build has no CPU floor"),
+        Some(floor) if missing.is_empty() => {
+            Check::ok("CPU", format!("has the {} features of this build", floor))
+        },
+        Some(floor) => Check::fail(
+            "CPU",
+            format!(
+                "does not have {}, which this {} build needs",
+                cpu::feature_list(missing),
+                floor
+            ),
+            cpu::FIX,
+        ),
+    }
 }
 
 fn model_check(config: &Config) -> Check {
@@ -496,6 +521,20 @@ mod tests {
         assert_eq!(check.level, Level::Ok);
         assert!(check.detail.contains("whisper-large-v3-turbo"));
         assert!(check.detail.contains("audio leaves this machine"));
+    }
+
+    #[test]
+    fn the_cpu_line_fails_only_below_the_floor() {
+        assert_eq!(cpu_report(None, &[]).level, Level::Ok);
+        assert_eq!(cpu_report(Some(cpu::X86_64_V3), &[]).level, Level::Ok);
+
+        let check = cpu_report(Some(cpu::X86_64_V3), &["avx2", "bmi2"]);
+        assert_eq!(check.level, Level::Fail);
+        assert!(check.detail.contains("AVX2, BMI2"), "{}", check.detail);
+        assert!(check.detail.contains("x86-64-v3"), "{}", check.detail);
+        let fix = check.fix.unwrap();
+        assert!(fix.contains("make release"), "{fix}");
+        assert!(fix.contains("backend = \"groq\""), "{fix}");
     }
 
     #[test]

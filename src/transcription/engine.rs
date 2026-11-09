@@ -5,6 +5,7 @@
 use crate::config::paths;
 use crate::config::settings::TranscriptionConfig;
 use crate::transcription::cloud::CloudTranscriber;
+use crate::transcription::cpu;
 use crate::transcription::models::{ModelManager, ModelSize};
 use crate::transcription::whisper::{TranscriptionResult, WhisperTranscriber};
 use crate::Result;
@@ -23,6 +24,7 @@ impl SpeechToText {
         if config.backend.is_cloud() {
             return CloudTranscriber::from_config(config).map(Self::Cloud);
         }
+        cpu::ensure_supported()?;
         let whisper = WhisperTranscriber::new(&local_model_path(config), config.use_gpu)
             .await
             .map_err(|e| {

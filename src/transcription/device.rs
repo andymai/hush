@@ -4,6 +4,7 @@
 //! in a static registry, so the devices it will actually use can be listed
 //! without loading a model.
 
+use crate::transcription::cpu;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::sync::OnceLock;
@@ -95,6 +96,9 @@ impl GpuAvailability {
 
     /// whisper.cpp's own summary of the compiled backends and CPU features
     pub fn system_info() -> String {
+        if let Err(e) = cpu::ensure_supported() {
+            return e.to_string();
+        }
         // SAFETY: whisper_print_system_info returns a pointer to a static
         // buffer owned by whisper.cpp; it is never null and is not freed.
         unsafe { cstr_to_string(sys::whisper_print_system_info()) }
@@ -122,8 +126,14 @@ fn gpu_type_for(backend_name: &str) -> GpuType {
     }
 }
 
-/// Every device registered with ggml, in registry order.
+/// Every device registered with ggml, in registry order, or none when this
+/// CPU is below the binary's floor.
 pub fn backend_devices() -> Vec<BackendDevice> {
+    // The first registry call registers the CPU backend, and that runs ggml
+    // code built for the floor.
+    if !cpu::supported() {
+        return Vec::new();
+    }
     // SAFETY: the registry is populated by static initializers in the linked
     // backends; every index below `ggml_backend_dev_count()` yields a live
     // device whose name and description strings outlive the process.

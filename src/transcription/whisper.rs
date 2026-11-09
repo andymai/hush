@@ -1,6 +1,7 @@
 //! Speech-to-text through whisper.cpp, via whisper-rs.
 
 use crate::logging::{transcription as logging, RequestContext};
+use crate::transcription::cpu;
 use crate::transcription::device::GpuAvailability;
 use crate::Result;
 use parking_lot::Mutex;
@@ -42,6 +43,7 @@ pub struct WhisperTranscriber {
 impl WhisperTranscriber {
     /// Load a ggml model. `use_gpu` is honored when a GPU backend exists.
     pub async fn new(model_path: &Path, use_gpu: bool) -> Result<Self> {
+        cpu::ensure_supported()?;
         let ctx = RequestContext::new("whisper_transcriber_init")
             .with_metadata("model_path", &model_path.display().to_string())
             .with_metadata("gpu_requested", &use_gpu.to_string());
