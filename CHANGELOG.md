@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/andymai/hush/compare/v0.12.1...v0.13.0) (2026-11-09)
+
+
+### Features
+
+* **transcription:** unload the local model when idle ([#262](https://github.com/andymai/hush/issues/262)) ([1d184c7](https://github.com/andymai/hush/commit/1d184c7b2094aa2a5b9879778b5e2430b88b1802))
+
 ## [0.12.1](https://github.com/andymai/hush/compare/v0.12.0...v0.12.1) (2026-11-09)
 
 
