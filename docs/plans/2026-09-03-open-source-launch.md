@@ -25,7 +25,7 @@ Hush goes public as a 0.x beta once the repository is hardened (M0) and the laun
 | Settings | A minimal settings window from the tray. The TOML file remains the full surface. |
 | Toolkit | iced with iced_layershell for wizard, settings, and overlay. |
 | Naming | Binary and packages are `hush`. App id `io.github.andymai.hush`. Tags `vX.Y.Z`. No crates.io publish. |
-| Distribution | GitHub Releases (.deb, .rpm, AppImage, tar.gz, SHA256SUMS), a curl installer, AUR `hush-bin`, Fedora COPR. Flathub follows the portal backends in M3. |
+| Distribution | GitHub Releases (.deb, .rpm, AppImage, tar.gz, SHA256SUMS), a curl installer, AUR `hush-voice-bin`, Fedora COPR. Flathub follows the portal backends in M3. |
 | Launch | Public beta at 0.2.0 after M0 and M1. 1.0 when M2 ships. |
 
 ## Target setup flow
@@ -64,7 +64,7 @@ Mirrors the patterns in brepkit, brepjs, and elevator-core.
 - Permission setup: `hush setup permissions` writes `/etc/udev/rules.d/70-hush.rules` via `pkexec`, reloads udev, and verifies access. Replaces the `input` group instructions.
 - Remove every non-test `unwrap`, fix the drifted doctests, and run doctests in CI.
 - Retire `install.sh` and `scripts/` in favor of the wizard and the release installer. Correct stale docs (hotkey name, config paths, MSRV).
-- Release pipeline: on a release tag, build `hush` with `--features vulkan`, produce `.deb` (cargo-deb), `.rpm` (cargo-generate-rpm), AppImage, `tar.gz`, and `SHA256SUMS`, upload to the GitHub Release, publish the AUR `hush-bin` PKGBUILD, and trigger the COPR build.
+- Release pipeline: on a release tag, build `hush` with `--features vulkan`, produce `.deb` (cargo-deb), `.rpm` (cargo-generate-rpm), AppImage, `tar.gz`, and `SHA256SUMS`, upload to the GitHub Release, publish the AUR `hush-voice-bin` PKGBUILD, and trigger the COPR build.
 - `install.sh` served from the repo detects the distro, downloads the matching asset, verifies the checksum, and installs it.
 - Packaged desktop entry, icon, and systemd user unit under `io.github.andymai.hush`.
 - README rewritten for the everyday-user path with a demo GIF, install matrix, and privacy statement.
@@ -145,7 +145,7 @@ release-please opens a release PR from conventional commits, CI validates it, th
 
 - Install the release-kun GitHub App on `andymai/hush` and add `RELEASE_KUN_APP_ID` and `RELEASE_KUN_APP_PRIVATE_KEY` as repository secrets.
 - Create the COPR project `andymai/hush` and add `COPR_API_LOGIN` and `COPR_API_TOKEN` secrets.
-- Register `hush-bin` on AUR and add `AUR_SSH_PRIVATE_KEY`.
+- Register `hush-voice-bin` on AUR and add `AUR_SSH_PRIVATE_KEY`.
 - Set the repository to public when M1 exits.
 
 ## Risks
