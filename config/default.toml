@@ -14,10 +14,16 @@ silence_stop_secs = 0    # stop a hands-free recording after this many seconds o
 # machine. groq and openai send the audio of each dictation to that service,
 # with the window title when context_prompt is on. The key comes from
 # GROQ_API_KEY or OPENAI_API_KEY (in the environment or ~/.config/hush/.env).
+# openai-compatible sends the audio of each dictation to the URL in
+# server_url, such as a whisper.cpp server on your network. Hush adds
+# /v1/audio/transcriptions when the URL does not end with it.
 # When the service fails, Hush reports the error and never falls back.
-backend = "local"                       # local, groq, openai
+backend = "local"                       # local, groq, openai, openai-compatible
 groq_model = "whisper-large-v3-turbo"   # or whisper-large-v3
 openai_model = "gpt-4o-mini-transcribe" # or gpt-4o-transcribe, whisper-1
+server_url = ""                         # openai-compatible: the server address, e.g. "http://localhost:8080/v1"
+server_model = ""                       # openai-compatible: the model name that the server expects
+server_key_env = ""                     # openai-compatible: the variable that holds the API key; "" sends no key
 # model_path = "/path/to/ggml-base.bin"  # derived from model_size when unset
 model_size = "base"       # tiny, base, small, medium, large, large-v2, large-v3
 language = "en"           # a two-letter code, or "auto" to detect the language you speak
@@ -77,11 +83,17 @@ browser = []
 [llm]
 # Polishing and Command Mode. auto: a local Ollama server when reachable,
 # else Anthropic when ANTHROPIC_API_KEY is set (in the environment or
-# ~/.config/hush/.env), else rule-based only. Only text is sent, never audio.
-provider = "auto"                     # auto, ollama, anthropic, none
+# ~/.config/hush/.env), else rule-based only. openai-compatible sends the
+# text to the URL in server_url, and Hush adds /v1/chat/completions when the
+# URL does not end with it. auto never picks it. Only text is sent, never
+# audio.
+provider = "auto"                     # auto, ollama, anthropic, openai-compatible, none
 ollama_url = "http://localhost:11434"
 ollama_model = "llama3.2"
 anthropic_model = "claude-haiku-4-5"
+server_url = ""                       # openai-compatible: the server address, e.g. "http://localhost:8080/v1"
+server_model = ""                     # openai-compatible: the model name that the server expects
+server_key_env = ""                   # openai-compatible: the variable that holds the API key; "" sends no key
 polish = true                         # rewrite every transcript with the LLM; Command Mode works either way
 max_tokens = 400
 temperature = 0.3

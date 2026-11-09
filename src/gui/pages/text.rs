@@ -1,6 +1,7 @@
 //! What happens to the words after Whisper: tone by application, polishing
 //! with a language model, and the words Hush must spell your way.
 
+use crate::config::server;
 use crate::config::settings::LlmSetting;
 use crate::gui::theme::{
     field, hint, quiet_button, row, section, toggle, toggle_row, FIELD_WIDTH, MUTED, TOGGLE_COLUMN,
@@ -41,7 +42,8 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
     row("Polish with")
         .describe(
             "Only the text is ever sent, never the audio. Anthropic needs \
-             ANTHROPIC_API_KEY in ~/.config/hush/.env.",
+             ANTHROPIC_API_KEY in ~/.config/hush/.env. An OpenAI-compatible server \
+             receives the text at the address you set.",
         )
         .show(ui, |ui| {
             egui::ComboBox::from_id_salt("llm_provider")
@@ -52,6 +54,7 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
                         LlmSetting::Auto,
                         LlmSetting::Ollama,
                         LlmSetting::Anthropic,
+                        LlmSetting::OpenAiCompatible,
                         LlmSetting::None,
                     ] {
                         ui.selectable_value(
@@ -81,6 +84,29 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
     row("Anthropic model").show(ui, |ui| {
         field(ui, &mut gui.config.llm.anthropic_model, "claude-haiku-4-5");
     });
+    row("OpenAI-compatible server")
+        .describe(&server_reach(&gui.config.llm.server_url))
+        .show(ui, |ui| {
+            field(
+                ui,
+                &mut gui.config.llm.server_url,
+                "http://localhost:8080/v1",
+            );
+        });
+    row("OpenAI-compatible model").show(ui, |ui| {
+        field(ui, &mut gui.config.llm.server_model, "llama3.2");
+    });
+}
+
+/// Where the text goes when the server URL is set.
+fn server_reach(url: &str) -> String {
+    if url.trim().is_empty() {
+        "Hush adds /v1/chat/completions when the address does not end with it.".to_string()
+    } else if server::is_local(url) {
+        format!("A local server: {}.", server::host_label(url))
+    } else {
+        format!("{} receives the text.", server::host_label(url))
+    }
 }
 
 fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -190,6 +216,25 @@ fn provider_name(provider: LlmSetting) -> &'static str {
         LlmSetting::Auto => "Ollama, else Anthropic",
         LlmSetting::Ollama => "Ollama",
         LlmSetting::Anthropic => "Anthropic",
+        LlmSetting::OpenAiCompatible => "OpenAI-compatible server",
         LlmSetting::None => "Nothing",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_server_row_says_local_server_or_names_the_receiver() {
+        assert!(server_reach("").contains("/v1/chat/completions"));
+        assert_eq!(
+            server_reach("http://192.168.1.9:8000/v1"),
+            "A local server: 192.168.1.9:8000."
+        );
+        assert_eq!(
+            server_reach("https://llm.example.com"),
+            "llm.example.com receives the text."
+        );
     }
 }

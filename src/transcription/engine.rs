@@ -1,6 +1,6 @@
 //! The transcriber the config asks for: whisper.cpp on this machine, or the
-//! cloud service the user chose. A cloud backend never loads the model, and
-//! the local one never opens a connection.
+//! service or server the user chose. An HTTP backend never loads the model,
+//! and the local one never opens a connection.
 
 use crate::config::paths;
 use crate::config::settings::TranscriptionConfig;
@@ -45,7 +45,7 @@ impl SpeechToText {
     pub fn describe(&self) -> String {
         match self {
             Self::Local(whisper) => format!("Whisper on {}", whisper.get_device_info()),
-            Self::Cloud(cloud) => format!("{}; audio leaves this machine", cloud.name()),
+            Self::Cloud(cloud) => cloud.describe(),
         }
     }
 
@@ -117,6 +117,37 @@ mod tests {
                 );
             },
         }
+    }
+
+    #[tokio::test]
+    async fn a_server_backend_never_loads_the_model_and_says_where_it_runs() {
+        let mut config = Config::defaults().unwrap().transcription;
+        config.backend = TranscriptionBackend::OpenAiCompatible;
+        config.server_url = "http://127.0.0.1:9/v1".into();
+        config.server_model = "whisper-1".into();
+        config.model_path = Some("/nonexistent/ggml-base.bin".into());
+        let engine = SpeechToText::from_config(&config).await.unwrap();
+        assert!(engine.is_cloud());
+        assert_eq!(
+            engine.describe(),
+            "whisper-1 on the local server 127.0.0.1:9"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failing_server_reports_its_error_and_nothing_else_runs() {
+        let mut config = Config::defaults().unwrap().transcription;
+        config.backend = TranscriptionBackend::OpenAiCompatible;
+        config.server_url = "http://127.0.0.1:1".into();
+        config.server_model = "whisper-1".into();
+        let engine = SpeechToText::from_config(&config).await.unwrap();
+        let message = engine
+            .transcribe_with_prompt(&[0.1; 160], 16_000, None)
+            .await
+            .err()
+            .map(|e| format!("{:#}", e))
+            .unwrap_or_default();
+        assert!(message.contains("127.0.0.1:1 did not answer"), "{message}");
     }
 
     #[tokio::test]

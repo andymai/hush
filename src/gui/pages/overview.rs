@@ -1,6 +1,8 @@
 //! Whether Hush can work on this machine, and a box to try it in.
 
+use super::speech::server_status;
 use super::Page;
+use crate::config::settings::TranscriptionBackend;
 use crate::gui::theme::{dot, hint, row, section, state_line, toggle, GOOD, TOGGLE_COLUMN};
 use crate::gui::Gui;
 use crate::ipc::DaemonState;
@@ -87,8 +89,20 @@ fn access(gui: &mut Gui, ui: &mut egui::Ui) {
 fn model(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Speech model");
     let backend = gui.config.transcription.backend;
+    if backend == TranscriptionBackend::OpenAiCompatible {
+        let (ok, title, description) = server_status(gui);
+        row(&title)
+            .status(ok)
+            .describe(&description)
+            .show(ui, |ui| {
+                if ui.button("Change").clicked() {
+                    gui.page = Page::Speech;
+                }
+            });
+        return;
+    }
     if let Some(var) = backend.key_var() {
-        let has_key = gui.machine.has_key(backend);
+        let has_key = gui.machine.has_key(&gui.config.transcription);
         let (title, description) = if has_key {
             (
                 format!("{} transcribes your speech", backend.name()),

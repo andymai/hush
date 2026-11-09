@@ -64,12 +64,13 @@ pub struct Machine {
     pub daemon: Option<DaemonState>,
     pub installed_models: Vec<ModelSize>,
     pub autostart: bool,
-    /// The cloud transcription key variables that hold a key.
-    pub cloud_keys: Vec<&'static str>,
+    /// The transcription key variables that hold a key: the hosted
+    /// services' and the server's.
+    pub cloud_keys: Vec<String>,
 }
 
 impl Machine {
-    fn read() -> Self {
+    fn read(server_key_env: &str) -> Self {
         let manager = ModelManager::new(crate::config::paths::models_dir()).ok();
         let installed_models = manager
             .map(|manager| {
@@ -88,24 +89,31 @@ impl Machine {
             cloud_keys: TranscriptionBackend::ALL
                 .iter()
                 .filter_map(|backend| backend.key_var())
+                .chain(crate::config::server::key_var(server_key_env))
                 .filter(|var| crate::config::keys::api_key(var).is_some())
+                .map(String::from)
                 .collect(),
         }
     }
 
-    /// Whether the cloud service `backend` names has its key.
-    pub fn has_key(&self, backend: TranscriptionBackend) -> bool {
-        backend
+    /// Whether the chosen backend has its key, or needs none.
+    pub fn has_key(&self, transcription: &TranscriptionConfig) -> bool {
+        transcription
             .key_var()
-            .is_some_and(|var| self.cloud_keys.contains(&var))
+            .is_none_or(|var| self.cloud_keys.iter().any(|key| key == var))
     }
 
-    /// Keyboard access, plus a downloaded model or the cloud service's key.
+    /// Keyboard access, plus a downloaded model, the cloud service's key, or
+    /// a server that is set up.
     pub fn ready(&self, transcription: &TranscriptionConfig) -> bool {
-        let speech = if transcription.backend.is_cloud() {
-            self.has_key(transcription.backend)
-        } else {
-            !self.installed_models.is_empty()
+        let speech = match transcription.backend {
+            TranscriptionBackend::Local => !self.installed_models.is_empty(),
+            TranscriptionBackend::OpenAiCompatible => {
+                transcription.validate_server().is_ok() && self.has_key(transcription)
+            },
+            TranscriptionBackend::Groq | TranscriptionBackend::OpenAi => {
+                self.has_key(transcription)
+            },
         };
         self.permissions.ready() && speech
     }
@@ -192,7 +200,7 @@ impl Gui {
             .enable_all()
             .build()
             .context("Failed to start the background runtime")?;
-        let machine = Machine::read();
+        let machine = Machine::read(&config.transcription.server_key_env);
         let vocabulary = load_vocabulary();
         let manager = ModelManager::new(crate::config::paths::models_dir()).ok();
         let catalogue = MODEL_ORDER
@@ -286,8 +294,9 @@ impl Gui {
         let latest = Arc::clone(&self.poll.latest);
         let in_flight = Arc::clone(&self.poll.in_flight);
         let ctx = ctx.clone();
+        let server_key_env = self.config.transcription.server_key_env.clone();
         std::thread::spawn(move || {
-            let machine = Machine::read();
+            let machine = Machine::read(&server_key_env);
             *latest.lock() = Some(machine);
             in_flight.store(false, Ordering::Release);
             ctx.request_repaint();
@@ -577,14 +586,36 @@ mod tests {
             "a cloud service needs its key"
         );
         let with_key = Machine {
-            cloud_keys: vec!["GROQ_API_KEY"],
+            cloud_keys: vec!["GROQ_API_KEY".to_string()],
             ..missing_model
         };
         assert!(
             with_key.ready(&transcription),
             "and then needs no local model"
         );
-        assert!(!with_key.has_key(TranscriptionBackend::OpenAi));
+        transcription.backend = TranscriptionBackend::OpenAi;
+        assert!(!with_key.has_key(&transcription));
+    }
+
+    #[test]
+    fn a_server_is_ready_with_an_address_a_model_and_any_key_it_names() {
+        let machine = Machine {
+            installed_models: Vec::new(),
+            ..ready_machine()
+        };
+        let mut transcription = Config::defaults().unwrap().transcription;
+        transcription.backend = TranscriptionBackend::OpenAiCompatible;
+        assert!(!machine.ready(&transcription), "no address yet");
+        transcription.server_url = "http://localhost:8080".into();
+        transcription.server_model = "whisper-1".into();
+        assert!(machine.ready(&transcription), "no key is needed");
+        transcription.server_key_env = "STT_KEY".into();
+        assert!(!machine.ready(&transcription), "the named key is missing");
+        let with_key = Machine {
+            cloud_keys: vec!["STT_KEY".to_string()],
+            ..machine
+        };
+        assert!(with_key.ready(&transcription));
     }
 
     #[test]

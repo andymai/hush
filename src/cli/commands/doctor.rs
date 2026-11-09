@@ -1,7 +1,8 @@
 //! `hush doctor`: everything that has to be true for dictation to work, each
 //! with the one command that fixes it.
 
-use crate::config::settings::TranscriptionConfig;
+use crate::config::server::{self, Sends};
+use crate::config::settings::{LlmSetting, TranscriptionBackend, TranscriptionConfig};
 use crate::config::{keys, Config};
 use crate::hotkey::HotkeyBindings;
 use crate::text::WindowProvider;
@@ -101,12 +102,11 @@ pub async fn checks() -> Vec<Check> {
 
     checks.push(permissions_check());
     if config.transcription.backend.is_cloud() {
-        let key = config
+        let key_present = config
             .transcription
-            .backend
             .key_var()
-            .and_then(keys::api_key);
-        checks.push(cloud_check(&config.transcription, key.is_some()));
+            .is_none_or(|var| keys::api_key(var).is_some());
+        checks.push(cloud_check(&config.transcription, key_present));
     } else {
         let cpu = cpu_report(cpu::floor(), &cpu::missing());
         let cpu_supported = cpu.level == Level::Ok;
@@ -197,6 +197,9 @@ fn model_check(config: &Config) -> Check {
 }
 
 fn cloud_check(config: &TranscriptionConfig, key_present: bool) -> Check {
+    if config.backend == TranscriptionBackend::OpenAiCompatible {
+        return server_check(config, key_present);
+    }
     let service = config.backend.name();
     let var = config.backend.key_var().unwrap_or_default();
     if !key_present {
@@ -217,6 +220,27 @@ fn cloud_check(config: &TranscriptionConfig, key_present: bool) -> Check {
             config.cloud_model().unwrap_or_default()
         ),
     )
+}
+
+fn server_check(config: &TranscriptionConfig, key_present: bool) -> Check {
+    if let Err(e) = config.validate_server() {
+        return Check::fail(
+            "Speech model",
+            e.to_string(),
+            "set server_url and server_model under [transcription]",
+        );
+    }
+    if let (Some(var), false) = (config.key_var(), key_present) {
+        return Check::fail(
+            "Speech model",
+            format!("the server needs {}", var),
+            format!(
+                "put {} in ~/.config/hush/.env, or set server_key_env = \"\" under [transcription]",
+                var
+            ),
+        );
+    }
+    Check::ok("Speech model", config.describe_server())
 }
 
 fn gpu_check(config: &Config) -> Check {
@@ -344,6 +368,31 @@ async fn llm_check(config: &Config) -> Check {
         LlmProvider::Ollama { model, .. } => Check::ok("Polishing", format!("Ollama {}", model)),
         LlmProvider::Anthropic { model, .. } => {
             Check::ok("Polishing", format!("Anthropic {}", model))
+        },
+        LlmProvider::OpenAiCompatible { url, model, .. } => Check::ok(
+            "Polishing",
+            format!(
+                "OpenAI-compatible {}",
+                server::describe(&model, &url, Sends::Text)
+            ),
+        ),
+        LlmProvider::None if config.llm.provider == LlmSetting::OpenAiCompatible => {
+            if let Err(e) = config.llm.validate_server() {
+                return Check::warn(
+                    "Polishing",
+                    e.to_string(),
+                    "set server_url and server_model under [llm]",
+                );
+            }
+            let var = config.llm.server_key_var().unwrap_or_default();
+            Check::warn(
+                "Polishing",
+                format!("the server needs {}; Command Mode is off", var),
+                format!(
+                    "put {} in ~/.config/hush/.env, or set server_key_env = \"\" under [llm]",
+                    var
+                ),
+            )
         },
         LlmProvider::None => Check::warn(
             "Polishing",
@@ -521,6 +570,60 @@ mod tests {
         assert_eq!(check.level, Level::Ok);
         assert!(check.detail.contains("whisper-large-v3-turbo"));
         assert!(check.detail.contains("audio leaves this machine"));
+    }
+
+    #[test]
+    fn a_server_backend_says_local_server_or_names_the_receiver() {
+        let mut config = Config::defaults().unwrap().transcription;
+        config.backend = TranscriptionBackend::OpenAiCompatible;
+        config.server_url = "http://192.168.1.5:8080/v1".into();
+        config.server_model = "whisper-large-v3".into();
+        let check = cloud_check(&config, true);
+        assert_eq!(check.level, Level::Ok);
+        assert_eq!(
+            check.detail,
+            "whisper-large-v3 on the local server 192.168.1.5:8080"
+        );
+
+        config.server_url = "https://stt.example.com".into();
+        let check = cloud_check(&config, true);
+        assert_eq!(check.level, Level::Ok);
+        assert!(
+            check.detail.ends_with("a service that receives the audio"),
+            "{}",
+            check.detail
+        );
+
+        config.server_key_env = "STT_KEY".into();
+        let check = cloud_check(&config, false);
+        assert_eq!(check.level, Level::Fail);
+        assert!(check.detail.contains("STT_KEY"));
+        assert!(check.fix.unwrap().contains("server_key_env = \"\""));
+
+        config.server_url.clear();
+        let check = cloud_check(&config, true);
+        assert_eq!(check.level, Level::Fail);
+        assert!(check.detail.contains("transcription.server_url"));
+    }
+
+    #[tokio::test]
+    async fn a_server_llm_without_its_key_names_the_variable() {
+        let mut config = Config::defaults().unwrap();
+        config.llm.provider = LlmSetting::OpenAiCompatible;
+        config.llm.server_url = "http://localhost:8000".into();
+        config.llm.server_model = "qwen3".into();
+        let check = llm_check(&config).await;
+        assert_eq!(check.level, Level::Ok);
+        assert_eq!(
+            check.detail,
+            "OpenAI-compatible qwen3 on the local server localhost:8000"
+        );
+
+        config.llm.server_key_env = "HUSH_TEST_UNSET_LLM_KEY".into();
+        let check = llm_check(&config).await;
+        assert_eq!(check.level, Level::Warn);
+        assert!(check.detail.contains("HUSH_TEST_UNSET_LLM_KEY"));
+        assert!(check.fix.unwrap().contains("under [llm]"));
     }
 
     #[test]

@@ -15,6 +15,7 @@
 
 pub mod keys;
 pub mod paths;
+pub mod server;
 pub mod settings;
 
 pub use settings::Config;

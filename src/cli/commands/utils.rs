@@ -1,3 +1,5 @@
+use crate::config::server;
+use crate::config::settings::{LlmConfig, LlmSetting, TranscriptionBackend};
 use crate::transcription::GpuAvailability;
 use crate::{AudioCapture, Config};
 /// Utility functions shared across command handlers
@@ -12,29 +14,35 @@ pub async fn show_config_status() -> Result<()> {
     match Config::load() {
         Ok(config) => {
             let transcription = &config.transcription;
-            match transcription.cloud_model() {
-                Some(model) => {
-                    let key = transcription
-                        .backend
-                        .key_var()
-                        .map(|var| match crate::config::keys::api_key(var) {
-                            Some(_) => format!("{} set", var),
-                            None => format!("{} missing", var),
-                        })
-                        .unwrap_or_default();
-                    println!(
-                        "  Transcription: {} {} (cloud, audio leaves this machine; {})",
-                        transcription.backend.name(),
-                        model,
-                        key
-                    );
-                },
-                None => {
+            let key = transcription
+                .key_var()
+                .map(|var| match crate::config::keys::api_key(var) {
+                    Some(_) => format!("{} set", var),
+                    None => format!("{} missing", var),
+                });
+            match transcription.backend {
+                TranscriptionBackend::Local => {
                     println!("  Transcription: local");
                     println!("  Model: {}", transcription.model_path().display());
                     println!("  Use GPU: {}", transcription.use_gpu);
                 },
+                TranscriptionBackend::OpenAiCompatible => {
+                    println!(
+                        "  Transcription: {} ({})",
+                        transcription.describe_server(),
+                        key.as_deref().unwrap_or("no key")
+                    );
+                },
+                backend => {
+                    println!(
+                        "  Transcription: {} {} (cloud, audio leaves this machine; {})",
+                        backend.name(),
+                        transcription.cloud_model().unwrap_or_default(),
+                        key.unwrap_or_default()
+                    );
+                },
             }
+            println!("  LLM: {}", llm_summary(&config.llm));
             println!("  Sample Rate: {}Hz", config.audio.sample_rate);
             println!("  Hotkey: {}", config.hotkey.combination);
         },
@@ -44,6 +52,20 @@ pub async fn show_config_status() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// The LLM setting as written, without a probe of Ollama or the server.
+fn llm_summary(llm: &LlmConfig) -> String {
+    match llm.provider {
+        LlmSetting::Auto => "auto (Ollama, else Anthropic)".to_string(),
+        LlmSetting::Ollama => format!("Ollama {}", llm.ollama_model),
+        LlmSetting::Anthropic => format!("Anthropic {}", llm.anthropic_model),
+        LlmSetting::OpenAiCompatible => format!(
+            "OpenAI-compatible {}",
+            server::describe(&llm.server_model, &llm.server_url, server::Sends::Text)
+        ),
+        LlmSetting::None => "none".to_string(),
+    }
 }
 
 /// Display system information including GPU status
@@ -144,4 +166,27 @@ pub async fn setup_hotkeys(test: Option<String>, list: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_llm_line_says_where_a_server_sends_the_text() {
+        let mut llm = LlmConfig::defaults();
+        assert_eq!(llm_summary(&llm), "auto (Ollama, else Anthropic)");
+        llm.provider = LlmSetting::OpenAiCompatible;
+        llm.server_url = "http://10.0.0.4:8000/v1".into();
+        llm.server_model = "qwen3".into();
+        assert_eq!(
+            llm_summary(&llm),
+            "OpenAI-compatible qwen3 on the local server 10.0.0.4:8000"
+        );
+        llm.server_url = "https://llm.example.com".into();
+        assert_eq!(
+            llm_summary(&llm),
+            "OpenAI-compatible qwen3 on llm.example.com, a service that receives the text"
+        );
+    }
 }

@@ -1,4 +1,4 @@
-use crate::config::paths;
+use crate::config::{paths, server};
 use crate::hotkey::{HotkeyBackend, HotkeyMode, KeyCombination};
 use crate::text::{InsertionMethod, PasteChord};
 use crate::transcription::models::ModelSize;
@@ -93,6 +93,10 @@ pub enum LlmSetting {
     Auto,
     Ollama,
     Anthropic,
+    /// The server at `server_url`, through the OpenAI chat completions API.
+    /// `auto` never picks it.
+    #[serde(rename = "openai-compatible")]
+    OpenAiCompatible,
     None,
 }
 
@@ -104,6 +108,12 @@ pub struct LlmConfig {
     pub ollama_url: String,
     pub ollama_model: String,
     pub anthropic_model: String,
+    /// Base URL of the OpenAI-compatible server
+    pub server_url: String,
+    /// Model name on that server
+    pub server_model: String,
+    /// The environment variable that holds the server's API key; empty sends no key
+    pub server_key_env: String,
     /// Polish every transcript with the LLM; Command Mode works either way
     pub polish: bool,
     pub max_tokens: u32,
@@ -123,10 +133,28 @@ impl LlmConfig {
             ollama_url: "http://localhost:11434".to_string(),
             ollama_model: "llama3.2".to_string(),
             anthropic_model: "claude-haiku-4-5".to_string(),
+            server_url: String::new(),
+            server_model: String::new(),
+            server_key_env: String::new(),
             polish: true,
             max_tokens: 400,
             temperature: 0.3,
         }
+    }
+
+    /// The variable that holds the OpenAI-compatible server's key, if any.
+    pub fn server_key_var(&self) -> Option<&str> {
+        server::key_var(&self.server_key_env)
+    }
+
+    pub fn validate_server(&self) -> Result<()> {
+        server::validate(
+            "llm",
+            &self.server_url,
+            &self.server_model,
+            &self.server_key_env,
+            server::CHAT_COMPLETIONS,
+        )
     }
 }
 
@@ -228,11 +256,21 @@ pub enum TranscriptionBackend {
     Groq,
     /// OpenAI's transcription API: the audio of each dictation leaves the machine
     OpenAi,
+    /// The server at `server_url`, through the OpenAI transcription API: the
+    /// audio of each dictation goes to that address
+    #[serde(rename = "openai-compatible")]
+    OpenAiCompatible,
 }
 
 impl TranscriptionBackend {
-    pub const ALL: [Self; 3] = [Self::Local, Self::Groq, Self::OpenAi];
+    pub const ALL: [Self; 4] = [
+        Self::Local,
+        Self::Groq,
+        Self::OpenAi,
+        Self::OpenAiCompatible,
+    ];
 
+    /// Whether the audio goes over HTTP instead of to whisper.cpp in this process.
     pub fn is_cloud(self) -> bool {
         self != Self::Local
     }
@@ -242,13 +280,15 @@ impl TranscriptionBackend {
             Self::Local => "This machine",
             Self::Groq => "Groq",
             Self::OpenAi => "OpenAI",
+            Self::OpenAiCompatible => "OpenAI-compatible server",
         }
     }
 
-    /// The environment variable that holds the service's API key.
+    /// The environment variable that holds a hosted service's API key. The
+    /// OpenAI-compatible server takes its variable from the config instead.
     pub fn key_var(self) -> Option<&'static str> {
         match self {
-            Self::Local => None,
+            Self::Local | Self::OpenAiCompatible => None,
             Self::Groq => Some("GROQ_API_KEY"),
             Self::OpenAi => Some("OPENAI_API_KEY"),
         }
@@ -258,8 +298,8 @@ impl TranscriptionBackend {
 /// Whisper transcription model configuration
 #[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
 pub struct TranscriptionConfig {
-    /// `local` runs whisper.cpp; `groq` and `openai` send the audio to that
-    /// service, and only when chosen here
+    /// `local` runs whisper.cpp; `groq`, `openai`, and `openai-compatible`
+    /// send the audio to that service, and only when chosen here
     #[serde(default)]
     pub backend: TranscriptionBackend,
     /// Model name on Groq
@@ -268,6 +308,15 @@ pub struct TranscriptionConfig {
     /// Model name on OpenAI
     #[serde(default = "default_openai_model")]
     pub openai_model: String,
+    /// Base URL of the OpenAI-compatible server
+    #[serde(default)]
+    pub server_url: String,
+    /// Model name on that server
+    #[serde(default)]
+    pub server_model: String,
+    /// The environment variable that holds the server's API key; empty sends no key
+    #[serde(default)]
+    pub server_key_env: String,
     /// Explicit model file. When unset or empty, the file for `model_size`
     /// inside the models directory is used.
     #[serde(
@@ -318,7 +367,32 @@ impl TranscriptionConfig {
             TranscriptionBackend::Local => None,
             TranscriptionBackend::Groq => Some(&self.groq_model),
             TranscriptionBackend::OpenAi => Some(&self.openai_model),
+            TranscriptionBackend::OpenAiCompatible => Some(&self.server_model),
         }
+    }
+
+    /// The variable that holds the chosen backend's key, or `None` when it
+    /// needs no key.
+    pub fn key_var(&self) -> Option<&str> {
+        match self.backend {
+            TranscriptionBackend::OpenAiCompatible => server::key_var(&self.server_key_env),
+            backend => backend.key_var(),
+        }
+    }
+
+    pub fn validate_server(&self) -> Result<()> {
+        server::validate(
+            "transcription",
+            &self.server_url,
+            &self.server_model,
+            &self.server_key_env,
+            server::TRANSCRIPTIONS,
+        )
+    }
+
+    /// The server model and where it runs, for status lines.
+    pub fn describe_server(&self) -> String {
+        server::describe(&self.server_model, &self.server_url, server::Sends::Audio)
     }
 
     /// The model file to load: the explicit path when set, otherwise the
@@ -503,6 +577,12 @@ impl Config {
             return Err(anyhow::anyhow!(
                 "Invalid beam size: must be between 1 and 20"
             ));
+        }
+        if self.transcription.backend == TranscriptionBackend::OpenAiCompatible {
+            self.transcription.validate_server()?;
+        }
+        if self.llm.provider == LlmSetting::OpenAiCompatible {
+            self.llm.validate_server()?;
         }
         if let Some(model) = self.transcription.cloud_model() {
             if model.trim().is_empty() {
@@ -851,6 +931,118 @@ model_size = "small"
             "[transcription]\nbackend = \"groq\"\ngroq_model = \" \"\n"
         )
         .is_err());
+    }
+
+    #[test]
+    fn an_openai_compatible_backend_needs_a_url_and_a_model() {
+        let defaults = Config::defaults().unwrap();
+        assert!(defaults.transcription.server_url.is_empty());
+        assert!(defaults.transcription.server_model.is_empty());
+        assert!(defaults.transcription.server_key_env.is_empty());
+
+        let config = Config::parse_over_defaults(
+            "[transcription]\nbackend = \"openai-compatible\"\nserver_url = \"http://192.168.1.5:8080\"\nserver_model = \"whisper-large-v3\"\n",
+        )
+        .unwrap();
+        let transcription = &config.transcription;
+        assert_eq!(
+            transcription.backend,
+            TranscriptionBackend::OpenAiCompatible
+        );
+        assert!(transcription.backend.is_cloud());
+        assert_eq!(transcription.cloud_model(), Some("whisper-large-v3"));
+        assert_eq!(
+            transcription.key_var(),
+            None,
+            "an empty variable sends no key"
+        );
+        assert_eq!(
+            transcription.describe_server(),
+            "whisper-large-v3 on the local server 192.168.1.5:8080"
+        );
+
+        let with_key = Config::parse_over_defaults(
+            "[transcription]\nbackend = \"openai-compatible\"\nserver_url = \"https://stt.example.com\"\nserver_model = \"m\"\nserver_key_env = \"STT_KEY\"\n",
+        )
+        .unwrap();
+        assert_eq!(with_key.transcription.key_var(), Some("STT_KEY"));
+
+        for (user, key) in [
+            ("server_model = \"m\"\n", "transcription.server_url"),
+            (
+                "server_url = \"localhost:8080\"\nserver_model = \"m\"\n",
+                "transcription.server_url",
+            ),
+            (
+                "server_url = \"http://localhost:8080\"\nserver_model = \" \"\n",
+                "transcription.server_model",
+            ),
+            (
+                "server_url = \"http://localhost:8080\"\nserver_model = \"m\"\nserver_key_env = \"sk-123\"\n",
+                "transcription.server_key_env",
+            ),
+        ] {
+            let toml = format!("[transcription]\nbackend = \"openai-compatible\"\n{}", user);
+            let err = Config::parse_over_defaults(&toml).unwrap_err().to_string();
+            assert!(err.contains(key), "{user:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn an_openai_compatible_llm_needs_a_url_and_a_model() {
+        let config = Config::parse_over_defaults(
+            "[llm]\nprovider = \"openai-compatible\"\nserver_url = \"http://10.0.0.4:8000/v1\"\nserver_model = \"qwen3\"\nserver_key_env = \"LLM_KEY\"\n",
+        )
+        .unwrap();
+        assert_eq!(config.llm.provider, LlmSetting::OpenAiCompatible);
+        assert_eq!(config.llm.server_model, "qwen3");
+        assert_eq!(config.llm.server_key_var(), Some("LLM_KEY"));
+        assert_eq!(Config::defaults().unwrap().llm.server_key_var(), None);
+
+        let err = Config::parse_over_defaults("[llm]\nprovider = \"openai-compatible\"\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("llm.server_url"), "{err}");
+        let err = Config::parse_over_defaults(
+            "[llm]\nprovider = \"openai-compatible\"\nserver_url = \"http://localhost:8000\"\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("llm.server_model"), "{err}");
+        assert!(
+            Config::parse_over_defaults("[llm]\nserver_url = \"not a url\"\n").is_ok(),
+            "the server keys are checked only when the provider is chosen"
+        );
+    }
+
+    #[test]
+    fn a_saved_server_backend_reloads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut config = Config::defaults().unwrap();
+        config.transcription.backend = TranscriptionBackend::OpenAiCompatible;
+        config.transcription.server_url = "http://localhost:8080".into();
+        config.transcription.server_model = "whisper-1".into();
+        config.llm.provider = LlmSetting::OpenAiCompatible;
+        config.llm.server_url = "http://localhost:8081/v1".into();
+        config.llm.server_model = "llama3".into();
+        config.save_to_file(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("backend = \"openai-compatible\""),
+            "{written}"
+        );
+        assert!(
+            written.contains("provider = \"openai-compatible\""),
+            "{written}"
+        );
+        assert_eq!(Config::load_from(Some(&path)).unwrap(), config);
+
+        config.transcription.server_url.clear();
+        assert!(
+            config.save_to_file(&path).is_err(),
+            "an empty URL is refused"
+        );
     }
 
     #[test]

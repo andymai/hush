@@ -1,7 +1,10 @@
 //! LLM polishing and Command Mode rewrites over HTTP: Anthropic's Messages
-//! API or a local Ollama server. Only text is sent, never audio.
+//! API, a local Ollama server, or a server that speaks the OpenAI chat
+//! completions API. Only text is sent, never audio.
 
 use super::config::{EditingMode, LlmProvider};
+use crate::config::keys;
+use crate::config::server::{self, Sends};
 use crate::config::settings::{LlmConfig, LlmSetting};
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
@@ -105,6 +108,36 @@ struct OllamaReply {
     content: String,
 }
 
+#[derive(Serialize)]
+struct ChatRequest<'a> {
+    model: &'a str,
+    messages: [ChatMessage<'a>; 2],
+    temperature: f32,
+    max_tokens: u32,
+    stream: bool,
+}
+
+#[derive(Serialize)]
+struct ChatMessage<'a> {
+    role: &'a str,
+    content: &'a str,
+}
+
+#[derive(Deserialize)]
+struct ChatResponse {
+    choices: Vec<ChatChoice>,
+}
+
+#[derive(Deserialize)]
+struct ChatChoice {
+    message: ChatReply,
+}
+
+#[derive(Deserialize)]
+struct ChatReply {
+    content: Option<String>,
+}
+
 const REWRITE_SYSTEM: &str = "You edit text on the user's behalf. Apply the spoken instruction to the text and return the resulting text. \
 Keep everything the instruction does not ask to change, including the language, formatting, line breaks, and code. \
 RETURN ONLY THE RESULTING TEXT. Do not add explanations, quotes, or any other content.";
@@ -126,6 +159,9 @@ impl LlmProcessor {
             LlmProvider::Ollama { url, model } => {
                 info!("LLM: Ollama {} at {}", model, url);
             },
+            LlmProvider::OpenAiCompatible { url, model, .. } => {
+                info!("LLM: {} at {}", model, server::host_label(url));
+            },
             LlmProvider::None => anyhow::bail!("No LLM provider configured"),
         }
         let client = Client::builder()
@@ -144,6 +180,12 @@ impl LlmProcessor {
         match &self.provider {
             LlmProvider::Anthropic { model, .. } => format!("Anthropic {}", model),
             LlmProvider::Ollama { model, .. } => format!("Ollama {}", model),
+            LlmProvider::OpenAiCompatible { url, model, .. } => {
+                format!(
+                    "OpenAI-compatible {}",
+                    server::describe(model, url, Sends::Text)
+                )
+            },
             LlmProvider::None => "none".to_string(),
         }
     }
@@ -183,6 +225,14 @@ impl LlmProcessor {
             },
             LlmProvider::Ollama { url, model } => {
                 self.ollama_complete(system, user, url, model).await
+            },
+            LlmProvider::OpenAiCompatible {
+                url,
+                model,
+                api_key,
+            } => {
+                self.server_complete(system, user, url, model, api_key.as_deref())
+                    .await
             },
             LlmProvider::None => Ok(user.to_string()),
         }
@@ -294,6 +344,64 @@ impl LlmProcessor {
             .context("Failed to parse the Ollama response")?;
         info!("Ollama {}: {} ms", model, start.elapsed().as_millis());
         Ok(parsed.message.content.trim().to_string())
+    }
+
+    async fn server_complete(
+        &self,
+        system: &str,
+        user: &str,
+        url: &str,
+        model: &str,
+        api_key: Option<&str>,
+    ) -> Result<String> {
+        let request = ChatRequest {
+            model,
+            messages: [
+                ChatMessage {
+                    role: "system",
+                    content: system,
+                },
+                ChatMessage {
+                    role: "user",
+                    content: user,
+                },
+            ],
+            temperature: self.temperature,
+            max_tokens: self.max_tokens,
+            stream: false,
+        };
+        let host = server::host_label(url);
+        let start = std::time::Instant::now();
+        let mut builder = self.client.post(url).json(&request);
+        if let Some(key) = api_key {
+            builder = builder.bearer_auth(key);
+        }
+        let response = builder
+            .send()
+            .await
+            .with_context(|| format!("Failed to reach the server at {}", host))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Server error at {} ({}): {}",
+                host,
+                status,
+                error_text.chars().take(200).collect::<String>()
+            );
+        }
+        let parsed: ChatResponse = response
+            .json()
+            .await
+            .with_context(|| format!("Failed to parse the answer from {}", host))?;
+        let text = parsed
+            .choices
+            .into_iter()
+            .next()
+            .and_then(|choice| choice.message.content)
+            .with_context(|| format!("{} sent no text", host))?;
+        info!("{} {}: {} ms", host, model, start.elapsed().as_millis());
+        Ok(text.trim().to_string())
     }
 
     /// System prompt for the editing mode plus the application's tone.
@@ -521,11 +629,13 @@ pub async fn ollama_reachable(url: &str) -> bool {
 }
 
 /// The provider for a setting, given what is available. `auto` prefers the
-/// local Ollama server, then Anthropic when a key exists.
+/// local Ollama server, then Anthropic when a key exists, and never picks
+/// the OpenAI-compatible server.
 pub fn choose_provider(
     config: &LlmConfig,
     ollama_ok: bool,
     anthropic_key: Option<String>,
+    server_key: Option<String>,
 ) -> LlmProvider {
     let ollama = || LlmProvider::Ollama {
         url: config.ollama_url.clone(),
@@ -553,6 +663,30 @@ pub fn choose_provider(
                 LlmProvider::None
             },
         },
+        LlmSetting::OpenAiCompatible => {
+            let url = match server::endpoint(&config.server_url, server::CHAT_COMPLETIONS) {
+                Ok(url) => url,
+                Err(e) => {
+                    warn!("Invalid llm.server_url: {}", e);
+                    return LlmProvider::None;
+                },
+            };
+            let api_key = match config.server_key_var() {
+                None => None,
+                Some(var) => match server_key.filter(|k| !k.trim().is_empty()) {
+                    Some(key) => Some(key),
+                    None => {
+                        warn!("llm.server_key_env is {} but {} is not set", var, var);
+                        return LlmProvider::None;
+                    },
+                },
+            };
+            LlmProvider::OpenAiCompatible {
+                url,
+                model: config.server_model.trim().to_string(),
+                api_key,
+            }
+        },
         LlmSetting::Auto => {
             if ollama_ok {
                 ollama()
@@ -572,7 +706,8 @@ pub async fn resolve_provider(config: &LlmConfig) -> LlmProvider {
         _ => false,
     };
     let key = std::env::var("ANTHROPIC_API_KEY").ok();
-    choose_provider(config, ollama_ok, key)
+    let server_key = config.server_key_var().and_then(keys::api_key);
+    choose_provider(config, ollama_ok, key, server_key)
 }
 
 #[cfg(test)]
@@ -760,15 +895,15 @@ mod tests {
     fn provider_order_is_ollama_then_anthropic() {
         let config = LlmConfig::defaults();
         assert!(matches!(
-            choose_provider(&config, true, Some("k".into())),
+            choose_provider(&config, true, Some("k".into()), None),
             LlmProvider::Ollama { .. }
         ));
         assert!(matches!(
-            choose_provider(&config, false, Some("k".into())),
+            choose_provider(&config, false, Some("k".into()), None),
             LlmProvider::Anthropic { .. }
         ));
         assert_eq!(
-            choose_provider(&config, false, Some("  ".into())),
+            choose_provider(&config, false, Some("  ".into()), None),
             LlmProvider::None
         );
         let anthropic_only = LlmConfig {
@@ -776,7 +911,7 @@ mod tests {
             ..LlmConfig::defaults()
         };
         assert_eq!(
-            choose_provider(&anthropic_only, true, None),
+            choose_provider(&anthropic_only, true, None, None),
             LlmProvider::None
         );
         let off = LlmConfig {
@@ -784,9 +919,172 @@ mod tests {
             ..LlmConfig::defaults()
         };
         assert_eq!(
-            choose_provider(&off, true, Some("k".into())),
+            choose_provider(&off, true, Some("k".into()), None),
             LlmProvider::None
         );
+    }
+
+    fn server_config(url: &str, key_env: &str) -> LlmConfig {
+        LlmConfig {
+            provider: LlmSetting::OpenAiCompatible,
+            server_url: url.to_string(),
+            server_model: " qwen3 ".to_string(),
+            server_key_env: key_env.to_string(),
+            ..LlmConfig::defaults()
+        }
+    }
+
+    #[test]
+    fn auto_never_picks_the_server() {
+        let config = LlmConfig {
+            server_url: "http://localhost:8000".to_string(),
+            server_model: "qwen3".to_string(),
+            ..LlmConfig::defaults()
+        };
+        for ollama_ok in [true, false] {
+            for anthropic in [None, Some("k".to_string())] {
+                let provider =
+                    choose_provider(&config, ollama_ok, anthropic, Some("s".to_string()));
+                assert!(
+                    !matches!(provider, LlmProvider::OpenAiCompatible { .. }),
+                    "{provider:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_server_provider_gets_its_endpoint_and_key() {
+        let provider = choose_provider(
+            &server_config("http://10.0.0.4:8000", ""),
+            true,
+            Some("k".into()),
+            None,
+        );
+        assert_eq!(
+            provider,
+            LlmProvider::OpenAiCompatible {
+                url: "http://10.0.0.4:8000/v1/chat/completions".into(),
+                model: "qwen3".into(),
+                api_key: None,
+            },
+            "chosen by name, whatever else is available"
+        );
+        let with_key = choose_provider(
+            &server_config("https://llm.example.com/v1", "LLM_KEY"),
+            false,
+            None,
+            Some("secret".into()),
+        );
+        assert!(matches!(
+            with_key,
+            LlmProvider::OpenAiCompatible { api_key: Some(ref key), .. } if key == "secret"
+        ));
+        assert_eq!(
+            choose_provider(
+                &server_config("https://llm.example.com/v1", "LLM_KEY"),
+                true,
+                Some("k".into()),
+                None
+            ),
+            LlmProvider::None,
+            "a missing key turns the LLM off and never picks another provider"
+        );
+        assert_eq!(
+            choose_provider(&server_config("", ""), true, Some("k".into()), None),
+            LlmProvider::None
+        );
+    }
+
+    #[test]
+    fn the_server_name_says_where_the_text_goes() {
+        let local = LlmProcessor::new(
+            LlmProvider::OpenAiCompatible {
+                url: "http://192.168.1.9:8000/v1/chat/completions".into(),
+                model: "qwen3".into(),
+                api_key: None,
+            },
+            200,
+            0.3,
+        )
+        .unwrap();
+        assert_eq!(
+            local.provider_name(),
+            "OpenAI-compatible qwen3 on the local server 192.168.1.9:8000"
+        );
+        let remote = LlmProcessor::new(
+            LlmProvider::OpenAiCompatible {
+                url: "https://llm.example.com/v1/chat/completions".into(),
+                model: "qwen3".into(),
+                api_key: Some("k".into()),
+            },
+            200,
+            0.3,
+        )
+        .unwrap();
+        assert!(remote
+            .provider_name()
+            .ends_with("llm.example.com, a service that receives the text"));
+    }
+
+    #[tokio::test]
+    async fn a_rewrite_goes_to_the_server_as_a_chat_completion() {
+        let reply = serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": " Short text. " } }]
+        })
+        .to_string();
+        let (url, request) = server::fake_server(reply).await;
+        let provider = choose_provider(
+            &server_config(&url, "LLM_KEY"),
+            false,
+            None,
+            Some("lan-secret".into()),
+        );
+        let processor = LlmProcessor::new(provider, 123, 0.2).unwrap();
+        let result = processor
+            .rewrite("make it short", "a long text")
+            .await
+            .unwrap();
+        assert_eq!(result, "Short text.");
+
+        let raw = String::from_utf8_lossy(&request.await.unwrap()).into_owned();
+        assert!(
+            raw.starts_with("POST /v1/chat/completions HTTP/1.1\r\n"),
+            "{raw}"
+        );
+        assert!(
+            raw.to_lowercase()
+                .contains("\r\nauthorization: bearer lan-secret\r\n"),
+            "{raw}"
+        );
+        let body = raw.split("\r\n\r\n").nth(1).unwrap_or_default();
+        let json: serde_json::Value = serde_json::from_str(body).unwrap();
+        assert_eq!(json["model"], "qwen3");
+        assert_eq!(json["stream"], false);
+        assert_eq!(json["max_tokens"], 123);
+        assert_eq!(json["messages"][0]["role"], "system");
+        assert_eq!(json["messages"][0]["content"], REWRITE_SYSTEM);
+        assert_eq!(json["messages"][1]["role"], "user");
+        assert!(json["messages"][1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Instruction: make it short"));
+    }
+
+    #[tokio::test]
+    async fn a_failing_server_is_an_error() {
+        let processor = LlmProcessor::new(
+            LlmProvider::OpenAiCompatible {
+                url: "http://127.0.0.1:1/v1/chat/completions".into(),
+                model: "m".into(),
+                api_key: None,
+            },
+            100,
+            0.3,
+        )
+        .unwrap();
+        let err = processor.rewrite("x", "y").await.unwrap_err();
+        assert!(format!("{:#}", err).contains("127.0.0.1:1"), "{err:#}");
     }
 
     #[test]
