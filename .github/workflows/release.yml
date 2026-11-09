@@ -46,9 +46,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
     # whisper-rs-sys passes GGML_* variables to ggml's CMake. Without them, ggml
@@ -202,31 +200,50 @@ jobs:
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
 
-      # A dry run attests too, so that it tests this step before a real release.
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: target/dist/*
-
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hush-${{ env.VERSION }}
           path: target/dist/*
           retention-days: 14
 
+  # Separate from the build, so that no cargo build script can mint the OIDC
+  # token that signs the attestations.
+  publish:
+    name: Attest and upload
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hush-${{ needs.package.outputs.version }}
+          path: dist
+
+      # A dry run attests too, so that it tests this step before a real release.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
       - name: Upload to the release
         if: github.event_name == 'release' || !inputs.dry_run
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" target/dist/* --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
 
   # Runs only when the repository variable AUR_PUBLISH is "true". The deploy key
   # secret can exist before an AUR account holds the key, and then every push fails.
+  # A failed build also skips publish, so only a skipped package means a
+  # repository-only run.
   aur:
     name: Publish to AUR
-    needs: package
+    needs: [package, publish]
     if: >-
       always() && !cancelled() && vars.AUR_PUBLISH == 'true' &&
-      (needs.package.result == 'success' || needs.package.result == 'skipped') &&
+      (needs.publish.result == 'success' || needs.package.result == 'skipped') &&
       (github.event_name == 'release' || inputs.publish_repos)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -261,10 +278,10 @@ jobs:
   # COPR_API_LOGIN, COPR_API_USERNAME, and COPR_API_TOKEN exist.
   copr:
     name: Publish to COPR
-    needs: package
+    needs: [package, publish]
     if: >-
       always() && !cancelled() &&
-      (needs.package.result == 'success' || needs.package.result == 'skipped') &&
+      (needs.publish.result == 'success' || needs.package.result == 'skipped') &&
       (github.event_name == 'release' || inputs.publish_repos)
     runs-on: ubuntu-latest
     timeout-minutes: 15
