@@ -26,6 +26,7 @@ pub async fn handle_daemon_start(options: SessionOptions, foreground: bool) -> R
         println!("Hush daemon is already running ({}).", state);
         return Ok(());
     }
+    crate::config::paths::move_legacy_models();
     if foreground {
         super::listen::handle_listen(options).await
     } else {
