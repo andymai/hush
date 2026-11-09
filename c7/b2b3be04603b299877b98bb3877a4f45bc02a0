@@ -1,0 +1,62 @@
+src/config/settings.rs
+  s_115995023cd6f3::t_2a208f63fea30a 603-607
+  s_115995023cd6f3::t_7a1c9bca459d36 2,9
+  s_115995023cd6f3::t_7ee5216f459961 1065
+  s_115995023cd6f3::t_156c2819a0cb5c 1041-1064,1066-1072
+  s_115995023cd6f3::t_38fb11de8617a2 489-537
+src/gui/theme.rs
+  s_115995023cd6f3::t_f0c8d9d7b67a28 170-174
+  s_115995023cd6f3::t_a51a09d0281eac 322-327
+  s_115995023cd6f3::t_52f01769e74b54 363-365
+  s_115995023cd6f3::t_941965a8a14301 294,304
+src/gui/pages/hotkeys.rs
+  s_115995023cd6f3::t_27cb4264a4f090 5,8,12-13,15-17,31-68,75-81,87,110,116,125,131,186-193,196,200,205,230,233,235,242,247-266,269,274-275,279,287,305-340
+src/hotkey/warnings.rs
+  s_115995023cd6f3::t_42da8809e22459 1-81,83-97,99-288,290-304,306-318,320-358
+  s_115995023cd6f3::t_67e78958ae1a82 82
+  s_115995023cd6f3::t_1ebccdf45a1545 98
+  s_115995023cd6f3::t_7e649d98de15de 289
+  s_115995023cd6f3::t_d905efe959868b 305
+  s_115995023cd6f3::t_d3064572ab9329 319
+src/hotkey/mod.rs
+  s_115995023cd6f3::t_5f0904081d99b1 30,40
+src/hotkey/combination.rs
+  s_115995023cd6f3::t_41aa3e7a235b5b 362-381
+  s_115995023cd6f3::t_f382bb2f17ddc4 202-209
+  s_b321718d129a1e::t_2d18760f26201d 361
+src/cli/commands/doctor.rs
+  s_115995023cd6f3::t_2abea0be41000a 7-8
+  s_115995023cd6f3::t_99793e76a88345 809-852
+  s_115995023cd6f3::t_a515baea016a0d 363-404
+  s_115995023cd6f3::t_9ace330e7f60b1 132-135
+  s_b321718d129a1e::t_28d7131d1a2aec 808
+src/gui/mod.rs
+  s_115995023cd6f3::t_2cd3c071c5fd4d 238
+  s_115995023cd6f3::t_1aa49fcc34b986 377,383,385-388
+  s_115995023cd6f3::t_423c2cf9cf1f38 16,19
+  s_115995023cd6f3::t_0d30f30e990b99 174-177,179-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c7b2b3be04603b299877b98bb3877a4f45bc02a0",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    },
+    "s_b321718d129a1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c62633eb-00e8-4221-9326-8801a74ef42d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
