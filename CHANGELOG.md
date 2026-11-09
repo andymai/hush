@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/andymai/hush/compare/v0.15.0...v0.16.0) (2026-11-09)
+
+
+### Features
+
+* **config:** import and export settings and vocabulary ([#273](https://github.com/andymai/hush/issues/273)) ([321a17b](https://github.com/andymai/hush/commit/321a17b7dfeb492511ed6a2cd364e477a4d641b5))
+* **transcription:** wait for the GPU at boot and fall back to the CPU ([#272](https://github.com/andymai/hush/issues/272)) ([fdb4343](https://github.com/andymai/hush/commit/fdb43431fb971b350dd15f34ffa92d1d406171ea))
+
+
+### Bug Fixes
+
+* **audio:** detect a stalled microphone and open it again ([#271](https://github.com/andymai/hush/issues/271)) ([32357ab](https://github.com/andymai/hush/commit/32357abcc0a6298ddeecffcd9cdc87c994c54524))
+
 ## [0.15.0](https://github.com/andymai/hush/compare/v0.14.0...v0.15.0) (2026-11-09)
 
 
