@@ -124,6 +124,9 @@ pub async fn checks() -> Vec<Check> {
         }
     }
     checks.push(microphone_check(&config));
+    if config.audio.pause_media {
+        checks.push(media_report(crate::audio::media::probe().await));
+    }
     checks.push(hotkey_check(&config));
     checks.push(window_check());
     checks.push(clipboard_check(crate::text::clipboard::support()));
@@ -474,6 +477,22 @@ fn hook_report(command: &str, program: Program) -> Check {
     }
 }
 
+fn media_report(players: Result<usize>) -> Check {
+    const NAME: &str = "Media pause";
+    match players {
+        Ok(1) => Check::ok(NAME, "on, 1 player on the session bus now"),
+        Ok(count) => Check::ok(
+            NAME,
+            format!("on, {} players on the session bus now", count),
+        ),
+        Err(e) => Check::warn(
+            NAME,
+            format!("the session bus does not answer ({:#})", e),
+            "run Hush inside your desktop session, or set audio.pause_media = false",
+        ),
+    }
+}
+
 fn tray_check(config: &Config) -> Check {
     if !config.tray.enabled {
         return Check::ok("Panel icon", "switched off");
@@ -817,6 +836,22 @@ mod tests {
         assert_eq!(newer.level, Level::Warn);
         assert!(newer.detail.starts_with("999.0.0 is available"));
         assert!(newer.fix.unwrap().ends_with("v999.0.0"));
+    }
+
+    #[test]
+    fn the_media_line_says_whether_the_session_bus_answers() {
+        let on = media_report(Ok(2));
+        assert_eq!(on.level, Level::Ok);
+        assert_eq!(on.detail, "on, 2 players on the session bus now");
+        assert_eq!(
+            media_report(Ok(1)).detail,
+            "on, 1 player on the session bus now"
+        );
+
+        let off = media_report(Err(anyhow::anyhow!("no answer in 500 ms")));
+        assert_eq!(off.level, Level::Warn);
+        assert!(off.detail.contains("no answer in 500 ms"));
+        assert!(off.fix.unwrap().contains("audio.pause_media = false"));
     }
 
     #[tokio::test]

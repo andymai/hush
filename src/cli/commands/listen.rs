@@ -8,6 +8,7 @@ use tracing::{debug, error, info, warn};
 
 // Import Hush components
 use crate::audio::level;
+use crate::audio::media::MediaPause;
 use crate::audio::take::{is_slow_start, START_TIMEOUT};
 use crate::audio::{
     AudioFeedback, CapCheck, LengthCap, SilenceDetector, StartEvent, StopAction, TakeClock,
@@ -707,6 +708,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let mut current_window: Option<WindowInfo> = None;
     let mut current_trigger = Trigger::Hotkey;
     let mut command_target: Option<CommandTarget> = None;
+    let mut media = MediaPause::new(config.audio.pause_media);
 
     loop {
         // Use short timeout for responsive hotkey handling (16ms ≈ 60Hz)
@@ -738,6 +740,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             );
                         }
                         shared.set_recording(clock.live_since().unwrap_or(now));
+                        media.live(clock.live_since().unwrap_or(now));
                         let mut recording = OverlayState::start_recording();
                         recording.set_locked(hands_free.load(Ordering::Acquire));
                         if command_target.is_some() {
@@ -758,6 +761,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             &amplitude_stop_signal,
                             &mut current_amplitude_thread,
                         );
+                        media.ended();
                         take = None;
                         command_target = None;
                         let _ = feedback.play_error();
@@ -781,6 +785,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 let Some(clock) = take.filter(TakeClock::is_live) else {
                     continue;
                 };
+                media.poll(now);
                 if !silence_sent
                     && command_target.is_none()
                     && silence_heard.load(Ordering::Acquire)
@@ -896,6 +901,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     &amplitude_stop_signal,
                     &mut current_amplitude_thread,
                 );
+                media.ended();
                 info!("Recording cancelled");
                 command_target = None;
                 // Only a take that gave the start cue gets a closing cue.
@@ -931,6 +937,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     ));
                 } else {
                     take = Some(TakeClock::new(stream_started));
+                    // Only a hold-mode press can become a tap that discards
+                    // the take; a toggle-mode tap locks it.
+                    let can_be_tap = trigger == Trigger::Hotkey && hotkey_mode == HotkeyMode::Hold;
+                    media.started(stream_started, can_be_tap.then_some(tap_window));
                     current_trigger = trigger;
                     shared.set_starting();
                     if model.begin_load() {
@@ -1027,6 +1037,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         &amplitude_stop_signal,
                         &mut current_amplitude_thread,
                     );
+                    media.ended();
                     info!("Recording stopped before the microphone delivered audio, discarding it");
                     command_target = None;
                     show(OverlayState::idle());
@@ -1047,7 +1058,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     let _ = thread.join();
                 }
 
-                let audio_data = match audio_capture.stop_recording() {
+                let stopped = audio_capture.stop_recording();
+                media.ended();
+                let audio_data = match stopped {
                     Ok(data) => data,
                     Err(e) => {
                         error!("Failed to stop recording: {}", e);
@@ -1189,6 +1202,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     drop(hotkey_manager);
     drop(audio_cmd_tx);
     drop(transcription_tx);
+    drop(media);
 
     // Signal any remaining amplitude thread to stop
     amplitude_stop_signal.store(true, Ordering::Release);

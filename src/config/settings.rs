@@ -261,6 +261,10 @@ pub struct AudioConfig {
     /// of silence that follow speech; 0 disables it
     #[serde(default)]
     pub silence_stop_secs: u64,
+    /// Pause the MPRIS media players that play while a take records, and
+    /// resume them when it ends
+    #[serde(default)]
+    pub pause_media: bool,
 }
 
 fn default_max_recording_secs() -> u64 {
@@ -937,6 +941,13 @@ model_size = "small"
                 .audio
                 .silence_stop_secs,
             3
+        );
+        assert!(!config.audio.pause_media);
+        assert!(
+            Config::parse_over_defaults("[audio]\npause_media = true\n")
+                .unwrap()
+                .audio
+                .pause_media
         );
         assert!(config.feedback.audio_enabled);
         assert!(config.transcription.context_prompt);

@@ -8,6 +8,7 @@ buffer_size = 1024
 # device = "default"
 max_recording_secs = 600 # stop and transcribe after ten minutes, warning a minute before; 0 disables
 silence_stop_secs = 0    # stop a hands-free recording after this many seconds of silence that follow speech; 0 disables
+pause_media = false      # pause the media players that play (MPRIS) while you record, and resume them when the recording stops
 
 [transcription]
 # Where speech becomes text. local runs whisper.cpp and nothing leaves this
