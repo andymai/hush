@@ -5,6 +5,7 @@ use crate::config::settings::TranscriptionConfig;
 use crate::config::{keys, Config};
 use crate::hotkey::HotkeyBindings;
 use crate::text::WindowProvider;
+use crate::text_processing::hook::{self, Program};
 use crate::transcription::cpu;
 use crate::transcription::device::GpuAvailability;
 use crate::transcription::models::{recommended_model, ModelManager, ModelSize};
@@ -122,6 +123,7 @@ pub async fn checks() -> Vec<Check> {
     checks.push(window_check());
     checks.push(clipboard_check(crate::text::clipboard::support()));
     checks.push(llm_check(&config).await);
+    checks.push(hook_check(&config));
     checks.push(tray_check(&config));
     checks.push(updates_check(&config));
     checks.push(autostart_check());
@@ -353,6 +355,51 @@ async fn llm_check(config: &Config) -> Check {
     }
 }
 
+fn hook_check(config: &Config) -> Check {
+    let command = config.hooks.transcript.trim();
+    let home = dirs::home_dir();
+    let program = hook::resolve_program(
+        command,
+        std::env::var_os("PATH").as_deref(),
+        home.as_deref(),
+    );
+    hook_report(command, program)
+}
+
+fn hook_report(command: &str, program: Program) -> Check {
+    const NAME: &str = "Transcript hook";
+    if command.is_empty() {
+        return Check::ok(NAME, "off");
+    }
+    let shown: String = if command.chars().count() > 60 {
+        command.chars().take(59).chain(['…']).collect()
+    } else {
+        command.to_string()
+    };
+    let until = "until then, Hush types the original text";
+    match program {
+        Program::Absolute(_) => Check::ok(NAME, shown),
+        Program::OnPath(path) => Check::warn(
+            NAME,
+            format!("{} ({} is on this PATH)", shown, path.display()),
+            format!(
+                "write {} in hooks.transcript: the daemon runs with the PATH of your login session, so an absolute path is safer",
+                path.display()
+            ),
+        ),
+        Program::NotExecutable(path) => Check::warn(
+            NAME,
+            format!("{} is not executable", path.display()),
+            format!("chmod +x {}; {}", path.display(), until),
+        ),
+        Program::Missing(word) => Check::warn(
+            NAME,
+            format!("{} is not an absolute path or a name on PATH", word),
+            format!("write the absolute path in hooks.transcript; {}", until),
+        ),
+    }
+}
+
 fn tray_check(config: &Config) -> Check {
     if !config.tray.enabled {
         return Check::ok("Panel icon", "switched off");
@@ -554,6 +601,44 @@ mod tests {
         let gnome = clipboard_check(Support::NoDataControl);
         assert_eq!(gnome.level, Level::Warn);
         assert!(gnome.detail.contains("GNOME"));
+    }
+
+    #[test]
+    fn the_hook_line_says_whether_the_command_resolves() {
+        let off = hook_report("", Program::Missing(String::new()));
+        assert_eq!(off.level, Level::Ok);
+        assert_eq!(off.detail, "off");
+
+        let absolute = hook_report(
+            "/usr/bin/tr -d '!'",
+            Program::Absolute("/usr/bin/tr".into()),
+        );
+        assert_eq!(absolute.level, Level::Ok);
+        assert_eq!(absolute.detail, "/usr/bin/tr -d '!'");
+
+        let on_path = hook_report("tr -d '!'", Program::OnPath("/usr/bin/tr".into()));
+        assert_eq!(on_path.level, Level::Warn);
+        assert!(on_path.detail.contains("/usr/bin/tr"), "{}", on_path.detail);
+        let fix = on_path.fix.unwrap();
+        assert!(fix.contains("write /usr/bin/tr"), "{fix}");
+        assert!(fix.contains("PATH of your login session"), "{fix}");
+
+        let missing = hook_report("fixit", Program::Missing("fixit".into()));
+        assert_eq!(missing.level, Level::Warn);
+        assert!(missing.detail.starts_with("fixit is not"));
+        assert!(missing.fix.unwrap().contains("original text"));
+
+        let plain = hook_report(
+            "/home/me/fix",
+            Program::NotExecutable("/home/me/fix".into()),
+        );
+        assert_eq!(plain.level, Level::Warn);
+        assert!(plain.fix.unwrap().starts_with("chmod +x /home/me/fix"));
+
+        let long = "x".repeat(80);
+        let shown = hook_report(&long, Program::Absolute("/x".into())).detail;
+        assert_eq!(shown.chars().count(), 60);
+        assert!(shown.ends_with('…'));
     }
 
     #[test]

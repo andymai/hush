@@ -8,6 +8,7 @@
 pub mod icon;
 
 use crate::ipc::{DaemonState, SessionCommand, SharedState};
+use crate::text_processing::Trigger;
 use icon::IconState;
 use ksni::menu::StandardItem;
 use ksni::{Category, Handle, MenuItem, Status, ToolTip, Tray, TrayMethods};
@@ -96,7 +97,7 @@ impl Tray for HushTray {
         if self.in_take() {
             self.send(SessionCommand::StopRecording);
         } else {
-            self.send(SessionCommand::StartRecording);
+            self.send(SessionCommand::StartRecording(Trigger::Tray));
         }
     }
 
@@ -270,7 +271,10 @@ mod tests {
     fn clicking_toggles_recording() {
         let (mut idle, rx) = tray(DaemonState::Idle);
         idle.activate(0, 0);
-        assert_eq!(rx.try_recv(), Ok(SessionCommand::StartRecording));
+        assert_eq!(
+            rx.try_recv(),
+            Ok(SessionCommand::StartRecording(Trigger::Tray))
+        );
 
         let (mut recording, rx) = tray(DaemonState::Recording { elapsed_ms: 0 });
         recording.activate(0, 0);

@@ -29,6 +29,9 @@ pub struct Config {
     /// LLM polishing and Command Mode
     #[serde(default)]
     pub llm: LlmConfig,
+    /// User commands that change the text
+    #[serde(default)]
+    pub hooks: HooksConfig,
     /// Panel status icon
     #[serde(default)]
     pub tray: TrayConfig,
@@ -47,6 +50,14 @@ pub struct UpdatesConfig {
     /// Ask GitHub once a day whether a newer release exists. AppImage and
     /// tarball installs only: a package-manager install never checks.
     pub check: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct HooksConfig {
+    /// Shell command that gets each transcript on stdin and prints the text
+    /// to type; empty is off
+    pub transcript: String,
 }
 
 /// Transcript history settings
@@ -733,6 +744,13 @@ model_size = "small"
         assert_eq!(config.history.max_entries, 500);
         assert!(Config::parse_over_defaults("[history]\nmax_entries = 0\n").is_err());
         assert!(Config::parse_over_defaults("[history]\nmax_entries = 100001\n").is_err());
+    }
+
+    #[test]
+    fn the_transcript_hook_is_off_by_default() {
+        assert_eq!(Config::defaults().unwrap().hooks.transcript, "");
+        let config = Config::parse_over_defaults("[hooks]\ntranscript = \"tr a-z A-Z\"\n").unwrap();
+        assert_eq!(config.hooks.transcript, "tr a-z A-Z");
     }
 
     #[test]

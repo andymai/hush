@@ -264,6 +264,19 @@ impl AppKind {
         }
     }
 
+    /// The profile's key under `[profiles]`.
+    pub fn name(self) -> &'static str {
+        match self {
+            AppKind::Terminal => "terminal",
+            AppKind::Editor => "editor",
+            AppKind::Chat => "chat",
+            AppKind::Mail => "mail",
+            AppKind::Docs => "docs",
+            AppKind::Browser => "browser",
+            AppKind::Other => "other",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             AppKind::Terminal => "terminal",
@@ -352,6 +365,15 @@ mod tests {
             AppKind::classify(&window("Code", ""), &cfg),
             AppKind::Terminal
         );
+    }
+
+    #[test]
+    fn names_match_the_config_keys() {
+        for kind in KINDS {
+            let key = serde_json::to_value(kind).unwrap();
+            assert_eq!(key.as_str(), Some(kind.name()));
+        }
+        assert_eq!(AppKind::Other.name(), "other");
     }
 
     #[test]

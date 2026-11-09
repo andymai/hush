@@ -86,6 +86,18 @@ polish = true                         # rewrite every transcript with the LLM; C
 max_tokens = 400
 temperature = 0.3
 
+[hooks]
+# A command that changes each transcript. Hush runs it with sh -c after
+# polishing and before it types the text, also for Command Mode. The text
+# goes to stdin, and Hush types what the command prints, without one
+# trailing newline. Exit code 77 types nothing. When the command fails,
+# prints nothing, or runs longer than 5 seconds, Hush types the original text.
+# The command gets HUSH_APP (the window class), HUSH_PROFILE (terminal,
+# editor, chat, mail, docs, browser, or other), HUSH_RAW_TEXT (the text as
+# Whisper returned it), and HUSH_TRIGGER (hotkey, ipc, tray, or command).
+# Use an absolute path: the daemon gets the PATH of your login session.
+transcript = "" # e.g. "/usr/bin/tr -d '!'"; empty is off
+
 [tray]
 # Status icon on the desktop panel: click to start or stop dictation, with
 # the same actions the hotkeys have. Needs a panel that speaks
