@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.0](https://github.com/andymai/hush/compare/v0.7.3...v0.8.0) (2026-11-09)
+
+
+### Features
+
+* **audio:** stop a hands-free recording after a pause ([#204](https://github.com/andymai/hush/issues/204)) ([189e584](https://github.com/andymai/hush/commit/189e5845e8f624aa1a2d9d140bb0b6926a089815)), closes [#111](https://github.com/andymai/hush/issues/111)
+* **transcription:** opt-in Groq and OpenAI backends ([#207](https://github.com/andymai/hush/issues/207)) ([3f35687](https://github.com/andymai/hush/commit/3f35687083f596e02814789b587737ffea4dc20a)), closes [#112](https://github.com/andymai/hush/issues/112)
+* **ui:** history page, vocabulary editing, and per-app insertion rules ([#208](https://github.com/andymai/hush/issues/208)) ([b3e482a](https://github.com/andymai/hush/commit/b3e482a244f6fffd1ea0296ec5cfea2ba791599b)), closes [#110](https://github.com/andymai/hush/issues/110)
+
 ## [0.7.3](https://github.com/andymai/hush/compare/v0.7.2...v0.7.3) (2026-10-14)
 
 
