@@ -7,9 +7,11 @@ use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 // Import Hush components
+use crate::audio::level;
 use crate::audio::take::{is_slow_start, START_TIMEOUT};
 use crate::audio::{
     AudioFeedback, CapCheck, LengthCap, SilenceDetector, StartEvent, StopAction, TakeClock,
+    TakeLevel,
 };
 use crate::cli::commands::daemon::{self, SessionOptions};
 use crate::config::{keys, Config};
@@ -1010,13 +1012,19 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     continue;
                 }
 
-                // Silence detection: calculate RMS energy of audio
-                let rms = (audio_data.iter().map(|s| s * s).sum::<f32>() / audio_data.len() as f32)
-                    .sqrt();
-                const SILENCE_THRESHOLD: f32 = 0.005;
-
-                if rms < SILENCE_THRESHOLD {
-                    *state_handle.lock() = OverlayState::idle();
+                let empty_take = match TakeLevel::of(&audio_data) {
+                    TakeLevel::NoSound => Some(EmptyTake::NoSound),
+                    TakeLevel::Quiet => Some(EmptyTake::NoSpeech),
+                    TakeLevel::Sound => None,
+                };
+                if let Some(empty) = empty_take {
+                    debug!(
+                        peak_dbfs = level::dbfs(level::peak(&audio_data)),
+                        rms_dbfs = level::dbfs(level::rms(&audio_data)),
+                        "Take too faint to transcribe"
+                    );
+                    report_empty_take(empty, &audio_capture.get_device_name(), feedback);
+                    show(OverlayState::idle());
                     shared.set_idle();
                     continue;
                 }
@@ -1028,7 +1036,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         .as_ref()
                         .map(|processor| processor.user_terms())
                         .unwrap_or_default();
-                    prompt::whisper_prompt(window.as_ref(), &terms)
+                    prompt::whisper_prompt(window.as_ref(), &terms, |prompt| {
+                        transcriber.prompt_fits(prompt)
+                    })
                 } else {
                     None
                 };
@@ -1043,23 +1053,13 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     .await
                 {
                     Ok(result) => {
-                        // Filter common Whisper hallucinations on near-silence
-                        let text = result.text.trim().to_lowercase();
-                        let hallucinations = [
-                            "you",
-                            "thank you",
-                            "thanks",
-                            "thank you.",
-                            "thanks for watching",
-                            "bye",
-                            "goodbye",
-                            "thank you for watching",
-                            "see you next time",
-                            "subscribe",
-                            "like and subscribe",
-                        ];
-                        if text.is_empty() || hallucinations.iter().any(|h| text == *h) {
-                            *state_handle.lock() = OverlayState::idle();
+                        if result.text.trim().is_empty() {
+                            report_empty_take(
+                                EmptyTake::NoSpeech,
+                                &audio_capture.get_device_name(),
+                                feedback,
+                            );
+                            show(OverlayState::idle());
                             shared.set_idle();
                             continue;
                         }
@@ -1108,6 +1108,35 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     info!("Listen mode ended");
     Ok(())
+}
+
+/// Why a take gave no text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmptyTake {
+    /// The microphone sent silence: it may be muted.
+    NoSound,
+    /// There was sound, but no words in it.
+    NoSpeech,
+}
+
+/// Tell the user why a take gave no text. A muted microphone gets a
+/// notification and the error cue, because the user must act on it. No
+/// speech gets only a log line.
+fn report_empty_take(take: EmptyTake, device: &str, feedback: AudioFeedback) {
+    match take {
+        EmptyTake::NoSound => {
+            warn!(device = %device, "The microphone sent no sound");
+            let _ = feedback.play_error();
+            notify(
+                "The microphone sent no sound",
+                &format!(
+                    "Hush got only silence from '{}'. The microphone may be muted.",
+                    device
+                ),
+            );
+        },
+        EmptyTake::NoSpeech => info!("No speech detected"),
+    }
 }
 
 /// Stop the capture and the level thread, and drop the audio.

@@ -349,6 +349,14 @@ pub struct TranscriptionConfig {
     /// Prime Whisper with the focused window's title and learned terms
     #[serde(default = "default_true")]
     pub context_prompt: bool,
+    /// Send only the speech in a take to local Whisper, found by the Silero
+    /// voice activity detection model
+    #[serde(default = "default_true")]
+    pub vad: bool,
+    /// Transcripts to drop as invented text. When set, this list replaces
+    /// the built-in one; an empty list drops nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drop_phrases: Option<Vec<String>>,
 }
 
 fn default_true() -> bool {
@@ -899,6 +907,17 @@ model_size = "small"
         );
         assert!(config.feedback.audio_enabled);
         assert!(config.transcription.context_prompt);
+        assert!(config.transcription.vad);
+        assert_eq!(config.transcription.drop_phrases, None);
+        let config = Config::parse_over_defaults(
+            "[transcription]\nvad = false\ndrop_phrases = [\"Over and out.\"]\n",
+        )
+        .unwrap();
+        assert!(!config.transcription.vad);
+        assert_eq!(
+            config.transcription.drop_phrases,
+            Some(vec!["Over and out.".to_string()])
+        );
         assert!(config.profiles.enabled);
         assert_eq!(config.hotkey.command, "Ctrl+RightAlt");
         assert_eq!(config.llm.provider, LlmSetting::Auto);

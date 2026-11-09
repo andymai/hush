@@ -113,6 +113,10 @@ pub async fn checks() -> Vec<Check> {
         let cpu_supported = cpu.level == Level::Ok;
         checks.push(cpu);
         checks.push(model_check(&config));
+        checks.push(vad_check(
+            &config.transcription,
+            crate::transcription::models::vad_model_path().is_file(),
+        ));
         // Below the floor, ggml lists no devices, so a GPU line would blame the driver.
         if cpu_supported {
             checks.push(gpu_check(&config));
@@ -196,6 +200,26 @@ fn model_check(config: &Config) -> Check {
         ),
     };
     Check::fail("Speech model", format!("{} is not downloaded", size), fix)
+}
+
+fn vad_check(config: &TranscriptionConfig, model_present: bool) -> Check {
+    const NAME: &str = "Voice detection";
+    if !config.vad {
+        return Check::ok(NAME, "switched off; Whisper gets the whole take");
+    }
+    if model_present {
+        return Check::ok(NAME, "Silero VAD trims silence before Whisper");
+    }
+    let size = if config.model_size.parse::<ModelSize>().is_ok() {
+        config.model_size.clone()
+    } else {
+        crate::gui::size_key(recommended_model()).to_string()
+    };
+    Check::warn(
+        NAME,
+        "the Silero VAD model is not downloaded, so Whisper gets silence too",
+        format!("hush models download {}", size),
+    )
 }
 
 fn cloud_check(config: &TranscriptionConfig, key_present: bool) -> Check {
@@ -602,6 +626,22 @@ mod tests {
             Some("hush models download large-v3"),
             "a known name is downloaded as asked"
         );
+    }
+
+    #[test]
+    fn the_vad_line_names_the_download_when_the_model_is_missing() {
+        let mut config = Config::defaults().unwrap().transcription;
+        config.model_size = "small".to_string();
+        let check = vad_check(&config, false);
+        assert_eq!(check.level, Level::Warn);
+        assert_eq!(check.name, "Voice detection");
+        assert_eq!(check.fix.as_deref(), Some("hush models download small"));
+
+        assert_eq!(vad_check(&config, true).level, Level::Ok);
+        config.vad = false;
+        let off = vad_check(&config, false);
+        assert_eq!(off.level, Level::Ok);
+        assert!(off.detail.contains("switched off"));
     }
 
     #[test]

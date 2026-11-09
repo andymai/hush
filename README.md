@@ -94,7 +94,7 @@ Models:
 | Command | Does |
 |---|---|
 | `hush models list [--downloaded] [--details]` | List models and what is downloaded |
-| `hush models download <size> [-f]` | Download a model |
+| `hush models download <size> [-f]` | Download a model, and the voice activity detection model when it is missing |
 | `hush models set <size>` | Select the active model |
 | `hush models remove <size>` | Delete a downloaded model |
 | `hush models info` / `verify [size] [--fix]` | Show stats, or re-check model files |
@@ -129,6 +129,8 @@ Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another co
 | `transcription.language` | Two-letter code, or `auto` to detect what you speak | en |
 | `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
 | `transcription.context_prompt` | Prime Whisper with the focused window's title and learned terms | true |
+| `transcription.vad` | Send local Whisper only the speech in each take, found by the Silero model that `hush models download` gets. Without the model, Whisper gets the whole take | true |
+| `transcription.drop_phrases` | Drop a transcript that is only one of these phrases, without case and punctuation. When set, it replaces the built-in list of text that Whisper invents for silence, such as "thanks for watching"; `[]` drops nothing | built-in list |
 | `transcription.backend` | `local` (whisper.cpp), or `groq` or `openai`, which send the audio of each dictation to that service. The key comes from `GROQ_API_KEY` or `OPENAI_API_KEY`. `openai-compatible` sends the audio of each dictation to the URL in `transcription.server_url` | local |
 | `transcription.groq_model`, `transcription.openai_model` | The model each service runs | whisper-large-v3-turbo, gpt-4o-mini-transcribe |
 | `transcription.server_url`, `transcription.server_model` | The OpenAI-compatible server and its model. Hush adds `/v1/audio/transcriptions` when the URL does not end with it. `hush doctor` shows whether the server is local | none |

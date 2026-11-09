@@ -39,10 +39,12 @@
 /// Currently supports Linux via ALSA/PulseAudio through the `cpal` library.
 pub mod capture;
 pub mod feedback;
+pub mod level;
 pub mod silence;
 pub mod take;
 
 pub use capture::AudioCapture;
 pub use feedback::AudioFeedback;
+pub use level::TakeLevel;
 pub use silence::SilenceDetector;
 pub use take::{CapCheck, LengthCap, StartEvent, StopAction, TakeClock};

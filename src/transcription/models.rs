@@ -11,12 +11,34 @@ use tracing::{debug, info, warn};
 #[derive(Debug, Clone)]
 pub struct ModelInfo {
     pub name: String,
-    pub size: ModelSize,
     pub repo_id: String,
     pub filename: String,
     pub expected_size: u64,
     /// SHA256 checksum for model integrity verification (None for custom models)
     pub sha256: Option<String>,
+}
+
+/// The Silero voice activity detection model that whisper.cpp's
+/// `models/download-vad-model.sh` fetches.
+pub const VAD_FILENAME: &str = "ggml-silero-v6.2.0.bin";
+
+/// The catalogue entry for the voice activity detection model. The checksum
+/// is the Git LFS object ID that Hugging Face lists for the file.
+pub fn vad_model() -> ModelInfo {
+    ModelInfo {
+        name: "silero-vad".to_string(),
+        repo_id: "ggml-org/whisper-vad".to_string(),
+        filename: VAD_FILENAME.to_string(),
+        expected_size: 885_098,
+        sha256: Some(
+            "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987".to_string(),
+        ),
+    }
+}
+
+/// Where the voice activity detection model lives, downloaded or not.
+pub fn vad_model_path() -> PathBuf {
+    crate::config::paths::models_dir().join(VAD_FILENAME)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -122,7 +144,6 @@ impl ModelManager {
             ModelSize::Tiny,
             ModelInfo {
                 name: "whisper-tiny".to_string(),
-                size: ModelSize::Tiny,
                 repo_id: "ggerganov/whisper.cpp".to_string(),
                 filename: "ggml-tiny.bin".to_string(),
                 expected_size: 77_700_000, // ~77.7MB
@@ -136,7 +157,6 @@ impl ModelManager {
             ModelSize::Base,
             ModelInfo {
                 name: "whisper-base".to_string(),
-                size: ModelSize::Base,
                 repo_id: "ggerganov/whisper.cpp".to_string(),
                 filename: "ggml-base.bin".to_string(),
                 expected_size: 147_000_000, // ~147MB
@@ -150,7 +170,6 @@ impl ModelManager {
             ModelSize::Small,
             ModelInfo {
                 name: "whisper-small".to_string(),
-                size: ModelSize::Small,
                 repo_id: "ggerganov/whisper.cpp".to_string(),
                 filename: "ggml-small.bin".to_string(),
                 expected_size: 488_000_000, // ~488MB
@@ -164,7 +183,6 @@ impl ModelManager {
             ModelSize::Medium,
             ModelInfo {
                 name: "whisper-medium".to_string(),
-                size: ModelSize::Medium,
                 repo_id: "ggerganov/whisper.cpp".to_string(),
                 filename: "ggml-medium.bin".to_string(),
                 expected_size: 1_533_000_000, // ~1.53GB
@@ -178,7 +196,6 @@ impl ModelManager {
             ModelSize::Large,
             ModelInfo {
                 name: "whisper-large".to_string(),
-                size: ModelSize::Large,
                 repo_id: "ggerganov/whisper.cpp".to_string(),
                 filename: "ggml-large-v1.bin".to_string(),
                 expected_size: 3_094_000_000, // ~3.09GB
@@ -192,7 +209,6 @@ impl ModelManager {
             ModelSize::LargeV2,
             ModelInfo {
                 name: "whisper-large-v2".to_string(),
-                size: ModelSize::LargeV2,
                 repo_id: "ggerganov/whisper.cpp".to_string(),
                 filename: "ggml-large-v2.bin".to_string(),
                 expected_size: 3_094_000_000, // ~3.09GB
@@ -206,7 +222,6 @@ impl ModelManager {
             ModelSize::LargeV3,
             ModelInfo {
                 name: "whisper-large-v3".to_string(),
-                size: ModelSize::LargeV3,
                 repo_id: "ggerganov/whisper.cpp".to_string(),
                 filename: "ggml-large-v3.bin".to_string(),
                 expected_size: 3_094_000_000, // ~3.09GB
@@ -237,23 +252,12 @@ impl ModelManager {
     }
 
     pub async fn ensure_model_downloaded(&self, size: &ModelSize) -> Result<PathBuf> {
-        let bar = std::sync::Mutex::new(None::<ProgressBar>);
         let name = self
             .get_model_info(size)
             .map(|info| info.name.clone())
             .unwrap_or_default();
-        self.ensure_model_downloaded_with(size, &move |done, total| {
-            let mut bar = match bar.lock() {
-                Ok(bar) => bar,
-                Err(_) => return,
-            };
-            let bar = bar.get_or_insert_with(|| Self::progress_bar(total, &name));
-            bar.set_position(done);
-            if done >= total {
-                bar.finish_and_clear();
-            }
-        })
-        .await
+        self.ensure_model_downloaded_with(size, &Self::terminal_progress(name))
+            .await
     }
 
     /// Download with a progress callback of `(downloaded, total)` bytes, for
@@ -263,29 +267,78 @@ impl ModelManager {
         size: &ModelSize,
         progress: &(dyn Fn(u64, u64) + Send + Sync),
     ) -> Result<PathBuf> {
-        info!("Ensuring model {:?} is available", size);
-
         let model_info = self
             .get_model_info(size)
             .ok_or_else(|| anyhow::anyhow!("Unknown model size: {:?}", size))?;
+        self.ensure_file(model_info, progress).await
+    }
 
+    /// The voice activity detection model in this cache, when it is there.
+    pub fn vad_model_path(&self) -> Option<PathBuf> {
+        let path = self.cache_dir.join(VAD_FILENAME);
+        path.is_file().then_some(path)
+    }
+
+    /// Download the voice activity detection model unless a valid copy is
+    /// already in the cache.
+    pub async fn ensure_vad_downloaded(&self) -> Result<PathBuf> {
+        let info = vad_model();
+        self.ensure_vad_downloaded_with(&Self::terminal_progress(info.name))
+            .await
+    }
+
+    pub async fn ensure_vad_downloaded_with(
+        &self,
+        progress: &(dyn Fn(u64, u64) + Send + Sync),
+    ) -> Result<PathBuf> {
+        self.ensure_file(&vad_model(), progress).await
+    }
+
+    fn terminal_progress(name: String) -> impl Fn(u64, u64) + Send + Sync {
+        let bar = std::sync::Mutex::new(None::<ProgressBar>);
+        move |done, total| {
+            let mut bar = match bar.lock() {
+                Ok(bar) => bar,
+                Err(_) => return,
+            };
+            let bar = bar.get_or_insert_with(|| Self::progress_bar(total, &name));
+            bar.set_position(done);
+            if done >= total {
+                bar.finish_and_clear();
+            }
+        }
+    }
+
+    async fn ensure_file(
+        &self,
+        model_info: &ModelInfo,
+        progress: &(dyn Fn(u64, u64) + Send + Sync),
+    ) -> Result<PathBuf> {
+        info!("Ensuring model {} is available", model_info.name);
         let model_path = self.cache_dir.join(&model_info.filename);
 
-        // Check if model already exists and is valid
         if self.is_model_valid(&model_path, model_info).await? {
-            info!("Model {:?} already cached at {:?}", size, model_path);
+            info!(
+                "Model {} already cached at {:?}",
+                model_info.name, model_path
+            );
             return Ok(model_path);
         }
 
-        info!("Downloading model {:?} from {}", size, model_info.repo_id);
+        info!(
+            "Downloading model {} from {}",
+            model_info.name, model_info.repo_id
+        );
         self.download_model(model_info, progress).await?;
 
-        // Verify the downloaded model
         if !self.is_model_valid(&model_path, model_info).await? {
             return Err(anyhow::anyhow!("Downloaded model failed validation"));
         }
 
-        info!("Model {:?} successfully downloaded and validated", size);
+        info!(
+            "Model {} successfully downloaded and validated",
+            model_info.name
+        );
         Ok(model_path)
     }
 
@@ -525,7 +578,31 @@ mod tests {
 
         let info = manager.get_model_info(&ModelSize::Tiny);
         assert!(info.is_some());
-        assert_eq!(info.unwrap().size, ModelSize::Tiny);
+        assert_eq!(info.unwrap().filename, ModelSize::Tiny.filename());
+    }
+
+    #[test]
+    fn the_vad_model_comes_from_the_whisper_cpp_vad_catalogue() {
+        let info = vad_model();
+        assert_eq!(
+            ModelManager::download_url(&info),
+            "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"
+        );
+        assert_eq!(info.sha256.as_deref().map(str::len), Some(64));
+        assert!(vad_model_path().ends_with(VAD_FILENAME));
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        assert_eq!(manager.vad_model_path(), None);
+        std::fs::write(temp_dir.path().join(VAD_FILENAME), b"x").unwrap();
+        assert_eq!(
+            manager.vad_model_path(),
+            Some(temp_dir.path().join(VAD_FILENAME))
+        );
+        assert!(
+            manager.list_cached_models().is_empty(),
+            "the VAD model is not a Whisper model"
+        );
     }
 
     #[test]
