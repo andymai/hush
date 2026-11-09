@@ -1,0 +1,30 @@
+src/updates.rs
+  s_8c30bad7701dbb::t_580829adbab8a1 247-249,251-252,255
+  s_8c30bad7701dbb::t_56427a583e2909 40-41,46-47
+  s_8c30bad7701dbb::t_0a3b7e77d27712 294-297
+  s_b321718d129a1e::t_1b172deb059535 293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4d3a0b0a9a74160189e84180c0c714b64c309914",
+  "prompts": {},
+  "sessions": {
+    "s_8c30bad7701dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf6bbec0-c5d2-46fa-8e5b-d526f9012d5d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    },
+    "s_b321718d129a1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c62633eb-00e8-4221-9326-8801a74ef42d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
