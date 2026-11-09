@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/andymai/hush/compare/v0.9.1...v0.10.0) (2026-11-09)
+
+
+### Features
+
+* **hooks:** run a user command on each transcript ([#252](https://github.com/andymai/hush/issues/252)) ([00dffb3](https://github.com/andymai/hush/commit/00dffb3b941a31031c602830190e9425e8601af8))
+* **transcription:** add an OpenAI-compatible backend and LLM provider ([#253](https://github.com/andymai/hush/issues/253)) ([6c9b433](https://github.com/andymai/hush/commit/6c9b43395531298f73b6e3d142bdf339666f2ddb))
+
 ## [0.9.1](https://github.com/andymai/hush/compare/v0.9.0...v0.9.1) (2026-11-09)
 
 
