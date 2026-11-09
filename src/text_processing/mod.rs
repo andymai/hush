@@ -16,6 +16,7 @@ mod executor;
 /// - Optional LLM-based polishing
 mod filler_words;
 mod history;
+pub mod hook;
 mod intent;
 pub mod llm;
 mod session;
@@ -30,6 +31,7 @@ pub use entities::EntityRecognizer;
 pub use executor::{CommandExecutor, ExecutionResult};
 pub use filler_words::FillerWordRemover;
 pub use history::{HistoryEntry, InsertionHistory};
+pub use hook::{HookEnv, TranscriptHook, Trigger};
 pub use intent::{CommunicationStyle, IntentDetector, UserIntent};
 pub mod learn;
 pub mod profiles;

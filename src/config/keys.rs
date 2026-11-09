@@ -2,13 +2,38 @@
 //! config.toml, so the config file is safe to share.
 
 use super::paths;
+use parking_lot::Mutex;
+use std::collections::{BTreeSet, HashSet};
+use std::ffi::OsString;
 use std::path::Path;
+
+static LOADED: Mutex<BTreeSet<OsString>> = Mutex::new(BTreeSet::new());
 
 /// Load `~/.config/hush/.env` (installed daemons) and `./.env` (source
 /// checkouts) into the environment. A variable that is already set wins.
 pub fn load_env_files() {
-    let _ = dotenvy::from_path(paths::config_dir().join(".env"));
-    let _ = dotenvy::dotenv();
+    load_with(|| {
+        let _ = dotenvy::from_path(paths::config_dir().join(".env"));
+        let _ = dotenvy::dotenv();
+    });
+}
+
+/// The variables that [`load_env_files`] added, so that a child process
+/// can go without them.
+pub fn loaded_from_env_files() -> Vec<OsString> {
+    LOADED.lock().iter().cloned().collect()
+}
+
+// dotenvy never overrides a set variable, so each name that is new after the
+// load came from a file and not from the user's session.
+pub(crate) fn load_with(load: impl FnOnce()) {
+    let before: HashSet<OsString> = std::env::vars_os().map(|(name, _)| name).collect();
+    load();
+    LOADED.lock().extend(
+        std::env::vars_os()
+            .map(|(name, _)| name)
+            .filter(|name| !before.contains(name)),
+    );
 }
 
 /// The key in `var`, from the environment or else from
@@ -48,5 +73,32 @@ mod tests {
         assert_eq!(from_file(&path, "OPENAI_API_KEY"), None, "blank is unset");
         assert_eq!(from_file(&path, "ANTHROPIC_API_KEY"), None);
         assert_eq!(from_file(&dir.path().join("missing"), "GROQ_API_KEY"), None);
+    }
+
+    #[test]
+    fn only_variables_from_a_file_are_recorded() {
+        std::env::set_var("HUSH_TEST_KEYS_SESSION", "from-session");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".env");
+        std::fs::write(
+            &path,
+            "HUSH_TEST_KEYS_FILE=secret\nHUSH_TEST_KEYS_SESSION=from-file\n",
+        )
+        .unwrap();
+        load_with(|| {
+            let _ = dotenvy::from_path(&path);
+        });
+        assert_eq!(
+            std::env::var("HUSH_TEST_KEYS_FILE").as_deref(),
+            Ok("secret")
+        );
+        assert_eq!(
+            std::env::var("HUSH_TEST_KEYS_SESSION").as_deref(),
+            Ok("from-session"),
+            "the session wins"
+        );
+        let loaded = loaded_from_env_files();
+        assert!(loaded.contains(&OsString::from("HUSH_TEST_KEYS_FILE")));
+        assert!(!loaded.contains(&OsString::from("HUSH_TEST_KEYS_SESSION")));
     }
 }

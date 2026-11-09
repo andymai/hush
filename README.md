@@ -55,7 +55,7 @@ Hold `Right Alt`, speak, release. Done.
 - **Command Mode.** Hold `Ctrl+Right Alt`, say what to do ("make this friendlier", "turn it into a bullet list"), release. Hush rewrites the selected text, or the last thing it typed when nothing is selected, through a local Ollama server or Anthropic, whichever `[llm]` resolves to. Only text is sent, never audio.
 - **Cleaner text, automatically.** Voice commands cover "new line", "new paragraph", "undo", and "scratch that". Filler words ("um", "uh", "like") are removed. Optional LLM polishing rewrites every transcript.
 - **Panel icon.** A status icon shows whether Hush is idle, recording, or working, and its menu offers the same actions the hotkeys do. Turn it off with `tray.enabled = false`.
-- **A window and a doctor.** `hush settings` opens one window for what still needs setting up and every setting. `hush doctor` checks the configuration, keyboard access, model, GPU, microphone, hotkey, window detection, polishing, panel icon, update check, autostart, and the daemon, then prints the one command that fixes each problem.
+- **A window and a doctor.** `hush settings` opens one window for what still needs setting up and every setting. `hush doctor` checks the configuration, keyboard access, model, GPU, microphone, hotkey, window detection, polishing, transcript hook, panel icon, update check, autostart, and the daemon, then prints the one command that fixes each problem.
 
 ## Scope
 
@@ -144,6 +144,7 @@ Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another co
 | `llm.ollama_url`, `llm.ollama_model` | The local Ollama server and model | localhost:11434, llama3.2 |
 | `llm.anthropic_model` | Anthropic model; the key comes from `ANTHROPIC_API_KEY` | claude-haiku-4-5 |
 | `llm.polish` | Rewrite every transcript with the LLM; Command Mode works either way | true |
+| `hooks.transcript` | A command that changes each transcript before Hush types it. See [Transcript hook](#transcript-hook) | `""` (off) |
 | `profiles.enabled` | Adapt output to the focused application; per-profile keys add window classes | true |
 | `audio.max_recording_secs` | Stop and transcribe after this long, with a warning a minute before; 0 disables | 600 |
 | `audio.silence_stop_secs` | Stop a hands-free recording after this many seconds of silence that follow speech; 0 disables | 0 |
@@ -157,6 +158,36 @@ Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another co
 | `updates.check` | Ask GitHub once a day whether a newer release exists (AppImage and tarball installs only) | false |
 
 Point at a different file with `hush -c other.toml …` or `HUSH_CONFIG=other.toml`.
+
+### Transcript hook
+
+Set `hooks.transcript` to a command, and Hush runs it with `sh -c` on each transcript after polishing and before it types the text. Command Mode results also go through it. The text goes to stdin, and Hush types what the command prints. Hush removes one trailing newline from the output.
+
+- Exit code 77 types nothing, and the take gets no history entry.
+- When the command exits with a code other than 0 or 77, cannot start, prints nothing, or runs longer than 5 seconds, Hush types the original text and logs the reason.
+- The command gets `HUSH_APP` (the window class, empty when unknown), `HUSH_PROFILE` (`terminal`, `editor`, `chat`, `mail`, `docs`, `browser`, or `other`), `HUSH_RAW_TEXT` (the text as Whisper returned it; in Command Mode, the spoken instruction), and `HUSH_TRIGGER` (`hotkey`, `ipc` for `hush toggle` and `hush start`, `tray`, or `command` for Command Mode).
+- The command does not get the API keys that Hush reads from its .env files.
+
+Remove every exclamation mark:
+
+```toml
+[hooks]
+transcript = "/usr/bin/tr -d '!'"
+```
+
+Put a list marker before each transcript that you dictate into Obsidian:
+
+```sh
+#!/bin/sh
+# ~/.local/bin/hush-hook (chmod +x), with transcript = "/home/you/.local/bin/hush-hook"
+text=$(cat)
+case "$HUSH_APP" in
+  obsidian) printf '%s' "- $text" ;;
+  *) printf '%s' "$text" ;;
+esac
+```
+
+The daemon runs with the PATH of your login session, so use absolute paths. `hush doctor` shows whether the command resolves.
 
 ## Models
 

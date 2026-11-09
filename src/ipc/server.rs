@@ -3,7 +3,7 @@
 //! the reply names the state that request leads to.
 
 use super::protocol::{DaemonCommand, DaemonResponse, DaemonState};
-use crate::text_processing::learn;
+use crate::text_processing::{learn, Trigger};
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use std::os::unix::fs::PermissionsExt;
@@ -18,7 +18,7 @@ use tracing::{debug, warn};
 /// What the session loop consumes, from the hotkey thread and from IPC alike.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionCommand {
-    StartRecording,
+    StartRecording(Trigger),
     /// Record a spoken instruction for Command Mode
     StartCommand,
     StopRecording,
@@ -216,10 +216,16 @@ pub fn respond(
             if shared.in_take() {
                 forward(SessionCommand::StopRecording, after_stop)
             } else {
-                forward(SessionCommand::StartRecording, DaemonState::Starting)
+                forward(
+                    SessionCommand::StartRecording(Trigger::Ipc),
+                    DaemonState::Starting,
+                )
             }
         },
-        DaemonCommand::Start => forward(SessionCommand::StartRecording, DaemonState::Starting),
+        DaemonCommand::Start => forward(
+            SessionCommand::StartRecording(Trigger::Ipc),
+            DaemonState::Starting,
+        ),
         DaemonCommand::Stop => forward(SessionCommand::StopRecording, after_stop),
         DaemonCommand::Cancel => forward(SessionCommand::CancelRecording, DaemonState::Idle),
         DaemonCommand::Quit => forward(SessionCommand::Quit, DaemonState::Stopping),
@@ -251,7 +257,10 @@ mod tests {
             respond(DaemonCommand::Toggle, &shared, &tx).state,
             Some(DaemonState::Starting)
         );
-        assert_eq!(rx.try_recv(), Ok(SessionCommand::StartRecording));
+        assert_eq!(
+            rx.try_recv(),
+            Ok(SessionCommand::StartRecording(Trigger::Ipc))
+        );
 
         shared.set_starting();
         assert_eq!(
@@ -312,7 +321,10 @@ mod tests {
 
         let started = client::send_to(&path, DaemonCommand::Start).await.unwrap();
         assert_eq!(started.state, Some(DaemonState::Starting));
-        assert_eq!(rx.recv().unwrap(), SessionCommand::StartRecording);
+        assert_eq!(
+            rx.recv().unwrap(),
+            SessionCommand::StartRecording(Trigger::Ipc)
+        );
 
         drop(guard);
         assert!(!path.exists());

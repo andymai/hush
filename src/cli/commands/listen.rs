@@ -25,8 +25,8 @@ use crate::text::WindowInfo;
 use crate::text_processing::transcripts::{self, Transcript};
 use crate::text_processing::{learn, llm, prompt, ProcessingContext};
 use crate::text_processing::{
-    CommandExecutor, CommandParser, EditingMode, InsertionHistory, LlmProvider, ProcessingConfig,
-    TextProcessor,
+    CommandExecutor, CommandParser, EditingMode, HookEnv, InsertionHistory, LlmProvider,
+    ProcessingConfig, TextProcessor, TranscriptHook, Trigger,
 };
 use crate::transcription::{SpeechToText, WHISPER_SAMPLE_RATE};
 use crate::tray;
@@ -178,6 +178,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             text: String,
             window: Option<WindowInfo>,
             command: Option<CommandTarget>,
+            trigger: Trigger,
         },
         Error(String),
     }
@@ -385,7 +386,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 },
             };
             let command = match action {
-                Some(GestureAction::Start) => Some(SessionCommand::StartRecording),
+                Some(GestureAction::Start) => Some(SessionCommand::StartRecording(Trigger::Hotkey)),
                 // The overlay stays in Recording until transcription completes
                 Some(GestureAction::Stop) => Some(SessionCommand::StopRecording),
                 Some(GestureAction::Cancel) => Some(SessionCommand::CancelRecording),
@@ -417,6 +418,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let command_executor_clone = command_executor.clone();
     let insertion_history_clone = insertion_history.clone();
     let shared_result = Arc::clone(&shared);
+    let transcript_hook = TranscriptHook::new(&config.hooks.transcript);
+    if let Some(hook) = &transcript_hook {
+        info!("Transcript hook: {}", hook.command());
+    }
     let result_thread = thread::spawn(move || {
         let result_runtime = match tokio::runtime::Runtime::new() {
             Ok(runtime) => runtime,
@@ -435,8 +440,19 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     text: raw_text,
                     window,
                     command,
+                    trigger,
                 } => {
                     shared_result.set_inserting();
+                    let context = ProcessingContext::new(window.clone(), &profiles);
+                    let hook_env = HookEnv {
+                        app: window
+                            .as_ref()
+                            .map(|w| w.class.as_str())
+                            .unwrap_or_default(),
+                        profile: context.kind.name(),
+                        raw_text: &raw_text,
+                        trigger,
+                    };
                     if let Some(target) = command {
                         run_command_mode(
                             &raw_text,
@@ -447,6 +463,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             &insertion_history_clone,
                             &shared_result,
                             feedback,
+                            transcript_hook.as_ref(),
+                            &hook_env,
                         );
                         *state_handle_clone2.lock() = OverlayState::idle();
                         shared_result.set_idle();
@@ -522,7 +540,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             info!("🔄 Processing text...");
                             // Keep current state (likely Recording) while processing
 
-                            let context = ProcessingContext::new(window.clone(), &profiles);
                             match result_runtime
                                 .block_on(processor.process_for(&command_text, &context))
                             {
@@ -541,6 +558,17 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     } else {
                         // Commands already formatted the text, skip processing
                         command_text
+                    };
+
+                    let Some(processed_text) = after_hook(
+                        transcript_hook.as_ref(),
+                        &result_runtime,
+                        processed_text,
+                        &hook_env,
+                    ) else {
+                        *state_handle_clone2.lock() = OverlayState::idle();
+                        shared_result.set_idle();
+                        continue;
                     };
 
                     shared_result.set_last_text(processed_text.clone());
@@ -639,6 +667,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let mut silence_sent = false;
     let context_prompt = config.transcription.context_prompt;
     let mut current_window: Option<WindowInfo> = None;
+    let mut current_trigger = Trigger::Hotkey;
     let mut command_target: Option<CommandTarget> = None;
 
     loop {
@@ -822,11 +851,15 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 show(OverlayState::idle());
                 shared.set_idle();
             },
-            SessionCommand::StartRecording | SessionCommand::StartCommand => {
+            SessionCommand::StartRecording(_) | SessionCommand::StartCommand => {
                 if take.is_some() {
                     continue;
                 }
-                let is_command = command == SessionCommand::StartCommand;
+                let trigger = match command {
+                    SessionCommand::StartRecording(trigger) => trigger,
+                    _ => Trigger::Command,
+                };
+                let is_command = trigger == Trigger::Command;
                 // Reset stop signal for new recording
                 amplitude_stop_signal.store(false, Ordering::Release);
 
@@ -844,6 +877,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     ));
                 } else {
                     take = Some(TakeClock::new(stream_started));
+                    current_trigger = trigger;
                     shared.set_starting();
                     #[cfg(target_os = "linux")]
                     {
@@ -1033,6 +1067,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             text: result.text,
                             window,
                             command,
+                            trigger: current_trigger,
                         }
                     },
                     Err(e) => {
@@ -1101,6 +1136,19 @@ fn read_selection() -> Option<String> {
     None
 }
 
+/// The text to type after the transcript hook, or `None` to type nothing.
+fn after_hook(
+    hook: Option<&TranscriptHook>,
+    runtime: &tokio::runtime::Runtime,
+    text: String,
+    env: &HookEnv<'_>,
+) -> Option<String> {
+    match hook {
+        Some(hook) => runtime.block_on(hook.apply(text, env)),
+        None => Some(text),
+    }
+}
+
 /// Apply a spoken instruction to the selection, or to the last transcript
 /// when nothing is selected, and replace it in place.
 #[allow(clippy::too_many_arguments)]
@@ -1113,6 +1161,8 @@ fn run_command_mode(
     history: &Arc<Mutex<InsertionHistory>>,
     shared: &crate::ipc::SharedState,
     feedback: AudioFeedback,
+    hook: Option<&TranscriptHook>,
+    hook_env: &HookEnv<'_>,
 ) {
     let instruction = instruction.trim();
     if instruction.is_empty() {
@@ -1159,6 +1209,9 @@ fn run_command_mode(
         );
         return;
     }
+    let Some(rewritten) = after_hook(hook, runtime, rewritten, hook_env) else {
+        return;
+    };
     let Some(inserter) = inserter else {
         info!("Rewritten text: {}", rewritten);
         return;
