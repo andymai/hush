@@ -1,4 +1,4 @@
-//! When a take really starts.
+//! When a take really starts, and when its stream stalls.
 //!
 //! The input stream pauses between takes, and PipeWire then suspends the idle
 //! source. The source can need seconds to wake, so a take starts at its first
@@ -10,11 +10,38 @@ use std::time::{Duration, Instant};
 /// A take that gets no audio frame in this time fails.
 pub const START_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// A live take that gets no audio frame in this time stalled.
+pub const STALL_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// A first frame later than this is a slow start, worth a warning in the log.
 pub const SLOW_START: Duration = Duration::from_millis(200);
 
 pub fn is_slow_start(delay: Duration) -> bool {
     delay > SLOW_START
+}
+
+/// The stream of a live take stopped: its last frame is [`STALL_TIMEOUT`] old
+/// or older. A take that is not live waits for [`START_TIMEOUT`] instead.
+pub fn is_stalled(last_frame: Option<Instant>, now: Instant, live: bool) -> bool {
+    live && last_frame.is_some_and(|last| now.saturating_duration_since(last) >= STALL_TIMEOUT)
+}
+
+/// What the input stream did in a take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StreamOutcome {
+    /// The stream gave audio, or the take ended before it had to.
+    #[default]
+    Worked,
+    /// No audio frame arrived in [`START_TIMEOUT`].
+    NoStart,
+    /// The audio of a live take stopped for [`STALL_TIMEOUT`].
+    Stalled,
+}
+
+/// The next take builds a new input stream when the stream of the last take
+/// did not start or stalled.
+pub fn needs_new_stream(last_take: StreamOutcome) -> bool {
+    matches!(last_take, StreamOutcome::NoStart | StreamOutcome::Stalled)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -294,6 +321,70 @@ mod tests {
             cap.check(clock.elapsed(at(base, 601_500))),
             CapCheck::Reached
         );
+    }
+
+    #[test]
+    fn a_stall_waits_for_the_take_to_go_live() {
+        let base = Instant::now();
+        let mut clock = TakeClock::new(base);
+        assert!(!is_stalled(None, at(base, 4000), clock.is_live()));
+        assert!(
+            !is_stalled(Some(at(base, 0)), at(base, 4000), clock.is_live()),
+            "a take that is not live is the start timeout's"
+        );
+
+        clock.poll(Some(at(base, 4500)), at(base, 4510));
+        assert!(!is_stalled(
+            Some(at(base, 4500)),
+            at(base, 6499),
+            clock.is_live()
+        ));
+        assert!(is_stalled(
+            Some(at(base, 4500)),
+            at(base, 6500),
+            clock.is_live()
+        ));
+    }
+
+    #[test]
+    fn a_live_take_stalls_after_two_seconds_without_a_frame() {
+        let base = Instant::now();
+        assert!(!is_stalled(Some(at(base, 1000)), at(base, 1064), true));
+        assert!(!is_stalled(Some(at(base, 1000)), at(base, 2999), true));
+        assert!(is_stalled(Some(at(base, 1000)), at(base, 3000), true));
+        assert!(is_stalled(Some(at(base, 1000)), at(base, 9000), true));
+    }
+
+    #[test]
+    fn each_frame_keeps_the_take_alive() {
+        let base = Instant::now();
+        assert!(!is_stalled(Some(at(base, 8000)), at(base, 9000), true));
+        assert!(
+            !is_stalled(Some(at(base, 9000)), at(base, 8990), true),
+            "a frame newer than the clock is not a stall"
+        );
+    }
+
+    #[test]
+    fn a_take_without_a_frame_time_does_not_stall() {
+        let base = Instant::now();
+        assert!(!is_stalled(None, at(base, 60_000), true));
+    }
+
+    #[test]
+    fn a_stream_that_worked_is_kept() {
+        assert!(!needs_new_stream(StreamOutcome::Worked));
+        assert!(!needs_new_stream(StreamOutcome::default()));
+    }
+
+    #[test]
+    fn a_stream_that_did_not_start_is_built_again() {
+        assert!(needs_new_stream(StreamOutcome::NoStart));
+    }
+
+    #[test]
+    fn a_stream_that_stalled_is_built_again() {
+        assert!(needs_new_stream(StreamOutcome::Stalled));
     }
 
     #[test]

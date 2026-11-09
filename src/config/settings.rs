@@ -252,7 +252,9 @@ pub struct AudioConfig {
     pub channels: u16,
     /// Audio buffer size in samples (power of 2, 64-8192)
     pub buffer_size: usize,
-    /// Optional specific audio device name (None uses system default)
+    /// Optional specific audio device name. None uses the system default; on
+    /// PipeWire, Hush follows a change of the default, because PipeWire moves
+    /// its stream. A set name keeps that device.
     pub device: Option<String>,
     /// A recording stops and transcribes after this long, with a warning a
     /// minute earlier; 0 disables the cap

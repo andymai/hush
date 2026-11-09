@@ -1,5 +1,6 @@
 use crate::logging::{audio as logging, RequestContext};
 use crate::Result;
+use anyhow::Context;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Host, Stream, StreamConfig};
 use parking_lot::Mutex;
@@ -16,20 +17,79 @@ const SAMPLES_PER_SECOND: usize = 16000; // 16kHz sample rate
 const PREALLOCATED_SAMPLES: usize = MAX_RECORDING_SECONDS * SAMPLES_PER_SECOND;
 
 pub struct AudioCapture {
+    host: Host,
+    /// The `audio.device` setting. Without it, the capture uses the default
+    /// input device.
+    configured: Option<String>,
     device: Device,
     config: StreamConfig,
     stream: Option<Stream>,
+    sink: Sink,
+    simulated_mode: bool,
+}
+
+/// What the stream callback writes to. A new stream shares it with the old one.
+#[derive(Clone)]
+struct Sink {
     buffer: Arc<Mutex<Vec<f32>>>,
     is_recording: Arc<AtomicBool>,
-    /// When the first audio of the current recording arrived
-    first_frame: Arc<Mutex<Option<Instant>>>,
-    simulated_mode: bool,
+    frames: Arc<Mutex<FrameTimes>>,
     /// Shared sender for amplitude updates - set via enable_amplitude_monitoring()
     amplitude_tx: Arc<Mutex<Option<mpsc::Sender<f32>>>>,
 }
 
+impl Sink {
+    fn new() -> Self {
+        Self {
+            buffer: Arc::new(Mutex::new(Vec::with_capacity(PREALLOCATED_SAMPLES))),
+            is_recording: Arc::new(AtomicBool::new(false)),
+            frames: Arc::new(Mutex::new(FrameTimes::default())),
+            amplitude_tx: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+/// When audio of the current recording arrived.
+#[derive(Debug, Default, Clone, Copy)]
+struct FrameTimes {
+    first: Option<Instant>,
+    last: Option<Instant>,
+}
+
 fn device_name_of(device: &Device) -> Option<String> {
     device.description().ok().map(|d| d.name().to_string())
+}
+
+fn open_stream(device: &Device, config: StreamConfig, sink: &Sink) -> Result<Stream> {
+    let sink = sink.clone();
+    device
+        .build_input_stream(
+            config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                if sink.is_recording.load(Ordering::Acquire) {
+                    sink.buffer.lock().extend_from_slice(data);
+                    if !data.is_empty() {
+                        let now = Instant::now();
+                        let mut frames = sink.frames.lock();
+                        frames.first.get_or_insert(now);
+                        frames.last = Some(now);
+                    }
+
+                    // Calculate and send amplitude for waveform visualization
+                    // Clone sender outside lock to avoid holding lock during send
+                    let tx_opt = sink.amplitude_tx.lock().clone();
+                    if let Some(tx) = tx_opt {
+                        let amplitude = calculate_rms_amplitude(data);
+                        let _ = tx.send(amplitude); // Ignore send errors (non-blocking)
+                    }
+                }
+            },
+            |err| {
+                error!("Audio stream error: {}", err);
+            },
+            None,
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to build input stream: {}", e))
 }
 
 /// Calculate RMS (Root Mean Square) amplitude from audio samples
@@ -150,6 +210,8 @@ impl AudioCapture {
                         warn!("No working audio devices found");
                         warn!("Audio capture will be simulated for development/testing");
                         return Ok(AudioCapture {
+                            host,
+                            configured: device_name.map(str::to_owned),
                             device,
                             config: StreamConfig {
                                 channels: 1,
@@ -157,11 +219,8 @@ impl AudioCapture {
                                 buffer_size: cpal::BufferSize::Fixed(1024),
                             },
                             stream: None,
-                            buffer: Arc::new(Mutex::new(Vec::with_capacity(PREALLOCATED_SAMPLES))),
-                            is_recording: Arc::new(AtomicBool::new(false)),
-                            first_frame: Arc::new(Mutex::new(None)),
+                            sink: Sink::new(),
                             simulated_mode: true,
-                            amplitude_tx: Arc::new(Mutex::new(None)),
                         });
                     },
                 }
@@ -181,57 +240,56 @@ impl AudioCapture {
             // Fall back to supported config but convert to our needs
         }
 
-        // Pre-allocate buffer to avoid reallocations during recording
-        let buffer = Arc::new(Mutex::new(Vec::with_capacity(PREALLOCATED_SAMPLES)));
-        let is_recording = Arc::new(AtomicBool::new(false));
-        let first_frame: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
-        let amplitude_tx: Arc<Mutex<Option<mpsc::Sender<f32>>>> = Arc::new(Mutex::new(None));
-
         // Pre-create the audio stream for faster recording start
         // Stream starts paused and is resumed on start_recording()
-        let buffer_clone = Arc::clone(&buffer);
-        let is_recording_clone = Arc::clone(&is_recording);
-        let first_frame_clone = Arc::clone(&first_frame);
-        let amplitude_tx_clone = Arc::clone(&amplitude_tx);
-
-        let stream = device
-            .build_input_stream(
-                config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if is_recording_clone.load(Ordering::Acquire) {
-                        buffer_clone.lock().extend_from_slice(data);
-                        if !data.is_empty() {
-                            first_frame_clone.lock().get_or_insert_with(Instant::now);
-                        }
-
-                        // Calculate and send amplitude for waveform visualization
-                        // Clone sender outside lock to avoid holding lock during send
-                        let tx_opt = amplitude_tx_clone.lock().clone();
-                        if let Some(tx) = tx_opt {
-                            let amplitude = calculate_rms_amplitude(data);
-                            let _ = tx.send(amplitude); // Ignore send errors (non-blocking)
-                        }
-                    }
-                },
-                |err| {
-                    error!("Audio stream error: {}", err);
-                },
-                None,
-            )
-            .map_err(|e| anyhow::anyhow!("Failed to build input stream: {}", e))?;
+        let sink = Sink::new();
+        let stream = open_stream(&device, config, &sink)?;
 
         info!("Audio stream pre-created (paused) for faster recording start");
 
         Ok(AudioCapture {
+            host,
+            configured: device_name.map(str::to_owned),
             device,
             config,
             stream: Some(stream),
-            buffer,
-            is_recording,
-            first_frame,
+            sink,
             simulated_mode: false,
-            amplitude_tx,
         })
+    }
+
+    /// Build a new input stream for `audio.device`, or for the default input
+    /// device when it is not set. When that fails, the old stream stays.
+    pub fn rebuild_stream(&mut self) {
+        if self.is_recording() {
+            return;
+        }
+        match self.open_configured() {
+            Ok((device, stream)) => {
+                let name = device_name_of(&device).unwrap_or_else(|| "Unknown".to_string());
+                info!(device = %name, "Built a new input stream for '{}'", name);
+                self.stream = Some(stream);
+                self.device = device;
+                self.simulated_mode = false;
+            },
+            Err(e) => warn!(
+                device = %self.get_device_name(),
+                "Could not build a new input stream, keeping the old one: {:#}",
+                e
+            ),
+        }
+    }
+
+    fn open_configured(&self) -> Result<(Device, Stream)> {
+        let device = match self.configured.as_deref() {
+            Some(name) => Self::find_device_by_name(&self.host, name)?,
+            None => self
+                .host
+                .default_input_device()
+                .context("No default input device")?,
+        };
+        let stream = open_stream(&device, self.config, &self.sink)?;
+        Ok((device, stream))
     }
 
     pub fn start_recording(&mut self) -> Result<()> {
@@ -242,7 +300,7 @@ impl AudioCapture {
         logging::log_recording_started(&ctx, &self.get_device_name());
 
         // Check if already recording
-        if self.is_recording.load(Ordering::Acquire) {
+        if self.is_recording() {
             warn!(
                 request_id = %ctx.request_id,
                 "Recording already in progress, ignoring start request"
@@ -252,13 +310,13 @@ impl AudioCapture {
 
         // Clear the buffer and mark as recording (single lock acquisition)
         let buffer_len_before = {
-            let mut buffer = self.buffer.lock();
+            let mut buffer = self.sink.buffer.lock();
             let len = buffer.len();
             buffer.clear();
             len
         };
-        *self.first_frame.lock() = None;
-        self.is_recording.store(true, Ordering::Release);
+        *self.sink.frames.lock() = FrameTimes::default();
+        self.sink.is_recording.store(true, Ordering::Release);
 
         debug!(
             request_id = %ctx.request_id,
@@ -272,7 +330,8 @@ impl AudioCapture {
                 request_id = %ctx.request_id,
                 "🧪 Using simulated audio recording for testing"
             );
-            *self.first_frame.lock() = Some(Instant::now());
+            // No `last`: a simulated take gets no frames, and must not stall.
+            self.sink.frames.lock().first = Some(Instant::now());
             return Ok(());
         }
 
@@ -300,7 +359,7 @@ impl AudioCapture {
             "🛑 Stopping audio recording"
         );
 
-        self.is_recording.store(false, Ordering::Release);
+        self.sink.is_recording.store(false, Ordering::Release);
 
         // Handle simulated mode with fake audio data
         if self.simulated_mode {
@@ -337,7 +396,7 @@ impl AudioCapture {
 
         // Extract recorded data from buffer using take() to avoid clone
         let recorded_data = {
-            let mut buffer = self.buffer.lock();
+            let mut buffer = self.sink.buffer.lock();
             let buffer_size = buffer.len();
             let data = std::mem::take(&mut *buffer);
 
@@ -366,13 +425,18 @@ impl AudioCapture {
     }
 
     pub fn is_recording(&self) -> bool {
-        self.is_recording.load(Ordering::Acquire)
+        self.sink.is_recording.load(Ordering::Acquire)
     }
 
     /// When the first audio of the current recording arrived. `None` while
     /// the source wakes up.
     pub fn first_frame_at(&self) -> Option<Instant> {
-        *self.first_frame.lock()
+        self.sink.frames.lock().first
+    }
+
+    /// When the latest audio of the current recording arrived.
+    pub fn last_frame_at(&self) -> Option<Instant> {
+        self.sink.frames.lock().last
     }
 
     pub fn get_device_name(&self) -> String {
@@ -387,14 +451,14 @@ impl AudioCapture {
     /// avoid resource leaks.
     pub fn enable_amplitude_monitoring(&mut self) -> mpsc::Receiver<f32> {
         let (tx, rx) = mpsc::channel();
-        *self.amplitude_tx.lock() = Some(tx);
+        *self.sink.amplitude_tx.lock() = Some(tx);
         rx
     }
 
     /// Disable amplitude monitoring and drop the sender
     /// This closes the channel and allows amplitude monitoring threads to exit cleanly
     pub fn disable_amplitude_monitoring(&mut self) {
-        *self.amplitude_tx.lock() = None;
+        *self.sink.amplitude_tx.lock() = None;
     }
 
     fn find_device_by_name(host: &Host, name: &str) -> Result<Device> {
