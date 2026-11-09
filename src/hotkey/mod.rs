@@ -26,6 +26,7 @@
 pub mod combination;
 pub mod evdev;
 pub mod gesture;
+pub mod modifiers;
 pub mod x11;
 
 use crate::Result;

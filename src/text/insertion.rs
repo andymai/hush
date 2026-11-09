@@ -4,19 +4,26 @@
 //! VM, and password field. Text the US-layout key map cannot express (accents,
 //! CJK, emoji) and very long text go through the clipboard: the previous
 //! clipboard is saved, the text is pasted with a uinput Ctrl+V, and the
-//! clipboard is restored.
+//! clipboard is restored if it still holds the text. Both paths first wait
+//! for the user to release Ctrl, Alt, Shift, and Super.
 
+use super::clipboard::{self, ClipboardBackend, Restore, Selection, Transcript};
+use super::clock::{Clock, SystemClock};
+use super::modifiers::{self, ModifierWait, PhysicalModifiers};
 use super::uinput_keyboard::UinputKeyboard;
 use super::window::{WindowInfo, WindowProvider};
 use super::InsertionMethod;
 use crate::config::settings::InsertionConfig;
 use crate::Result;
+use anyhow::Context;
 use std::thread;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
 /// Texts longer than this paste even when every character is typeable.
 pub const PASTE_THRESHOLD_CHARS: usize = 2000;
+/// A slow application reads the clipboard some time after the paste chord.
+pub const AFTER_PASTE: Duration = Duration::from_millis(500);
 
 /// The path a given text will take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +53,7 @@ pub fn choose_method(configured: InsertionMethod, text: &str, types_like_us: boo
 
 pub struct TextInserter {
     uinput: UinputKeyboard,
-    clipboard: Option<arboard::Clipboard>,
+    clipboard: Option<Box<dyn ClipboardBackend>>,
     windows: WindowProvider,
     config: InsertionConfig,
     types_like_us: bool,
@@ -62,23 +69,19 @@ impl TextInserter {
                 "uinput is not available; run `hush setup permissions` and try again"
             ));
         }
-        let clipboard = match arboard::Clipboard::new() {
-            Ok(clipboard) => Some(clipboard),
-            Err(e) => {
-                warn!("Clipboard unavailable, paste fallback disabled: {}", e);
-                None
-            },
-        };
+        let clipboard = clipboard::open();
         let windows = WindowProvider::detect();
         let types_like_us = super::layout::types_like_us();
         info!(
-            "Text insertion ready: {}, clipboard {}, window detection via {}",
+            "Text insertion ready: {}, clipboard restore {}, window detection via {}",
             if types_like_us {
                 "typed key by key"
             } else {
                 "pasted, because the keyboard layout is not plain US"
             },
-            if clipboard.is_some() { "ready" } else { "off" },
+            clipboard
+                .as_ref()
+                .map_or("off", |clipboard| clipboard.describe()),
             windows.name()
         );
         Ok(Self {
@@ -130,6 +133,7 @@ impl TextInserter {
     }
 
     fn type_with_uinput(&mut self, text: &str) -> Result<()> {
+        wait_for_modifiers();
         self.uinput.set_typing_delay(self.config.typing_delay_ms);
         self.uinput.type_text(text)?;
         info!("Text inserted via uinput ({} chars)", text.chars().count());
@@ -137,23 +141,25 @@ impl TextInserter {
     }
 
     fn paste(&mut self, text: &str) -> Result<()> {
+        let clock = SystemClock;
         let clipboard = self
             .clipboard
-            .as_mut()
+            .as_deref_mut()
             .ok_or_else(|| anyhow::anyhow!("clipboard unavailable"))?;
-        let previous = clipboard.get_text().ok();
+        let transcript = Transcript::new(text);
+        let selection = Selection::Clipboard;
+        let saved = clipboard::snapshot(clipboard, selection, &clock);
         clipboard
-            .set_text(text.to_string())
-            .map_err(|e| anyhow::anyhow!("failed to set clipboard: {}", e))?;
-        thread::sleep(Duration::from_millis(50));
-        self.uinput.send_paste_shortcut()?;
-        // Give the application time to read the selection before it changes.
-        thread::sleep(Duration::from_millis(150));
-        if let Some(previous) = previous {
-            if let Err(e) = clipboard.set_text(previous) {
-                warn!("Could not restore the previous clipboard: {}", e);
-            }
+            .offer(selection, transcript.formats())
+            .context("failed to set clipboard")?;
+        wait_for_modifiers();
+        let sent = self.uinput.send_paste_shortcut();
+        if sent.is_ok() {
+            clock.sleep(AFTER_PASTE);
         }
+        let outcome = clipboard::restore(clipboard, selection, saved, &transcript, &clock);
+        log_restore(selection, &outcome);
+        sent?;
         info!(
             "Text inserted via clipboard ({} chars)",
             text.chars().count()
@@ -165,16 +171,17 @@ impl TextInserter {
     pub fn copy_to_clipboard(&mut self, text: &str) -> Result<()> {
         let clipboard = self
             .clipboard
-            .as_mut()
+            .as_deref_mut()
             .ok_or_else(|| anyhow::anyhow!("clipboard unavailable"))?;
         clipboard
-            .set_text(text.to_string())
-            .map_err(|e| anyhow::anyhow!("failed to set clipboard: {}", e))
+            .offer(Selection::Clipboard, clipboard::text_formats(text))
+            .context("failed to set clipboard")
     }
 
     /// Undo the last insertion by sending backspaces.
     pub fn undo_last_insertion(&mut self, char_count: usize) -> Result<()> {
         info!("Undoing last insertion ({} chars)", char_count);
+        wait_for_modifiers();
         for _ in 0..char_count {
             self.uinput.send_backspace()?;
             thread::sleep(Duration::from_millis(self.config.typing_delay_ms));
@@ -187,6 +194,37 @@ impl TextInserter {
         thread::sleep(Duration::from_millis(500));
         self.insert_text("\nThis includes: special-chars, numbers123, and symbols!@#")?;
         Ok(())
+    }
+}
+
+fn wait_for_modifiers() {
+    match modifiers::wait_for_release(&PhysicalModifiers, &SystemClock) {
+        ModifierWait::Released { waited } if !waited.is_zero() => {
+            debug!("Waited {:?} for the modifier keys to come up", waited)
+        },
+        ModifierWait::Released { .. } => {},
+        ModifierWait::GaveUp => warn!(
+            "A modifier key is still down after {:?}; inserting anyway",
+            modifiers::CAP
+        ),
+        ModifierWait::Unknown => debug!("Modifier key state unknown"),
+    }
+}
+
+fn log_restore(selection: Selection, outcome: &Restore) {
+    match outcome {
+        Restore::Restored => debug!("Restored the previous {}", selection),
+        Restore::Cleared => debug!("Cleared the {}, which was empty before", selection),
+        Restore::Kept(why) => warn!("The {} keeps the transcript: {}", selection, why),
+        Restore::Replaced => info!(
+            "The {} changed after the paste; Hush keeps the new content",
+            selection
+        ),
+        Restore::CheckFailed(e) => warn!(
+            "Could not check the {} after the paste ({}); it stays as it is",
+            selection, e
+        ),
+        Restore::Failed(e) => warn!("Could not restore the {}: {}", selection, e),
     }
 }
 

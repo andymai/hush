@@ -113,6 +113,7 @@ pub async fn checks() -> Vec<Check> {
     checks.push(microphone_check(&config));
     checks.push(hotkey_check(&config));
     checks.push(window_check());
+    checks.push(clipboard_check(crate::text::clipboard::support()));
     checks.push(llm_check(&config).await);
     checks.push(tray_check(&config));
     checks.push(updates_check(&config));
@@ -291,6 +292,23 @@ fn window_check() -> Check {
                 "tone by app falls back to plain prose",
             ),
         },
+    }
+}
+
+fn clipboard_check(support: crate::text::clipboard::Support) -> Check {
+    use crate::text::clipboard::Support;
+    match support {
+        Support::DataControl => Check::ok(
+            "Clipboard",
+            "a paste puts back every format (Wayland data-control)",
+        ),
+        Support::NoDataControl => Check::warn(
+            "Clipboard",
+            "a paste puts back only text: the compositor has no data-control \
+             protocol (GNOME has none)",
+            "images and rich text on the clipboard are lost when Hush pastes",
+        ),
+        Support::X11 => Check::ok("Clipboard", "a paste puts back the text (X11)"),
     }
 }
 
@@ -487,6 +505,16 @@ mod tests {
         let check = hotkey_check(&config);
         assert_eq!(check.level, Level::Fail);
         assert!(check.detail.contains("Nope"));
+    }
+
+    #[test]
+    fn a_compositor_without_data_control_is_a_warning() {
+        use crate::text::clipboard::Support;
+        assert_eq!(clipboard_check(Support::DataControl).level, Level::Ok);
+        assert_eq!(clipboard_check(Support::X11).level, Level::Ok);
+        let gnome = clipboard_check(Support::NoDataControl);
+        assert_eq!(gnome.level, Level::Warn);
+        assert!(gnome.detail.contains("GNOME"));
     }
 
     #[test]

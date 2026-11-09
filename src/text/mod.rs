@@ -3,7 +3,8 @@
 //! [`TextInserter`] types through `/dev/uinput`, which reaches every
 //! application, VM, and password field on X11 and Wayland. Text the US key
 //! map cannot express, or very long text, is pasted through the clipboard
-//! with a uinput `Ctrl+V` and the clipboard is restored afterwards.
+//! with a uinput `Ctrl+V`. The [`clipboard`] module saves the old clipboard
+//! before the paste and puts it back afterwards.
 //! [`WindowProvider`] names the focused window when the compositor offers
 //! that; insertion never depends on it.
 //!
@@ -31,11 +32,17 @@ pub enum InsertionMethod {
 }
 
 #[cfg(target_os = "linux")]
+pub mod clipboard;
+#[cfg(target_os = "linux")]
+pub mod clock;
+#[cfg(target_os = "linux")]
 pub mod insertion;
 #[cfg(target_os = "linux")]
 pub mod kwin;
 #[cfg(target_os = "linux")]
 pub mod layout;
+#[cfg(target_os = "linux")]
+pub mod modifiers;
 #[cfg(target_os = "linux")]
 pub mod selection;
 #[cfg(target_os = "linux")]
