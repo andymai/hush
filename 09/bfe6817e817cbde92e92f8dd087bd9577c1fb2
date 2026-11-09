@@ -1,0 +1,20 @@
+.github/ISSUE_TEMPLATE/beta_report.yml
+  s_8c30bad7701dbb::t_2aa9fb984320e4 1-67,69-81
+  s_8c30bad7701dbb::t_641e3f598b619e 68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "09bfe6817e817cbde92e92f8dd087bd9577c1fb2",
+  "prompts": {},
+  "sessions": {
+    "s_8c30bad7701dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf6bbec0-c5d2-46fa-8e5b-d526f9012d5d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
