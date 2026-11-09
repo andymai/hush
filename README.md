@@ -142,6 +142,7 @@ Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another co
 | `llm.polish` | Rewrite every transcript with the LLM; Command Mode works either way | true |
 | `profiles.enabled` | Adapt output to the focused application; per-profile keys add window classes | true |
 | `audio.max_recording_secs` | Stop and transcribe after this long, with a warning a minute before; 0 disables | 600 |
+| `audio.silence_stop_secs` | Stop a hands-free recording after this many seconds of silence that follow speech; 0 disables | 0 |
 | `audio.device` | Microphone name from `hush status --devices` | system default |
 | `feedback.audio_enabled` | Tones on start, stop, cancel, and the cap warning | true |
 | `insertion.method` | `auto` (type, then paste what uinput cannot type), `uinput`, or `clipboard` | auto |

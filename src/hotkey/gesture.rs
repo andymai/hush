@@ -44,6 +44,11 @@ impl GestureDetector {
         matches!(self.state, State::Locked)
     }
 
+    /// The key is down and the recording ends when it comes up.
+    pub fn is_holding(&self) -> bool {
+        matches!(self.state, State::Holding { .. })
+    }
+
     /// When the tap window closes; the caller wakes up then and calls
     /// [`expire`](Self::expire).
     pub fn deadline(&self) -> Option<Instant> {
@@ -126,6 +131,24 @@ mod tests {
 
     fn at(base: Instant, ms: u64) -> Instant {
         base + Duration::from_millis(ms)
+    }
+
+    #[test]
+    fn holding_is_only_a_key_down_session() {
+        let base = Instant::now();
+        let mut g = GestureDetector::new(HotkeyMode::Toggle, TAP);
+        g.feed(HotkeyEvent::Pressed, at(base, 0));
+        assert!(g.is_holding());
+        g.feed(HotkeyEvent::Released, at(base, 100));
+        assert!(g.is_locked());
+        assert!(!g.is_holding());
+
+        let mut g = GestureDetector::new(HotkeyMode::Hold, TAP);
+        g.feed(HotkeyEvent::Pressed, at(base, 0));
+        g.feed(HotkeyEvent::Released, at(base, 100));
+        g.feed(HotkeyEvent::Pressed, at(base, 200));
+        assert!(g.is_locked());
+        assert!(!g.is_holding());
     }
 
     #[test]
