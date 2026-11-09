@@ -1,0 +1,19 @@
+.husky/commit-msg
+  s_8c30bad7701dbb::t_a9d6a458cfb928 3-5,8-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "269c9c9bf1e1c46bc9c5c230d8ce90d95b1ffd8a",
+  "prompts": {},
+  "sessions": {
+    "s_8c30bad7701dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf6bbec0-c5d2-46fa-8e5b-d526f9012d5d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
