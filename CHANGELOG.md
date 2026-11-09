@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/andymai/hush/compare/v0.14.0...v0.15.0) (2026-11-09)
+
+
+### Features
+
+* **hotkey:** warn about shared chords, AltGr, and character keys ([#269](https://github.com/andymai/hush/issues/269)) ([8e6a2b6](https://github.com/andymai/hush/commit/8e6a2b68a358a475e045d5f7156c9254f0f8a365))
+
 ## [0.14.0](https://github.com/andymai/hush/compare/v0.13.0...v0.14.0) (2026-11-09)
 
 
