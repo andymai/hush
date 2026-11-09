@@ -13,6 +13,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
+use std::path::Path;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
@@ -699,14 +700,17 @@ pub fn choose_provider(
     }
 }
 
-/// Probe what the config needs and pick the provider.
-pub async fn resolve_provider(config: &LlmConfig) -> LlmProvider {
+/// Probe what the config needs and pick the provider. The server key comes
+/// from the environment or `env_file` (`~/.config/hush/.env`).
+pub async fn resolve_provider(config: &LlmConfig, env_file: &Path) -> LlmProvider {
     let ollama_ok = match config.provider {
         LlmSetting::Auto | LlmSetting::Ollama => ollama_reachable(&config.ollama_url).await,
         _ => false,
     };
     let key = std::env::var("ANTHROPIC_API_KEY").ok();
-    let server_key = config.server_key_var().and_then(keys::api_key);
+    let server_key = config
+        .server_key_var()
+        .and_then(|var| keys::api_key_in(env_file, var));
     choose_provider(config, ollama_ok, key, server_key)
 }
 

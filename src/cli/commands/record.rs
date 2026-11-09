@@ -1,4 +1,4 @@
-use crate::config::keys;
+use crate::config::{keys, paths};
 use crate::text_processing::{
     DomainVocabulary, EditingMode, LlmProvider, ProcessingConfig, TextProcessor,
 };
@@ -98,7 +98,12 @@ pub async fn handle_record(
     if !print_only {
         println!("🗣️ Transcribing...");
         keys::load_env_files();
-        let transcriber = SpeechToText::from_config(&config.transcription).await?;
+        let transcriber = SpeechToText::from_config(
+            &config.transcription,
+            &paths::models_dir(),
+            &keys::env_file(),
+        )
+        .await?;
         info!("Transcriber: {}", transcriber.describe());
 
         // Initialize text processor

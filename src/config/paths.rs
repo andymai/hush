@@ -106,6 +106,7 @@ mod tests {
 
     #[test]
     fn config_path_honors_override() {
+        crate::test_support::in_temp_home!(config_path_honors_override);
         let dir = tempfile::tempdir().unwrap();
         let custom = dir.path().join("custom.toml");
         std::env::set_var(CONFIG_ENV, &custom);

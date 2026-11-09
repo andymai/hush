@@ -6,7 +6,6 @@
 //! that echoes the prompt is made again without the prompt, and text that
 //! Whisper invents for silence is dropped.
 
-use crate::config::paths;
 use crate::config::settings::TranscriptionConfig;
 use crate::transcription::cloud::CloudTranscriber;
 use crate::transcription::cpu;
@@ -14,7 +13,7 @@ use crate::transcription::guard::{self, EchoChoice};
 use crate::transcription::models::{self, ModelManager, ModelSize};
 use crate::transcription::whisper::{TranscriptionResult, WhisperTranscriber};
 use crate::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
 /// A prompt longer than this is cut when no tokenizer can count it. Whisper
@@ -33,19 +32,25 @@ enum Backend {
 }
 
 impl SpeechToText {
-    /// Load the local model, or prepare the client for the chosen service.
-    /// Call [`crate::config::keys::load_env_files`] first when the key may
-    /// live in `./.env`.
-    pub async fn from_config(config: &TranscriptionConfig) -> Result<Self> {
+    /// Load the local model from `models_dir`, or prepare the client for the
+    /// chosen service with its key from the environment or `env_file`. Call
+    /// [`crate::config::keys::load_env_files`] first when the key may live
+    /// in `./.env`.
+    pub async fn from_config(
+        config: &TranscriptionConfig,
+        models_dir: &Path,
+        env_file: &Path,
+    ) -> Result<Self> {
         let drop_phrases = guard::drop_list(config.drop_phrases.as_deref());
         if config.backend.is_cloud() {
             return Ok(Self {
-                backend: Backend::Cloud(CloudTranscriber::from_config(config)?),
+                backend: Backend::Cloud(CloudTranscriber::from_config(config, env_file)?),
                 drop_phrases,
             });
         }
         cpu::ensure_supported()?;
-        let mut whisper = WhisperTranscriber::new(&local_model_path(config), config.use_gpu)
+        let model = local_model_path(config, models_dir);
+        let mut whisper = WhisperTranscriber::new(&model, config.use_gpu)
             .await
             .map_err(|e| {
                 anyhow::anyhow!(
@@ -56,7 +61,7 @@ impl SpeechToText {
             })?
             .with_language(&config.language);
         if config.vad {
-            load_vad(&mut whisper, &config.model_size);
+            load_vad(&mut whisper, models_dir, &config.model_size);
         }
         Ok(Self {
             backend: Backend::Local(whisper),
@@ -168,8 +173,8 @@ impl SpeechToText {
 
 /// Load the Silero model when it is downloaded. Without it, Whisper gets the
 /// whole take, and the log says once how to get the model.
-fn load_vad(whisper: &mut WhisperTranscriber, model_size: &str) {
-    let path = models::vad_model_path();
+fn load_vad(whisper: &mut WhisperTranscriber, models_dir: &Path, model_size: &str) {
+    let path = models::vad_model_path(models_dir);
     if !path.is_file() {
         warn!(
             "Voice activity detection is off: {} is missing. Get it with: hush models download {}",
@@ -188,13 +193,13 @@ fn load_vad(whisper: &mut WhisperTranscriber, model_size: &str) {
 
 /// The configured model file, or the catalogue's copy of `model_size` when
 /// that file is absent.
-fn local_model_path(config: &TranscriptionConfig) -> PathBuf {
-    let configured = config.model_path();
+fn local_model_path(config: &TranscriptionConfig, models_dir: &Path) -> PathBuf {
+    let configured = config.model_path_in(models_dir);
     if configured.exists() {
         return configured;
     }
     let size: ModelSize = config.model_size.parse().unwrap_or(ModelSize::Base);
-    ModelManager::new(paths::models_dir())
+    ModelManager::new(models_dir)
         .ok()
         .and_then(|manager| manager.get_model_path(&size))
         .unwrap_or(configured)
@@ -205,13 +210,20 @@ mod tests {
     use super::*;
     use crate::config::settings::TranscriptionBackend;
     use crate::config::Config;
+    use tempfile::TempDir;
+
+    async fn engine_in(config: &TranscriptionConfig, home: &TempDir) -> Result<SpeechToText> {
+        let models = home.path().join("models");
+        SpeechToText::from_config(config, &models, &home.path().join(".env")).await
+    }
 
     #[tokio::test]
     async fn a_cloud_backend_needs_its_key_and_never_loads_the_model() {
+        let home = TempDir::new().unwrap();
         let mut config = Config::defaults().unwrap().transcription;
         config.backend = TranscriptionBackend::Groq;
         config.model_path = Some("/nonexistent/ggml-base.bin".into());
-        match SpeechToText::from_config(&config).await {
+        match engine_in(&config, &home).await {
             Ok(engine) => {
                 assert!(engine.is_cloud(), "a key in the environment was used");
                 assert!(engine.describe().contains("audio leaves this machine"));
@@ -234,7 +246,7 @@ mod tests {
         config.server_url = "http://127.0.0.1:9/v1".into();
         config.server_model = "whisper-1".into();
         config.model_path = Some("/nonexistent/ggml-base.bin".into());
-        let engine = SpeechToText::from_config(&config).await.unwrap();
+        let engine = engine_in(&config, &TempDir::new().unwrap()).await.unwrap();
         assert!(engine.is_cloud());
         assert_eq!(
             engine.describe(),
@@ -248,7 +260,7 @@ mod tests {
         config.backend = TranscriptionBackend::OpenAiCompatible;
         config.server_url = "http://127.0.0.1:1".into();
         config.server_model = "whisper-1".into();
-        let engine = SpeechToText::from_config(&config).await.unwrap();
+        let engine = engine_in(&config, &TempDir::new().unwrap()).await.unwrap();
         let message = engine
             .transcribe_with_prompt(&[0.1; 160], 16_000, None)
             .await
@@ -260,13 +272,11 @@ mod tests {
 
     #[tokio::test]
     async fn the_local_backend_names_the_download_when_the_model_is_missing() {
+        let home = TempDir::new().unwrap();
         let mut config = Config::defaults().unwrap().transcription;
         config.model_path = Some("/nonexistent/ggml-base.bin".into());
         config.model_size = "large-v3".into();
-        if local_model_path(&config).exists() {
-            return;
-        }
-        let message = SpeechToText::from_config(&config)
+        let message = engine_in(&config, &home)
             .await
             .err()
             .map(|e| e.to_string())

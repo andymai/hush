@@ -55,6 +55,7 @@ mod tests {
 
     #[test]
     fn test_adapter_creation() {
+        crate::test_support::in_temp_home!(test_adapter_creation);
         if let Ok(adapter) = TextInserterAdapter::new() {
             assert_eq!(adapter.output_method(), "uinput");
         }
@@ -62,6 +63,7 @@ mod tests {
 
     #[test]
     fn test_adapter_implements_trait() {
+        crate::test_support::in_temp_home!(test_adapter_implements_trait);
         let _can_box: Result<Box<dyn TextOutput>> =
             TextInserterAdapter::new().map(|adapter| Box::new(adapter) as Box<dyn TextOutput>);
     }

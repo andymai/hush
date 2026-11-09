@@ -10,7 +10,7 @@ use anyhow::Result;
 use serde_json::json;
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::System;
 use tracing::{Event, Level, Subscriber};
@@ -78,6 +78,15 @@ pub struct PerformanceMetrics {
 
 impl PerformanceMetrics {
     pub fn collect() -> Self {
+        let cache = crate::config::paths::cache_dir();
+        let models = crate::config::paths::models_dir();
+        let logs = crate::config::paths::data_dir().join("logs");
+        Self::collect_in(&[cache.as_path(), models.as_path(), logs.as_path()])
+    }
+
+    /// [`Self::collect`] with `folders` as the folders whose size counts as
+    /// disk usage, in place of the cache, models, and logs folders.
+    pub fn collect_in(folders: &[&Path]) -> Self {
         let (cpu_usage, memory_usage_mb) = System::new_all().map_or((0.0, 0), |mut system| {
             system.refresh_all();
             let memory_usage_mb = system
@@ -87,8 +96,7 @@ impl PerformanceMetrics {
             (system.global_cpu_usage(), memory_usage_mb)
         });
 
-        // Calculate disk usage for hush cache directory
-        let disk_usage_mb = Self::calculate_disk_usage();
+        let disk_usage_mb = Self::calculate_disk_usage(folders);
 
         // Count open file descriptors (Linux only)
         let open_files = Self::count_open_files();
@@ -105,33 +113,15 @@ impl PerformanceMetrics {
         }
     }
 
-    fn calculate_disk_usage() -> u64 {
-        // Calculate disk usage for hush cache directories
-        let mut total_size = 0u64;
-
-        if let Some(cache_dir) = dirs::cache_dir() {
-            let hush_cache = cache_dir.join("hush");
-            if hush_cache.exists() {
-                total_size += Self::dir_size(&hush_cache).unwrap_or(0);
-            }
-        }
-
-        let models_dir = crate::config::paths::models_dir();
-        if models_dir.exists() {
-            total_size += Self::dir_size(&models_dir).unwrap_or(0);
-        }
-
-        if let Some(data_dir) = dirs::data_local_dir() {
-            let logs_dir = data_dir.join("hush/logs");
-            if logs_dir.exists() {
-                total_size += Self::dir_size(&logs_dir).unwrap_or(0);
-            }
-        }
-
-        total_size / (1024 * 1024) // Convert to MB
+    fn calculate_disk_usage(folders: &[&Path]) -> u64 {
+        let total_size: u64 = folders
+            .iter()
+            .map(|folder| Self::dir_size(folder).unwrap_or(0))
+            .sum();
+        total_size / (1024 * 1024)
     }
 
-    fn dir_size(path: &PathBuf) -> Result<u64> {
+    fn dir_size(path: &Path) -> Result<u64> {
         let mut size = 0u64;
         if path.is_dir() {
             for entry in std::fs::read_dir(path)? {
@@ -617,9 +607,11 @@ mod tests {
 
     #[test]
     fn test_performance_metrics_collection() {
-        let metrics = PerformanceMetrics::collect();
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("model.bin"), vec![0u8; 2 * 1024 * 1024]).unwrap();
+        let metrics = PerformanceMetrics::collect_in(&[dir.path(), &dir.path().join("missing")]);
         assert!(metrics.cpu_usage >= 0.0);
-        // Memory usage might be 0 if process not found, which is ok for tests
+        assert_eq!(metrics.disk_usage_mb, 2);
     }
 
     #[tokio::test]

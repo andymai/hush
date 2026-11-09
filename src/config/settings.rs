@@ -440,6 +440,11 @@ impl TranscriptionConfig {
     /// The model file to load: the explicit path when set, otherwise the
     /// catalogue file for `model_size` in the models directory.
     pub fn model_path(&self) -> PathBuf {
+        self.model_path_in(&paths::models_dir())
+    }
+
+    /// [`Self::model_path`] with `models_dir` in place of the models directory.
+    pub fn model_path_in(&self, models_dir: &Path) -> PathBuf {
         match &self.model_path {
             Some(path) => path.clone(),
             None => {
@@ -448,7 +453,7 @@ impl TranscriptionConfig {
                     .parse::<ModelSize>()
                     .map(|size| size.filename())
                     .unwrap_or_else(|_| format!("ggml-{}.bin", self.model_size));
-                paths::models_dir().join(filename)
+                models_dir.join(filename)
             },
         }
     }
@@ -947,25 +952,30 @@ model_size = "small"
 
     #[test]
     fn model_path_is_derived_from_the_catalogue() {
+        let models = Path::new("/models");
         let mut config = Config::defaults().unwrap();
         config.transcription.model_size = "large".into();
-        assert!(config
-            .transcription
-            .model_path()
-            .ends_with("ggml-large-v1.bin"));
+        assert_eq!(
+            config.transcription.model_path_in(models),
+            models.join("ggml-large-v1.bin")
+        );
 
         config.transcription.model_path = Some(PathBuf::from("/tmp/custom.bin"));
         assert_eq!(
-            config.transcription.model_path(),
+            config.transcription.model_path_in(models),
             PathBuf::from("/tmp/custom.bin")
         );
     }
 
     #[test]
     fn empty_model_path_falls_back_to_the_catalogue() {
+        let models = Path::new("/models");
         let config = Config::parse_over_defaults("[transcription]\nmodel_path = \"\"\n").unwrap();
         assert!(config.transcription.model_path.is_none());
-        assert!(config.transcription.model_path().ends_with("ggml-base.bin"));
+        assert_eq!(
+            config.transcription.model_path_in(models),
+            models.join("ggml-base.bin")
+        );
     }
 
     #[test]

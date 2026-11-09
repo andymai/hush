@@ -5,15 +5,20 @@ use super::paths;
 use parking_lot::Mutex;
 use std::collections::{BTreeSet, HashSet};
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 static LOADED: Mutex<BTreeSet<OsString>> = Mutex::new(BTreeSet::new());
+
+/// `~/.config/hush/.env`
+pub fn env_file() -> PathBuf {
+    paths::config_dir().join(".env")
+}
 
 /// Load `~/.config/hush/.env` (installed daemons) and `./.env` (source
 /// checkouts) into the environment. A variable that is already set wins.
 pub fn load_env_files() {
     load_with(|| {
-        let _ = dotenvy::from_path(paths::config_dir().join(".env"));
+        let _ = dotenvy::from_path(env_file());
         let _ = dotenvy::dotenv();
     });
 }
@@ -40,8 +45,13 @@ pub(crate) fn load_with(load: impl FnOnce()) {
 /// `~/.config/hush/.env`, when it is set and not blank. The file is read
 /// each time, so a key added while a window is open is found.
 pub fn api_key(var: &str) -> Option<String> {
+    api_key_in(&env_file(), var)
+}
+
+/// [`api_key`] with `env_file` in place of `~/.config/hush/.env`.
+pub fn api_key_in(env_file: &Path, var: &str) -> Option<String> {
     let from_env = std::env::var(var).ok().filter(|key| !key.trim().is_empty());
-    from_env.or_else(|| from_file(&paths::config_dir().join(".env"), var))
+    from_env.or_else(|| from_file(env_file, var))
 }
 
 fn from_file(path: &Path, var: &str) -> Option<String> {

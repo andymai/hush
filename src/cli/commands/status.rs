@@ -9,6 +9,7 @@ use crate::{AudioCapture, Config};
 /// Displays system status including configuration, devices, and component health.
 use anyhow::Result;
 use serde::Serialize;
+use std::path::Path;
 
 /// Handle the status command
 ///
@@ -100,9 +101,11 @@ pub struct StatusReport {
 
 impl StatusReport {
     /// `reply` is the daemon's status reply, `None` when no daemon runs.
+    /// A model without an explicit path is looked for in `models_dir`.
     pub fn new(
         reply: Option<&DaemonResponse>,
         config: Result<Config>,
+        models_dir: &Path,
         gpu: &GpuAvailability,
         devices: Vec<String>,
     ) -> Self {
@@ -127,7 +130,7 @@ impl StatusReport {
             }),
             model_path: transcription
                 .filter(|t| !t.backend.is_cloud())
-                .map(|t| t.model_path().display().to_string()),
+                .map(|t| t.model_path_in(models_dir).display().to_string()),
             use_gpu: transcription.map(|t| t.use_gpu),
             gpu: gpu.available.then(|| gpu.device_name.clone()),
             gpu_type: gpu.gpu_type.to_string().to_lowercase(),
@@ -149,6 +152,7 @@ pub async fn handle_status_json() -> Result<()> {
     let report = StatusReport::new(
         reply.as_ref(),
         Config::load(),
+        &crate::config::paths::models_dir(),
         GpuAvailability::detect(),
         AudioCapture::list_devices().unwrap_or_default(),
     );
@@ -180,6 +184,7 @@ mod tests {
         let report = StatusReport::new(
             Some(&reply),
             Config::defaults(),
+            Path::new("/models"),
             &cpu(),
             vec!["Built-in Microphone".to_string()],
         );
@@ -221,11 +226,18 @@ mod tests {
         assert_eq!(value["gpu"], serde_json::Value::Null);
         assert_eq!(value["gpu_type"], "cpu");
         assert_eq!(value["hotkey"], "RightAlt");
+        assert_eq!(value["model_path"], "/models/ggml-base.bin");
     }
 
     #[test]
     fn json_status_without_a_daemon_or_config() {
-        let report = StatusReport::new(None, Err(anyhow::anyhow!("bad toml")), &cpu(), vec![]);
+        let report = StatusReport::new(
+            None,
+            Err(anyhow::anyhow!("bad toml")),
+            Path::new("/models"),
+            &cpu(),
+            vec![],
+        );
         assert_eq!(report.state, "stopped");
         assert!(!report.running);
         assert_eq!(report.model_state, None);
@@ -235,12 +247,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_status_command_runs() {
-        // This is a basic smoke test - the command should not panic
-        // Actual functionality depends on system configuration
-        let result = handle_status(false, false, false).await;
-
-        // We don't assert success since it depends on system setup
-        // but we verify it doesn't panic
-        let _ = result;
+        crate::test_support::in_temp_home!(test_status_command_runs);
+        // In an empty home no daemon runs, so only a panic fails the test.
+        let _ = handle_status(false, false, false).await;
     }
 }
