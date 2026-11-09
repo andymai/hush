@@ -1,10 +1,10 @@
 //! When Whisper uses the CPU in a GPU build.
 //!
 //! At login, the graphics driver can start after Hush. ggml looks for the
-//! GPU only once in each process, so the first model load waits a short time
-//! for a render node. When the GPU fails a take, Hush writes the GPU and its
-//! driver to a file in the state folder. Later starts use the CPU on that GPU
-//! until the driver changes.
+//! GPU only once in each process, so in the first minutes after boot, the
+//! first model load waits a short time for a render node. When the GPU fails
+//! a take, Hush writes the GPU and its driver to a file in the state folder.
+//! Later starts use the CPU on that GPU until the driver changes.
 
 use crate::config::paths;
 use crate::transcription::device::GpuAvailability;
@@ -22,16 +22,41 @@ pub const GPU_BUILD: bool = cfg!(any(feature = "cuda", feature = "vulkan"));
 const RENDER_NODES: &str = "/dev/dri";
 const RENDER_NODE_WAIT: Duration = Duration::from_secs(5);
 const RENDER_NODE_POLL: Duration = Duration::from_millis(250);
+/// The graphics driver can start after Hush only this soon after boot.
+const BOOT_WINDOW: Duration = Duration::from_secs(180);
 
+const UPTIME: &str = "/proc/uptime";
 const NVIDIA_VERSION: &str = "/sys/module/nvidia/version";
 const KERNEL_RELEASE: &str = "/proc/sys/kernel/osrelease";
 
 static FAILED_THIS_SESSION: AtomicBool = AtomicBool::new(false);
 
 /// Whether the model load waits for a render node. ggml looks for the GPU
-/// only once, so a wait after that look cannot help.
-pub fn should_wait(gpu_build: bool, use_gpu: bool, detected: bool, render_node: bool) -> bool {
-    gpu_build && use_gpu && !detected && !render_node
+/// only once, so a wait after that look cannot help. A machine that booted
+/// a while ago, or with an unknown uptime, does not wait: a VM or server
+/// without a render node would wait at each start.
+pub fn should_wait(
+    gpu_build: bool,
+    use_gpu: bool,
+    detected: bool,
+    render_node: bool,
+    uptime: Option<Duration>,
+) -> bool {
+    gpu_build
+        && use_gpu
+        && !detected
+        && !render_node
+        && uptime.is_some_and(|uptime| uptime < BOOT_WINDOW)
+}
+
+/// The first field of `/proc/uptime`: seconds since boot.
+fn parse_uptime(text: &str) -> Option<Duration> {
+    let seconds: f64 = text.split_whitespace().next()?.parse().ok()?;
+    Duration::try_from_secs_f64(seconds).ok()
+}
+
+fn uptime() -> Option<Duration> {
+    parse_uptime(&std::fs::read_to_string(UPTIME).ok()?)
 }
 
 /// Wait up to 5 seconds for a render node, when [`should_wait`] says so.
@@ -43,6 +68,7 @@ pub async fn wait_for_gpu(use_gpu: bool) {
         use_gpu,
         GpuAvailability::is_detected(),
         has_render_node(dir),
+        uptime(),
     ) {
         return;
     }
@@ -229,13 +255,49 @@ mod tests {
         }
     }
 
+    const JUST_BOOTED: Option<Duration> = Some(Duration::from_secs(20));
+
     #[test]
     fn only_a_gpu_build_without_a_render_node_waits() {
-        assert!(should_wait(true, true, false, false));
-        assert!(!should_wait(true, true, false, true), "the node is there");
-        assert!(!should_wait(true, true, true, false), "ggml looked already");
-        assert!(!should_wait(true, false, false, false), "use_gpu is off");
-        assert!(!should_wait(false, true, false, false), "a CPU-only build");
+        assert!(should_wait(true, true, false, false, JUST_BOOTED));
+        assert!(
+            !should_wait(true, true, false, true, JUST_BOOTED),
+            "the node is there"
+        );
+        assert!(
+            !should_wait(true, true, true, false, JUST_BOOTED),
+            "ggml looked already"
+        );
+        assert!(
+            !should_wait(true, false, false, false, JUST_BOOTED),
+            "use_gpu is off"
+        );
+        assert!(
+            !should_wait(false, true, false, false, JUST_BOOTED),
+            "a CPU-only build"
+        );
+    }
+
+    #[test]
+    fn only_a_machine_that_booted_less_than_180_s_ago_waits() {
+        let wait = |uptime| should_wait(true, true, false, false, uptime);
+        assert!(wait(Some(Duration::ZERO)));
+        assert!(wait(Some(Duration::from_millis(179_999))));
+        assert!(!wait(Some(Duration::from_secs(180))), "the limit");
+        assert!(!wait(Some(Duration::from_secs(86_400))), "a VM or server");
+        assert!(!wait(None), "an unknown uptime");
+    }
+
+    #[test]
+    fn the_uptime_is_the_first_field_of_proc_uptime() {
+        assert_eq!(
+            parse_uptime("42.57 160.12\n"),
+            Some(Duration::from_secs_f64(42.57))
+        );
+        assert_eq!(parse_uptime("12345 1\n"), Some(Duration::from_secs(12_345)));
+        assert_eq!(parse_uptime(""), None);
+        assert_eq!(parse_uptime("soon 1"), None);
+        assert_eq!(parse_uptime("-5 1"), None);
     }
 
     #[test]
