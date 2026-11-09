@@ -1,0 +1,41 @@
+src/transcription/mod.rs
+  s_115995023cd6f3::t_d30682de4645f1 12-16,22
+src/transcription/device.rs
+  s_115995023cd6f3::t_fbc2726ee99294 87-92
+src/cli/commands/doctor.rs
+  s_115995023cd6f3::t_72afa88514a920 321-336
+  s_115995023cd6f3::t_b9fccf20449ccd 13
+  s_115995023cd6f3::t_bd43f6121ec656 127-131
+  s_115995023cd6f3::t_241060c05c943a 822-847
+  s_115995023cd6f3::t_d3eda1f0fa5045 821
+src/transcription/whisper.rs
+  s_115995023cd6f3::t_eaaf8368b209c7 86,89-97,99,108-110,113-114,116-118
+  s_115995023cd6f3::t_ffde354630e4e8 54-55,60-61,66-67
+  s_115995023cd6f3::t_2ed2bdaa04e6bb 243-244,246,252-255
+  s_115995023cd6f3::t_80e701de7b217a 281-333,335,339,341-342,349-381
+  s_115995023cd6f3::t_59614d9d04ecac 176,187-199
+  s_115995023cd6f3::t_1e08a7f259ae4d 7,9,12-13
+  s_115995023cd6f3::t_4ac084ccc1eba3 382-383
+README.md
+  s_115995023cd6f3::t_cc70b09322fb28 285-286
+src/transcription/gpu_fallback.rs
+  s_115995023cd6f3::t_712e7cc92da9d8 1-320,327-328
+  s_115995023cd6f3::t_449dca7a1d7ebf 321-326
+  s_115995023cd6f3::t_7de81a74dda1ff 329-332
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "78d7399a1a540930cb89d57efb65150e181ab684",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
