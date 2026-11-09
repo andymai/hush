@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 // Import Hush components
 use crate::audio::level;
 use crate::audio::media::MediaPause;
-use crate::audio::take::{is_slow_start, START_TIMEOUT};
+use crate::audio::take::{is_slow_start, is_stalled, STALL_TIMEOUT, START_TIMEOUT};
 use crate::audio::{
     AudioFeedback, CapCheck, LengthCap, SilenceDetector, StartEvent, StopAction, TakeClock,
     TakeLevel,
@@ -82,8 +82,10 @@ struct CommandTarget {
 ///    - **Overlay Thread**: Manages visual feedback window
 ///    - **Main Thread**: Handles audio recording pipeline
 ///      - Start/stop recording on commands
+///      - Move to a new default microphone before a take, unless `audio.device` is set
 ///      - Give the start cue and show the overlay at the first audio frame,
 ///        or cancel when no audio arrives in 5 s
+///      - Stop and transcribe a take when its audio stops for 2 s
 ///      - Monitor amplitude during recording
 ///      - Transcribe audio with Whisper
 ///      - Send results to handler thread
@@ -785,6 +787,27 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 let Some(clock) = take.filter(TakeClock::is_live) else {
                     continue;
                 };
+                if is_stalled(audio_capture.last_frame_at(), now, clock.is_live()) {
+                    let device = audio_capture.get_device_name();
+                    warn!(
+                        device = %device,
+                        "No audio from the microphone for {} s, stopping the take",
+                        STALL_TIMEOUT.as_secs()
+                    );
+                    notify(
+                        NoticeKind::Problem,
+                        "The microphone stopped",
+                        &format!(
+                            "'{}' sent no audio for {} seconds. Hush inserts what it heard until then.",
+                            device,
+                            STALL_TIMEOUT.as_secs()
+                        ),
+                    );
+                    if audio_cmd_tx.send(SessionCommand::StopRecording).is_err() {
+                        break;
+                    }
+                    continue;
+                }
                 media.poll(now);
                 if !silence_sent
                     && command_target.is_none()
@@ -926,6 +949,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 // Create fresh amplitude channel for this recording session
                 let amplitude_rx = audio_capture.enable_amplitude_monitoring();
 
+                audio_capture.follow_default_input();
                 let stream_started = Instant::now();
                 if let Err(e) = audio_capture.start_recording() {
                     error!("Failed to start recording: {}", e);
