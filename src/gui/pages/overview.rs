@@ -86,6 +86,30 @@ fn access(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn model(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Speech model");
+    let backend = gui.config.transcription.backend;
+    if let Some(var) = backend.key_var() {
+        let has_key = gui.machine.has_key(backend);
+        let (title, description) = if has_key {
+            (
+                format!("{} transcribes your speech", backend.name()),
+                format!("The audio of each dictation goes to {}.", backend.name()),
+            )
+        } else {
+            (
+                format!("{} needs an API key", backend.name()),
+                format!("Put {} in ~/.config/hush/.env.", var),
+            )
+        };
+        row(&title)
+            .status(has_key)
+            .describe(&description)
+            .show(ui, |ui| {
+                if ui.button("Change").clicked() {
+                    gui.page = Page::Speech;
+                }
+            });
+        return;
+    }
     let chosen: Option<ModelSize> = gui.config.transcription.model_size.parse().ok();
     let installed = chosen.is_some_and(|size| gui.machine.installed_models.contains(&size));
     let title = if installed {

@@ -1,7 +1,8 @@
 //! `hush doctor`: everything that has to be true for dictation to work, each
 //! with the one command that fixes it.
 
-use crate::config::Config;
+use crate::config::settings::TranscriptionConfig;
+use crate::config::{keys, Config};
 use crate::hotkey::HotkeyBindings;
 use crate::text::WindowProvider;
 use crate::transcription::device::GpuAvailability;
@@ -98,8 +99,17 @@ pub async fn checks() -> Vec<Check> {
     };
 
     checks.push(permissions_check());
-    checks.push(model_check(&config));
-    checks.push(gpu_check(&config));
+    if config.transcription.backend.is_cloud() {
+        let key = config
+            .transcription
+            .backend
+            .key_var()
+            .and_then(keys::api_key);
+        checks.push(cloud_check(&config.transcription, key.is_some()));
+    } else {
+        checks.push(model_check(&config));
+        checks.push(gpu_check(&config));
+    }
     checks.push(microphone_check(&config));
     checks.push(hotkey_check(&config));
     checks.push(window_check());
@@ -157,6 +167,29 @@ fn model_check(config: &Config) -> Check {
         ),
     };
     Check::fail("Speech model", format!("{} is not downloaded", size), fix)
+}
+
+fn cloud_check(config: &TranscriptionConfig, key_present: bool) -> Check {
+    let service = config.backend.name();
+    let var = config.backend.key_var().unwrap_or_default();
+    if !key_present {
+        return Check::fail(
+            "Speech model",
+            format!("{} needs {}", service, var),
+            format!(
+                "put {} in ~/.config/hush/.env, or set backend = \"local\" under [transcription]",
+                var
+            ),
+        );
+    }
+    Check::ok(
+        "Speech model",
+        format!(
+            "{} {}; audio leaves this machine",
+            service,
+            config.cloud_model().unwrap_or_default()
+        ),
+    )
 }
 
 fn gpu_check(config: &Config) -> Check {
@@ -379,6 +412,21 @@ mod tests {
             Some("hush models download large-v3"),
             "a known name is downloaded as asked"
         );
+    }
+
+    #[test]
+    fn a_cloud_backend_is_checked_for_its_key() {
+        let mut config = Config::defaults().unwrap();
+        config.transcription.backend = crate::config::settings::TranscriptionBackend::Groq;
+        let check = cloud_check(&config.transcription, false);
+        assert_eq!(check.level, Level::Fail);
+        assert!(check.detail.contains("GROQ_API_KEY"));
+        assert!(check.fix.unwrap().contains("backend = \"local\""));
+
+        let check = cloud_check(&config.transcription, true);
+        assert_eq!(check.level, Level::Ok);
+        assert!(check.detail.contains("whisper-large-v3-turbo"));
+        assert!(check.detail.contains("audio leaves this machine"));
     }
 
     #[test]

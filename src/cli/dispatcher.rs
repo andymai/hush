@@ -544,11 +544,10 @@ pub async fn test_full_pipeline(count: u32, transcribe_only: bool) -> Result<()>
 
         // Initialize components
         let mut audio_capture = crate::AudioCapture::new(config.audio.device.as_deref())?;
-        let transcriber = crate::WhisperTranscriber::new(
-            &config.transcription.model_path(),
-            config.transcription.use_gpu,
-        )
-        .await?;
+        crate::config::keys::load_env_files();
+        let transcriber =
+            crate::transcription::SpeechToText::from_config(&config.transcription).await?;
+        println!("   Transcriber: {}", transcriber.describe());
         let mut text_inserter;
         #[cfg(target_os = "linux")]
         {

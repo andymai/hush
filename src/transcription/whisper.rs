@@ -269,7 +269,7 @@ fn run_full(
 /// `(upbeat music)`. Square brackets never hold dictated words, so they are
 /// dropped anywhere. Parentheses are dropped only when they make up the whole
 /// segment, because an inline aside can be real speech.
-fn strip_non_speech(segment: &str) -> String {
+pub(crate) fn strip_non_speech(segment: &str) -> String {
     let segment = segment.trim();
     if let Some(inner) = segment.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
         if !inner.contains(['(', ')']) {

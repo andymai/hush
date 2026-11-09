@@ -133,9 +133,57 @@ fn default_max_recording_secs() -> u64 {
     600
 }
 
+/// Where speech becomes text
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TranscriptionBackend {
+    /// whisper.cpp on this machine
+    #[default]
+    Local,
+    /// Groq's hosted Whisper: the audio of each dictation leaves the machine
+    Groq,
+    /// OpenAI's transcription API: the audio of each dictation leaves the machine
+    OpenAi,
+}
+
+impl TranscriptionBackend {
+    pub const ALL: [Self; 3] = [Self::Local, Self::Groq, Self::OpenAi];
+
+    pub fn is_cloud(self) -> bool {
+        self != Self::Local
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Local => "This machine",
+            Self::Groq => "Groq",
+            Self::OpenAi => "OpenAI",
+        }
+    }
+
+    /// The environment variable that holds the service's API key.
+    pub fn key_var(self) -> Option<&'static str> {
+        match self {
+            Self::Local => None,
+            Self::Groq => Some("GROQ_API_KEY"),
+            Self::OpenAi => Some("OPENAI_API_KEY"),
+        }
+    }
+}
+
 /// Whisper transcription model configuration
 #[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
 pub struct TranscriptionConfig {
+    /// `local` runs whisper.cpp; `groq` and `openai` send the audio to that
+    /// service, and only when chosen here
+    #[serde(default)]
+    pub backend: TranscriptionBackend,
+    /// Model name on Groq
+    #[serde(default = "default_groq_model")]
+    pub groq_model: String,
+    /// Model name on OpenAI
+    #[serde(default = "default_openai_model")]
+    pub openai_model: String,
     /// Explicit model file. When unset or empty, the file for `model_size`
     /// inside the models directory is used.
     #[serde(
@@ -163,6 +211,14 @@ fn default_true() -> bool {
     true
 }
 
+fn default_groq_model() -> String {
+    "whisper-large-v3-turbo".to_string()
+}
+
+fn default_openai_model() -> String {
+    "gpt-4o-mini-transcribe".to_string()
+}
+
 fn empty_path_as_none<'de, D>(deserializer: D) -> std::result::Result<Option<PathBuf>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -172,6 +228,15 @@ where
 }
 
 impl TranscriptionConfig {
+    /// The model the chosen cloud service runs, or `None` for local.
+    pub fn cloud_model(&self) -> Option<&str> {
+        match self.backend {
+            TranscriptionBackend::Local => None,
+            TranscriptionBackend::Groq => Some(&self.groq_model),
+            TranscriptionBackend::OpenAi => Some(&self.openai_model),
+        }
+    }
+
     /// The model file to load: the explicit path when set, otherwise the
     /// catalogue file for `model_size` in the models directory.
     pub fn model_path(&self) -> PathBuf {
@@ -354,6 +419,14 @@ impl Config {
             return Err(anyhow::anyhow!(
                 "Invalid beam size: must be between 1 and 20"
             ));
+        }
+        if let Some(model) = self.transcription.cloud_model() {
+            if model.trim().is_empty() {
+                return Err(anyhow::anyhow!(
+                    "transcription.backend is {} but its model name is empty",
+                    self.transcription.backend.name()
+                ));
+            }
         }
 
         if self.insertion.typing_delay_ms > 200 {
@@ -579,6 +652,51 @@ model_size = "small"
         let config = Config::parse_over_defaults("[profiles]\nchat = [\"myapp\"]\n").unwrap();
         assert_eq!(config.profiles.chat, vec!["myapp".to_string()]);
         assert!(config.profiles.enabled);
+    }
+
+    #[test]
+    fn transcription_stays_local_unless_a_service_is_named() {
+        let config = Config::defaults().unwrap();
+        assert_eq!(config.transcription.backend, TranscriptionBackend::Local);
+        assert!(!config.transcription.backend.is_cloud());
+        assert_eq!(config.transcription.cloud_model(), None);
+        assert_eq!(config.transcription.groq_model, "whisper-large-v3-turbo");
+        assert_eq!(config.transcription.openai_model, "gpt-4o-mini-transcribe");
+
+        let config = Config::parse_over_defaults("[transcription]\nbackend = \"groq\"\n").unwrap();
+        assert_eq!(config.transcription.backend, TranscriptionBackend::Groq);
+        assert_eq!(
+            config.transcription.cloud_model(),
+            Some("whisper-large-v3-turbo")
+        );
+        assert_eq!(config.transcription.backend.key_var(), Some("GROQ_API_KEY"));
+
+        let config = Config::parse_over_defaults(
+            "[transcription]\nbackend = \"openai\"\nopenai_model = \"whisper-1\"\n",
+        )
+        .unwrap();
+        assert_eq!(config.transcription.backend, TranscriptionBackend::OpenAi);
+        assert_eq!(config.transcription.cloud_model(), Some("whisper-1"));
+
+        assert!(Config::parse_over_defaults("[transcription]\nbackend = \"azure\"\n").is_err());
+        assert!(Config::parse_over_defaults(
+            "[transcription]\nbackend = \"groq\"\ngroq_model = \" \"\n"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_saved_backend_reloads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut config = Config::defaults().unwrap();
+        config.transcription.backend = TranscriptionBackend::OpenAi;
+        config.save_to_file(&path).unwrap();
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("backend = \"openai\""));
+        let reloaded = Config::load_from(Some(&path)).unwrap();
+        assert_eq!(reloaded.transcription.backend, TranscriptionBackend::OpenAi);
     }
 
     #[test]
