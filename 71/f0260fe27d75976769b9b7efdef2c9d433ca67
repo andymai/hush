@@ -1,0 +1,24 @@
+src/transcription/gpu_fallback.rs
+  s_115995023cd6f3::t_6cfc6dc1a17d72 25-26,28,35-59,71
+  s_115995023cd6f3::t_0b8119be64fdbd 258-259,262-300
+  s_115995023cd6f3::t_363b64a5f6f13c 4-5
+  s_115995023cd6f3::t_a7c00c5750fb27 6-7
+README.md
+  s_115995023cd6f3::t_af1cbf61901be8 285
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "71f0260fe27d75976769b9b7efdef2c9d433ca67",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
