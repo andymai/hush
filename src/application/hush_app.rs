@@ -7,7 +7,7 @@ use crate::core::traits::{AudioSource, InputTrigger, TextOutput, Transcriber, Tr
 use crate::Result;
 use anyhow::Context;
 use std::time::Instant;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Main application orchestrator (trait-based version)
 pub struct HushApp {
@@ -208,7 +208,8 @@ impl HushApp {
             println!("{}", text);
         } else {
             // Insert text
-            info!("📝 Transcribed: '{}'", text);
+            info!("📝 Transcribed {} chars", text.chars().count());
+            debug!("Transcribed: '{}'", text);
             self.state.transition(AppState::Inserting {
                 text_length: text.len(),
             })?;
@@ -296,7 +297,8 @@ impl HushApp {
 
         // Log target window info if available
         if let Ok(Some(window)) = self.text_output.focused_window().await {
-            info!("📝 Target window: '{}' ({})", window.title, window.class);
+            info!("📝 Target window class: {}", window.class);
+            debug!("Target window title: '{}'", window.title);
         }
 
         info!("✅ Recording started");
@@ -373,7 +375,8 @@ impl HushApp {
             return Ok(());
         }
 
-        info!("📝 Transcribed text: '{}'", text);
+        info!("📝 Transcribed {} chars", text.chars().count());
+        debug!("Transcribed text: '{}'", text);
         info!("🎯 Confidence: {:.2}", result.confidence);
 
         // Insert text

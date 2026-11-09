@@ -63,11 +63,12 @@ async fn main() -> std::process::ExitCode {
         std::env::set_var(hush::config::paths::CONFIG_ENV, path);
     }
 
-    // Initialize comprehensive logging system
-    let logging_result = initialize_logging(&cli);
-    match logging_result {
-        Ok(_logging_system) => {
+    // The file writer stops when the logging system drops, so it must live
+    // until main returns.
+    let _logging = match initialize_logging(&cli) {
+        Ok(logging_system) => {
             info!("Hush - Voice-to-Text for Linux Developers - Logging Initialized");
+            Some(logging_system)
         },
         Err(e) => {
             // Fall back to simple logging if comprehensive logging fails
@@ -78,8 +79,9 @@ async fn main() -> std::process::ExitCode {
                 "Comprehensive logging initialization failed, using fallback: {}",
                 e
             );
+            None
         },
-    }
+    };
 
     // Log startup information
     info!(
