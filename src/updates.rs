@@ -223,6 +223,7 @@ async fn check_once(path: &Path) {
     if let Some((version, url)) = state.to_announce(CURRENT_VERSION) {
         info!("Hush {} is available: {}", version, url);
         crate::notify::notify(
+            crate::notify::NoticeKind::Release,
             &format!("Hush {} is available", version),
             &format!(
                 "You use {}. Get the new release at {}",

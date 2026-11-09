@@ -21,7 +21,7 @@ use crate::hotkey::{
 };
 use crate::ipc::protocol::{DaemonState, NO_TAKE};
 use crate::ipc::{SessionCommand, TakeResult, TakeWaiter};
-use crate::notify::notify;
+use crate::notify::{notify, NoticeKind};
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
 use crate::text::WindowInfo;
 use crate::text_processing::transcripts::{self, Transcript};
@@ -612,7 +612,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                     Ok(()) => "The text is on the clipboard. `hush paste-last` types it again.",
                                     Err(_) => "`hush paste-last` types it again.",
                                 };
-                                notify("Hush could not insert the text", body);
+                                notify(NoticeKind::Problem, "Hush could not insert the text", body);
                             },
                         }
                     }
@@ -738,6 +738,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         command_target = None;
                         let _ = feedback.play_error();
                         notify(
+                            NoticeKind::Problem,
                             "The microphone did not start",
                             &format!(
                                 "Hush got no audio from '{}'. Check the input device.",
@@ -773,6 +774,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     CapCheck::Reached => {
                         info!("Recording reached the {} second cap", cap.max_secs());
                         notify(
+                            NoticeKind::Status,
                             "Recording stopped",
                             &format!(
                                 "Hush stops after {} minutes and inserts what it heard.",
@@ -788,6 +790,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             cap_warned = true;
                             let _ = feedback.play_warning();
                             notify(
+                                NoticeKind::Status,
                                 "Recording stops soon",
                                 &format!("Hush stops recording in {} seconds.", remaining_secs),
                             );
@@ -818,7 +821,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     continue;
                 }
                 let Some(text) = shared.last_text() else {
-                    notify("Nothing to paste yet", "Dictate something first.");
+                    notify(
+                        NoticeKind::Status,
+                        "Nothing to paste yet",
+                        "Dictate something first.",
+                    );
                     continue;
                 };
                 #[cfg(target_os = "linux")]
@@ -841,13 +848,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     }
                     let _ = feedback.play_success();
                     notify(
+                        NoticeKind::Status,
                         "Learned",
                         &format!("'{}' will be written exactly like that.", term),
                     );
                 },
                 Err(e) => {
                     let _ = feedback.play_error();
-                    notify("Nothing learned", &e.to_string());
+                    notify(NoticeKind::Status, "Nothing learned", &e.to_string());
                 },
             },
             SessionCommand::ReloadVocabulary => {
@@ -1115,7 +1123,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         // The overlay is too narrow for the service's reason,
                         // and a bad key or quota needs the user to act.
                         if transcriber.is_cloud() {
-                            notify("Transcription failed", &format!("{:#}", e));
+                            notify(
+                                NoticeKind::Problem,
+                                "Transcription failed",
+                                &format!("{:#}", e),
+                            );
                         }
                         finish(
                             printer,
@@ -1174,6 +1186,7 @@ fn report_empty_take(take: EmptyTake, device: &str, feedback: AudioFeedback) {
             warn!(device = %device, "The microphone sent no sound");
             let _ = feedback.play_error();
             notify(
+                NoticeKind::Problem,
                 "The microphone sent no sound",
                 &format!(
                     "Hush got only silence from '{}'. The microphone may be muted.",
@@ -1253,6 +1266,7 @@ fn run_command_mode(
     let Some(processor) = processor.filter(|p| p.is_llm_ready()) else {
         let _ = feedback.play_error();
         notify(
+            NoticeKind::Problem,
             "Command Mode needs an LLM",
             "Run Ollama, or set ANTHROPIC_API_KEY in ~/.config/hush/.env, then restart the daemon.",
         );
@@ -1264,6 +1278,7 @@ fn run_command_mode(
         (None, None) => {
             let _ = feedback.play_error();
             notify(
+                NoticeKind::Status,
                 "Nothing to edit",
                 "Select some text or dictate something first.",
             );
@@ -1280,12 +1295,13 @@ fn run_command_mode(
         Err(e) => {
             error!("Command Mode failed: {}", e);
             let _ = feedback.play_error();
-            notify("Command failed", &e.to_string());
+            notify(NoticeKind::Problem, "Command failed", &e.to_string());
             return;
         },
     };
     if rewritten.trim().is_empty() || rewritten == text {
         notify(
+            NoticeKind::Status,
             "Nothing changed",
             "The instruction left the text as it was.",
         );
@@ -1320,6 +1336,7 @@ fn run_command_mode(
             let _ = feedback.play_error();
             let _ = inserter.copy_to_clipboard(&rewritten);
             notify(
+                NoticeKind::Problem,
                 "Hush could not insert the text",
                 "The result is on the clipboard.",
             );
