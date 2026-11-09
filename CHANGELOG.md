@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.1](https://github.com/andymai/hush/compare/v0.9.0...v0.9.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **audio:** start the recording cue on the first audio frame ([#233](https://github.com/andymai/hush/issues/233)) ([030cc31](https://github.com/andymai/hush/commit/030cc314c77901ee3a9e6d8fd948aa13c85e3c43))
+* **insertion:** restore the clipboard safely, pick paste keys per app, and paste on Dvorak ([#250](https://github.com/andymai/hush/issues/250)) ([c665419](https://github.com/andymai/hush/commit/c6654193f22ce8a47134db5058879229dbc0998e))
+* **release:** build ggml for an x86-64-v3 floor ([#249](https://github.com/andymai/hush/issues/249)) ([174a3ac](https://github.com/andymai/hush/commit/174a3ac8c45537a7fe18e8b9ff350d4ee7f5596a))
+* **text:** guard LLM polish and match vocabulary phrases as whole words ([#222](https://github.com/andymai/hush/issues/222)) ([1f9aab3](https://github.com/andymai/hush/commit/1f9aab3ed4763c6962197f5d3dfb95022b289186))
+
 ## [0.9.0](https://github.com/andymai/hush/compare/v0.8.0...v0.9.0) (2026-11-09)
 
 
