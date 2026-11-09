@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/andymai/hush/compare/v0.12.0...v0.12.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **notify:** replace status notifications instead of stacking them ([#260](https://github.com/andymai/hush/issues/260)) ([f6d8ec7](https://github.com/andymai/hush/commit/f6d8ec7b2b25b79308308ed0a02db4fa441d28e5)), closes [#231](https://github.com/andymai/hush/issues/231)
+
 ## [0.12.0](https://github.com/andymai/hush/compare/v0.11.0...v0.12.0) (2026-11-09)
 
 
