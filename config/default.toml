@@ -68,11 +68,12 @@ clipboard_apps = [] # always paste, e.g. applications that drop typed letters
 # ctrl+v. A rule names the whole class or its last part after a dot:
 # "konsole" matches org.kde.konsole, and "st" does not match steam.
 paste_keys = {} # e.g. { kitty = "ctrl+v", "org.wezfurlong.wezterm" = "shift+insert" }
-# Window classes where Hush presses Enter about 150 ms after it inserts the
-# text, for example to send a chat message or to run a command. A rule names
-# the whole class or its last part after a dot, as in paste_keys. Hush does
-# not press Enter after a failed or empty insertion, when the transcript hook
-# types nothing, or for `hush stop --print`.
+# Window classes where Hush presses Enter after it inserts a dictation, for
+# example to send a chat message or to run a command: 150 ms after typed
+# text, 400 ms after a paste. A rule names the whole class or its last part
+# after a dot, as in paste_keys, so a browser rule presses Enter in every tab.
+# Hush does not press Enter after a failed or empty insertion, when the
+# transcript hook types nothing, after Command Mode, or for `hush stop --print`.
 submit_apps = [] # e.g. ["Slack", "kitty"]
 
 [history]

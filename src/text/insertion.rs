@@ -9,8 +9,8 @@
 //!
 //! A terminal gets the text on one line, so a line break cannot run a
 //! command. A chat application gets a typed line break as Shift+Enter, so
-//! it cannot send the message. A `submit_apps` window gets Enter after the
-//! text.
+//! it cannot send the message. A `submit_apps` window gets Enter after a
+//! dictation.
 
 use super::clipboard::{self, ClipboardBackend, Restore, Selection, Transcript};
 use super::clock::{Clock, SystemClock};
@@ -30,9 +30,22 @@ use tracing::{debug, info, warn};
 pub const PASTE_THRESHOLD_CHARS: usize = 2000;
 /// A slow application reads the clipboard some time after the paste chord.
 pub const AFTER_PASTE: Duration = Duration::from_millis(500);
-/// Enter follows the text by about this much, so the application handles
+/// Enter follows typed text by about this much, so the application handles
 /// the text before the key that sends it.
-pub const SUBMIT_DELAY: Duration = Duration::from_millis(150);
+pub const TYPED_SUBMIT_DELAY: Duration = Duration::from_millis(150);
+/// A Wayland paste is asynchronous: the application fetches the data after
+/// it gets the paste keys. Enter waits longer, so it does not arrive first.
+pub const PASTED_SUBMIT_DELAY: Duration = Duration::from_millis(400);
+
+/// Where the inserted text comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// A dictation, also when paste-last types it again
+    Dictation,
+    /// A Command Mode rewrite, which replaces text that the user may have
+    /// sent already
+    Rewrite,
+}
 
 /// Konsole (and Yakuake, which embeds it) drops a simulated Ctrl+Shift+V,
 /// and the terminal inside VS Code, VSCodium, and Cursor takes Ctrl+V for
@@ -144,11 +157,12 @@ pub fn one_line(text: &str) -> String {
     line
 }
 
-/// Whether Enter follows an insertion: only in a `submit_apps` window, only
-/// when the keys went out, and only when they carried text. A printed take
-/// and a hook that typed nothing never reach the inserter.
-pub fn presses_enter(submit_app: bool, text: &str, sent: &Result<()>) -> bool {
-    submit_app && sent.is_ok() && !text.trim().is_empty()
+/// Whether Enter follows an insertion: only after a dictation in a
+/// `submit_apps` window, only when the keys went out, and only when they
+/// carried text. A printed take and a hook that typed nothing never reach
+/// the inserter.
+pub fn presses_enter(origin: Origin, submit_app: bool, text: &str, sent: &Result<()>) -> bool {
+    origin == Origin::Dictation && submit_app && sent.is_ok() && !text.trim().is_empty()
 }
 
 pub struct TextInserter {
@@ -213,6 +227,15 @@ impl TextInserter {
     /// Returns the text as the window got it, which differs from `text`
     /// when the terminal cleanup changed it.
     pub fn insert_text(&mut self, text: &str) -> Result<String> {
+        self.insert(text, Origin::Dictation)
+    }
+
+    /// Like [`Self::insert_text`], but never presses Enter.
+    pub fn insert_rewrite(&mut self, text: &str) -> Result<String> {
+        self.insert(text, Origin::Rewrite)
+    }
+
+    fn insert(&mut self, text: &str, origin: Origin) -> Result<String> {
         let window = self.windows.focused();
         let kind = ProcessingContext::new(window.clone(), &self.profiles).kind;
         let text = if kind == AppKind::Terminal {
@@ -254,12 +277,12 @@ impl TextInserter {
         };
 
         match choose_method(method, &text, self.types_like_us) {
-            Chosen::Uinput => self.type_with_uinput(&text, line_break, submit_app)?,
+            Chosen::Uinput => self.type_with_uinput(&text, line_break, origin, submit_app)?,
             Chosen::Clipboard => {
-                if let Err(e) = self.paste(&text, window.as_ref(), submit_app) {
+                if let Err(e) = self.paste(&text, window.as_ref(), origin, submit_app) {
                     warn!("Paste failed ({}); typing what uinput can", e);
                     // Typing can skip characters, so Hush does not send the result.
-                    self.type_with_uinput(&text, line_break, false)?;
+                    self.type_with_uinput(&text, line_break, origin, false)?;
                 }
             },
         }
@@ -270,20 +293,27 @@ impl TextInserter {
         &mut self,
         text: &str,
         line_break: LineBreak,
+        origin: Origin,
         submit_app: bool,
     ) -> Result<()> {
         wait_for_modifiers();
         self.uinput.set_typing_delay(self.config.typing_delay_ms);
         let typed = self.uinput.type_text(text, line_break);
-        if presses_enter(submit_app, text, &typed) {
-            press_enter(&mut self.uinput, &SystemClock);
+        if presses_enter(origin, submit_app, text, &typed) {
+            press_enter(&mut self.uinput, &SystemClock, TYPED_SUBMIT_DELAY);
         }
         typed?;
         info!("Text inserted via uinput ({} chars)", text.chars().count());
         Ok(())
     }
 
-    fn paste(&mut self, text: &str, window: Option<&WindowInfo>, submit_app: bool) -> Result<()> {
+    fn paste(
+        &mut self,
+        text: &str,
+        window: Option<&WindowInfo>,
+        origin: Origin,
+        submit_app: bool,
+    ) -> Result<()> {
         let clock = SystemClock;
         let mut chord = choose_chord(window, &self.config, &self.profiles);
         let clipboard = self
@@ -316,8 +346,8 @@ impl TextInserter {
         debug!("Pasting with {}", chord);
         let sent = self.uinput.send_paste_shortcut(chord);
         let pasted_at = clock.now();
-        if presses_enter(submit_app, text, &sent) {
-            press_enter(&mut self.uinput, &clock);
+        if presses_enter(origin, submit_app, text, &sent) {
+            press_enter(&mut self.uinput, &clock, PASTED_SUBMIT_DELAY);
         }
         if sent.is_ok() {
             let waited = clock.now().saturating_duration_since(pasted_at);
@@ -381,9 +411,9 @@ fn wait_for_modifiers() {
 }
 
 /// A failure only logs, because the text is already in the window.
-fn press_enter(uinput: &mut UinputKeyboard, clock: &dyn Clock) {
+fn press_enter(uinput: &mut UinputKeyboard, clock: &dyn Clock, delay: Duration) {
     // The modifier wait ends with SETTLE, which counts toward the delay.
-    clock.sleep(SUBMIT_DELAY.saturating_sub(modifiers::SETTLE));
+    clock.sleep(delay.saturating_sub(modifiers::SETTLE));
     wait_for_modifiers();
     match uinput.send_enter() {
         Ok(()) => info!("Pressed Enter after the text"),
@@ -643,21 +673,47 @@ mod tests {
 
     #[test]
     fn enter_follows_only_a_successful_insertion_with_text() {
+        let dictation = Origin::Dictation;
         let sent: Result<()> = Ok(());
         let failed: Result<()> = Err(anyhow::anyhow!("uinput write failed"));
-        assert!(presses_enter(true, "ls -la", &sent));
+        assert!(presses_enter(dictation, true, "ls -la", &sent));
         assert!(
-            !presses_enter(true, "ls -la", &failed),
+            !presses_enter(dictation, true, "ls -la", &failed),
             "a failed insertion"
         );
-        assert!(!presses_enter(true, "", &sent), "an empty insertion");
         assert!(
-            !presses_enter(true, " \n ", &sent),
+            !presses_enter(dictation, true, "", &sent),
+            "an empty insertion"
+        );
+        assert!(
+            !presses_enter(dictation, true, " \n ", &sent),
             "an insertion of only white space"
         );
         assert!(
-            !presses_enter(false, "ls -la", &sent),
+            !presses_enter(dictation, false, "ls -la", &sent),
             "a window outside submit_apps"
+        );
+    }
+
+    #[test]
+    fn a_command_mode_rewrite_never_presses_enter() {
+        let sent: Result<()> = Ok(());
+        assert!(
+            presses_enter(Origin::Dictation, true, "see you then", &sent),
+            "a dictation, and paste-last"
+        );
+        assert!(
+            !presses_enter(Origin::Rewrite, true, "see you then", &sent),
+            "the rewritten text can replace a message that is already sent"
+        );
+    }
+
+    #[test]
+    fn enter_waits_longer_after_a_paste() {
+        assert!(PASTED_SUBMIT_DELAY > TYPED_SUBMIT_DELAY);
+        assert!(
+            PASTED_SUBMIT_DELAY < AFTER_PASTE,
+            "Enter comes before the clipboard restore"
         );
     }
 }

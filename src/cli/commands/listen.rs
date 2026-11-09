@@ -1382,7 +1382,7 @@ fn run_command_mode(
             error!("Could not remove the last transcript: {}", e);
         }
     }
-    match inserter.insert_text(&rewritten) {
+    match inserter.insert_rewrite(&rewritten) {
         Ok(typed) => {
             history.lock().record(typed);
             shared.set_last_text(rewritten);
