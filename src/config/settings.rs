@@ -31,7 +31,31 @@ pub struct Config {
     /// Panel status icon
     #[serde(default)]
     pub tray: TrayConfig,
+    /// Delivered transcripts kept for the History page
+    #[serde(default)]
+    pub history: HistoryConfig,
 }
+
+/// Transcript history settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct HistoryConfig {
+    /// Keep each delivered transcript on disk
+    pub enabled: bool,
+    /// The oldest transcripts go when there are more than this
+    pub max_entries: usize,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_entries: 500,
+        }
+    }
+}
+
+pub const MAX_HISTORY_ENTRIES: usize = 100_000;
 
 /// Status icon settings
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -101,6 +125,10 @@ pub struct InsertionConfig {
     pub method: InsertionMethod,
     /// Delay between typed keys in milliseconds
     pub typing_delay_ms: u64,
+    /// Window classes that always type, whatever `method` says
+    pub uinput_apps: Vec<String>,
+    /// Window classes that always paste, whatever `method` says
+    pub clipboard_apps: Vec<String>,
 }
 
 impl Default for InsertionConfig {
@@ -108,6 +136,31 @@ impl Default for InsertionConfig {
         Self {
             method: InsertionMethod::Auto,
             typing_delay_ms: 10,
+            uinput_apps: Vec::new(),
+            clipboard_apps: Vec::new(),
+        }
+    }
+}
+
+impl InsertionConfig {
+    /// The method for a window class. A pattern in `uinput_apps` or
+    /// `clipboard_apps` that is part of the class, in any case, overrides
+    /// `method`. When both lists match, the longer pattern wins, and a tie
+    /// pastes.
+    pub fn method_for(&self, class: &str) -> InsertionMethod {
+        let class = class.to_lowercase();
+        let longest = |apps: &[String]| {
+            apps.iter()
+                .map(|app| app.trim().to_lowercase())
+                .filter(|app| !app.is_empty() && class.contains(app.as_str()))
+                .map(|app| app.len())
+                .max()
+        };
+        match (longest(&self.uinput_apps), longest(&self.clipboard_apps)) {
+            (Some(typed), Some(pasted)) if typed > pasted => InsertionMethod::Uinput,
+            (_, Some(_)) => InsertionMethod::Clipboard,
+            (Some(_), None) => InsertionMethod::Uinput,
+            (None, None) => self.method,
         }
     }
 }
@@ -438,6 +491,12 @@ impl Config {
                 "Invalid typing delay: must be at most 200 ms"
             ));
         }
+        if self.history.max_entries == 0 || self.history.max_entries > MAX_HISTORY_ENTRIES {
+            return Err(anyhow::anyhow!(
+                "Invalid history.max_entries: must be between 1 and {}; set history.enabled = false to keep none",
+                MAX_HISTORY_ENTRIES
+            ));
+        }
 
         // Validate hotkey configuration
         if self.hotkey.enabled {
@@ -577,6 +636,47 @@ model_size = "small"
         let config = Config::parse_over_defaults("[insertion]\nmethod = \"clipboard\"\n").unwrap();
         assert_eq!(config.insertion.method, InsertionMethod::Clipboard);
         assert!(Config::parse_over_defaults("[insertion]\ntyping_delay_ms = 999\n").is_err());
+    }
+
+    #[test]
+    fn app_rules_override_the_method_and_the_longer_match_wins() {
+        let config = Config::parse_over_defaults(
+            "[insertion]\nuinput_apps = [\"Konsole\", \"firefox\"]\nclipboard_apps = [\"code\", \"firefox-dev\", \" \"]\n",
+        )
+        .unwrap();
+        let rules = &config.insertion;
+        assert_eq!(rules.method_for("org.kde.konsole"), InsertionMethod::Uinput);
+        assert_eq!(rules.method_for("Code"), InsertionMethod::Clipboard);
+        assert_eq!(rules.method_for("firefox"), InsertionMethod::Uinput);
+        assert_eq!(
+            rules.method_for("firefox-developer-edition"),
+            InsertionMethod::Clipboard,
+            "the longer pattern is the more specific rule"
+        );
+        assert_eq!(
+            rules.method_for("thunderbird"),
+            InsertionMethod::Auto,
+            "no match keeps the global method; a blank pattern matches nothing"
+        );
+
+        let tie = InsertionConfig {
+            uinput_apps: vec!["kitty".into()],
+            clipboard_apps: vec!["KITTY".into()],
+            ..InsertionConfig::default()
+        };
+        assert_eq!(tie.method_for("kitty"), InsertionMethod::Clipboard);
+    }
+
+    #[test]
+    fn history_section_defaults_and_bounds() {
+        let config = Config::defaults().unwrap();
+        assert!(config.history.enabled);
+        assert_eq!(config.history.max_entries, 500);
+        let config = Config::parse_over_defaults("[history]\nenabled = false\n").unwrap();
+        assert!(!config.history.enabled);
+        assert_eq!(config.history.max_entries, 500);
+        assert!(Config::parse_over_defaults("[history]\nmax_entries = 0\n").is_err());
+        assert!(Config::parse_over_defaults("[history]\nmax_entries = 100001\n").is_err());
     }
 
     #[test]

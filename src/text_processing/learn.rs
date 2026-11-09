@@ -40,6 +40,21 @@ pub fn learn_into(vocab: &mut DomainVocabulary, term: &str) -> bool {
     true
 }
 
+/// Remove the term with exactly this spelling; returns whether it was there.
+pub fn forget_in(vocab: &mut DomainVocabulary, term: &str) -> bool {
+    let before = vocab.technical_terms.len();
+    vocab.technical_terms.retain(|_, value| value != term);
+    vocab.technical_terms.len() != before
+}
+
+/// Replace `old` with `new`, spelled exactly as given; returns the new term.
+pub fn rename_in(vocab: &mut DomainVocabulary, old: &str, new: &str) -> Result<String> {
+    let new = normalise(new)?;
+    forget_in(vocab, old);
+    learn_into(vocab, &new);
+    Ok(new)
+}
+
 /// Learn into the vocabulary file at `path`, creating it when missing.
 pub fn learn_at(path: &Path, term: &str) -> Result<String> {
     let term = normalise(term)?;
@@ -105,6 +120,30 @@ mod tests {
             vocab.apply("deploy to kubernetes now"),
             "deploy to KUBERNETES now"
         );
+    }
+
+    #[test]
+    fn edits_round_trip_through_the_file_and_keep_other_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vocabulary.json");
+        let mut vocab = DomainVocabulary::default();
+        vocab.add_abbreviation("k8s".into(), "Kubernetes".into());
+        learn_into(&mut vocab, "Postgres");
+        learn_into(&mut vocab, "Hush");
+        assert_eq!(
+            rename_in(&mut vocab, "Postgres", " PostgreSQL ").unwrap(),
+            "PostgreSQL"
+        );
+        assert!(rename_in(&mut vocab, "Hush", "  ").is_err());
+        assert!(forget_in(&mut vocab, "Hush"));
+        assert!(!forget_in(&mut vocab, "Hush"), "already gone");
+        vocab.save_to_file(&path).unwrap();
+
+        let loaded = DomainVocabulary::load_from_file(&path).unwrap();
+        assert_eq!(loaded, vocab);
+        let terms: Vec<&String> = loaded.technical_terms.values().collect();
+        assert_eq!(terms, ["PostgreSQL"]);
+        assert_eq!(loaded.expand("k8s").map(String::as_str), Some("Kubernetes"));
     }
 
     #[test]

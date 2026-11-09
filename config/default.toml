@@ -44,6 +44,17 @@ audio_enabled = true # start, stop, cancel, and warning tones
 [insertion]
 method = "auto"      # auto: uinput typing, clipboard paste for text uinput cannot type; or "uinput", "clipboard"
 typing_delay_ms = 10
+# Applications that ignore method. Part of the window class is enough:
+# "konsole" matches org.kde.konsole. The History page in the settings window
+# shows the class of each application you dictate into.
+uinput_apps = []    # always type, e.g. terminals that paste with Ctrl+Shift+V
+clipboard_apps = [] # always paste, e.g. applications that drop typed letters
+
+[history]
+# Each delivered transcript, kept in $XDG_DATA_HOME/hush/history.jsonl
+# (readable only by you) for the History page in the settings window.
+enabled = true
+max_entries = 500 # when there are more, the oldest go
 
 [profiles]
 # Tone by application. The focused window's class picks a profile: terminal

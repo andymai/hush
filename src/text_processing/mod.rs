@@ -34,6 +34,7 @@ pub use intent::{CommunicationStyle, IntentDetector, UserIntent};
 pub mod learn;
 pub mod profiles;
 pub mod prompt;
+pub mod transcripts;
 pub use llm::LlmProcessor;
 pub use profiles::{AppKind, ProfilesConfig, TextProfile};
 pub use session::{SessionEntry, SessionMemory};

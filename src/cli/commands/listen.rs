@@ -18,6 +18,7 @@ use crate::ipc::SessionCommand;
 use crate::notify::notify;
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
 use crate::text::WindowInfo;
+use crate::text_processing::transcripts::{self, Transcript};
 use crate::text_processing::{learn, llm, prompt, ProcessingContext};
 use crate::text_processing::{
     CommandExecutor, CommandParser, EditingMode, InsertionHistory, LlmProvider, ProcessingConfig,
@@ -282,8 +283,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     #[cfg(target_os = "linux")]
     let text_inserter = match TextInserter::new() {
         Ok(mut inserter) => {
-            inserter.set_method(config.insertion.method);
-            inserter.set_typing_delay(config.insertion.typing_delay_ms);
+            inserter.configure(&config.insertion);
             info!("✅ Text inserter initialized");
             Some(Arc::new(Mutex::new(inserter)))
         },
@@ -409,6 +409,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let text_inserter_clone = text_inserter.clone();
     let text_processor_clone = text_processor.clone();
     let profiles = config.profiles.clone();
+    let history = config.history.clone();
     let command_parser_clone = command_parser.clone();
     let command_executor_clone = command_executor.clone();
     let insertion_history_clone = insertion_history.clone();
@@ -570,6 +571,18 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     {
                         info!("Text insertion not available on this platform");
                         info!("Processed text: {}", processed_text);
+                    }
+
+                    if history.enabled {
+                        let app = window.as_ref().map(|w| w.class.clone()).unwrap_or_default();
+                        let entry = Transcript::new(processed_text.clone(), app);
+                        if let Err(e) = transcripts::append(
+                            &transcripts::default_path(),
+                            &entry,
+                            history.max_entries,
+                        ) {
+                            warn!("Could not save the transcript to the history: {}", e);
+                        }
                     }
 
                     // Update overlay
