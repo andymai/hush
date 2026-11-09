@@ -3,6 +3,7 @@
 
 use super::vocabulary::DomainVocabulary;
 use anyhow::{anyhow, Context, Result};
+use std::collections::HashSet;
 use std::path::Path;
 
 pub const MAX_WORDS: usize = 5;
@@ -53,6 +54,47 @@ pub fn rename_in(vocab: &mut DomainVocabulary, old: &str, new: &str) -> Result<S
     forget_in(vocab, old);
     learn_into(vocab, &new);
     Ok(new)
+}
+
+/// What an import of a word list did.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ListImport {
+    pub added: usize,
+    /// Terms the vocabulary or the list already had, in any case
+    pub skipped: usize,
+    /// Lines that are not a term [`normalise`] accepts
+    pub invalid: usize,
+}
+
+/// The learned terms as plain text, one on each line.
+pub fn to_list(vocab: &DomainVocabulary) -> String {
+    let mut terms: Vec<&String> = vocab.technical_terms.values().collect();
+    terms.sort_by_key(|term| (term.to_lowercase(), term.as_str()));
+    terms.iter().map(|term| format!("{}\n", term)).collect()
+}
+
+/// Learn each line of `text`. A term that is already there, in any case,
+/// stays as it is.
+pub fn import_list(vocab: &mut DomainVocabulary, text: &str) -> ListImport {
+    let mut known: HashSet<String> = vocab
+        .technical_terms
+        .iter()
+        .flat_map(|(key, term)| [key.to_lowercase(), term.to_lowercase()])
+        .collect();
+    let mut result = ListImport::default();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(term) = normalise(line) else {
+            result.invalid += 1;
+            continue;
+        };
+        if known.insert(term.to_lowercase()) {
+            learn_into(vocab, &term);
+            result.added += 1;
+        } else {
+            result.skipped += 1;
+        }
+    }
+    result
 }
 
 /// Learn into the vocabulary file at `path`, creating it when missing.
@@ -144,6 +186,39 @@ mod tests {
         let terms: Vec<&String> = loaded.technical_terms.values().collect();
         assert_eq!(terms, ["PostgreSQL"]);
         assert_eq!(loaded.expand("k8s").map(String::as_str), Some("Kubernetes"));
+    }
+
+    #[test]
+    fn a_word_list_import_skips_duplicates_in_any_case() {
+        let mut vocab = DomainVocabulary::default();
+        learn_into(&mut vocab, "Kubernetes");
+        let list = "kubernetes\n\nPostgreSQL\r\n  Hush   daemon \nPOSTGRESQL\nbad\u{7}term\n";
+        let result = import_list(&mut vocab, list);
+        assert_eq!(
+            result,
+            ListImport {
+                added: 2,
+                skipped: 2,
+                invalid: 1
+            }
+        );
+        assert_eq!(vocab.technical_terms["kubernetes"], "Kubernetes");
+        assert_eq!(vocab.technical_terms["postgresql"], "PostgreSQL");
+        assert_eq!(vocab.technical_terms["hush daemon"], "Hush daemon");
+    }
+
+    #[test]
+    fn a_word_list_round_trips() {
+        let mut vocab = DomainVocabulary::default();
+        for term in ["zsh", "Kubernetes", "C#"] {
+            learn_into(&mut vocab, term);
+        }
+        let list = to_list(&vocab);
+        assert_eq!(list, "C#\nKubernetes\nzsh\n");
+        let mut copy = DomainVocabulary::default();
+        assert_eq!(import_list(&mut copy, &list).added, 3);
+        assert_eq!(copy, vocab);
+        assert_eq!(to_list(&DomainVocabulary::default()), "");
     }
 
     #[test]
