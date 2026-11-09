@@ -112,14 +112,9 @@ fn prompt_terms(prompt: &str) -> HashSet<String> {
         .collect()
 }
 
-/// The output repeats the prompt instead of the speech: one prompt term
-/// comes three times in a row, or prompt terms are most of three or more
-/// words.
-pub fn is_prompt_echo(output: &str, prompt: &str) -> bool {
+/// One prompt term comes three times in a row in the output.
+pub fn has_prompt_term_run(output: &str, prompt: &str) -> bool {
     let terms = prompt_terms(prompt);
-    if terms.is_empty() {
-        return false;
-    }
     let words = words(output);
     let mut run = 0;
     for (i, word) in words.iter().enumerate() {
@@ -136,24 +131,44 @@ pub fn is_prompt_echo(output: &str, prompt: &str) -> bool {
             return true;
         }
     }
+    false
+}
+
+/// Prompt terms are most of the output, which has three words or more.
+pub fn is_mostly_prompt_terms(output: &str, prompt: &str) -> bool {
+    let terms = prompt_terms(prompt);
+    let words = words(output);
     let from_prompt = words.iter().filter(|word| terms.contains(*word)).count();
     words.len() >= ECHO_MIN_WORDS && from_prompt * 2 > words.len()
 }
 
-/// The words of `text` that are not prompt terms.
-pub fn real_word_count(text: &str, prompt: &str) -> usize {
-    let terms = prompt_terms(prompt);
-    words(text)
-        .iter()
-        .filter(|word| !terms.contains(*word))
-        .count()
+/// The output can repeat the prompt instead of the speech: one prompt term
+/// comes three times in a row, or prompt terms are most of the words.
+pub fn is_prompt_echo(output: &str, prompt: &str) -> bool {
+    has_prompt_term_run(output, prompt) || is_mostly_prompt_terms(output, prompt)
 }
 
-/// After `first` echoed the prompt, keep `second` (transcribed without the
-/// prompt) only when it has more real words and does not echo the prompt.
-pub fn keep_second_pass(first: &str, second: &str, prompt: &str) -> bool {
-    real_word_count(second, prompt) > real_word_count(first, prompt)
-        && !is_prompt_echo(second, prompt)
+/// Which transcript to keep after the first one looked like an echo of the
+/// prompt and the retry ran without the prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EchoChoice {
+    /// Neither: the retry heard no words, or it echoes the prompt too.
+    Drop,
+    /// The retry: the first transcript looped on one prompt term.
+    Retry,
+    /// The first transcript: the retry heard speech, so the prompt terms
+    /// were real, and the prompt spells them better.
+    Original,
+}
+
+pub fn after_echo(first: &str, retry: &str, prompt: &str) -> EchoChoice {
+    if is_punctuation_only(retry) || is_prompt_echo(retry, prompt) {
+        EchoChoice::Drop
+    } else if has_prompt_term_run(first, prompt) {
+        EchoChoice::Retry
+    } else {
+        EchoChoice::Original
+    }
 }
 
 #[cfg(test)]
@@ -269,28 +284,67 @@ mod tests {
     }
 
     #[test]
-    fn real_words_are_the_words_outside_the_prompt() {
-        assert_eq!(real_word_count(PROMPT, PROMPT), 1, "only 'rs' is too short");
-        assert_eq!(real_word_count("Ship the Kubernetes fix.", PROMPT), 3);
-        assert_eq!(real_word_count("", PROMPT), 0);
+    fn the_two_echo_signs_are_told_apart() {
+        let run = "Kubernetes, Kubernetes, Kubernetes.";
+        assert!(has_prompt_term_run(run, PROMPT));
+        assert!(!has_prompt_term_run(PROMPT, PROMPT));
+        assert!(is_mostly_prompt_terms(PROMPT, PROMPT));
+        assert!(!is_mostly_prompt_terms("Ship the Kubernetes fix.", PROMPT));
+        assert!(!has_prompt_term_run("anything at all", ""));
     }
 
     #[test]
-    fn the_second_pass_wins_only_with_more_real_text_and_no_echo() {
-        let echo = "Kubernetes, PostgreSQL, Kubernetes, PostgreSQL.";
-        assert!(keep_second_pass(echo, "Ship the fix today.", PROMPT));
-        assert!(!keep_second_pass(echo, "", PROMPT), "nothing is not more");
-        assert!(
-            !keep_second_pass(echo, "PostgreSQL, PostgreSQL, PostgreSQL, the end", PROMPT),
-            "an echo again"
+    fn a_retry_with_no_words_or_another_echo_drops_the_take() {
+        for first in [PROMPT, "PostgreSQL PostgreSQL PostgreSQL"] {
+            for retry in [
+                "",
+                "  ",
+                "...",
+                "PostgreSQL, PostgreSQL, PostgreSQL, the end",
+            ] {
+                assert_eq!(
+                    after_echo(first, retry, PROMPT),
+                    EchoChoice::Drop,
+                    "{first:?} then {retry:?}"
+                );
+            }
+            assert_eq!(
+                after_echo(first, "Kubernetes, PostgreSQL, main code.", PROMPT),
+                EchoChoice::Drop,
+                "the retry is mostly prompt terms too"
+            );
+        }
+    }
+
+    #[test]
+    fn a_loop_on_one_term_gives_way_to_the_retry() {
+        assert_eq!(
+            after_echo(
+                "So Kubernetes Kubernetes Kubernetes Kubernetes",
+                "So the cluster is up.",
+                PROMPT
+            ),
+            EchoChoice::Retry
         );
-        assert!(
-            !keep_second_pass(
-                "Kubernetes Kubernetes Kubernetes now",
+        assert_eq!(
+            after_echo(
+                "Kubernetes, Kubernetes, Kubernetes now",
                 "Kubernetes now",
                 PROMPT
             ),
-            "no more real words"
+            EchoChoice::Retry
+        );
+    }
+
+    #[test]
+    fn a_real_list_of_terms_keeps_the_prompted_spelling() {
+        assert_eq!(
+            after_echo(
+                "Kubernetes, PostgreSQL, and code review.",
+                "Cooper Netties, Postgres QL, and code review.",
+                PROMPT
+            ),
+            EchoChoice::Original
         );
     }
 }

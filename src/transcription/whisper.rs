@@ -1,5 +1,6 @@
 //! Speech-to-text through whisper.cpp, via whisper-rs.
 
+use crate::audio::level;
 use crate::logging::{transcription as logging, RequestContext};
 use crate::transcription::cpu;
 use crate::transcription::device::GpuAvailability;
@@ -21,6 +22,10 @@ pub const WHISPER_SAMPLE_RATE: u32 = 16_000;
 /// Audio kept on each side of a stretch of speech, so that soft first and
 /// last sounds of a word stay in.
 const VAD_SPEECH_PAD_MS: i32 = 100;
+
+/// Shorter speech is dropped as noise. whisper.cpp uses 250 ms, which can
+/// drop a dictated "no" or "OK".
+const VAD_MIN_SPEECH_MS: i32 = 100;
 
 /// Silence put between two stretches of speech, as whisper.cpp does.
 const SPEECH_GAP: usize = WHISPER_SAMPLE_RATE as usize / 10;
@@ -260,11 +265,10 @@ impl WhisperTranscriber {
                     None
                 },
             });
-            if trimmed.as_ref().is_some_and(Vec::is_empty) {
-                debug!("Voice activity detection found no speech");
+            let Some(samples) = whisper_input(&samples, trimmed.as_deref()) else {
+                debug!("Voice activity detection found no speech in a quiet take");
                 return Ok(String::new());
-            }
-            let samples = trimmed.as_deref().unwrap_or(&samples);
+            };
             run_full(&engine, samples, &language, threads, prompt.as_deref())
         })
         .await
@@ -347,9 +351,26 @@ fn run_full(
     Ok(text)
 }
 
+/// The audio Whisper gets: the speech that voice activity detection found,
+/// or the whole take when it did not run. When it found no speech in a take
+/// that is loud enough to hold some, Whisper gets the whole take, because
+/// the model can miss one short word. A quiet take gets nothing.
+pub(crate) fn whisper_input<'a>(take: &'a [f32], speech: Option<&'a [f32]>) -> Option<&'a [f32]> {
+    match speech {
+        None => Some(take),
+        Some(speech) if !speech.is_empty() => Some(speech),
+        Some(_) if level::rms(take) >= level::QUIET_RMS => {
+            debug!("Voice activity detection found no speech, so Whisper gets the whole take");
+            Some(take)
+        },
+        Some(_) => None,
+    }
+}
+
 /// The speech in `samples`, as the Silero model finds it.
 fn speech_in(vad: &Mutex<WhisperVadContext>, samples: &[f32]) -> Result<Vec<f32>> {
     let mut params = WhisperVadParams::new();
+    params.set_min_speech_duration(VAD_MIN_SPEECH_MS);
     params.set_speech_pad(VAD_SPEECH_PAD_MS);
     let segments = vad
         .lock()
@@ -549,6 +570,32 @@ mod tests {
             "no sample is copied twice"
         );
         assert_eq!(kept.last(), Some(&23_999.0));
+    }
+
+    #[test]
+    fn whisper_gets_the_speech_or_the_whole_take() {
+        let loud: Vec<f32> = (0..16_000).map(|i| (i as f32 * 0.05).sin() * 0.2).collect();
+        let speech = &loud[4_000..8_000];
+        assert_eq!(whisper_input(&loud, Some(speech)), Some(speech));
+        assert_eq!(
+            whisper_input(&loud, None),
+            Some(&loud[..]),
+            "without VAD, the whole take"
+        );
+        assert_eq!(
+            whisper_input(&loud, Some(&[])),
+            Some(&loud[..]),
+            "VAD found nothing in a loud take: the whole take"
+        );
+
+        let quiet = vec![0.002f32; 16_000];
+        assert!(level::rms(&quiet) < level::QUIET_RMS);
+        assert_eq!(
+            whisper_input(&quiet, Some(&[])),
+            None,
+            "VAD found nothing in a quiet take: nothing"
+        );
+        assert_eq!(whisper_input(&quiet, None), Some(&quiet[..]));
     }
 
     #[test]

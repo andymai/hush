@@ -10,7 +10,7 @@ use crate::config::paths;
 use crate::config::settings::TranscriptionConfig;
 use crate::transcription::cloud::CloudTranscriber;
 use crate::transcription::cpu;
-use crate::transcription::guard;
+use crate::transcription::guard::{self, EchoChoice};
 use crate::transcription::models::{self, ModelManager, ModelSize};
 use crate::transcription::whisper::{TranscriptionResult, WhisperTranscriber};
 use crate::Result;
@@ -93,10 +93,10 @@ impl SpeechToText {
         }
     }
 
-    /// Transcribe, then check the text. When the text only echoes `prompt`,
-    /// transcribe again without it and keep that result only if it has more
-    /// real words and no echo. Text that Whisper invents for silence comes
-    /// back empty.
+    /// Transcribe, then check the text. When the text looks like an echo of
+    /// `prompt`, transcribe again without it, and let [`guard::after_echo`]
+    /// pick the result. Text that Whisper invents for silence comes back
+    /// empty.
     pub async fn transcribe_with_prompt(
         &self,
         audio: &[f32],
@@ -107,15 +107,22 @@ impl SpeechToText {
         let mut result = self.transcribe_once(audio, sample_rate, prompt).await?;
 
         if let Some(prompt) = prompt.filter(|p| guard::is_prompt_echo(&result.text, p)) {
-            info!("The transcript echoes the prompt, transcribing again without it");
-            let second = self.transcribe_once(audio, sample_rate, None).await?;
-            result.processing_time += second.processing_time;
-            if guard::keep_second_pass(&result.text, &second.text, prompt) {
-                result.text = second.text;
-                result.confidence = second.confidence;
-            } else {
-                info!("Dropped the transcript: it only echoed the prompt");
-                result.text.clear();
+            info!("The transcript looks like an echo of the prompt, transcribing again without it");
+            let retry = self.transcribe_once(audio, sample_rate, None).await?;
+            result.processing_time += retry.processing_time;
+            match guard::after_echo(&result.text, &retry.text, prompt) {
+                EchoChoice::Drop => {
+                    info!("Dropped the transcript: without the prompt, it had no speech");
+                    result.text.clear();
+                },
+                EchoChoice::Retry => {
+                    info!("Kept the transcript made without the prompt");
+                    result.text = retry.text;
+                    result.confidence = retry.confidence;
+                },
+                EchoChoice::Original => {
+                    info!("Kept the first transcript: the prompt terms in it were spoken");
+                },
             }
         }
 
