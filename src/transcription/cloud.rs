@@ -16,6 +16,7 @@ use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::io::Cursor;
+use std::path::Path;
 use std::time::{Duration, Instant};
 use tracing::info;
 
@@ -54,10 +55,13 @@ struct ErrorDetail {
 
 impl CloudTranscriber {
     /// The service `config.backend` names, with its key from the
-    /// environment or `~/.config/hush/.env`.
-    pub fn from_config(config: &TranscriptionConfig) -> Result<Self> {
+    /// environment or `env_file` (`~/.config/hush/.env`).
+    pub fn from_config(config: &TranscriptionConfig, env_file: &Path) -> Result<Self> {
         if config.backend != TranscriptionBackend::OpenAiCompatible {
-            let key = config.backend.key_var().and_then(keys::api_key);
+            let key = config
+                .backend
+                .key_var()
+                .and_then(|var| keys::api_key_in(env_file, var));
             return Self::new(
                 config.backend,
                 config.cloud_model().unwrap_or_default(),
@@ -66,7 +70,7 @@ impl CloudTranscriber {
             );
         }
         let key = match config.key_var() {
-            Some(var) => Some(keys::api_key(var).with_context(|| {
+            Some(var) => Some(keys::api_key_in(env_file, var).with_context(|| {
                 format!(
                     "transcription.server_key_env is {} but {} is not set. Put it in \
                      ~/.config/hush/.env, or set server_key_env = \"\"",
@@ -506,6 +510,8 @@ mod tests {
 
     #[test]
     fn a_server_key_that_is_not_set_names_the_variable() {
+        let dir = tempfile::tempdir().unwrap();
+        let env_file = dir.path().join(".env");
         let config = TranscriptionConfig {
             backend: TranscriptionBackend::OpenAiCompatible,
             server_url: "http://localhost:8080".into(),
@@ -513,18 +519,27 @@ mod tests {
             server_key_env: "HUSH_TEST_UNSET_SERVER_KEY".into(),
             ..crate::config::Config::defaults().unwrap().transcription
         };
-        let err = CloudTranscriber::from_config(&config)
+        let err = CloudTranscriber::from_config(&config, &env_file)
             .err()
             .unwrap()
             .to_string();
         assert!(err.contains("HUSH_TEST_UNSET_SERVER_KEY"), "{err}");
         assert!(err.contains("server_key_env = \"\""), "{err}");
 
+        std::fs::write(&env_file, "HUSH_TEST_UNSET_SERVER_KEY=sk-from-file\n").unwrap();
+        assert_eq!(
+            CloudTranscriber::from_config(&config, &env_file)
+                .unwrap()
+                .api_key
+                .as_deref(),
+            Some("sk-from-file")
+        );
+
         let no_key = TranscriptionConfig {
             server_key_env: String::new(),
             ..config
         };
-        assert!(CloudTranscriber::from_config(&no_key)
+        assert!(CloudTranscriber::from_config(&no_key, &env_file)
             .unwrap()
             .api_key
             .is_none());

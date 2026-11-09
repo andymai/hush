@@ -18,7 +18,7 @@ use crate::audio::{
 };
 use crate::cli::commands::daemon::{self, SessionOptions};
 use crate::config::settings::TranscriptionConfig;
-use crate::config::{keys, Config};
+use crate::config::{keys, paths, Config};
 use crate::hotkey::{
     GestureAction, GestureDetector, HotkeyAction, HotkeyBindings, HotkeyEvent, HotkeyManager,
     HotkeyMode,
@@ -263,7 +263,12 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     // First, because a cloud backend reads its key from these files
     keys::load_env_files();
 
-    let transcriber = SpeechToText::from_config(&config.transcription).await?;
+    let transcriber = SpeechToText::from_config(
+        &config.transcription,
+        &paths::models_dir(),
+        &keys::env_file(),
+    )
+    .await?;
     info!("✅ Transcriber ready: {}", transcriber.describe());
     let local_model = !config.transcription.backend.is_cloud();
     let mut model = ModelSlot::loaded(transcriber, model_loader(&config.transcription));
@@ -286,7 +291,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     // Initialize text processor
     let text_processor = if !no_processing {
-        let llm_provider = llm::resolve_provider(&config.llm).await;
+        let llm_provider = llm::resolve_provider(&config.llm, &keys::env_file()).await;
         if matches!(llm_provider, LlmProvider::None) {
             info!("No LLM: polishing is rule-based and Command Mode is off until Ollama runs or ANTHROPIC_API_KEY is set");
         }
@@ -1258,7 +1263,9 @@ fn model_loader(
     let config = config.clone();
     move || {
         let config = config.clone();
-        Box::pin(async move { SpeechToText::from_config(&config).await })
+        Box::pin(async move {
+            SpeechToText::from_config(&config, &paths::models_dir(), &keys::env_file()).await
+        })
     }
 }
 

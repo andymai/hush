@@ -44,6 +44,9 @@ pub mod gui;
 /// Launcher and autostart entries
 pub mod desktop;
 
+#[cfg(test)]
+mod test_support;
+
 // Re-export main types for convenience (legacy)
 pub use audio::{AudioCapture, AudioFeedback};
 pub use config::Config;

@@ -45,6 +45,7 @@ use tracing::error;
 ///
 /// Models are stored in `$XDG_DATA_HOME/hush/models/` (`~/.local/share/hush/models/`)
 pub async fn handle_models(model_command: ModelCommands) -> Result<()> {
+    crate::config::paths::move_legacy_models();
     match model_command {
         ModelCommands::List {
             downloaded,

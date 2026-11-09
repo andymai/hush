@@ -3,7 +3,7 @@
 
 use crate::config::server::{self, Sends};
 use crate::config::settings::{LlmSetting, TranscriptionBackend, TranscriptionConfig};
-use crate::config::{keys, Config};
+use crate::config::{keys, paths, Config};
 use crate::hotkey::{warnings, HotkeyBindings};
 use crate::text::layout::Layout;
 use crate::text::WindowProvider;
@@ -11,7 +11,7 @@ use crate::text_processing::hook::{self, Program};
 use crate::transcription::cpu;
 use crate::transcription::device::GpuAvailability;
 use crate::transcription::gpu_fallback::GpuFailure;
-use crate::transcription::models::{recommended_model, ModelManager, ModelSize};
+use crate::transcription::models::{self, recommended_model, ModelManager, ModelSize};
 use crate::AudioCapture;
 use anyhow::Result;
 use std::fmt;
@@ -87,7 +87,7 @@ pub async fn checks() -> Vec<Check> {
         Ok(config) => {
             checks.push(Check::ok(
                 "Configuration",
-                format!("{}", crate::config::paths::config_path().display()),
+                format!("{}", paths::config_path().display()),
             ));
             config
         },
@@ -104,21 +104,23 @@ pub async fn checks() -> Vec<Check> {
         },
     };
 
+    let models_dir = paths::models_dir();
+    let env_file = keys::env_file();
     checks.push(permissions_check());
     if config.transcription.backend.is_cloud() {
         let key_present = config
             .transcription
             .key_var()
-            .is_none_or(|var| keys::api_key(var).is_some());
+            .is_none_or(|var| keys::api_key_in(&env_file, var).is_some());
         checks.push(cloud_check(&config.transcription, key_present));
     } else {
         let cpu = cpu_report(cpu::floor(), &cpu::missing());
         let cpu_supported = cpu.level == Level::Ok;
         checks.push(cpu);
-        checks.push(model_check(&config, &crate::config::paths::models_dir()));
+        checks.push(model_check(&config, &models_dir));
         checks.push(vad_check(
             &config.transcription,
-            crate::transcription::models::vad_model_path().is_file(),
+            models::vad_model_path(&models_dir).is_file(),
         ));
         // Below the floor, ggml lists no devices, so a GPU line would blame the driver.
         if cpu_supported {
@@ -141,7 +143,7 @@ pub async fn checks() -> Vec<Check> {
     ));
     checks.push(window_check());
     checks.push(clipboard_check(crate::text::clipboard::support()));
-    checks.push(llm_check(&config).await);
+    checks.push(llm_check(&config, &env_file).await);
     checks.push(hook_check(&config));
     checks.push(tray_check(&config));
     checks.push(updates_check(&config));
@@ -191,7 +193,7 @@ fn cpu_report(floor: Option<&str>, missing: &[&str]) -> Check {
 
 fn model_check(config: &Config, models_dir: &Path) -> Check {
     let size = config.transcription.model_size.clone();
-    let path = config.transcription.model_path();
+    let path = config.transcription.model_path_in(models_dir);
     if path.exists() {
         let megabytes = std::fs::metadata(&path)
             .map(|meta| meta.len() / 1_000_000)
@@ -460,9 +462,9 @@ fn clipboard_check(support: crate::text::clipboard::Support) -> Check {
     }
 }
 
-async fn llm_check(config: &Config) -> Check {
+async fn llm_check(config: &Config, env_file: &Path) -> Check {
     use crate::text_processing::LlmProvider;
-    let provider = crate::text_processing::llm::resolve_provider(&config.llm).await;
+    let provider = crate::text_processing::llm::resolve_provider(&config.llm, env_file).await;
     match provider {
         LlmProvider::Ollama { model, .. } => Check::ok("Polishing", format!("Ollama {}", model)),
         LlmProvider::Anthropic { model, .. } => {
@@ -786,11 +788,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_server_llm_without_its_key_names_the_variable() {
+        let dir = tempfile::tempdir().unwrap();
+        let env_file = dir.path().join(".env");
         let mut config = Config::defaults().unwrap();
         config.llm.provider = LlmSetting::OpenAiCompatible;
         config.llm.server_url = "http://localhost:8000".into();
         config.llm.server_model = "qwen3".into();
-        let check = llm_check(&config).await;
+        let check = llm_check(&config, &env_file).await;
         assert_eq!(check.level, Level::Ok);
         assert_eq!(
             check.detail,
@@ -798,7 +802,7 @@ mod tests {
         );
 
         config.llm.server_key_env = "HUSH_TEST_UNSET_LLM_KEY".into();
-        let check = llm_check(&config).await;
+        let check = llm_check(&config, &env_file).await;
         assert_eq!(check.level, Level::Warn);
         assert!(check.detail.contains("HUSH_TEST_UNSET_LLM_KEY"));
         assert!(check.fix.unwrap().contains("under [llm]"));
@@ -997,6 +1001,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_checks_run_without_panicking() {
+        crate::test_support::in_temp_home!(the_checks_run_without_panicking);
         let checks = checks().await;
         assert!(checks.len() >= 8, "every area is reported");
         assert!(checks.iter().any(|check| check.name == "Keyboard access"));

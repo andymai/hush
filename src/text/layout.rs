@@ -79,6 +79,12 @@ fn split_variant(layout: &str) -> (&str, &str) {
 
 /// The configured layout, from the most specific source that answers.
 pub fn current() -> Option<Layout> {
+    let kxkbrc = dirs::config_dir().map(|dir| dir.join("kxkbrc"));
+    detect(kxkbrc.as_deref())
+}
+
+/// [`current`] with `kxkbrc` in place of KDE's `~/.config/kxkbrc`.
+fn detect(kxkbrc: Option<&Path>) -> Option<Layout> {
     if let Some(layout) = from_env() {
         return Some(layout);
     }
@@ -95,10 +101,7 @@ pub fn current() -> Option<Layout> {
         }
     }
     if desktop_is("kde") {
-        if let Some(layout) = dirs::config_dir()
-            .and_then(|dir| read(&dir.join("kxkbrc")))
-            .and_then(|s| parse_kxkbrc(&s))
-        {
+        if let Some(layout) = kxkbrc.and_then(read).and_then(|s| parse_kxkbrc(&s)) {
             return Some(layout);
         }
     }
@@ -399,6 +402,7 @@ mod tests {
 
     #[test]
     fn detection_never_panics() {
-        let _ = types_like_us();
+        let dir = tempfile::tempdir().unwrap();
+        let _ = detect(Some(&dir.path().join("kxkbrc")));
     }
 }

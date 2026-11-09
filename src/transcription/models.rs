@@ -36,9 +36,10 @@ pub fn vad_model() -> ModelInfo {
     }
 }
 
-/// Where the voice activity detection model lives, downloaded or not.
-pub fn vad_model_path() -> PathBuf {
-    crate::config::paths::models_dir().join(VAD_FILENAME)
+/// Where the voice activity detection model lives in `models_dir`,
+/// downloaded or not.
+pub fn vad_model_path(models_dir: &Path) -> PathBuf {
+    models_dir.join(VAD_FILENAME)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -589,9 +590,12 @@ mod tests {
             "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"
         );
         assert_eq!(info.sha256.as_deref().map(str::len), Some(64));
-        assert!(vad_model_path().ends_with(VAD_FILENAME));
 
         let temp_dir = TempDir::new().unwrap();
+        assert_eq!(
+            vad_model_path(temp_dir.path()),
+            temp_dir.path().join(VAD_FILENAME)
+        );
         let manager = ModelManager::new(temp_dir.path()).unwrap();
         assert_eq!(manager.vad_model_path(), None);
         std::fs::write(temp_dir.path().join(VAD_FILENAME), b"x").unwrap();

@@ -4,7 +4,6 @@
 //! AppImages, and source builds all read and write the same places.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use tracing::{info, warn};
 
 const APP: &str = "hush";
@@ -52,40 +51,45 @@ pub fn state_dir() -> PathBuf {
         .join(APP)
 }
 
-/// Where downloaded Whisper models live.
-///
-/// Models used to be stored under the cache directory. The first call moves
-/// that directory into the data directory; if the move fails (for example
-/// across filesystems) the legacy location keeps being used so nothing has to
-/// be downloaded again.
+/// Where downloaded Whisper models live: `$XDG_DATA_HOME/hush/models`, or
+/// the legacy `$XDG_CACHE_HOME/hush/models` while only that folder exists.
+/// It never moves files; [`move_legacy_models`] does.
 pub fn models_dir() -> PathBuf {
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| resolve_models_dir(&data_dir().join("models"), &cache_dir().join("models")))
-        .clone()
+    choose_models_dir(&data_dir().join("models"), &cache_dir().join("models"))
 }
 
-fn resolve_models_dir(current: &Path, legacy: &Path) -> PathBuf {
+/// Move models from the legacy cache folder into the data folder. The daemon
+/// and `hush models` call it once at start. When the move fails (for example
+/// across filesystems), the models stay, and [`models_dir`] keeps the legacy
+/// folder, so nothing must be downloaded again.
+pub fn move_legacy_models() {
+    move_models(&data_dir().join("models"), &cache_dir().join("models"));
+}
+
+fn choose_models_dir(current: &Path, legacy: &Path) -> PathBuf {
     if current.exists() || !legacy.is_dir() {
-        return current.to_path_buf();
+        current.to_path_buf()
+    } else {
+        legacy.to_path_buf()
+    }
+}
+
+fn move_models(current: &Path, legacy: &Path) {
+    if current.exists() || !legacy.is_dir() {
+        return;
     }
     match migrate_dir(legacy, current) {
-        Ok(()) => {
-            info!(
-                "Moved models from {} to {}",
-                legacy.display(),
-                current.display()
-            );
-            current.to_path_buf()
-        },
-        Err(e) => {
-            warn!(
-                "Could not move models from {} to {} ({}); using the legacy location",
-                legacy.display(),
-                current.display(),
-                e
-            );
-            legacy.to_path_buf()
-        },
+        Ok(()) => info!(
+            "Moved models from {} to {}",
+            legacy.display(),
+            current.display()
+        ),
+        Err(e) => warn!(
+            "Could not move models from {} to {} ({}); using the legacy location",
+            legacy.display(),
+            current.display(),
+            e
+        ),
     }
 }
 
@@ -102,6 +106,7 @@ mod tests {
 
     #[test]
     fn config_path_honors_override() {
+        crate::test_support::in_temp_home!(config_path_honors_override);
         let dir = tempfile::tempdir().unwrap();
         let custom = dir.path().join("custom.toml");
         std::env::set_var(CONFIG_ENV, &custom);
@@ -115,13 +120,14 @@ mod tests {
     }
 
     #[test]
-    fn resolve_prefers_existing_current_dir() {
+    fn an_existing_current_dir_wins_and_is_never_replaced() {
         let root = tempfile::tempdir().unwrap();
         let current = root.path().join("data/models");
         let legacy = root.path().join("cache/models");
         std::fs::create_dir_all(&current).unwrap();
         std::fs::create_dir_all(&legacy).unwrap();
-        assert_eq!(resolve_models_dir(&current, &legacy), current);
+        assert_eq!(choose_models_dir(&current, &legacy), current);
+        move_models(&current, &legacy);
         assert!(
             legacy.exists(),
             "an existing current dir never triggers a move"
@@ -129,25 +135,54 @@ mod tests {
     }
 
     #[test]
-    fn resolve_moves_legacy_dir_once() {
+    fn a_read_uses_the_legacy_dir_and_never_moves_it() {
         let root = tempfile::tempdir().unwrap();
         let current = root.path().join("data/models");
         let legacy = root.path().join("cache/models");
         std::fs::create_dir_all(&legacy).unwrap();
         std::fs::write(legacy.join("ggml-base.bin"), b"model").unwrap();
 
-        assert_eq!(resolve_models_dir(&current, &legacy), current);
-        assert!(current.join("ggml-base.bin").exists());
-        assert!(!legacy.exists());
-        assert_eq!(resolve_models_dir(&current, &legacy), current);
+        assert_eq!(choose_models_dir(&current, &legacy), legacy);
+        assert!(legacy.join("ggml-base.bin").exists());
+        assert!(!current.exists());
     }
 
     #[test]
-    fn resolve_uses_current_when_nothing_exists() {
+    fn the_move_takes_the_legacy_dir_once() {
         let root = tempfile::tempdir().unwrap();
         let current = root.path().join("data/models");
         let legacy = root.path().join("cache/models");
-        assert_eq!(resolve_models_dir(&current, &legacy), current);
-        assert!(!current.exists(), "resolution never creates the directory");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("ggml-base.bin"), b"model").unwrap();
+
+        move_models(&current, &legacy);
+        assert!(current.join("ggml-base.bin").exists());
+        assert!(!legacy.exists());
+        assert_eq!(choose_models_dir(&current, &legacy), current);
+        move_models(&current, &legacy);
+        assert!(current.join("ggml-base.bin").exists());
+    }
+
+    #[test]
+    fn a_failed_move_keeps_the_legacy_dir() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("data"), b"not a folder").unwrap();
+        let current = root.path().join("data/models");
+        let legacy = root.path().join("cache/models");
+        std::fs::create_dir_all(&legacy).unwrap();
+
+        move_models(&current, &legacy);
+        assert!(legacy.exists());
+        assert_eq!(choose_models_dir(&current, &legacy), legacy);
+    }
+
+    #[test]
+    fn nothing_on_disk_means_the_current_dir_and_no_new_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let current = root.path().join("data/models");
+        let legacy = root.path().join("cache/models");
+        assert_eq!(choose_models_dir(&current, &legacy), current);
+        move_models(&current, &legacy);
+        assert!(!current.exists(), "nothing to move creates nothing");
     }
 }

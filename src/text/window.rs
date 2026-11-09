@@ -208,6 +208,7 @@ mod tests {
 
     #[test]
     fn detect_never_panics() {
+        crate::test_support::in_temp_home!(detect_never_panics);
         let provider = WindowProvider::detect();
         assert!(!provider.name().is_empty());
     }
