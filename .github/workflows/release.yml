@@ -155,7 +155,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" target/dist/* --clobber --repo "$GITHUB_REPOSITORY"
 
-  # Publishes hush-bin once AUR_SSH_PRIVATE_KEY exists; skips quietly until then.
+  # Publishes hush-voice-bin once AUR_SSH_PRIVATE_KEY exists; skips quietly until then.
   aur:
     name: Publish to AUR
     needs: package
@@ -189,7 +189,7 @@ jobs:
       - uses: KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050 # v4.2.0
         if: env.HAS_AUR_KEY == 'true'
         with:
-          pkgname: hush-bin
+          pkgname: hush-voice-bin
           pkgbuild: ./PKGBUILD
           commit_username: Andy Aragon
           commit_email: hi@andymai.com
