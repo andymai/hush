@@ -37,13 +37,14 @@ pub enum InstallKind {
 
 impl InstallKind {
     pub fn detect(exe: &Path, appimage: Option<&OsStr>) -> Self {
-        if appimage.is_some_and(|value| !value.is_empty()) {
-            return InstallKind::AppImage;
-        }
+        // The location comes first: a process started from inside another
+        // AppImage inherits APPIMAGE, and a packaged binary must still not check.
         let managed = (exe.starts_with("/usr") && !exe.starts_with("/usr/local"))
             || exe.starts_with("/nix/store");
         if managed {
             InstallKind::PackageManager
+        } else if appimage.is_some_and(|value| !value.is_empty()) {
+            InstallKind::AppImage
         } else {
             InstallKind::SelfManaged
         }
@@ -243,11 +244,15 @@ pub async fn run(kind: InstallKind) {
     }
     let path = UpdateState::path();
     tokio::time::sleep(STARTUP_DELAY).await;
+    // The file only carries the throttle across restarts. When it cannot be
+    // written, reading it back would make every pass of this loop send a request.
+    let mut checked_here = None;
     loop {
-        let state = UpdateState::load_from(&path);
-        let wait = next_check_in(state.last_checked, Utc::now());
+        let last = checked_here.or_else(|| UpdateState::load_from(&path).last_checked);
+        let wait = next_check_in(last, Utc::now());
         if wait.is_zero() {
             check_once(&path).await;
+            checked_here = Some(Utc::now());
         } else {
             tokio::time::sleep(wait.min(MAX_SLEEP)).await;
         }
@@ -285,6 +290,11 @@ mod tests {
             InstallKind::AppImage
         );
         assert_eq!(detect("/usr/bin/hush", None), InstallKind::PackageManager);
+        assert_eq!(
+            detect("/usr/bin/hush", Some("/home/a/Terminal.AppImage")),
+            InstallKind::PackageManager,
+            "APPIMAGE inherited from another AppImage"
+        );
         assert_eq!(
             detect("/nix/store/abc-hush-0.7.3/bin/hush", None),
             InstallKind::PackageManager
