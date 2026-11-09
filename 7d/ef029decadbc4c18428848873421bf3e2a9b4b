@@ -1,0 +1,44 @@
+src/audio/silence.rs
+  s_8c30bad7701dbb::t_d6f6ae73d165ff 1-223
+  s_8c30bad7701dbb::t_d8612068f7d404 224-238
+src/config/settings.rs
+  s_8c30bad7701dbb::t_274b59c9abc1c1 565-572
+  s_f8c761b717b79b::t_1bc1c98b802b7a 130-133
+src/hotkey/gesture.rs
+  s_8c30bad7701dbb::t_e01ee3f3f27c3d 50,137-153
+  s_f8c761b717b79b::t_2b2dc9f8a6be92 47-49,51,136
+src/gui/pages/speech.rs
+  s_8c30bad7701dbb::t_3628298fd9ab44 193-212
+README.md
+  s_8c30bad7701dbb::t_72bed57e7cb5a8 144
+config/default.toml
+  s_8c30bad7701dbb::t_43f1b380543b9b 10
+src/audio/mod.rs
+  s_8c30bad7701dbb::t_8cf12b77577add 42,46
+src/cli/commands/listen.rs
+  s_8c30bad7701dbb::t_c5e8750af66647 9,358-360,435-437,652-655,665-677,825-826,831-832,850-854
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7def029decadbc4c18428848873421bf3e2a9b4b",
+  "prompts": {},
+  "sessions": {
+    "s_8c30bad7701dbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf6bbec0-c5d2-46fa-8e5b-d526f9012d5d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    },
+    "s_f8c761b717b79b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0161eb79-bcdb-4e67-ad8a-f056fadf98c2",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
