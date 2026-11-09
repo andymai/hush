@@ -95,6 +95,9 @@ impl TranscriptHook {
 
     /// The text to type after the hook, or `None` to type nothing.
     pub async fn apply(&self, text: String, env: &HookEnv<'_>) -> Option<String> {
+        if text.trim().is_empty() {
+            return Some(text);
+        }
         match self.run(&text, env).await {
             Outcome::Replace(replaced) => Some(replaced),
             Outcome::Skip => {
@@ -121,7 +124,11 @@ impl TranscriptHook {
     }
 
     pub async fn run(&self, text: &str, env: &HookEnv<'_>) -> Outcome {
-        let spawned = Command::new("sh")
+        let mut command = Command::new("sh");
+        for name in crate::config::keys::loaded_from_env_files() {
+            command.env_remove(name);
+        }
+        let spawned = command
             .arg("-c")
             .arg(&self.command)
             .env("HUSH_APP", env.app)
@@ -449,6 +456,43 @@ mod tests {
             hook.run("Hello world.", &env).await,
             Outcome::Replace("org.kde.konsole|terminal|um hello world|ipc".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn keys_from_env_files_stay_out_of_the_hook() {
+        std::env::set_var("HUSH_TEST_HOOK_SESSION", "from-session");
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".env");
+        std::fs::write(
+            &file,
+            "HUSH_TEST_HOOK_KEY=secret\nHUSH_TEST_HOOK_SESSION=from-file\n",
+        )
+        .unwrap();
+        crate::config::keys::load_with(|| {
+            let _ = dotenvy::from_path(&file);
+        });
+        assert_eq!(std::env::var("HUSH_TEST_HOOK_KEY").as_deref(), Ok("secret"));
+        assert_eq!(
+            run(
+                r#"printf %s "${HUSH_TEST_HOOK_KEY-unset}|$HUSH_TEST_HOOK_SESSION""#,
+                "x"
+            )
+            .await,
+            Outcome::Replace("unset|from-session".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_whitespace_take_skips_the_hook() {
+        let hook = TranscriptHook::new("exit 77").unwrap();
+        for text in ["\n", "\n\n", " \t "] {
+            assert_eq!(
+                hook.apply(text.to_string(), &ENV).await.as_deref(),
+                Some(text),
+                "{text:?}"
+            );
+        }
+        assert_eq!(hook.apply("\nword\n".to_string(), &ENV).await, None);
     }
 
     #[test]

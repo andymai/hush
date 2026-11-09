@@ -166,6 +166,7 @@ Set `hooks.transcript` to a command, and Hush runs it with `sh -c` on each trans
 - Exit code 77 types nothing, and the take gets no history entry.
 - When the command exits with a code other than 0 or 77, cannot start, prints nothing, or runs longer than 5 seconds, Hush types the original text and logs the reason.
 - The command gets `HUSH_APP` (the window class, empty when unknown), `HUSH_PROFILE` (`terminal`, `editor`, `chat`, `mail`, `docs`, `browser`, or `other`), `HUSH_RAW_TEXT` (the text as Whisper returned it; in Command Mode, the spoken instruction), and `HUSH_TRIGGER` (`hotkey`, `ipc` for `hush toggle` and `hush start`, `tray`, or `command` for Command Mode).
+- The command does not get the API keys that Hush reads from its .env files.
 
 Remove every exclamation mark:
 
