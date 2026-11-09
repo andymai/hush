@@ -92,6 +92,8 @@ assets/sounds/*.wav
 
 # Build artifacts
 /hush
+/result
+/result-*
 
 # Claude Code
 .claude/settings.local.json
