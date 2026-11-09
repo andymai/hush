@@ -8,7 +8,7 @@
 use std::time::{Duration, Instant};
 
 /// A take that gets no audio frame in this time fails.
-pub const START_TIMEOUT: Duration = Duration::from_secs(2);
+pub const START_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A first frame later than this is a slow start, worth a warning in the log.
 pub const SLOW_START: Duration = Duration::from_millis(200);
@@ -195,11 +195,11 @@ mod tests {
     }
 
     #[test]
-    fn no_frame_in_two_seconds_cancels_the_take() {
+    fn no_frame_in_five_seconds_cancels_the_take() {
         let base = Instant::now();
         let mut clock = TakeClock::new(base);
-        assert_eq!(clock.poll(None, at(base, 1999)), None);
-        assert_eq!(clock.poll(None, at(base, 2000)), Some(StartEvent::TimedOut));
+        assert_eq!(clock.poll(None, at(base, 4999)), None);
+        assert_eq!(clock.poll(None, at(base, 5000)), Some(StartEvent::TimedOut));
         assert!(!clock.is_live());
         assert_eq!(clock.stop_action(), StopAction::Discard);
     }
@@ -209,7 +209,7 @@ mod tests {
         let base = Instant::now();
         let mut clock = TakeClock::new(base);
         assert_eq!(
-            clock.poll(Some(at(base, 2010)), at(base, 2016)),
+            clock.poll(Some(at(base, 5010)), at(base, 5016)),
             Some(StartEvent::TimedOut)
         );
         assert!(!clock.is_live());
@@ -220,9 +220,22 @@ mod tests {
         let base = Instant::now();
         let mut clock = TakeClock::new(base);
         assert_eq!(
-            clock.poll(Some(at(base, 1995)), at(base, 2011)),
+            clock.poll(Some(at(base, 4995)), at(base, 5011)),
             Some(StartEvent::Live {
-                delay: Duration::from_millis(1995)
+                delay: Duration::from_millis(4995)
+            })
+        );
+    }
+
+    #[test]
+    fn a_four_second_wake_still_starts_the_take() {
+        let base = Instant::now();
+        let mut clock = TakeClock::new(base);
+        assert_eq!(clock.poll(None, at(base, 3990)), None);
+        assert_eq!(
+            clock.poll(Some(at(base, 4000)), at(base, 4006)),
+            Some(StartEvent::Live {
+                delay: Duration::from_secs(4)
             })
         );
     }

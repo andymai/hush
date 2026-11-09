@@ -79,7 +79,7 @@ struct CommandTarget {
 ///    - **Main Thread**: Handles audio recording pipeline
 ///      - Start/stop recording on commands
 ///      - Give the start cue and show the overlay at the first audio frame,
-///        or cancel when no audio arrives in 2 s
+///        or cancel when no audio arrives in 5 s
 ///      - Monitor amplitude during recording
 ///      - Transcribe audio with Whisper
 ///      - Send results to handler thread
