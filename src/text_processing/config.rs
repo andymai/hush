@@ -18,6 +18,14 @@ pub enum LlmProvider {
         /// Model name, such as llama3.2
         model: String,
     },
+    /// A server that speaks the OpenAI chat completions API
+    OpenAiCompatible {
+        /// The full chat completions endpoint
+        url: String,
+        model: String,
+        /// Sent as a bearer token when set
+        api_key: Option<String>,
+    },
     /// No LLM - rule-based only
     None,
 }

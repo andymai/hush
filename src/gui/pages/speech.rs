@@ -2,6 +2,7 @@
 //! transcription runs, the model, the language, the GPU, the microphone, and
 //! how long a recording may run.
 
+use crate::config::server;
 use crate::config::settings::TranscriptionBackend;
 use crate::gui::meter::{self, Meter};
 use crate::gui::theme::{field, quiet_button, row, section, slider, toggle_row, FIELD_WIDTH, GOOD};
@@ -45,7 +46,8 @@ fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
     row("Transcribe on")
         .describe(
             "This machine keeps the audio here. Groq and OpenAI can be faster on a slow \
-             computer, and they receive the audio of every dictation.",
+             computer, and they receive the audio of every dictation. An OpenAI-compatible \
+             server receives the audio at the address you set.",
         )
         .show(ui, |ui| {
             egui::ComboBox::from_id_salt("backend")
@@ -63,11 +65,15 @@ fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
         });
 
     let backend = gui.config.transcription.backend;
+    if backend == TranscriptionBackend::OpenAiCompatible {
+        server_settings(gui, ui);
+        return;
+    }
     let Some(var) = backend.key_var() else {
         return;
     };
     let service = backend.name();
-    let has_key = gui.machine.has_key(backend);
+    let has_key = gui.machine.has_key(&gui.config.transcription);
     let sent = if gui.config.transcription.context_prompt {
         "the audio of each dictation and the focused window's title"
     } else {
@@ -102,7 +108,7 @@ fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
             &mut gui.config.transcription.openai_model,
             "gpt-4o-mini-transcribe",
         ),
-        TranscriptionBackend::Local => return,
+        TranscriptionBackend::Local | TranscriptionBackend::OpenAiCompatible => return,
     };
     let title = format!("{} model", service);
     row(&title).show(ui, |ui| {
@@ -110,11 +116,83 @@ fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
     });
 }
 
+fn server_settings(gui: &mut Gui, ui: &mut egui::Ui) {
+    let (ok, title, description) = server_status(gui);
+    row(&title)
+        .status(ok)
+        .describe(&description)
+        .show(ui, |_| {});
+    row("Server address")
+        .describe("Hush adds /v1/audio/transcriptions when the address does not end with it.")
+        .show(ui, |ui| {
+            field(
+                ui,
+                &mut gui.config.transcription.server_url,
+                "http://localhost:8080/v1",
+            );
+        });
+    row("Server model").show(ui, |ui| {
+        field(
+            ui,
+            &mut gui.config.transcription.server_model,
+            "whisper-large-v3",
+        );
+    });
+}
+
+/// Whether the OpenAI-compatible server is set up, a title, and where the
+/// audio goes: a local server, or a service that receives it.
+pub fn server_status(gui: &Gui) -> (bool, String, String) {
+    let transcription = &gui.config.transcription;
+    if let Err(e) = transcription.validate_server() {
+        return (
+            false,
+            "Set the server address and model".to_string(),
+            e.to_string(),
+        );
+    }
+    if !gui.machine.has_key(transcription) {
+        let var = transcription.key_var().unwrap_or_default();
+        return (
+            false,
+            format!("The server needs {}", var),
+            format!(
+                "Put {} in ~/.config/hush/.env. Until then dictation fails, \
+                 and Hush never falls back to another backend.",
+                var
+            ),
+        );
+    }
+    let host = server::host_label(&transcription.server_url);
+    let sent = if transcription.context_prompt {
+        "the audio of each dictation and the focused window's title"
+    } else {
+        "the audio of each dictation"
+    };
+    if server::is_local(&transcription.server_url) {
+        (
+            true,
+            "A local server transcribes the audio".to_string(),
+            format!(
+                "Hush sends {} to {}, on this machine or your local network.",
+                sent, host
+            ),
+        )
+    } else {
+        (
+            true,
+            format!("Audio leaves this machine for {}", host),
+            format!("Hush sends {} to {}.", sent, host),
+        )
+    }
+}
+
 fn backend_label(backend: TranscriptionBackend) -> &'static str {
     match backend {
         TranscriptionBackend::Local => "This machine",
         TranscriptionBackend::Groq => "Groq (cloud)",
         TranscriptionBackend::OpenAi => "OpenAI (cloud)",
+        TranscriptionBackend::OpenAiCompatible => "OpenAI-compatible server",
     }
 }
 
@@ -251,9 +329,13 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
         );
     }
     let context_text = if backend.is_cloud() {
+        let receiver = match backend {
+            TranscriptionBackend::OpenAiCompatible => "the server",
+            hosted => hosted.name(),
+        };
         format!(
             "Sends the focused window's title and your vocabulary to {} with the audio.",
-            backend.name()
+            receiver
         )
     } else {
         "Primes Whisper with the focused window's title and your vocabulary.".to_string()
@@ -452,14 +534,18 @@ mod tests {
     }
 
     #[test]
-    fn cloud_services_are_labelled_as_cloud() {
+    fn hosted_services_are_labelled_as_cloud() {
         for backend in TranscriptionBackend::ALL {
             assert_eq!(
                 backend_label(backend).contains("(cloud)"),
-                backend.is_cloud(),
+                backend.key_var().is_some(),
                 "{backend:?}"
             );
         }
+        assert_eq!(
+            backend_label(TranscriptionBackend::OpenAiCompatible),
+            "OpenAI-compatible server"
+        );
     }
 
     #[test]

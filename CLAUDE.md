@@ -100,7 +100,7 @@ These versions are constrained:
 ## Configuration
 
 - **`config/default.toml`** - Compiled-in defaults (16kHz sample rate, "base" model, RightAlt hotkey, Escape cancels, Ctrl+RightAlt for Command Mode). User overrides live in `$XDG_CONFIG_HOME/hush/config.toml`; `--config-file` or `HUSH_CONFIG` point elsewhere. Models live in `$XDG_DATA_HOME/hush/models`.
-- **`.env`** - `ANTHROPIC_API_KEY` for the Anthropic provider; `[llm]` in the config picks Ollama, Anthropic, or none
+- **`.env`** - `ANTHROPIC_API_KEY` for the Anthropic provider; `[llm]` in the config picks Ollama, Anthropic, an OpenAI-compatible server, or none
 - **Logging verbosity**: `-v` (INFO), `-vv` (DEBUG), `-vvv` (TRACE)
 
 ## Testing
