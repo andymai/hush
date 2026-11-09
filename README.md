@@ -150,6 +150,7 @@ Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another co
 | `feedback.audio_enabled` | Tones on start, stop, cancel, and the cap warning | true |
 | `insertion.method` | `auto` (type, then paste what uinput cannot type), `uinput`, or `clipboard` | auto |
 | `insertion.uinput_apps`, `insertion.clipboard_apps` | Window classes that always type or always paste, whatever `insertion.method` says; part of the class is enough | none |
+| `insertion.paste_keys` | Paste chord by window class: `ctrl+v`, `ctrl+shift+v`, or `shift+insert`. A rule names the whole class or its last part after a dot. Without a rule, terminals get `ctrl+shift+v`; Konsole, VS Code, VSCodium, and Cursor get `shift+insert`; other applications get `ctrl+v` | none |
 | `history.enabled`, `history.max_entries` | Keep delivered transcripts in `~/.local/share/hush/history.jsonl`, and how many | true, 500 |
 | `tray.enabled` | Status icon on the desktop panel | true |
 | `updates.check` | Ask GitHub once a day whether a newer release exists (AppImage and tarball installs only) | false |

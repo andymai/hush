@@ -47,8 +47,14 @@ typing_delay_ms = 10
 # Applications that ignore method. Part of the window class is enough:
 # "konsole" matches org.kde.konsole. The History page in the settings window
 # shows the class of each application you dictate into.
-uinput_apps = []    # always type, e.g. terminals that paste with Ctrl+Shift+V
+uinput_apps = []    # always type, e.g. applications where a paste does nothing
 clipboard_apps = [] # always paste, e.g. applications that drop typed letters
+# The paste chord by window class: "ctrl+v", "ctrl+shift+v", or
+# "shift+insert". Without a rule, terminals get ctrl+shift+v; Konsole,
+# VS Code, VSCodium, and Cursor get shift+insert; other applications get
+# ctrl+v. A rule names the whole class or its last part after a dot:
+# "konsole" matches org.kde.konsole, and "st" does not match steam.
+paste_keys = {} # e.g. { kitty = "ctrl+v", "org.wezfurlong.wezterm" = "shift+insert" }
 
 [history]
 # Each delivered transcript, kept in $XDG_DATA_HOME/hush/history.jsonl
