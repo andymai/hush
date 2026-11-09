@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/andymai/hush/compare/v0.11.0...v0.12.0) (2026-11-09)
+
+
+### Features
+
+* **cli:** add script output to stop and status ([#254](https://github.com/andymai/hush/issues/254)) ([ad331c2](https://github.com/andymai/hush/commit/ad331c2115670198d3029c261aece2bf187ae7cf))
+
 ## [0.11.0](https://github.com/andymai/hush/compare/v0.10.0...v0.11.0) (2026-11-09)
 
 
