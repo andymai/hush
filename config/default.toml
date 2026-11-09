@@ -86,3 +86,10 @@ temperature = 0.3
 # StatusNotifierItem (KDE and most panels do; GNOME needs the AppIndicator
 # extension).
 enabled = true
+
+[updates]
+# Once a day, ask GitHub for the number of the newest release and show a
+# notification when it is newer than this one. The request sends nothing but
+# the Hush version. AppImage and tarball installs only: a package manager
+# updates its own installs, so those never check.
+check = false

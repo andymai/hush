@@ -32,6 +32,9 @@ pub mod ipc;
 /// Desktop notifications
 pub mod notify;
 
+/// Opt-in check for a newer release
+pub mod updates;
+
 /// Panel status icon
 pub mod tray;
 

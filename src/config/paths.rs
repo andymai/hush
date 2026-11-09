@@ -45,6 +45,13 @@ pub fn cache_dir() -> PathBuf {
         .join(APP)
 }
 
+/// `$XDG_STATE_HOME/hush`
+pub fn state_dir() -> PathBuf {
+    dirs::state_dir()
+        .unwrap_or_else(|| PathBuf::from(".local/state"))
+        .join(APP)
+}
+
 /// Where downloaded Whisper models live.
 ///
 /// Models used to be stored under the cache directory. The first call moves

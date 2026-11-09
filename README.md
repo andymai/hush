@@ -54,13 +54,13 @@ Hold `Right Alt`, speak, release. Done.
 - **Command Mode.** Hold `Ctrl+Right Alt`, say what to do ("make this friendlier", "turn it into a bullet list"), release. Hush rewrites the selected text, or the last thing it typed when nothing is selected, through a local Ollama server or Anthropic, whichever `[llm]` resolves to. Only text is sent, never audio.
 - **Cleaner text, automatically.** Voice commands cover "new line", "new paragraph", "undo", and "scratch that". Filler words ("um", "uh", "like") are removed. Optional LLM polishing rewrites every transcript.
 - **Panel icon.** A status icon shows whether Hush is idle, recording, or working, and its menu offers the same actions the hotkeys do. Turn it off with `tray.enabled = false`.
-- **A window and a doctor.** `hush settings` opens one window for what still needs setting up and every setting. `hush doctor` checks the configuration, keyboard access, model, GPU, microphone, hotkey, window detection, polishing, panel icon, autostart, and the daemon, then prints the one command that fixes each problem.
+- **A window and a doctor.** `hush settings` opens one window for what still needs setting up and every setting. `hush doctor` checks the configuration, keyboard access, model, GPU, microphone, hotkey, window detection, polishing, panel icon, update check, autostart, and the daemon, then prints the one command that fixes each problem.
 
 ## Scope
 
 Hush deliberately does not:
 
-- **Send audio without asking.** Transcription runs on your machine. Groq and OpenAI transcription are an explicit choice (`transcription.backend`), and Hush never falls back to them on its own. Otherwise the only network traffic is the one-time model download and, if you turn it on, text-only LLM polishing.
+- **Send audio without asking.** Transcription runs on your machine. Groq and OpenAI transcription are an explicit choice (`transcription.backend`), and Hush never falls back to them on its own. Otherwise the only network traffic is the one-time model download and, if you turn them on, text-only LLM polishing and a daily check for a new release.
 - **Act as a voice assistant.** It types what you say. It does not answer questions, run commands, or wake on a phrase.
 - **Run on macOS or Windows.** Linux-only, by design. It depends on `/dev/uinput`, evdev, and Linux window protocols.
 - **Stream partial words.** It transcribes when you release the key, not live as you speak.
@@ -152,6 +152,7 @@ Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another co
 | `insertion.uinput_apps`, `insertion.clipboard_apps` | Window classes that always type or always paste, whatever `insertion.method` says; part of the class is enough | none |
 | `history.enabled`, `history.max_entries` | Keep delivered transcripts in `~/.local/share/hush/history.jsonl`, and how many | true, 500 |
 | `tray.enabled` | Status icon on the desktop panel | true |
+| `updates.check` | Ask GitHub once a day whether a newer release exists (AppImage and tarball installs only) | false |
 
 Point at a different file with `hush -c other.toml …` or `HUSH_CONFIG=other.toml`.
 
@@ -182,7 +183,7 @@ If `hush setup permissions` cannot run where you are (a container, an SSH sessio
 
 ## Privacy and security
 
-Everything runs locally by default. The only network traffic is the one-time model download, and text-only LLM polishing if you turn it on (never audio). If you set `transcription.backend` to `groq` or `openai`, Hush sends the audio of each dictation to that service, with the focused window's title when `transcription.context_prompt` is on. When that service fails, Hush reports the error and does not try another service. Hush reads keyboard events and types through `/dev/input` and `/dev/uinput`; one udev rule grants the logged-in user access to those for the length of the session. Details in [SECURITY.md](SECURITY.md).
+Everything runs locally by default. The only network traffic is the one-time model download, text-only LLM polishing if you turn it on (never audio), and the update check if you turn it on (one request a day to GitHub for the newest release number). If you set `transcription.backend` to `groq` or `openai`, Hush sends the audio of each dictation to that service, with the focused window's title when `transcription.context_prompt` is on. When that service fails, Hush reports the error and does not try another service. Hush reads keyboard events and types through `/dev/input` and `/dev/uinput`; one udev rule grants the logged-in user access to those for the length of the session. Details in [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
