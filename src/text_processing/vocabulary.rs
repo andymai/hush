@@ -33,6 +33,63 @@ fn get_cached_regex(pattern: &str) -> Option<Arc<Regex>> {
     }
 }
 
+static WORD_START: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\w").expect("WORD_START is valid"));
+static WORD_END: Lazy<Regex> = Lazy::new(|| Regex::new(r"\w$").expect("WORD_END is valid"));
+
+/// `\b` only holds next to a word character, so a term such as "c++" or
+/// ".net" gets a boundary only on the side that has one.
+fn whole_word_pattern(term: &str, ignore_case: bool) -> String {
+    format!(
+        "{}{}{}{}",
+        if ignore_case { "(?i)" } else { "" },
+        if WORD_START.is_match(term) { r"\b" } else { "" },
+        regex::escape(term),
+        if WORD_END.is_match(term) { r"\b" } else { "" },
+    )
+}
+
+/// One pass over the original text, longest term first, so a shorter term
+/// never fires inside a longer match or inside a replacement.
+fn replace_terms(text: &str, terms: &HashMap<String, String>, ignore_case: bool) -> String {
+    let mut ordered: Vec<(&String, &String)> = terms
+        .iter()
+        .filter(|(term, _)| !term.trim().is_empty())
+        .collect();
+    ordered.sort_by(|(a, _), (b, _)| {
+        b.chars()
+            .count()
+            .cmp(&a.chars().count())
+            .then_with(|| a.cmp(b))
+    });
+    let mut spans: Vec<(usize, usize, &str)> = Vec::new();
+    for (term, replacement) in ordered {
+        let Some(re) = get_cached_regex(&whole_word_pattern(term, ignore_case)) else {
+            continue;
+        };
+        for found in re.find_iter(text) {
+            let free = spans
+                .iter()
+                .all(|&(start, end, _)| found.end() <= start || found.start() >= end);
+            if free {
+                spans.push((found.start(), found.end(), replacement.as_str()));
+            }
+        }
+    }
+    if spans.is_empty() {
+        return text.to_string();
+    }
+    spans.sort_unstable_by_key(|&(start, _, _)| start);
+    let mut result = String::with_capacity(text.len());
+    let mut copied = 0;
+    for (start, end, replacement) in spans {
+        result.push_str(&text[copied..start]);
+        result.push_str(replacement);
+        copied = end;
+    }
+    result.push_str(&text[copied..]);
+    result
+}
+
 /// Domain-specific vocabulary configuration
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct DomainVocabulary {
@@ -98,30 +155,9 @@ impl DomainVocabulary {
 
     /// Apply vocabulary transformations to text
     pub fn apply(&self, text: &str) -> String {
-        let mut result = text.to_string();
-
-        // Apply abbreviation expansions (using cached regex)
-        for (abbrev, expansion) in &self.abbreviations {
-            let pattern = format!(r"\b{}\b", regex::escape(abbrev));
-            if let Some(re) = get_cached_regex(&pattern) {
-                result = re.replace_all(&result, expansion.as_str()).to_string();
-            }
-        }
-
-        // Apply phrase replacements (simple string replace, no regex needed)
-        for (phrase, replacement) in &self.phrases {
-            result = result.replace(phrase, replacement);
-        }
-
-        // Apply technical term capitalization (using cached regex)
-        for (lowercase, proper) in &self.technical_terms {
-            let pattern = format!(r"(?i)\b{}\b", regex::escape(lowercase));
-            if let Some(re) = get_cached_regex(&pattern) {
-                result = re.replace_all(&result, proper.as_str()).to_string();
-            }
-        }
-
-        result
+        let expanded = replace_terms(text, &self.abbreviations, false);
+        let phrased = replace_terms(&expanded, &self.phrases, true);
+        replace_terms(&phrased, &self.technical_terms, true)
     }
 
     /// Check if a word should be preserved exactly
@@ -373,6 +409,63 @@ mod tests {
 
         let result = vocab1.apply("api connects to db");
         assert_eq!(result, "API connects to database");
+    }
+
+    fn phrases(entries: &[(&str, &str)]) -> DomainVocabulary {
+        let mut vocab = DomainVocabulary::new();
+        for (phrase, replacement) in entries {
+            vocab
+                .phrases
+                .insert(phrase.to_string(), replacement.to_string());
+        }
+        vocab
+    }
+
+    #[test]
+    fn phrase_does_not_fire_inside_a_word() {
+        let vocab = phrases(&[("cat", "dog")]);
+        assert_eq!(
+            vocab.apply("concatenate the cat and the cats"),
+            "concatenate the dog and the cats"
+        );
+    }
+
+    #[test]
+    fn longest_phrase_wins() {
+        let vocab = phrases(&[("new york city", "NYC"), ("new york", "NY")]);
+        assert_eq!(
+            vocab.apply("from new york city to new york"),
+            "from NYC to NY"
+        );
+        let vocab = phrases(&[("new york city", "New York City"), ("new york", "NY")]);
+        assert_eq!(vocab.apply("in new york city"), "in New York City");
+    }
+
+    #[test]
+    fn phrase_matching_ignores_case_and_replaces_every_occurrence() {
+        let vocab = phrases(&[("pull request", "PR")]);
+        assert_eq!(
+            vocab.apply("Pull Request one and PULL REQUEST two and pull request three"),
+            "PR one and PR two and PR three"
+        );
+    }
+
+    #[test]
+    fn phrase_with_regex_characters_matches_literally() {
+        let vocab = phrases(&[("c++", "C++"), ("dollar one", "$1")]);
+        assert_eq!(vocab.apply("i write c++ daily"), "i write C++ daily");
+        assert_eq!(vocab.apply("abc++ stays"), "abc++ stays");
+        assert_eq!(vocab.apply("cxx stays"), "cxx stays");
+        assert_eq!(vocab.apply("pay dollar one"), "pay $1");
+    }
+
+    #[test]
+    fn learned_term_with_symbols_applies_as_written() {
+        let mut vocab = DomainVocabulary::new();
+        vocab.add_technical_term("c#".to_string(), "C#".to_string());
+        vocab.add_technical_term("foo$bar".to_string(), "Foo$Bar".to_string());
+        assert_eq!(vocab.apply("i like c# a lot"), "i like C# a lot");
+        assert_eq!(vocab.apply("call foo$bar now"), "call Foo$Bar now");
     }
 
     #[test]
