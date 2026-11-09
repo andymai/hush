@@ -17,6 +17,32 @@ one of these:
 - Use a cloud backend: set `backend = "groq"` or `backend = "openai"` under
   `[transcription]`. A cloud backend does not run Whisper on your CPU.
 
+## Verify a download
+
+The release workflow attests the build provenance of each release file: the
+tarball, the `.deb`, the `.rpm`, the AppImage, and `SHA256SUMS`. An attestation
+is a Sigstore-signed record. It ties the SHA-256 digest of a file to the
+workflow run that built the file. Releases from 0.17.0 have attestations.
+
+To verify a release file, use GitHub CLI 2.49 or later. The command needs a
+GitHub login, also for a public repository.
+
+```bash
+gh auth login
+gh attestation verify <file> --repo andymai/hush
+```
+
+The command fails when no attestation from `andymai/hush` matches the file.
+
+`install.sh` checks the attestation after the checksum:
+
+- If `gh` 2.49 or later is installed and logged in, the script runs
+  `gh attestation verify`. If the check fails, the script stops and installs
+  nothing.
+- If `gh` cannot do the check, the script prints the command to run by hand
+  and continues.
+- A release before 0.17.0 has no attestation, so the script does not check it.
+
 ## Dependencies
 
 ### Ubuntu / Debian

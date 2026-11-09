@@ -47,6 +47,8 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     outputs:
       version: ${{ steps.version.outputs.version }}
     # whisper-rs-sys passes GGML_* variables to ggml's CMake. Without them, ggml
@@ -199,6 +201,11 @@ jobs:
           cd target/dist
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
+
+      # A dry run attests too, so that it tests this step before a real release.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: target/dist/*
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -12,10 +12,44 @@ set -eu
 REPO="andymai/hush"
 VERSION="${HUSH_VERSION:-latest}"
 ARCH="$(uname -m)"
+FIRST_ATTESTED="0.17.0"
+GH_ATTESTATION_SINCE="2.49"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
+
+# True when MAJOR.MINOR of $1 is at least that of $2. The patch is ignored.
+at_least() {
+  a_major="${1%%.*}"; a_minor="${1#*.}"; a_minor="${a_minor%%.*}"
+  b_major="${2%%.*}"; b_minor="${2#*.}"; b_minor="${b_minor%%.*}"
+  [ "$a_major" -gt "$b_major" ] || { [ "$a_major" -eq "$b_major" ] && [ "$a_minor" -ge "$b_minor" ]; }
+}
+
+# Distribution packages of gh are often older than the attestation command,
+# and the command needs a login even for a public repository.
+gh_can_verify() {
+  command -v gh >/dev/null 2>&1 || return 1
+  gh_version="$(gh --version 2>/dev/null | sed -n '1s/^gh version \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+  [ -n "$gh_version" ] && at_least "$gh_version" "$GH_ATTESTATION_SINCE" &&
+    gh auth status --hostname github.com >/dev/null 2>&1
+}
+
+verify_provenance() {
+  if ! at_least "$version" "$FIRST_ATTESTED"; then
+    say "Hush $version has no build provenance attestation. Releases from $FIRST_ATTESTED have one."
+    return
+  fi
+  if ! gh_can_verify; then
+    say "To verify the build provenance by hand, run: curl -fLO $base/$1 && gh attestation verify $1 --repo $REPO"
+    return
+  fi
+  out="$(gh attestation verify "$tmp/$1" --repo "$REPO" 2>&1)" || {
+    printf '%s\n' "$out" >&2
+    die "the build provenance of $1 did not verify, so the install stopped. Read the gh output above."
+  }
+  say "Verified the build provenance of $1"
+}
 
 need curl
 [ "$(uname -s)" = "Linux" ] || die "Hush runs on Linux only"
@@ -50,6 +84,7 @@ fetch() {
   curl -fsSL -o "$tmp/$1" "$base/$1"
   curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"
   (cd "$tmp" && grep " $1\$" SHA256SUMS | sha256sum -c --quiet -) || die "checksum mismatch for $1"
+  verify_provenance "$1"
 }
 
 sudo_cmd() {
