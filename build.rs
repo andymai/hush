@@ -9,11 +9,41 @@ fn main() {
     eprintln!("Hush Build System");
     eprintln!();
 
+    check_cpu_floor();
     check_linux_dependencies();
     check_gpu_support();
     print_build_summary();
 
     println!("cargo:rerun-if-changed=build.rs");
+}
+
+/// `HUSH_CPU_FLOOR` turns on the runtime CPU check in a prebuilt binary. It
+/// is valid only together with the ggml flags that make the floor true.
+fn check_cpu_floor() {
+    println!("cargo:rerun-if-env-changed=HUSH_CPU_FLOOR");
+    println!("cargo:rerun-if-env-changed=GGML_NATIVE");
+    let Ok(floor) = std::env::var("HUSH_CPU_FLOOR") else {
+        return;
+    };
+    let var = |name: &str| std::env::var(name).unwrap_or_default();
+    let problem = if floor != "x86-64-v3" {
+        format!("HUSH_CPU_FLOOR={floor} is not known; the only floor is x86-64-v3")
+    } else if var("CARGO_CFG_TARGET_ARCH") != "x86_64" {
+        "HUSH_CPU_FLOOR=x86-64-v3 needs an x86_64 target".to_string()
+    } else if !var("GGML_NATIVE").eq_ignore_ascii_case("off") {
+        "HUSH_CPU_FLOOR needs GGML_NATIVE=OFF, or ggml targets the CPU of this machine".to_string()
+    } else if var("CARGO_CFG_TARGET_FEATURE")
+        .split(',')
+        .any(|feature| feature == "avx")
+    {
+        "HUSH_CPU_FLOOR needs Rust code without AVX, or the runtime CPU check cannot run"
+            .to_string()
+    } else {
+        return;
+    };
+    println!("cargo:warning={problem}");
+    eprintln!("\nERROR: {problem}\n");
+    std::process::exit(1);
 }
 
 fn check_linux_dependencies() {

@@ -6,9 +6,11 @@
 //! when `transcription.backend` names that service. [`SpeechToText`] builds
 //! whichever the config asks for. [`ModelManager`] downloads and verifies
 //! models from the ggerganov/whisper.cpp catalogue. [`GpuAvailability`]
-//! reports what ggml's backend registry found.
+//! reports what ggml's backend registry found. [`cpu`] refuses to call ggml
+//! on a CPU below the floor of a prebuilt binary.
 
 pub mod cloud;
+pub mod cpu;
 pub mod device;
 pub mod engine;
 pub mod models;
