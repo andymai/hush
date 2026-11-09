@@ -557,7 +557,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                 .block_on(processor.process_for(&command_text, &context))
                             {
                                 Ok(polished) => {
-                                    info!("✨ Text polished: '{}'", polished);
+                                    info!("✨ Text polished ({} chars)", polished.chars().count());
                                     polished
                                 },
                                 Err(e) => {
@@ -620,7 +620,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     #[cfg(not(target_os = "linux"))]
                     {
                         info!("Text insertion not available on this platform");
-                        info!("Processed text: {}", processed_text);
+                        debug!("Processed text: {}", processed_text);
                     }
 
                     if history.enabled {
@@ -1311,7 +1311,8 @@ fn run_command_mode(
         return;
     };
     let Some(inserter) = inserter else {
-        info!("Rewritten text: {}", rewritten);
+        info!("Rewritten text ({} chars)", rewritten.chars().count());
+        debug!("Rewritten text: {}", rewritten);
         return;
     };
     let mut inserter = inserter.lock();

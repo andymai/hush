@@ -317,8 +317,13 @@ impl LoggingSystem {
     }
 
     pub fn initialize(mut self) -> Result<LoggingSystem> {
-        // Ensure log directory exists
+        // Debug logs hold dictated text, so only the user may read the folder.
         std::fs::create_dir_all(&self.config.log_dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&self.config.log_dir, std::fs::Permissions::from_mode(0o700))?;
+        }
 
         // Build component-specific filter
         let mut filter = EnvFilter::from_default_env();
@@ -632,5 +637,20 @@ mod tests {
         // Test that we can create request contexts
         let ctx = RequestContext::new("test");
         assert!(!ctx.request_id.is_empty());
+    }
+
+    #[test]
+    fn only_the_user_can_read_the_log_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = TempDir::new().unwrap();
+        let log_dir = temp_dir.path().join("logs");
+        let config = LoggingConfig {
+            log_dir: log_dir.clone(),
+            console_output: false,
+            ..Default::default()
+        };
+        let _ = LoggingSystem::new(config).unwrap().initialize();
+        let mode = std::fs::metadata(&log_dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
     }
 }

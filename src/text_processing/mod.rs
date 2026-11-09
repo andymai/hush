@@ -173,7 +173,12 @@ impl TextProcessor {
 
     /// Process raw transcription text the way the focused application wants it.
     pub async fn process_for(&self, raw_text: &str, context: &ProcessingContext) -> Result<String> {
-        info!("🔄 Processing: '{}' ({})", raw_text, context.kind.label());
+        info!(
+            "🔄 Processing {} chars ({})",
+            raw_text.chars().count(),
+            context.kind.label()
+        );
+        debug!("Processing: '{}'", raw_text);
         let profile = context.kind.profile();
 
         // Detect application context and intent
@@ -248,7 +253,11 @@ impl TextProcessor {
             capitalized
         };
 
-        info!("✅ Processing complete: '{}'", polished);
+        info!(
+            "✅ Processing complete ({} chars)",
+            polished.chars().count()
+        );
+        debug!("Processing result: '{}'", polished);
         debug!("  Input:  '{}'", raw_text);
         debug!("  Output: '{}'", polished);
         debug!("  Intent: {}", intent.description());
