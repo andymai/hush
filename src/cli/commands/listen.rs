@@ -219,23 +219,30 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         });
     }
 
-    let bindings = HotkeyBindings::parse(&hotkey_combination, Some(&config.hotkey.cancel))?
-        .with_action(HotkeyAction::PasteLast, &config.hotkey.paste_last)?
-        .with_action(HotkeyAction::Learn, &config.hotkey.learn)?
-        .with_command(&config.hotkey.command)?;
-    let (hotkey_manager, hotkey_rx) =
-        HotkeyManager::with_backend(bindings, config.hotkey.backend, config.hotkey.exclusive)?;
+    let (hotkey_manager, hotkey_rx) = if config.hotkey.enabled {
+        let bindings = HotkeyBindings::parse(&hotkey_combination, Some(&config.hotkey.cancel))?
+            .with_action(HotkeyAction::PasteLast, &config.hotkey.paste_last)?
+            .with_action(HotkeyAction::Learn, &config.hotkey.learn)?
+            .with_command(&config.hotkey.command)?;
+        let (manager, receiver) =
+            HotkeyManager::with_backend(bindings, config.hotkey.backend, config.hotkey.exclusive)?;
+        manager.start_listening()?;
+        info!(
+            "✅ Hotkey '{}' registered via {}",
+            hotkey_combination,
+            manager.backend_name()
+        );
+        (Some(manager), receiver)
+    } else {
+        info!("Hotkeys are off (hotkey.enabled = false); the socket and the tray control Hush");
+        // The sender drops at once, so the hotkey thread ends at once.
+        (None, mpsc::channel::<HotkeyEvent>().1)
+    };
     let feedback = if config.feedback.audio_enabled {
         AudioFeedback::default()
     } else {
         AudioFeedback::silent()
     };
-    hotkey_manager.start_listening()?;
-    info!(
-        "✅ Hotkey '{}' registered via {}",
-        hotkey_combination,
-        hotkey_manager.backend_name()
-    );
 
     let tray_guard = if config.tray.enabled {
         tray::spawn(
