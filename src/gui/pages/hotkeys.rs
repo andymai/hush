@@ -294,7 +294,8 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         ui,
         "Keep menus closed",
         "With an Alt or Super key on its own, Hush taps Ctrl when the key goes down. \
-         Applications then open no menu, and the desktop opens no launcher.",
+         Applications then open no menu, and the desktop opens no launcher. On Sway, \
+         Hush cannot read the keyboard options and sends no tap.",
         &mut gui.config.hotkey.mask_menu,
     );
     chord_keys(

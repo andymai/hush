@@ -457,7 +457,11 @@ mod tests {
             options: "ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl".into(),
             ..Names::default()
         };
-        let keys = xkb::chord_keys(&[names], 0).unwrap();
+        let holders = xkb::holders(&[names], 0).unwrap();
+        let keys = ChordKeys {
+            control: holders.control.expect("a key holds Control"),
+            shift: holders.shift.expect("a key holds Shift"),
+        };
         let (modifiers, key) = chord_keys(PasteChord::CtrlV, Some(KeyTable::us()), keys);
         assert_eq!(
             (modifiers.as_slice(), key),

@@ -355,6 +355,20 @@ fn explain_no_keyboard() -> anyhow::Error {
 
 type SharedMask = Option<Arc<Mutex<MenuMask>>>;
 
+/// The menu mask on the key that holds Control in the session keymap. Hush
+/// never guesses that key, because a wrong guess taps Caps Lock, Alt, or
+/// Super on every dictation.
+fn open_mask() -> std::result::Result<MenuMask, String> {
+    let key = KeyCode::new(crate::text::typing::control_key()?.code());
+    let mask =
+        MenuMask::new(key).map_err(|e| format!("Hush cannot make its virtual keyboard ({})", e))?;
+    info!(
+        "A lone Alt or Super hotkey gets a Ctrl tap ({:?}), so it opens no menu",
+        key
+    );
+    Ok(mask)
+}
+
 /// Whether the reader taps Ctrl for chords of only Alt and Super keys. A
 /// grab hides those keys from applications, so they need no tap.
 fn masks_menus(exclusive: bool, mask_menu: bool) -> bool {
@@ -405,19 +419,13 @@ impl EvdevHotkey {
 
         let matchers = Matchers::new(&bindings, masks_menus(exclusive, mask_menu));
         let mask = if matchers.masks() {
-            let ctrl = KeyCode::new(crate::text::typing::chord_keys().control.code());
-            match MenuMask::new(ctrl) {
-                Ok(mask) => {
-                    info!(
-                        "A lone Alt or Super hotkey gets a Ctrl tap ({:?}), so it opens no menu",
-                        ctrl
-                    );
-                    Some(Arc::new(Mutex::new(mask)))
-                },
-                Err(e) => {
+            match open_mask() {
+                Ok(mask) => Some(Arc::new(Mutex::new(mask))),
+                Err(why) => {
                     warn!(
-                        "No menu mask ({}); a lone Alt or Super hotkey can open application menus",
-                        e
+                        "No menu mask: {}. A lone Alt or Super hotkey can open application \
+                         menus; hotkey.exclusive hides the key instead",
+                        why
                     );
                     None
                 },

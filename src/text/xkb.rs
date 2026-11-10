@@ -9,7 +9,7 @@
 //! Hush loads libxkbcommon at run time, so a system without it falls back
 //! to the US table or to the clipboard.
 
-use super::keymap::{ChordKeys, KeyTable, Tap, EXTRA_KEYS, MAIN_KEYS, MODIFIER_KEYS};
+use super::keymap::{KeyTable, Tap, EXTRA_KEYS, MAIN_KEYS, MODIFIER_KEYS};
 use anyhow::{anyhow, bail, Result};
 use input_linux::Key;
 use std::collections::HashMap;
@@ -114,10 +114,16 @@ pub const CHORD_MODIFIER_KEYS: [Key; 9] = [
     Key::RightAlt,
 ];
 
-/// The keys that hold Control and Shift in each keymap of `names`, for a
-/// keyboard that can have any of them. A modifier that no key holds in
-/// every keymap keeps the key of [`ChordKeys::default`].
-pub fn chord_keys(names: &[Names], group: u32) -> Result<ChordKeys> {
+/// The keys that hold Control and Shift in every keymap of a list, for a
+/// keyboard that can have any of them. `None` when no key holds the
+/// modifier in every keymap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Holders {
+    pub control: Option<Key>,
+    pub shift: Option<Key>,
+}
+
+pub fn holders(names: &[Names], group: u32) -> Result<Holders> {
     let lib =
         xkbcommon_dl::xkbcommon_option().ok_or_else(|| anyhow!("libxkbcommon is not installed"))?;
     let context = Context::new(lib)?;
@@ -125,10 +131,9 @@ pub fn chord_keys(names: &[Names], group: u32) -> Result<ChordKeys> {
         .iter()
         .map(|names| Keymap::compile(&context, names))
         .collect::<Result<Vec<_>>>()?;
-    let defaults = ChordKeys::default();
-    Ok(ChordKeys {
-        control: common_holder(&keymaps, group, Held::Control)?.unwrap_or(defaults.control),
-        shift: common_holder(&keymaps, group, Held::Shift)?.unwrap_or(defaults.shift),
+    Ok(Holders {
+        control: common_holder(&keymaps, group, Held::Control)?,
+        shift: common_holder(&keymaps, group, Held::Shift)?,
     })
 }
 
@@ -822,32 +827,38 @@ pub(crate) mod tests {
             options: options.into(),
             ..Names::default()
         };
-        let control = |names: &[Names]| chord_keys(names, 0).unwrap().control;
-        assert_eq!(chord_keys(&[us("")], 0).unwrap(), ChordKeys::default());
+        let control = |names: &[Names]| holders(names, 0).unwrap().control;
+        assert_eq!(
+            holders(&[us("")], 0).unwrap(),
+            Holders {
+                control: Some(Key::LeftCtrl),
+                shift: Some(Key::LeftShift)
+            }
+        );
         assert_eq!(
             control(&[us("ctrl:swapcaps")]),
-            Key::RightCtrl,
+            Some(Key::RightCtrl),
             "Left Ctrl types Caps Lock"
         );
         assert_eq!(
-            chord_keys(&[us("ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl")], 0).unwrap(),
-            ChordKeys {
-                control: Key::LeftMeta,
-                shift: Key::LeftShift
+            holders(&[us("ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl")], 0).unwrap(),
+            Holders {
+                control: Some(Key::LeftMeta),
+                shift: Some(Key::LeftShift)
             },
             "both Ctrl keys type Super, and Left Win types Control_L"
         );
         assert_eq!(
             control(&[us(""), us("ctrl:swap_lwin_lctl")]),
-            Key::RightCtrl,
+            Some(Key::RightCtrl),
             "the key must hold Control with each option list"
         );
         assert_eq!(
             control(&[us("ctrl:swap_lwin_lctl"), us("ctrl:swap_rwin_rctl")]),
-            Key::LeftCtrl,
-            "no key holds Control with both lists, so the default stays"
+            None,
+            "no key holds Control with both lists"
         );
-        assert!(chord_keys(
+        assert!(holders(
             &[
                 us(""),
                 Names {

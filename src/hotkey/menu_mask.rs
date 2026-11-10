@@ -5,7 +5,8 @@
 //! A Ctrl tap from a small virtual keyboard while the key is down turns the
 //! lone modifier into a chord, so nothing opens. The tap presses the key
 //! that holds Control in the session keymap. An XKB option can move
-//! Control: with `ctrl:swapcaps`, the Left Ctrl key types Caps Lock.
+//! Control: with `ctrl:swapcaps`, the Left Ctrl key types Caps Lock. When
+//! Hush cannot read the options, as on Sway, it sends no tap.
 //!
 //! The tap comes from a device of its own, not from the typing keyboard.
 //! The hotkey reader thread writes the tap at once, also while a take
