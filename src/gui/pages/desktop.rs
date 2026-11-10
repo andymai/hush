@@ -74,12 +74,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                 .add(Button::new("Open the file").icon(icons::FILE_TEXT))
                 .clicked()
             {
-                if !path.exists() {
-                    let _ = gui.config.save_to_file(&path);
-                }
-                if let Err(e) = std::process::Command::new("xdg-open").arg(&path).spawn() {
-                    gui.say(format!("Could not open it: {}", e));
-                }
+                open_config_file(gui);
             }
         });
     let confirming = gui.confirm_reset;
@@ -122,6 +117,18 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                 gui.confirm_reset = false;
             }
         });
+}
+
+/// Open the configuration file in the desktop's editor, and write it first
+/// when it does not exist.
+pub fn open_config_file(gui: &mut Gui) {
+    let path = crate::config::paths::config_path();
+    if !path.exists() {
+        let _ = gui.config.save_to_file(&path);
+    }
+    if let Err(e) = std::process::Command::new("xdg-open").arg(&path).spawn() {
+        gui.say(format!("Could not open it: {}", e));
+    }
 }
 
 /// The built-in defaults, with the history settings and the writing styles

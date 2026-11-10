@@ -104,6 +104,43 @@ pub fn palette(ctx: &Context) -> &'static Palette {
     }
 }
 
+/// The dim over the window behind a dialog.
+pub fn scrim(ctx: &Context) -> Color32 {
+    match ctx.theme() {
+        Theme::Dark => Color32::from_black_alpha(80),
+        Theme::Light => Color32::from_black_alpha(26),
+    }
+}
+
+/// The two shadows under a dialog: a close one for the edge, and a wide one
+/// that lifts it off the window.
+pub fn dialog_shadows(ctx: &Context) -> [Shadow; 2] {
+    let (near, far) = match ctx.theme() {
+        Theme::Dark => (
+            Color32::from_black_alpha(128),
+            Color32::from_black_alpha(153),
+        ),
+        Theme::Light => (
+            Color32::from_rgba_unmultiplied(20, 24, 33, 15),
+            Color32::from_rgba_unmultiplied(20, 24, 33, 46),
+        ),
+    };
+    [
+        Shadow {
+            offset: egui::vec2(0.0, 2.0),
+            blur: 4.0,
+            spread: 0.0,
+            color: near,
+        },
+        Shadow {
+            offset: egui::vec2(0.0, 24.0),
+            blur: 48.0,
+            spread: 0.0,
+            color: far,
+        },
+    ]
+}
+
 /// The scheme to draw: the setting, else the desktop's preference, else
 /// light.
 pub fn resolve(appearance: Appearance, desktop: Option<Theme>) -> Theme {
@@ -159,6 +196,11 @@ pub const EDGE_CLEARANCE: f32 = 4.0;
 pub const RADIUS_XS: f32 = 4.0;
 pub const RADIUS_SM: f32 = 6.0;
 pub const RADIUS_MD: f32 = 8.0;
+/// The command palette
+pub const RADIUS_LG: f32 = 12.0;
+/// How far the glow of a row that the palette jumped to reaches past the
+/// column on each side
+pub const ROW_GLOW_MARGIN: f32 = 8.0;
 
 pub const MEDIUM: &str = "geist-medium";
 pub const SEMIBOLD: &str = "geist-semibold";

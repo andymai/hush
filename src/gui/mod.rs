@@ -8,8 +8,10 @@ mod autosave;
 mod capture;
 mod chrome;
 mod icons;
+mod jump;
 mod meter;
 mod pages;
+mod palette;
 mod scheme;
 mod screenshot;
 mod theme;
@@ -276,6 +278,10 @@ pub struct Gui {
     pub confirm_reset: bool,
     /// The page of the last frame, to disarm a second click on a change
     last_page: Page,
+    /// The command palette that Ctrl+K opens
+    palette: palette::Palette,
+    /// The next frame shows the page from its top
+    scroll_top: bool,
     debounce: Debounce,
     attempt: Arc<Mutex<Option<Attempt>>>,
     attempting: bool,
@@ -332,6 +338,13 @@ impl Gui {
             .collect();
         let screenshot = Screenshot::from_env();
         let page = Page::from_env().unwrap_or(Page::Overview);
+        let mut palette = palette::Palette::default();
+        if let Some(query) = screenshot
+            .as_ref()
+            .and_then(|_| Screenshot::palette_query())
+        {
+            palette.open_with(&query);
+        }
         Ok(Self {
             page,
             saved: config.clone(),
@@ -384,6 +397,8 @@ impl Gui {
             undo: None,
             confirm_reset: false,
             last_page: page,
+            palette,
+            scroll_top: false,
             debounce: Debounce::default(),
             attempt: Arc::new(Mutex::new(None)),
             attempting: false,
@@ -400,6 +415,22 @@ impl Gui {
 
     pub fn say(&mut self, message: impl Into<String>) {
         self.toast = Some((message.into(), Instant::now()));
+    }
+
+    /// Open `page`, and drop the questions of the page before.
+    pub fn go_to(&mut self, page: Page) {
+        if self.page != page {
+            self.page = page;
+            self.last_page = page;
+            self.disarm();
+        }
+    }
+
+    /// Drop every question that waits for a second click.
+    fn disarm(&mut self) {
+        self.confirm_reset = false;
+        self.confirm_replace = false;
+        self.history.disarm();
     }
 
     /// Put a change into the window's settings, which save at the end of the
@@ -622,6 +653,7 @@ impl Gui {
         if !ctx.input(|input| input.viewport().close_requested()) {
             return;
         }
+        self.palette.dismiss(ctx);
         let focused = ctx.memory(|memory| memory.focused());
         let step = close_step(CloseState {
             focused: focused.is_some(),
@@ -1031,29 +1063,31 @@ impl Gui {
 
     /// The page in the centred column, scrolled under the title bar.
     fn page(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let origin = ui.cursor().min;
-                let (left, width) = theme::column(ui.available_width());
-                let max = egui::Rect::from_min_size(
-                    origin + egui::vec2(left, theme::PAGE_PADDING),
-                    egui::vec2(width, f32::INFINITY),
-                );
-                let mut column = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(max)
-                        .layout(egui::Layout::top_down(egui::Align::Min)),
-                );
-                column.set_width(width);
-                column.spacing_mut().item_spacing.y = 0.0;
-                pages::show(self, &mut column);
-                let bottom = column.min_rect().bottom() + theme::PAGE_PADDING;
-                ui.advance_cursor_after_rect(egui::Rect::from_min_max(
-                    origin,
-                    egui::pos2(origin.x + ui.available_width(), bottom),
-                ));
-            });
+        let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+        if std::mem::take(&mut self.scroll_top) {
+            area = area.vertical_scroll_offset(0.0);
+        }
+        area.show(ui, |ui| {
+            let origin = ui.cursor().min;
+            let (left, width) = theme::column(ui.available_width());
+            let max = egui::Rect::from_min_size(
+                origin + egui::vec2(left, theme::PAGE_PADDING),
+                egui::vec2(width, f32::INFINITY),
+            );
+            let mut column = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(max)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
+            );
+            column.set_width(width);
+            column.spacing_mut().item_spacing.y = 0.0;
+            pages::show(self, &mut column);
+            let bottom = column.min_rect().bottom() + theme::PAGE_PADDING;
+            ui.advance_cursor_after_rect(egui::Rect::from_min_max(
+                origin,
+                egui::pos2(origin.x + ui.available_width(), bottom),
+            ));
+        });
     }
 }
 
@@ -1070,6 +1104,7 @@ impl eframe::App for Gui {
         self.take_refresh();
         self.finish_download(ctx);
         self.finish_capture();
+        self.palette.keys(ctx, self.capture.is_some());
         if self.page != Page::Speech {
             self.meter = None;
             self.meter_error = None;
@@ -1083,9 +1118,7 @@ impl eframe::App for Gui {
         }
         if self.page != self.last_page {
             self.last_page = self.page;
-            self.confirm_reset = false;
-            self.confirm_replace = false;
-            self.history.disarm();
+            self.disarm();
         }
         self.intercept_close(ctx);
 
@@ -1121,6 +1154,16 @@ impl eframe::App for Gui {
             .show(ctx, |ui| self.page(ui));
         chrome::resize_edges(ctx);
         chrome::window_border(ctx);
+        if self.palette.is_open() {
+            self.history.refresh();
+        }
+        let mut commands = std::mem::take(&mut self.palette);
+        let pick = commands.show(ctx, self);
+        self.palette = commands;
+        if let Some(pick) = pick {
+            palette::run(self, ctx, pick);
+        }
+        jump::expire(ctx);
         let now = Instant::now();
         let rejected = widgets::take_rejections(ctx) > 0;
         let before = (

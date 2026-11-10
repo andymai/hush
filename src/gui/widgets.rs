@@ -7,6 +7,7 @@
 //! over the settings can find and reach it.
 
 use super::icons;
+use super::jump;
 use super::theme::{self, palette, Palette, Split};
 use egui::text::LayoutJob;
 use egui::{
@@ -284,6 +285,7 @@ impl<'a> Row<'a> {
         let colours = palette(ui.ctx());
         let width = ui.available_width();
         let origin = ui.cursor().min;
+        let landing = jump::arrive(ui, self.key);
         ui.painter().hline(
             origin.x..=origin.x + width,
             origin.y + 0.5,
@@ -335,10 +337,16 @@ impl<'a> Row<'a> {
             .bottom()
             .max(text_top + text_height)
             .max(control_rect.bottom());
-        ui.advance_cursor_after_rect(Rect::from_min_max(
+        let row = Rect::from_min_max(
             origin,
             Pos2::new(origin.x + width, bottom + theme::ROW_PADDING),
-        ));
+        );
+        ui.advance_cursor_after_rect(row);
+        if let Some(landing) = landing {
+            let glow = Rect::from_min_max(row.min + Vec2::new(0.0, 1.0), row.max)
+                .expand2(Vec2::new(theme::ROW_GLOW_MARGIN, 0.0));
+            landing.land(ui, glow);
+        }
         inner
     }
 
@@ -586,6 +594,7 @@ impl Widget for Button<'_> {
         };
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), sense);
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, self.enabled, self.label));
+        jump::offer(ui, &response);
         if !ui.is_rect_visible(rect) {
             return response;
         }
@@ -687,6 +696,7 @@ pub fn switch(ui: &mut Ui, on: &mut bool) -> Response {
         response.mark_changed();
     }
     response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), *on, ""));
+    jump::offer(ui, &response);
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -830,6 +840,9 @@ pub fn segmented<T: PartialEq + Copy>(
                 *label,
             )
         });
+        if *value == *option {
+            jump::offer(ui, &cell_response);
+        }
         if cell_response.clicked() && *value != *option {
             *value = *option;
             response.mark_changed();
@@ -926,7 +939,8 @@ impl Widget for Field<'_> {
         let hint = egui::RichText::new(self.placeholder)
             .font(font.clone())
             .color(colours.muted);
-        let edit = egui::TextEdit::singleline(self.text)
+        let text = self.text;
+        let edit = egui::TextEdit::singleline(&mut *text)
             .font(font)
             .text_color(colours.ink)
             .hint_text(hint)
@@ -938,6 +952,8 @@ impl Widget for Field<'_> {
             .desired_width(self.width - left - 8.0);
         let background = ui.painter().add(egui::Shape::Noop);
         let response = ui.add(edit);
+        note_text_focus(ui, &response, text.is_empty());
+        jump::offer(ui, &response);
         let rect = response.rect + margin;
         let edge = if self.invalid {
             colours.bad
@@ -984,7 +1000,7 @@ pub fn text_area(
     let margin = egui::Margin::symmetric(10.0, 8.0);
     let background = ui.painter().add(egui::Shape::Noop);
     let response = ui.add(
-        egui::TextEdit::multiline(text)
+        egui::TextEdit::multiline(&mut *text)
             .font(theme::sans(theme::BODY))
             .text_color(colours.ink)
             .hint_text(hint)
@@ -993,6 +1009,8 @@ pub fn text_area(
             .desired_rows(rows)
             .desired_width(width - 20.0),
     );
+    note_text_focus(ui, &response, text.is_empty());
+    jump::offer(ui, &response);
     let rect = response.rect + margin;
     ui.painter().set(
         background,
@@ -1037,6 +1055,53 @@ pub fn field(ui: &mut Ui, text: &mut String, placeholder: &str) -> Response {
 /// A field for a value: an address, a model name, a window class, a path.
 pub fn value_field(ui: &mut Ui, text: &mut String, placeholder: &str) -> Response {
     ui.add(Field::new(text, placeholder).mono())
+}
+
+/// The text field that had the keyboard focus when it last drew, and
+/// whether it was empty. Ctrl+K opens the command palette only from an
+/// empty field, because in a field with text it deletes to the end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextFocus {
+    pub id: egui::Id,
+    pub empty: bool,
+}
+
+pub fn text_focus_id() -> egui::Id {
+    egui::Id::new("hush-text-focus")
+}
+
+fn note_text_focus(ui: &Ui, response: &Response, empty: bool) {
+    if response.has_focus() {
+        let focus = TextFocus {
+            id: response.id,
+            empty,
+        };
+        ui.data_mut(|data| data.insert_temp(text_focus_id(), focus));
+    }
+}
+
+/// Key caps in a row that ends at `right`, centred on `y`, such as Ctrl
+/// and K. Returns the left edge of the first cap.
+pub fn key_caps(ui: &Ui, right: f32, y: f32, keys: &[&str]) -> f32 {
+    let colours = palette(ui.ctx());
+    let mut x = right;
+    for key in keys.iter().rev() {
+        let galley = ui.fonts(|fonts| {
+            fonts.layout_no_wrap((*key).to_owned(), theme::mono(theme::MONO), colours.muted)
+        });
+        let width = (galley.size().x + 8.0).max(20.0);
+        let cap = Rect::from_min_size(Pos2::new(x - width, y - 10.0), Vec2::new(width, 20.0));
+        ui.painter().rect(
+            cap,
+            theme::RADIUS_XS,
+            colours.surface,
+            Stroke::new(1.0_f32, colours.line),
+        );
+        ui.painter()
+            .galley(cap.center() - galley.size() / 2.0, galley, colours.muted);
+        x = cap.left() - 4.0;
+    }
+    x + 4.0
 }
 
 /// A field enter-pressed after the user typed in it.
@@ -1247,6 +1312,7 @@ pub fn dropdown<R>(
             ui.set_min_width(width - 8.0);
             add(ui)
         });
+    jump::offer(ui, &shown.response);
     if shown.response.has_focus() {
         focus_ring(ui, shown.response.rect, theme::RADIUS_SM);
     }
@@ -1309,6 +1375,7 @@ pub fn key_field(
         chord
     };
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
+    jump::offer(ui, &response);
     if !ui.is_rect_visible(rect) {
         return response;
     }

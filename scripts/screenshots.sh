@@ -93,17 +93,27 @@ done
 }
 export WAYLAND_DISPLAY=hush-shots
 
+# shot NAME SCHEME [VARIABLE=VALUE...]: save one frame as NAME.png, or as
+# NAME-light.png in the light scheme.
+shot() {
+  local name=$1 scheme=$2
+  shift 2
+  [ "$scheme" = light ] && name="$name-light"
+  env "$@" HUSH_SETTINGS_APPEARANCE="$scheme" HUSH_SETTINGS_SCREENSHOT="$out/$name.png" \
+    timeout 60 "$hush" settings >>"$work/hush.log" 2>&1
+  [ -s "$out/$name.png" ] || {
+    echo "No frame for $name" >&2
+    exit 1
+  }
+  echo "$out/$name.png"
+}
+
 for page in overview hotkeys speech text output desktop history; do
   for scheme in dark light; do
-    name="$page"
-    [ "$scheme" = light ] && name="$page-light"
-    HUSH_SETTINGS_PAGE="$page" HUSH_SETTINGS_APPEARANCE="$scheme" \
-      HUSH_SETTINGS_SCREENSHOT="$out/$name.png" \
-      timeout 60 "$hush" settings >>"$work/hush.log" 2>&1
-    [ -s "$out/$name.png" ] || {
-      echo "No frame for $name" >&2
-      exit 1
-    }
-    echo "$out/$name.png"
+    shot "$page" "$scheme" HUSH_SETTINGS_PAGE="$page"
   done
+done
+for scheme in dark light; do
+  shot palette "$scheme" HUSH_SETTINGS_PAGE=speech HUSH_SETTINGS_PALETTE=
+  shot palette-search "$scheme" HUSH_SETTINGS_PAGE=speech HUSH_SETTINGS_PALETTE=audio
 done

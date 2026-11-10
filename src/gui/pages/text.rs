@@ -576,8 +576,24 @@ fn count_hint(shown: usize, total: usize) -> String {
     }
 }
 
+/// The vocabulary page lists a search field over the words when it has
+/// more than this many.
+pub fn many_words(gui: &Gui) -> bool {
+    gui.vocabulary.technical_terms.len() > FILTER_FROM
+}
+
+/// Import reads the word list file named in its field.
+pub fn can_import(gui: &Gui) -> bool {
+    !gui.word_list.trim().is_empty()
+}
+
+/// Export writes every word to the file named in its field.
+pub fn can_export(gui: &Gui) -> bool {
+    can_import(gui) && !gui.vocabulary.technical_terms.is_empty()
+}
+
 fn word_list(gui: &mut Gui, ui: &mut egui::Ui) {
-    let has_path = !gui.word_list.trim().is_empty();
+    let has_path = can_import(gui);
     let has_terms = !gui.vocabulary.technical_terms.is_empty();
     let (import, export) = row("text.vocabulary.word_list", "Word list")
         .describe(
@@ -603,36 +619,48 @@ fn word_list(gui: &mut Gui, ui: &mut egui::Ui) {
             value_field(ui, &mut gui.word_list, DEFAULT_WORD_LIST);
             (import, export)
         });
-    if !import && !export {
-        return;
-    }
-    let path = list_path(&gui.word_list, &dirs::home_dir().unwrap_or_default());
     if import {
-        match std::fs::read_to_string(&path) {
-            Ok(text) => {
-                let result = learn::import_list(&mut gui.vocabulary, &text);
-                gui.say(import_message(result));
-            },
-            Err(e) => gui.say(format!("Could not read {}: {}", path.display(), e)),
-        }
+        import_word_list(gui);
     }
     if export {
-        if path.exists() {
-            gui.say(format!(
-                "{} already exists. Type the name of a new file.",
-                path.display()
-            ));
-            return;
-        }
-        let text = learn::to_list(&gui.vocabulary);
-        match transfer::write_atomic(&path, text.as_bytes(), false) {
-            Ok(()) => gui.say(format!(
-                "Wrote {} to {}.",
-                words(text.lines().count()),
-                path.display()
-            )),
-            Err(e) => gui.say(format!("Could not export: {:#}", e)),
-        }
+        export_word_list(gui);
+    }
+}
+
+fn word_list_path(gui: &Gui) -> PathBuf {
+    list_path(&gui.word_list, &dirs::home_dir().unwrap_or_default())
+}
+
+/// Add each word of the word list file that the vocabulary does not have.
+pub fn import_word_list(gui: &mut Gui) {
+    let path = word_list_path(gui);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => {
+            let result = learn::import_list(&mut gui.vocabulary, &text);
+            gui.say(import_message(result));
+        },
+        Err(e) => gui.say(format!("Could not read {}: {}", path.display(), e)),
+    }
+}
+
+/// Write every word to a new word list file.
+pub fn export_word_list(gui: &mut Gui) {
+    let path = word_list_path(gui);
+    if path.exists() {
+        gui.say(format!(
+            "{} already exists. Type the name of a new file.",
+            path.display()
+        ));
+        return;
+    }
+    let text = learn::to_list(&gui.vocabulary);
+    match transfer::write_atomic(&path, text.as_bytes(), false) {
+        Ok(()) => gui.say(format!(
+            "Wrote {} to {}.",
+            words(text.lines().count()),
+            path.display()
+        )),
+        Err(e) => gui.say(format!("Could not export: {:#}", e)),
     }
 }
 

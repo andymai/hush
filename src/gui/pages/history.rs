@@ -132,8 +132,18 @@ impl HistoryView {
         self.confirm_audio = None;
     }
 
+    /// Whether the file holds a transcript, as the page last read it.
+    pub fn has_entries(&self) -> bool {
+        !self.entries.is_empty()
+    }
+
+    /// Ask the question of Clear all, as its first click does.
+    pub fn ask_to_clear(&mut self) {
+        self.confirm_clear = !self.entries.is_empty();
+    }
+
     /// Read the file again when its time or size changed since the last read.
-    fn refresh(&mut self) {
+    pub fn refresh(&mut self) {
         let path = transcripts::default_path();
         let stamp = std::fs::metadata(&path)
             .ok()
