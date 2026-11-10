@@ -5,12 +5,14 @@
 use crate::config::settings::LlmSetting;
 use crate::config::{server, transfer, Config};
 use crate::gui::icons;
+use crate::gui::pages::text_setting;
 use crate::gui::theme::{self, palette, FIELD_WIDTH};
 use crate::gui::widgets::{
     self, actions, divider, dropdown, empty, icon_button, intro, list, list_item, option, row,
     section, submitted, switch, switch_row, text_area, value_field, Button, Field, Size, Variant,
 };
 use crate::gui::Gui;
+use crate::gui::{checked_change, choose};
 use crate::hotkey::warnings;
 use crate::text_processing::learn::{self, ListImport};
 use crate::text_processing::styles::{self, StyleConfig, StyleName};
@@ -87,19 +89,26 @@ fn tone(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Polish");
+    let shown_before = gui.pending.provider.unwrap_or(gui.config.llm.provider);
+    let waiting = gui.pending.provider.and_then(|provider| {
+        checked_change(&gui.config, |config| config.llm.provider = provider)
+            .err()
+            .map(|reason| format!("Not switched yet: set the server below. {}", reason))
+    });
+    let mut shown = shown_before;
     row("text.llm_provider", "Polish with")
         .describe(
             "Only the text is ever sent, never the audio. Anthropic needs \
              ANTHROPIC_API_KEY in ~/.config/hush/.env. An OpenAI-compatible server \
              receives the text at the address you set.",
         )
+        .problem(waiting.as_deref())
         .show(ui, |ui| {
-            let current = &mut gui.config.llm.provider;
             dropdown(
                 ui,
                 "llm_provider",
                 FIELD_WIDTH,
-                provider_name(*current),
+                provider_name(shown),
                 |ui| {
                     for provider in [
                         LlmSetting::Auto,
@@ -108,42 +117,62 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
                         LlmSetting::OpenAiCompatible,
                         LlmSetting::None,
                     ] {
-                        option(ui, current, provider, provider_name(provider));
+                        option(ui, &mut shown, provider, provider_name(provider));
                     }
                 },
             );
         });
+    if shown != shown_before {
+        gui.pending.provider = choose(&mut gui.config, shown, |config, provider| {
+            config.llm.provider = provider
+        });
+    }
     row("text.polish", "Tidy up every transcript")
         .describe("Otherwise the model only handles spoken commands.")
         .reserve(36.0)
         .show(ui, |ui| {
-            ui.add_enabled_ui(gui.config.llm.provider != LlmSetting::None, |ui| {
+            ui.add_enabled_ui(shown != LlmSetting::None, |ui| {
                 switch(ui, &mut gui.config.llm.polish);
             });
         });
 
     section(ui, "Language models");
-    row("text.ollama_url", "Ollama server").show(ui, |ui| {
-        value_field(ui, &mut gui.config.llm.ollama_url, "http://localhost:11434");
-    });
-    row("text.ollama_model", "Ollama model").show(ui, |ui| {
-        value_field(ui, &mut gui.config.llm.ollama_model, "llama3.2");
-    });
-    row("text.anthropic_model", "Anthropic model").show(ui, |ui| {
-        value_field(ui, &mut gui.config.llm.anthropic_model, "claude-haiku-4-5");
-    });
-    row("text.server_url", "OpenAI-compatible server")
-        .describe(&server_reach(&gui.config.llm.server_url))
-        .show(ui, |ui| {
-            value_field(
-                ui,
-                &mut gui.config.llm.server_url,
-                "http://localhost:8080/v1",
-            );
-        });
-    row("text.server_model", "OpenAI-compatible model").show(ui, |ui| {
-        value_field(ui, &mut gui.config.llm.server_model, "llama3.2");
-    });
+    text_setting(
+        gui,
+        ui,
+        row("text.ollama_url", "Ollama server"),
+        "http://localhost:11434",
+        |config| &mut config.llm.ollama_url,
+    );
+    text_setting(
+        gui,
+        ui,
+        row("text.ollama_model", "Ollama model"),
+        "llama3.2",
+        |config| &mut config.llm.ollama_model,
+    );
+    text_setting(
+        gui,
+        ui,
+        row("text.anthropic_model", "Anthropic model"),
+        "claude-haiku-4-5",
+        |config| &mut config.llm.anthropic_model,
+    );
+    let reach = server_reach(&gui.config.llm.server_url);
+    text_setting(
+        gui,
+        ui,
+        row("text.server_url", "OpenAI-compatible server").describe(&reach),
+        "http://localhost:8080/v1",
+        |config| &mut config.llm.server_url,
+    );
+    text_setting(
+        gui,
+        ui,
+        row("text.server_model", "OpenAI-compatible model"),
+        "llama3.2",
+        |config| &mut config.llm.server_model,
+    );
 }
 
 fn writing_styles(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -181,13 +210,24 @@ fn writing_styles(gui: &mut Gui, ui: &mut egui::Ui) {
         }
     });
     if let Some(name) = remove {
-        match remove_style(&mut gui.config, &name) {
-            Ok(()) => {
-                if gui.style_draft.original.as_deref() == Some(name.as_str()) {
-                    gui.style_draft = StyleDraft::default();
-                }
+        let mut refused = None;
+        gui.remove(
+            format!("Removed the style {}", name),
+            |gui| match remove_style(&mut gui.config, &name) {
+                Ok(()) => {
+                    if gui.style_draft.original.as_deref() == Some(name.as_str()) {
+                        gui.style_draft = StyleDraft::default();
+                    }
+                    true
+                },
+                Err(message) => {
+                    refused = Some(message);
+                    false
+                },
             },
-            Err(message) => gui.say(message),
+        );
+        if let Some(message) = refused {
+            gui.say(message);
         }
     }
     if let Some(name) = change {
@@ -494,7 +534,9 @@ fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
         });
     }
     if let Some(term) = remove {
-        learn::forget_in(&mut gui.vocabulary, &term);
+        gui.remove(format!("Removed {}", term), |gui| {
+            learn::forget_in(&mut gui.vocabulary, &term)
+        });
     }
     let muted = palette(ui.ctx()).muted;
     widgets::text(
@@ -615,9 +657,6 @@ fn import_message(result: ListImport) -> String {
             learn::MAX_WORDS,
             learn::MAX_CHARS
         ));
-    }
-    if result.added > 0 {
-        message.push_str(" Save to keep them.");
     }
     message
 }
@@ -837,7 +876,7 @@ mod tests {
         assert_eq!(
             import_message(result),
             "Added 2 words. Skipped 1 duplicate. Ignored 3 lines longer than \
-             5 words or 64 characters. Save to keep them."
+             5 words or 64 characters."
         );
         assert_eq!(
             import_message(ListImport {

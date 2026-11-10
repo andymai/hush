@@ -2,8 +2,10 @@
 //! window's colours, and the file behind every page.
 
 use crate::config::settings::Appearance;
+use crate::config::Config;
+use crate::gui::autosave::Pending;
 use crate::gui::icons;
-use crate::gui::widgets::{row, section, segmented, switch_row, Button};
+use crate::gui::widgets::{row, section, segmented, switch_row, Button, Variant};
 use crate::gui::Gui;
 use std::path::Path;
 
@@ -80,23 +82,56 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                 }
             }
         });
+    let confirming = gui.confirm_reset;
     row("desktop.reset", "Reset everything")
-        .describe("Puts the built-in defaults back on every page. Save makes it permanent.")
-        .reserve(100.0)
+        .describe(
+            "Puts the built-in defaults back on every page, except the history settings and \
+             your writing styles.",
+        )
+        .caution(confirming.then_some(
+            "Resets the hotkeys and the speech, text, output, and desktop settings at once. \
+             The history settings, the writing styles, the vocabulary, the transcripts, and \
+             the kept audio stay as they are.",
+        ))
+        .reserve(if confirming { 230.0 } else { 100.0 })
         .show(ui, |ui| {
-            if ui
-                .add(Button::new("Reset").icon(icons::ROTATE_CCW))
-                .clicked()
-            {
-                match crate::config::Config::defaults() {
+            if !confirming {
+                if ui
+                    .add(Button::new("Reset").icon(icons::ROTATE_CCW))
+                    .clicked()
+                {
+                    gui.confirm_reset = true;
+                }
+                return;
+            }
+            let button = Button::new("Reset everything")
+                .icon(icons::ROTATE_CCW)
+                .variant(Variant::Danger);
+            if ui.add(button).clicked() {
+                gui.confirm_reset = false;
+                match reset_settings(&gui.config) {
                     Ok(defaults) => {
                         gui.config = defaults;
-                        gui.say("Reset. Save to keep it.");
+                        gui.pending = Pending::default();
+                        gui.say("The settings are back to their defaults.");
                     },
                     Err(e) => gui.say(format!("Could not reset: {}", e)),
                 }
             }
+            if ui.add(Button::new("Keep them")).clicked() {
+                gui.confirm_reset = false;
+            }
         });
+}
+
+/// The built-in defaults, with the history settings and the writing styles
+/// of `current`, so a reset deletes no kept audio and no transcripts.
+fn reset_settings(current: &Config) -> anyhow::Result<Config> {
+    let mut defaults = Config::defaults()?;
+    defaults.history = current.history.clone();
+    defaults.styles = current.styles.clone();
+    defaults.validate()?;
+    Ok(defaults)
 }
 
 /// The path with the home folder written as `~`.
@@ -110,6 +145,27 @@ fn home_relative(path: &Path, home: Option<&Path>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reset_keeps_the_history_settings_and_the_styles() {
+        let mut current = Config::defaults().unwrap();
+        current.history.keep_audio_days = 30;
+        current.history.max_entries = 2000;
+        current.styles.insert(
+            "casual".into(),
+            crate::text_processing::StyleConfig {
+                prompt: "Brief.".into(),
+                polish: true,
+            },
+        );
+        current.tray.enabled = false;
+        current.hotkey.combination = "F13".into();
+        let reset = reset_settings(&current).unwrap();
+        assert_eq!(reset.history, current.history, "no audio or transcripts go");
+        assert_eq!(reset.styles, current.styles);
+        assert!(reset.tray.enabled);
+        assert_eq!(reset.hotkey.combination, "RightAlt");
+    }
 
     #[test]
     fn a_path_in_the_home_folder_starts_with_a_tilde() {

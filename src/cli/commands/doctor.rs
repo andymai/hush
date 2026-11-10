@@ -749,9 +749,20 @@ fn autostart_check() -> Check {
 }
 
 async fn daemon_check() -> Check {
-    match crate::ipc::client::status().await {
-        Some(state) => Check::ok("Hush", format!("running, {}", state)),
-        None => Check::warn("Hush", "not running", "hush daemon start"),
+    daemon_line(crate::ipc::client::status_reply().await.as_ref())
+}
+
+/// The doctor line for the daemon's status reply, `None` when none runs.
+fn daemon_line(reply: Option<&crate::ipc::DaemonResponse>) -> Check {
+    let state = reply.and_then(|reply| reply.state);
+    match (state, reply.and_then(|reply| reply.safe_mode.as_deref())) {
+        (Some(state), Some(reason)) => Check::warn(
+            "Hush",
+            format!("running in safe mode, {}", state),
+            super::status::safe_mode_line(reason),
+        ),
+        (Some(state), None) => Check::ok("Hush", format!("running, {}", state)),
+        (None, _) => Check::warn("Hush", "not running", "hush daemon start"),
     }
 }
 
@@ -788,6 +799,24 @@ pub async fn handle_doctor() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_daemon_in_safe_mode_is_a_warning_with_its_reason() {
+        use crate::ipc::{DaemonResponse, DaemonState};
+        let normal = DaemonResponse::ok(DaemonState::Idle);
+        assert_eq!(daemon_line(Some(&normal)).level, Level::Ok);
+        let safe = DaemonResponse::ok(DaemonState::Idle)
+            .with_safe_mode(Some("the configuration does not load: bad toml".into()));
+        let line = daemon_line(Some(&safe));
+        assert_eq!(line.level, Level::Warn);
+        assert!(line.detail.contains("safe mode"), "{}", line.detail);
+        let fix = line.fix.unwrap();
+        assert!(
+            fix.contains("bad toml") && fix.contains("hush daemon restart"),
+            "{fix}"
+        );
+        assert_eq!(daemon_line(None).level, Level::Warn);
+    }
 
     #[test]
     fn the_typing_line_says_types_or_pastes_and_why() {

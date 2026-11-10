@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use parking_lot::Mutex;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tracing::{debug, error, info, warn};
 
 // Import Hush components
@@ -19,7 +19,7 @@ use crate::audio::{
     TakeLevel,
 };
 use crate::cli::commands::daemon::{self, SessionOptions};
-use crate::config::settings::TranscriptionConfig;
+use crate::config::settings::{HistoryConfig, TranscriptionConfig};
 use crate::config::{keys, paths, Config};
 use crate::hotkey::{
     GestureAction, GestureDetector, HotkeyAction, HotkeyBindings, HotkeyEvent, HotkeyManager,
@@ -139,15 +139,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     info!("   Text processing: {}", !no_processing);
     info!("   Show button: {}", !no_button);
 
-    // Load configuration
-    let config = match Config::load() {
-        Ok(config) => config,
-        Err(e) => {
-            warn!("Failed to load config, using defaults: {}", e);
-            Config::defaults()?
-        },
-    };
-    sweep_kept_audio(config.history.keep_audio_days);
+    let Startup { config, storage } = startup(Config::load())?;
+    let audio_dirs = AudioDirs::default();
+    if let Some(days) = storage.sweep_days {
+        sweep_kept_audio(&audio_dirs, days);
+    }
     let hotkey_combination = config.hotkey.combination.clone();
     let hotkey_mode = config.hotkey.mode;
 
@@ -226,6 +222,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     // Single instance and control socket, before any device is opened
     let handles = daemon::claim(audio_cmd_tx.clone()).await?;
     let shared = Arc::clone(&handles.shared);
+    shared.set_safe_mode(storage.safe_mode.clone());
     // After the claim, so that no other daemon still uses these parts.
     recover_leftover_parts();
     let config_language = Language::parse(&config.transcription.language).unwrap_or(Language::AUTO);
@@ -524,7 +521,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let text_processor_clone = text_processor.clone();
     let profiles = config.profiles.clone();
     let user_styles = config.styles.clone();
-    let history = config.history.clone();
+    let results_storage = storage.clone();
+    let results_dirs = audio_dirs.clone();
     let command_parser_clone = command_parser.clone();
     let command_executor_clone = command_executor.clone();
     let insertion_history_clone = insertion_history.clone();
@@ -742,22 +740,19 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         debug!("Processed text: {}", processed_text);
                     }
 
-                    if history.enabled {
+                    if results_storage.history.is_some() {
                         let app = window.as_ref().map(|w| w.class.clone()).unwrap_or_default();
                         let mut entry = Transcript::new(processed_text.clone(), app);
-                        if let Some(name) = audio
-                            .as_deref()
-                            .and_then(|samples| keep_take_audio(samples, history.keep_audio_days))
-                        {
+                        if let Some(name) = audio.as_deref().and_then(|samples| {
+                            keep_take_audio(&results_dirs, samples, results_storage.sweep_days)
+                        }) {
                             entry = entry.with_audio(name);
                         }
-                        if let Err(e) = transcripts::append(
+                        record_transcript(
                             &transcripts::default_path(),
+                            results_storage.history,
                             &entry,
-                            history.max_entries,
-                        ) {
-                            warn!("Could not save the transcript to the history: {}", e);
-                        }
+                        );
                     }
                     if let Some(printer) = printer {
                         printer.finish(TakeResult::from_text(processed_text.clone()));
@@ -852,8 +847,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let silence_heard = Arc::new(AtomicBool::new(false));
     let mut silence_sent = false;
     let context_prompt = config.transcription.context_prompt;
-    let keep_audio = config.history.keeps_audio();
-    let keep_audio_days = config.history.keep_audio_days;
+    let keep_audio = storage.keep_audio;
+    let sweep_days = storage.sweep_days;
     let mut current_window: Option<WindowInfo> = None;
     let mut current_trigger = Trigger::Hotkey;
     let mut current_language = config_language;
@@ -1504,7 +1499,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         error!("Transcription failed: {:#}", e);
                         // The parts of a take that failed are in the recovery
                         // folder already.
-                        let kept = chunked || keep_for_recovery(&audio_data, keep_audio_days);
+                        let kept =
+                            chunked || keep_for_recovery(&audio_dirs, &audio_data, sweep_days);
                         // The overlay is too narrow for the service's reason,
                         // and a bad key or quota needs the user to act.
                         let reason = (!local_model).then(|| format!("{:#}", e));
@@ -1583,9 +1579,92 @@ fn recover_leftover_parts() {
     }
 }
 
+/// The settings the daemon starts with, and what it may do to the history
+/// and the kept audio.
+struct Startup {
+    config: Config,
+    storage: Storage,
+}
+
+/// What the daemon may write and delete in the history and the kept audio.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Storage {
+    /// The age at which kept audio goes; `None` deletes none
+    sweep_days: Option<u64>,
+    /// How many transcripts the history keeps; `None` writes none
+    history: Option<usize>,
+    /// Keep the audio of each delivered take
+    keep_audio: bool,
+    /// Why the daemon runs in safe mode
+    safe_mode: Option<String>,
+}
+
+impl Storage {
+    fn of(history: &HistoryConfig) -> Self {
+        Self {
+            sweep_days: Some(history.keep_audio_days),
+            history: history.enabled.then_some(history.max_entries),
+            keep_audio: history.keeps_audio(),
+            safe_mode: None,
+        }
+    }
+
+    /// The configuration file does not load, so the daemon does not know
+    /// the user's history settings: it dictates on the defaults and writes
+    /// and deletes nothing in the history and the kept audio. The audio of
+    /// a take that fails still goes to the recovery folder, which deletes
+    /// nothing.
+    fn safe(reason: String) -> Self {
+        Self {
+            sweep_days: None,
+            history: None,
+            keep_audio: false,
+            safe_mode: Some(reason),
+        }
+    }
+}
+
+fn startup(loaded: Result<Config>) -> Result<Startup> {
+    match loaded {
+        Ok(config) => Ok(Startup {
+            storage: Storage::of(&config.history),
+            config,
+        }),
+        Err(e) => {
+            let reason = format!("the configuration does not load: {:#}", e);
+            warn!(
+                "Hush runs in safe mode because {}. It dictates on the defaults and writes \
+                 and deletes nothing in the history and the kept audio until the file loads.",
+                reason
+            );
+            Ok(Startup {
+                config: Config::defaults()?,
+                storage: Storage::safe(reason),
+            })
+        },
+    }
+}
+
+/// The folders of the kept audio.
+#[derive(Debug, Clone)]
+struct AudioDirs {
+    takes: PathBuf,
+    recovery: PathBuf,
+}
+
+impl Default for AudioDirs {
+    fn default() -> Self {
+        Self {
+            takes: store::takes_dir(),
+            recovery: store::recovery_dir(),
+        }
+    }
+}
+
 /// Delete the kept audio that is too old, then the oldest over the cap.
-fn sweep_kept_audio(keep_days: u64) {
-    match store::sweep_now(keep_days) {
+fn sweep_kept_audio(dirs: &AudioDirs, keep_days: u64) {
+    let policy = store::Policy::new(keep_days);
+    match store::sweep(&dirs.takes, &dirs.recovery, policy, SystemTime::now()) {
         Ok(swept) if swept.files > 0 => info!(
             "Deleted {} kept audio files ({} bytes)",
             swept.files, swept.bytes
@@ -1595,11 +1674,13 @@ fn sweep_kept_audio(keep_days: u64) {
     }
 }
 
-/// Save the audio of a delivered take for its history entry. Returns the
-/// file name.
-fn keep_take_audio(samples: &[f32], keep_days: u64) -> Option<String> {
-    let saved = store::save(&store::takes_dir(), samples, Utc::now());
-    sweep_kept_audio(keep_days);
+/// Save the audio of a delivered take for its history entry, then sweep by
+/// `sweep_days` when it is set. Returns the file name.
+fn keep_take_audio(dirs: &AudioDirs, samples: &[f32], sweep_days: Option<u64>) -> Option<String> {
+    let saved = store::save(&dirs.takes, samples, Utc::now());
+    if let Some(days) = sweep_days {
+        sweep_kept_audio(dirs, days);
+    }
     match saved {
         Ok(path) => path
             .file_name()
@@ -1611,10 +1692,13 @@ fn keep_take_audio(samples: &[f32], keep_days: u64) -> Option<String> {
     }
 }
 
-/// Keep the audio of a take that did not transcribe, for `hush recover`.
-fn keep_for_recovery(samples: &[f32], keep_days: u64) -> bool {
-    let saved = store::save(&store::recovery_dir(), samples, Utc::now());
-    sweep_kept_audio(keep_days);
+/// Keep the audio of a take that did not transcribe, for `hush recover`,
+/// then sweep by `sweep_days` when it is set.
+fn keep_for_recovery(dirs: &AudioDirs, samples: &[f32], sweep_days: Option<u64>) -> bool {
+    let saved = store::save(&dirs.recovery, samples, Utc::now());
+    if let Some(days) = sweep_days {
+        sweep_kept_audio(dirs, days);
+    }
     match saved {
         Ok(path) => {
             info!("Kept the audio for `hush recover`: {}", path.display());
@@ -1624,6 +1708,17 @@ fn keep_for_recovery(samples: &[f32], keep_days: u64) -> bool {
             warn!("Could not keep the audio of the failed take: {:#}", e);
             false
         },
+    }
+}
+
+/// Add a delivered transcript to the history, which keeps `max_entries`;
+/// without them, the history gets nothing.
+fn record_transcript(path: &Path, max_entries: Option<usize>, entry: &Transcript) {
+    let Some(max_entries) = max_entries else {
+        return;
+    };
+    if let Err(e) = transcripts::append(path, entry, max_entries) {
+        warn!("Could not save the transcript to the history: {}", e);
     }
 }
 
@@ -1915,5 +2010,100 @@ fn run_style_rewrite(
             "The style left the text as it was.",
         ),
         RewriteOutcome::Skipped => {},
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn audio_dirs(root: &Path) -> AudioDirs {
+        AudioDirs {
+            takes: root.join("audio"),
+            recovery: root.join("recover"),
+        }
+    }
+
+    /// A kept take of `days_old` days in `dir`.
+    fn old_take(dir: &Path, days_old: u64) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join(format!("old-{}.flac", days_old));
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_modified(SystemTime::now() - Duration::from_secs(days_old * 24 * 60 * 60))
+            .unwrap();
+        path
+    }
+
+    fn files_in(dir: &Path) -> usize {
+        std::fs::read_dir(dir).map_or(0, |entries| entries.count())
+    }
+
+    #[test]
+    fn a_config_that_loads_sweeps_and_keeps_history_by_its_own_settings() {
+        let mut config = Config::defaults().unwrap();
+        config.history.keep_audio_days = 30;
+        let start = startup(Ok(config)).unwrap();
+        assert_eq!(
+            start.storage,
+            Storage {
+                sweep_days: Some(30),
+                history: Some(500),
+                keep_audio: true,
+                safe_mode: None,
+            }
+        );
+    }
+
+    #[test]
+    fn a_config_that_does_not_load_starts_in_safe_mode() {
+        let start = startup(Err(anyhow::anyhow!("Invalid config file"))).unwrap();
+        assert_eq!(start.storage.sweep_days, None, "no sweep");
+        assert_eq!(start.storage.history, None, "no new history entries");
+        assert!(!start.storage.keep_audio, "no new kept audio");
+        let reason = start.storage.safe_mode.unwrap();
+        assert!(reason.contains("Invalid config file"), "{reason}");
+        assert!(
+            start.config.validate().is_ok(),
+            "dictation runs on the defaults"
+        );
+    }
+
+    #[test]
+    fn a_failed_take_in_safe_mode_is_kept_and_deletes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let dirs = audio_dirs(root.path());
+        let kept = old_take(&dirs.takes, 40);
+        assert!(keep_for_recovery(&dirs, &[0.0; 1600], None));
+        assert!(kept.exists(), "no sweep");
+        assert_eq!(
+            files_in(&dirs.recovery),
+            1,
+            "the failed take is there for hush recover"
+        );
+
+        assert!(keep_for_recovery(&dirs, &[0.0; 1600], Some(0)));
+        assert!(!kept.exists(), "a loaded config with no kept audio sweeps");
+    }
+
+    #[test]
+    fn a_kept_take_sweeps_only_with_days() {
+        let root = tempfile::tempdir().unwrap();
+        let dirs = audio_dirs(root.path());
+        let kept = old_take(&dirs.takes, 40);
+        assert!(keep_take_audio(&dirs, &[0.0; 1600], None).is_some());
+        assert!(kept.exists());
+        assert!(keep_take_audio(&dirs, &[0.0; 1600], Some(30)).is_some());
+        assert!(!kept.exists(), "older than 30 days");
+    }
+
+    #[test]
+    fn safe_mode_writes_no_history_entry() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("history.jsonl");
+        let entry = Transcript::new("secret text", "kitty");
+        record_transcript(&path, None, &entry);
+        assert!(!path.exists());
+        record_transcript(&path, Some(500), &entry);
+        assert_eq!(transcripts::read(&path).unwrap(), vec![entry]);
     }
 }

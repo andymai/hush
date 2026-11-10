@@ -7,11 +7,12 @@
 use crate::config::settings::{HotkeyConfig, MAX_TAP_MS};
 use crate::gui::capture::Capture;
 use crate::gui::icons;
+use crate::gui::pages::number_setting;
 use crate::gui::pages::speech::language_picker;
 use crate::gui::theme::palette;
 use crate::gui::widgets::{
-    dropdown, icon_button, intro, key_field, notice, number, option, row, section, segmented,
-    switch_row, Field,
+    dropdown, forget_draft, icon_button, intro, key_field, notice, option, row, section, segmented,
+    setting_field, switch_row, FieldKind, FieldOutcome,
 };
 use crate::gui::Gui;
 use crate::hotkey::warnings;
@@ -273,12 +274,16 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
             .map(|backend| (backend, backend_name(backend)));
             segmented(ui, &mut gui.config.hotkey.backend, &options);
         });
-    row("hotkeys.tap_ms", "Tap is shorter than")
-        .describe("A shorter press is a tap: taps lock and unlock, holds record.")
-        .reserve(110.0)
-        .show(ui, |ui| {
-            number(ui, &mut gui.config.hotkey.tap_ms, 0..=MAX_TAP_MS, "ms");
-        });
+    number_setting(
+        gui,
+        ui,
+        row("hotkeys.tap_ms", "Tap is shorter than")
+            .describe("A shorter press is a tap: taps lock and unlock, holds record.")
+            .reserve(110.0),
+        0..=MAX_TAP_MS,
+        "ms",
+        |config| &mut config.hotkey.tap_ms,
+    );
     switch_row(
         ui,
         "hotkeys.exclusive",
@@ -409,7 +414,11 @@ fn chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap, chord: &str) {
         .show(ui, |ui| {
             if icon_button(ui, icons::X, "Remove this key").clicked() {
                 gui.capture = None;
-                map.entries_mut(&mut gui.config.hotkey).remove(chord);
+                gui.remove(format!("Removed the key {}", chord), |gui| {
+                    map.entries_mut(&mut gui.config.hotkey)
+                        .remove(chord)
+                        .is_some()
+                });
                 return;
             }
             if let Some(value) = map.entries_mut(&mut gui.config.hotkey).get_mut(chord) {
@@ -481,7 +490,7 @@ fn toggle_capture(gui: &mut Gui, target: KeyTarget) {
     }
     match Capture::start() {
         Ok(capture) => {
-            finish_typing(gui);
+            stop_typing(gui);
             gui.capture = Some((target, capture));
         },
         Err(e) => gui.say(format!("Could not read the keyboard: {}", e)),
@@ -510,7 +519,7 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
         .capture
         .as_ref()
         .is_some_and(|(target, _)| *target == KeyTarget::Action(role));
-    let editing = gui.editing_key.as_ref().is_some_and(|(r, _)| *r == role);
+    let editing = gui.editing_key == Some(role);
     let value = gui.config.hotkey.chord(role).to_string();
     let error = combination_error(&value, required(role))
         .or_else(|| taken(&gui.config.hotkey, role, &value));
@@ -524,19 +533,26 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
         .show(ui, |ui| {
             if editing {
                 ui.add_space(64.0);
-                let Some(slot) = gui.config.hotkey.chord_mut(role) else {
-                    return;
-                };
-                let invalid = error.is_some();
-                let response = ui.add(Field::new(slot, "Ctrl+Shift+Space").mono().invalid(invalid));
-                if gui.focus_editor {
-                    response.request_focus();
-                    gui.focus_editor = false;
-                } else if response.lost_focus() {
-                    finish_typing(gui);
+                let focus = std::mem::take(&mut gui.focus_editor);
+                let typed = setting_field(
+                    ui,
+                    &key,
+                    &value,
+                    "Ctrl+Shift+Space",
+                    FieldKind::Value,
+                    focus,
+                );
+                match typed {
+                    FieldOutcome::Commit(commit) => match set_typed(gui, role, &commit.text) {
+                        Ok(()) => gui.editing_key = None,
+                        Err(problem) => commit.reject(ui.ctx(), problem),
+                    },
+                    FieldOutcome::Closed => gui.editing_key = None,
+                    FieldOutcome::Idle | FieldOutcome::Editing => {},
                 }
                 return;
             }
+            forget_draft(ui.ctx(), &key);
 
             let clear = !required(role) && !value.is_empty();
             if !clear {
@@ -544,9 +560,16 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
             }
             if clear && icon_button(ui, icons::X, "Clear the key").clicked() {
                 gui.capture = None;
-                if let Some(slot) = gui.config.hotkey.chord_mut(role) {
-                    slot.clear();
-                }
+                gui.remove(
+                    format!("Cleared the key for {}", role.label()),
+                    |gui| match gui.config.hotkey.chord_mut(role) {
+                        Some(slot) => {
+                            slot.clear();
+                            true
+                        },
+                        None => false,
+                    },
+                );
             }
             if icon_button(ui, icons::PENCIL, "Type the key's name instead").clicked() {
                 gui.capture = None;
@@ -566,24 +589,31 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
 }
 
 fn start_typing(gui: &mut Gui, role: Role) {
-    finish_typing(gui);
-    gui.editing_key = Some((role, gui.config.hotkey.chord(role).to_string()));
+    gui.editing_key = Some(role);
     gui.focus_editor = true;
 }
 
-/// Keep the typed chord, unless another action uses it: then put back the
-/// chord from before the edit.
-fn finish_typing(gui: &mut Gui) {
-    let Some((role, before)) = gui.editing_key.take() else {
-        return;
-    };
-    let typed = gui.config.hotkey.chord(role).to_string();
-    if let Some(message) = refusal(&gui.config.hotkey, role, &typed) {
-        if let Some(slot) = gui.config.hotkey.chord_mut(role) {
-            *slot = before;
-        }
-        gui.say(message);
+/// Close the typed key's field without saving what it holds.
+fn stop_typing(gui: &mut Gui) {
+    gui.editing_key = None;
+}
+
+/// Save a typed key: one that parses, that dictation has when it needs one,
+/// and that no other action uses.
+fn set_typed(gui: &mut Gui, role: Role, typed: &str) -> Result<(), String> {
+    let typed = typed.trim();
+    if let Some(problem) = combination_error(typed, required(role)) {
+        return Err(problem);
     }
+    if let Some(problem) = refusal(&gui.config.hotkey, role, typed) {
+        return Err(problem);
+    }
+    let typed = typed.to_string();
+    gui.try_set(|config| {
+        if let Some(slot) = config.hotkey.chord_mut(role) {
+            *slot = typed;
+        }
+    })
 }
 
 fn start_capture(gui: &mut Gui, role: Role) {
@@ -594,7 +624,7 @@ fn start_capture(gui: &mut Gui, role: Role) {
     }
     match Capture::start() {
         Ok(capture) => {
-            finish_typing(gui);
+            stop_typing(gui);
             gui.capture = Some((KeyTarget::Action(role), capture));
         },
         Err(e) => {

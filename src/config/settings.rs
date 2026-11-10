@@ -922,12 +922,17 @@ impl Config {
         self.save_to_file(paths::config_path())
     }
 
+    /// The checked configuration as the text of a config file: every key,
+    /// with no comments.
+    pub fn to_toml(&self) -> Result<String> {
+        self.validate()?;
+        toml::to_string_pretty(self)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize config: {}", e))
+    }
+
     /// Save configuration to a specific file path
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        self.validate()?;
-
-        let toml_string = toml::to_string_pretty(self)
-            .map_err(|e| anyhow::anyhow!("Failed to serialize config: {}", e))?;
+        let toml_string = self.to_toml()?;
 
         if let Some(parent) = path.as_ref().parent() {
             std::fs::create_dir_all(parent).map_err(|e| {

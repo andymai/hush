@@ -20,14 +20,21 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
 fn running(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Status");
     let running = gui.machine.running();
-    let (title, description) = if running {
-        ("Hush is running", "Listening for the hotkey.")
-    } else {
-        ("Hush is not running", "Start it to dictate.")
+    let safe_mode = gui
+        .machine
+        .safe_mode
+        .clone()
+        .filter(|_| running)
+        .map(|reason| safe_mode_text(&reason));
+    let (title, description) = match (running, &safe_mode) {
+        (true, Some(_)) => ("Hush runs in safe mode", "Listening for the hotkey."),
+        (true, None) => ("Hush is running", "Listening for the hotkey."),
+        (false, _) => ("Hush is not running", "Start it to dictate."),
     };
     row("overview.daemon", title)
-        .status(running)
+        .status(running && safe_mode.is_none())
         .describe(description)
+        .caution(safe_mode.as_deref())
         .reserve(200.0)
         .show(ui, |ui| {
             if running {
@@ -67,6 +74,15 @@ fn running(gui: &mut Gui, ui: &mut egui::Ui) {
                 }
             }
         });
+}
+
+/// What safe mode means in the window, with its reason.
+pub fn safe_mode_text(reason: &str) -> String {
+    format!(
+        "Hush writes and deletes nothing in the history and the kept audio, because {}. \
+         It restarts on its own once the file loads.",
+        reason
+    )
 }
 
 fn access(gui: &mut Gui, ui: &mut egui::Ui) {

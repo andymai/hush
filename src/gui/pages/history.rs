@@ -7,8 +7,8 @@ use crate::config::settings::MAX_KEEP_AUDIO_DAYS;
 use crate::gui::icons;
 use crate::gui::theme::{self, palette};
 use crate::gui::widgets::{
-    self, chip, empty, icon_button, intro, number, row, section, switch, switch_row, text_area,
-    Button, Field, Size, Variant,
+    self, chip, empty, icon_button, intro, parse_number, row, section, setting_field, switch,
+    switch_row, text_area, Button, Field, FieldKind, FieldOutcome, Size, Variant,
 };
 use crate::gui::Gui;
 use crate::ipc::{client, DaemonCommand};
@@ -75,6 +75,9 @@ pub struct HistoryView {
     filter: String,
     shown: usize,
     confirm_clear: bool,
+    /// A change to Keep the audio that deletes kept audio, which waits for a
+    /// second click
+    confirm_audio: Option<AudioCut>,
     /// The last number of days chosen, for the switch to restore
     days: u64,
     playback: Option<Playback>,
@@ -83,7 +86,52 @@ pub struct HistoryView {
     proposals: Option<Proposals>,
 }
 
+/// A lower limit for the kept audio, and what it deletes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AudioCut {
+    /// The new number of days; 0 turns Keep the audio off
+    days: u64,
+    deletes: store::Swept,
+}
+
+impl AudioCut {
+    fn warning(&self) -> String {
+        let takes = if self.deletes.files == 1 {
+            "1 take".to_string()
+        } else {
+            format!("{} takes", self.deletes.files)
+        };
+        let size = crate::gui::megabytes(self.deletes.bytes);
+        if self.days == 0 {
+            format!(
+                "Turning this off deletes {} ({}) of kept audio.",
+                takes, size
+            )
+        } else {
+            format!(
+                "Lowering to {} days deletes {} ({}) of kept audio.",
+                self.days, takes, size
+            )
+        }
+    }
+}
+
+/// The kept audio that a limit of `days` deletes at once.
+fn audio_cut(days: u64) -> AudioCut {
+    let kept = store::list(&store::takes_dir()).unwrap_or_default();
+    AudioCut {
+        days,
+        deletes: store::older_than(&kept, days, SystemTime::now()),
+    }
+}
+
 impl HistoryView {
+    /// Drop the questions that wait for a second click, as on a page change.
+    pub fn disarm(&mut self) {
+        self.confirm_clear = false;
+        self.confirm_audio = None;
+    }
+
     /// Read the file again when its time or size changed since the last read.
     fn refresh(&mut self) {
         let path = transcripts::default_path();
@@ -543,8 +591,9 @@ fn save_fix(gui: &mut Gui) {
 }
 
 /// Learn the term as `hush learn` does: write it into the vocabulary file,
-/// then tell a running daemon, which reloads the file. The window's copy of
-/// the vocabulary gets the term too, so a later Save keeps it.
+/// then tell a running daemon, which reloads the file. The window reads the
+/// file again, with the term and any word the Learn key added, and keeps its
+/// own unsaved changes on top; the daemon needs no restart.
 fn learn_term(gui: &mut Gui, term: &str) {
     let term = match learn::learn_at(&DomainVocabulary::default_path(), term) {
         Ok(term) => term,
@@ -553,8 +602,7 @@ fn learn_term(gui: &mut Gui, term: &str) {
             return;
         },
     };
-    learn::learn_into(&mut gui.vocabulary, &term);
-    learn::learn_into(&mut gui.saved_vocabulary, &term);
+    gui.vocabulary_changed_on_disk();
     let command = DaemonCommand::Learn {
         text: Some(term.clone()),
     };
@@ -577,7 +625,8 @@ fn retention_row(gui: &mut Gui, ui: &mut egui::Ui) {
     let description = if days > 0 {
         format!(
             "Hush keeps the audio of each take for {} days, in files only you can read. \
-             Play it or transcribe it again below.",
+             Play it or transcribe it again below. A smaller number deletes the older \
+             audio at once.",
             days
         )
     } else {
@@ -587,33 +636,87 @@ fn retention_row(gui: &mut Gui, ui: &mut egui::Ui) {
             store::RECOVERY_DAYS
         )
     };
-    let caution = (days == 0 && gui.saved.history.keep_audio_days > 0)
-        .then_some("Saving deletes the audio that Hush kept.");
+    let confirming = gui.history.confirm_audio;
+    let warning = confirming.map(|cut| cut.warning());
+    let key = "history.keep_audio";
+    let reserve = if confirming.is_some() {
+        RETENTION_CONTROLS + 60.0
+    } else if days > 0 {
+        RETENTION_CONTROLS
+    } else {
+        36.0
+    };
     ui.add_enabled_ui(gui.config.history.enabled, |ui| {
-        row("history.keep_audio", "Keep the audio")
+        row(key, "Keep the audio")
             .describe(&description)
-            .caution(caution)
-            .reserve(if days > 0 { RETENTION_CONTROLS } else { 36.0 })
+            .caution(warning.as_deref())
+            .reserve(reserve)
             .show(ui, |ui| {
+                if let Some(cut) = confirming {
+                    let delete = Button::new("Delete them")
+                        .icon(icons::TRASH)
+                        .variant(Variant::Danger);
+                    if ui.add(delete).clicked() {
+                        gui.history.confirm_audio = None;
+                        gui.config.history.keep_audio_days = cut.days;
+                    }
+                    let keep = if days > 0 {
+                        format!("Keep {} days", days)
+                    } else {
+                        "Keep the audio".to_string()
+                    };
+                    if ui.add(Button::new(&keep)).clicked() {
+                        gui.history.confirm_audio = None;
+                    }
+                    return;
+                }
                 let mut on = days > 0;
                 if switch(ui, &mut on).changed() {
-                    gui.config.history.keep_audio_days = if on {
-                        Some(gui.history.days)
+                    if on {
+                        gui.config.history.keep_audio_days = Some(gui.history.days)
                             .filter(|days| *days > 0)
-                            .unwrap_or(DEFAULT_KEEP_DAYS)
+                            .unwrap_or(DEFAULT_KEEP_DAYS);
                     } else {
-                        0
-                    };
+                        lower_audio_days(gui, 0);
+                    }
                 }
-                if on {
-                    ui.add_space(8.0);
-                    let mut chosen = gui.config.history.keep_audio_days;
-                    if number(ui, &mut chosen, 1..=MAX_KEEP_AUDIO_DAYS, "days").changed() {
-                        gui.config.history.keep_audio_days = chosen;
+                if !on {
+                    return;
+                }
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("days")
+                        .font(theme::mono(theme::MONO))
+                        .color(palette(ui.ctx()).muted),
+                );
+                let saved = days.to_string();
+                let outcome = setting_field(ui, key, &saved, "", FieldKind::Number, false);
+                if let FieldOutcome::Commit(commit) = outcome {
+                    match parse_number(&commit.text, &(1..=MAX_KEEP_AUDIO_DAYS)) {
+                        Ok(chosen) if chosen < days => lower_audio_days(gui, chosen),
+                        Ok(chosen) => {
+                            if let Err(problem) =
+                                gui.try_set(|config| config.history.keep_audio_days = chosen)
+                            {
+                                commit.reject(ui.ctx(), problem);
+                            }
+                        },
+                        Err(problem) => commit.reject(ui.ctx(), problem),
                     }
                 }
             });
     });
+}
+
+/// Lower the kept audio to `days`, at once when that deletes nothing, else
+/// after a second click.
+fn lower_audio_days(gui: &mut Gui, days: u64) {
+    let cut = audio_cut(days);
+    if cut.deletes.files == 0 {
+        gui.config.history.keep_audio_days = days;
+    } else {
+        gui.history.confirm_audio = Some(cut);
+    }
 }
 
 /// The text of a take transcribed again, with a Copy button. Returns the
@@ -789,6 +892,35 @@ mod tests {
         assert!(view.fix.is_some());
         view.forget(&entry);
         assert!(view.fix.is_none());
+    }
+
+    #[test]
+    fn the_audio_warning_says_how_much_goes() {
+        let cut = |days, files, bytes| AudioCut {
+            days,
+            deletes: store::Swept { files, bytes },
+        };
+        assert_eq!(
+            cut(0, 3, 4_200_000).warning(),
+            "Turning this off deletes 3 takes (4 MB) of kept audio."
+        );
+        assert_eq!(
+            cut(7, 1, 900_000).warning(),
+            "Lowering to 7 days deletes 1 take (1 MB) of kept audio."
+        );
+    }
+
+    #[test]
+    fn a_page_change_drops_the_questions_that_wait() {
+        let mut view = view(&[]);
+        view.confirm_clear = true;
+        view.confirm_audio = Some(AudioCut {
+            days: 0,
+            deletes: store::Swept::default(),
+        });
+        view.disarm();
+        assert!(!view.confirm_clear);
+        assert_eq!(view.confirm_audio, None);
     }
 
     #[test]

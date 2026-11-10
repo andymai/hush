@@ -60,7 +60,7 @@ Hold `Right Alt`, speak, release. Done.
 - **Command Mode.** Hold `Ctrl+Right Alt`, say what to do ("make this friendlier", "turn it into a bullet list"), release. Hush rewrites the selected text, or the last thing it typed when nothing is selected, through a local Ollama server, Anthropic, or an OpenAI-compatible server, whichever `[llm]` resolves to. Only text is sent, never audio.
 - **Cleaner text, automatically.** Voice commands cover "new line", "new paragraph", "undo", and "scratch that". Filler words ("um", "uh", "like") are removed. Optional LLM polishing rewrites every transcript.
 - **Panel icon.** A status icon shows whether Hush is idle, recording, or working, and its menu offers the same actions the hotkeys do. Turn it off with `tray.enabled = false`.
-- **A window and a doctor.** `hush settings` opens one window for what still needs setting up and every setting. `hush doctor` checks the configuration, keyboard access, model, GPU, microphone, hotkey, window detection, polishing, transcript hook, panel icon, update check, autostart, and the daemon, then prints the one command that fixes each problem.
+- **A window and a doctor.** `hush settings` opens one window for what still needs setting up and every setting. Each change saves at once: a text or number field saves when you press Enter or leave it, and Escape puts back the saved value. When a change needs a daemon restart, Hush restarts it once after the changes stop, and waits until a recording ends. `hush doctor` checks the configuration, keyboard access, model, GPU, microphone, hotkey, window detection, polishing, transcript hook, panel icon, update check, autostart, and the daemon, then prints the one command that fixes each problem.
 
 ## Scope
 
@@ -174,6 +174,7 @@ text="$(hush stop --print)" && notify-send "Hush heard" "$text"
 | `devices` | Names of the audio input devices |
 | `os`, `arch` | Operating system and CPU architecture |
 | `config_error` | Why the configuration did not load, else `null` |
+| `safe_mode` | Why the daemon runs in safe mode, else `null`. A daemon that started while the configuration did not load dictates on the defaults and writes and deletes nothing in the history and the kept audio |
 
 ### Waybar
 

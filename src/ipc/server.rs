@@ -96,6 +96,7 @@ pub struct SharedState {
     waiter: Mutex<Option<oneshot::Sender<TakeResult>>>,
     files: Mutex<VecDeque<FileJob>>,
     changes: watch::Sender<()>,
+    safe_mode: Mutex<Option<String>>,
 }
 
 impl Default for SharedState {
@@ -116,7 +117,13 @@ impl SharedState {
             waiter: Mutex::new(None),
             files: Mutex::new(VecDeque::new()),
             changes: watch::channel(()).0,
+            safe_mode: Mutex::new(None),
         }
+    }
+
+    /// The daemon runs in safe mode for `reason`; status replies say so.
+    pub fn set_safe_mode(&self, reason: Option<String>) {
+        *self.safe_mode.lock() = reason;
     }
 
     fn set(&self, phase: Phase) {
@@ -284,6 +291,7 @@ impl SharedState {
         DaemonResponse::ok(self.snapshot())
             .with_model_state(self.model_state())
             .with_language(self.active_language().map(|l| l.code().to_string()))
+            .with_safe_mode(self.safe_mode.lock().clone())
     }
 
     pub fn snapshot(&self) -> DaemonState {

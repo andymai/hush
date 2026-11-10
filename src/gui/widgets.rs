@@ -227,8 +227,57 @@ impl<'a> Row<'a> {
         self
     }
 
+    /// The control goes under the text, which takes the whole width.
+    pub fn control_below(mut self) -> Self {
+        self.control = f32::INFINITY;
+        self
+    }
+
     pub fn show<R>(self, ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         ui.push_id(self.key, |ui| self.draw(ui, add)).inner
+    }
+
+    /// A row whose control is a value field, which saves on Enter or when it
+    /// loses focus. The caller saves the committed text or rejects it.
+    pub fn value_field(self, ui: &mut Ui, saved: &str, placeholder: &str) -> Option<Committed> {
+        let key = self.key;
+        let outcome = self.show(ui, |ui| {
+            setting_field(ui, key, saved, placeholder, FieldKind::Value, false)
+        });
+        match outcome {
+            FieldOutcome::Commit(committed) => Some(committed),
+            _ => None,
+        }
+    }
+
+    /// A row whose control is a whole number from `range` with `unit` after
+    /// it. Text that is no such number stays in the field with a problem.
+    pub fn number_field(
+        self,
+        ui: &mut Ui,
+        saved: u64,
+        range: RangeInclusive<u64>,
+        unit: &str,
+    ) -> Option<(u64, Committed)> {
+        let key = self.key;
+        let saved = saved.to_string();
+        let outcome = self.show(ui, |ui| {
+            let unit = egui::RichText::new(unit)
+                .font(theme::mono(theme::MONO))
+                .color(palette(ui.ctx()).muted);
+            ui.label(unit);
+            setting_field(ui, key, &saved, "", FieldKind::Number, false)
+        });
+        let FieldOutcome::Commit(committed) = outcome else {
+            return None;
+        };
+        match parse_number(&committed.text, &range) {
+            Ok(number) => Some((number, committed)),
+            Err(problem) => {
+                committed.reject(ui.ctx(), problem);
+                None
+            },
+        }
     }
 
     fn draw<R>(self, ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -246,7 +295,10 @@ impl<'a> Row<'a> {
             Split::Beside { text } => text,
             Split::Stacked => width,
         };
-        let block = self.text_block(ui, colours, text_width);
+        let drafted = ui
+            .data(|data| data.get_temp::<Draft>(draft_id(self.key)))
+            .and_then(|draft| draft.problem);
+        let block = self.text_block(ui, colours, text_width, drafted.as_deref());
         let text_height = block.height;
 
         let (text_top, control_rect, layout) = match split {
@@ -290,7 +342,7 @@ impl<'a> Row<'a> {
         inner
     }
 
-    fn text_block(&self, ui: &Ui, colours: &Palette, width: f32) -> Block {
+    fn text_block(&self, ui: &Ui, colours: &Palette, width: f32, drafted: Option<&str>) -> Block {
         let mut lines = Vec::new();
         let status_width = if self.status.is_some() { 24.0 } else { 0.0 };
         if !self.title.is_empty() {
@@ -340,7 +392,7 @@ impl<'a> Row<'a> {
             });
         }
         for (text, icon, colour) in [
-            (self.problem, icons::CIRCLE_X, colours.bad),
+            (drafted.or(self.problem), icons::CIRCLE_X, colours.bad),
             (self.caution, icons::TRIANGLE_ALERT, colours.warn),
         ] {
             if let Some(text) = text {
@@ -992,50 +1044,175 @@ pub fn submitted(ui: &Ui, response: &Response) -> bool {
     response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
 }
 
-/// A number typed into a field, kept in `range`, with `unit` after it. The
-/// value follows each number the user types, clamped to `range`, so Save
-/// never reads an older value. When the field loses focus, it shows the
-/// value again, and text that is no number is dropped.
-pub fn number(ui: &mut Ui, value: &mut u64, range: RangeInclusive<u64>, unit: &str) -> Response {
-    let colours = palette(ui.ctx());
-    let unit_text = egui::RichText::new(unit)
-        .font(theme::mono(theme::MONO))
-        .color(colours.muted);
-    let backwards = ui.layout().prefer_right_to_left();
-    if backwards {
-        ui.label(unit_text.clone());
-    }
-    let id = ui.id().with("number");
-    let mut draft = ui
-        .data(|data| data.get_temp::<String>(id))
-        .unwrap_or_else(|| value.to_string());
-    let response = ui.add(Field::new(&mut draft, "").number().width(72.0));
-    let mut changed = false;
-    if response.changed() || response.lost_focus() {
-        if let Some(parsed) = parse_number(&draft, &range) {
-            changed = parsed != *value;
-            *value = parsed;
-        }
-    }
-    if response.has_focus() {
-        ui.data_mut(|data| data.insert_temp(id, draft));
-    } else {
-        ui.data_mut(|data| data.remove::<String>(id));
-    }
-    if !backwards {
-        ui.label(unit_text);
-    }
-    let mut response = response;
-    if changed {
-        response.mark_changed();
-    }
-    response
+/// A field's text while the user edits it, and why its last commit failed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Draft {
+    pub text: String,
+    pub problem: Option<String>,
 }
 
-/// The number in `text`, clamped to `range`.
-pub fn parse_number(text: &str, range: &RangeInclusive<u64>) -> Option<u64> {
-    let parsed: u64 = text.trim().parse().ok()?;
-    Some(parsed.clamp(*range.start(), *range.end()))
+/// What the user did to a field in one frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldEvent {
+    Idle,
+    Editing,
+    /// Enter, or the focus moved away
+    Commit,
+    Escape,
+}
+
+/// One frame of a field that saves on Enter or when it loses focus: the
+/// draft it keeps, and the text to save. Escape drops the draft, so the
+/// field shows the saved text again. A commit of the saved text saves
+/// nothing and clears a failed draft.
+pub fn draft_step(
+    draft: Option<Draft>,
+    saved: &str,
+    text: String,
+    event: FieldEvent,
+) -> (Option<Draft>, Option<String>) {
+    match event {
+        FieldEvent::Idle => (draft, None),
+        FieldEvent::Editing => (
+            Some(Draft {
+                text,
+                problem: draft.and_then(|draft| draft.problem),
+            }),
+            None,
+        ),
+        FieldEvent::Escape => (None, None),
+        FieldEvent::Commit if text == saved => (None, None),
+        FieldEvent::Commit => (None, Some(text)),
+    }
+}
+
+fn draft_id(key: &str) -> egui::Id {
+    egui::Id::new(("hush-draft", key))
+}
+
+/// Text that the user committed in the field of the row `key`.
+#[derive(Debug)]
+pub struct Committed {
+    pub text: String,
+    key: egui::Id,
+}
+
+impl Committed {
+    /// Keep the text in the field, with `problem` under its row. The setting
+    /// keeps its saved value.
+    pub fn reject(self, ctx: &egui::Context, problem: impl Into<String>) {
+        let draft = Draft {
+            text: self.text,
+            problem: Some(problem.into()),
+        };
+        ctx.data_mut(|data| {
+            data.insert_temp(self.key, draft);
+            *data.get_temp_mut_or_default::<u32>(rejections_id()) += 1;
+        });
+        ctx.request_repaint();
+    }
+}
+
+fn rejections_id() -> egui::Id {
+    egui::Id::new("hush-rejections")
+}
+
+/// How many commits were rejected since the last call, so a close that
+/// committed the focused field can stop when it did not save.
+pub fn take_rejections(ctx: &egui::Context) -> u32 {
+    ctx.data_mut(|data| data.remove_temp::<u32>(rejections_id()).unwrap_or(0))
+}
+
+/// The outcome of one frame of a [`setting_field`].
+#[derive(Debug)]
+pub enum FieldOutcome {
+    Idle,
+    Editing,
+    /// The user committed a change, which the caller saves or rejects
+    Commit(Committed),
+    /// The focus left with nothing to save: Escape, or the saved text
+    Closed,
+}
+
+/// How a [`setting_field`] looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldKind {
+    /// A value such as an address or a model name, in the monospace face
+    Value,
+    /// A whole number, aligned right
+    Number,
+}
+
+/// The field of the row `key` for a setting saved as `saved`. It saves on
+/// Enter or when it loses focus, and Escape restores the saved text. A
+/// rejected commit keeps its text, and the row shows the problem.
+pub fn setting_field(
+    ui: &mut Ui,
+    key: &str,
+    saved: &str,
+    placeholder: &str,
+    kind: FieldKind,
+    focus: bool,
+) -> FieldOutcome {
+    let id = draft_id(key);
+    let draft: Option<Draft> = ui.data(|data| data.get_temp(id));
+    let mut text = draft
+        .as_ref()
+        .map_or_else(|| saved.to_owned(), |draft| draft.text.clone());
+    let invalid = draft.as_ref().is_some_and(|draft| draft.problem.is_some());
+    let field = Field::new(&mut text, placeholder).invalid(invalid);
+    let field = match kind {
+        FieldKind::Value => field.mono(),
+        FieldKind::Number => field.number().width(72.0),
+    };
+    let response = ui.add(field);
+    if focus {
+        response.request_focus();
+    }
+    let event = if response.lost_focus() {
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            FieldEvent::Escape
+        } else {
+            FieldEvent::Commit
+        }
+    } else if response.has_focus() {
+        FieldEvent::Editing
+    } else {
+        FieldEvent::Idle
+    };
+    let (next, commit) = draft_step(draft, saved, text, event);
+    ui.data_mut(|data| match next {
+        Some(next) => data.insert_temp(id, next),
+        None => data.remove::<Draft>(id),
+    });
+    match (event, commit) {
+        (_, Some(text)) => FieldOutcome::Commit(Committed { text, key: id }),
+        (FieldEvent::Commit | FieldEvent::Escape, None) => FieldOutcome::Closed,
+        (FieldEvent::Editing, None) => FieldOutcome::Editing,
+        (FieldEvent::Idle, None) => FieldOutcome::Idle,
+    }
+}
+
+/// Drop the draft of the row `key`, as when its field closes.
+pub fn forget_draft(ctx: &egui::Context, key: &str) {
+    ctx.data_mut(|data| data.remove::<Draft>(draft_id(key)));
+}
+
+/// A whole number from `range`, or the problem to show.
+pub fn parse_number(text: &str, range: &RangeInclusive<u64>) -> Result<u64, String> {
+    let problem = || {
+        format!(
+            "Enter a whole number from {} to {}.",
+            range.start(),
+            range.end()
+        )
+    };
+    let number: u64 = text.trim().parse().map_err(|_| problem())?;
+    if range.contains(&number) {
+        Ok(number)
+    } else {
+        Err(problem())
+    }
 }
 
 /// A drop-down that shows `selected` and lists what `add` draws, with
@@ -1366,14 +1543,266 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_typed_number_is_clamped_and_text_is_dropped() {
+    fn a_number_outside_its_range_is_a_problem_not_a_clamp() {
         let range = 1..=3650;
-        assert_eq!(parse_number(" 30 ", &range), Some(30));
-        assert_eq!(parse_number("0", &range), Some(1));
-        assert_eq!(parse_number("99999", &range), Some(3650));
-        assert_eq!(parse_number("thirty", &range), None);
-        assert_eq!(parse_number("-4", &range), None);
-        assert_eq!(parse_number("", &range), None);
+        assert_eq!(parse_number(" 30 ", &range), Ok(30));
+        assert_eq!(parse_number("1", &range), Ok(1));
+        assert_eq!(parse_number("3650", &range), Ok(3650));
+        let problem = Err("Enter a whole number from 1 to 3650.".to_string());
+        for text in ["0", "99999", "thirty", "-4", "", "2.5"] {
+            assert_eq!(parse_number(text, &range), problem, "{text:?}");
+        }
+    }
+
+    /// The window's frames for a field, driven by input events.
+    struct Window {
+        ctx: egui::Context,
+    }
+
+    impl Window {
+        fn new() -> Self {
+            let ctx = egui::Context::default();
+            crate::gui::theme::install(&ctx);
+            Self { ctx }
+        }
+
+        fn frame(&self, events: Vec<egui::Event>, saved: &str, focus: bool) -> String {
+            self.frame_with(events, saved, focus, false)
+        }
+
+        /// A frame in which the window takes the focus away before the
+        /// field draws, as a close request does.
+        fn closing_frame(&self, saved: &str) -> String {
+            self.frame_with(Vec::new(), saved, false, true)
+        }
+
+        fn frame_with(
+            &self,
+            events: Vec<egui::Event>,
+            saved: &str,
+            focus: bool,
+            surrender: bool,
+        ) -> String {
+            let mut outcome = String::new();
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = self.ctx.run(input, |ctx| {
+                if surrender {
+                    if let Some(focused) = ctx.memory(|memory| memory.focused()) {
+                        ctx.memory_mut(|memory| memory.surrender_focus(focused));
+                    }
+                }
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    outcome = match setting_field(ui, "test", saved, "", FieldKind::Value, focus) {
+                        FieldOutcome::Idle => "idle".into(),
+                        FieldOutcome::Editing => "editing".into(),
+                        FieldOutcome::Closed => "closed".into(),
+                        FieldOutcome::Commit(commit) => format!("commit {}", commit.text),
+                    };
+                });
+            });
+            outcome
+        }
+
+        fn number(&self, events: Vec<egui::Event>, saved: u64) -> Option<u64> {
+            let mut number = None;
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = self.ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    number = row("test", "Test")
+                        .number_field(ui, saved, 0..=200, "ms")
+                        .map(|(number, _)| number);
+                });
+            });
+            number
+        }
+
+        fn draft(&self) -> Option<Draft> {
+            self.ctx.data(|data| data.get_temp(draft_id("test")))
+        }
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn typed(text: &str) -> egui::Event {
+        egui::Event::Text(text.to_string())
+    }
+
+    /// A click far from the field, which moves the focus away.
+    fn click_away() -> Vec<egui::Event> {
+        let at = egui::pos2(5000.0, 5000.0);
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    }
+
+    #[test]
+    fn enter_saves_the_typed_text_in_a_real_frame() {
+        let window = Window::new();
+        window.frame(Vec::new(), "llama", true);
+        assert_eq!(window.frame(vec![typed("3")], "llama", false), "editing");
+        assert_eq!(window.draft(), draft("llama3", None));
+        assert_eq!(
+            window.frame(vec![key(egui::Key::Enter)], "llama", false),
+            "commit llama3"
+        );
+        assert_eq!(window.draft(), None);
+    }
+
+    #[test]
+    fn leaving_the_field_saves_the_typed_text_in_a_real_frame() {
+        let window = Window::new();
+        window.frame(Vec::new(), "llama", true);
+        window.frame(vec![typed("3")], "llama", false);
+        assert_eq!(window.frame(click_away(), "llama", false), "commit llama3");
+    }
+
+    #[test]
+    fn a_close_that_takes_the_focus_away_commits_the_field() {
+        let window = Window::new();
+        window.frame(Vec::new(), "llama", true);
+        window.frame(vec![typed("3")], "llama", false);
+        assert_eq!(window.closing_frame("llama"), "commit llama3");
+    }
+
+    #[test]
+    fn escape_puts_back_the_saved_text_in_a_real_frame() {
+        let window = Window::new();
+        window.frame(Vec::new(), "llama", true);
+        window.frame(vec![typed("3")], "llama", false);
+        assert_eq!(
+            window.frame(vec![key(egui::Key::Escape)], "llama", false),
+            "closed"
+        );
+        assert_eq!(window.draft(), None);
+        assert_eq!(window.frame(Vec::new(), "llama", false), "idle");
+    }
+
+    #[test]
+    fn a_number_in_its_range_saves_on_enter() {
+        let window = Window::new();
+        window.number(vec![key(egui::Key::Tab)], 10);
+        window.number(Vec::new(), 10);
+        window.number(vec![typed("5")], 10);
+        assert_eq!(window.number(vec![key(egui::Key::Enter)], 10), Some(105));
+        assert_eq!(window.draft(), None);
+    }
+
+    #[test]
+    fn an_invalid_number_never_saves_and_stays_with_its_problem() {
+        let window = Window::new();
+        window.number(vec![key(egui::Key::Tab)], 10);
+        window.number(Vec::new(), 10);
+        window.number(vec![typed("0x")], 10);
+        assert_eq!(window.number(vec![key(egui::Key::Enter)], 10), None);
+        let kept = window.draft().unwrap();
+        assert_eq!(kept.text, "100x");
+        assert_eq!(
+            kept.problem.as_deref(),
+            Some("Enter a whole number from 0 to 200.")
+        );
+    }
+
+    fn draft(text: &str, problem: Option<&str>) -> Option<Draft> {
+        Some(Draft {
+            text: text.to_string(),
+            problem: problem.map(str::to_string),
+        })
+    }
+
+    #[test]
+    fn typing_keeps_a_draft_and_saves_nothing() {
+        let (next, commit) = draft_step(None, "llama3.2", "llama3".into(), FieldEvent::Editing);
+        assert_eq!((next, commit), (draft("llama3", None), None));
+        let (next, commit) = draft_step(draft("x", None), "llama3.2", "x".into(), FieldEvent::Idle);
+        assert_eq!((next, commit), (draft("x", None), None), "idle keeps it");
+    }
+
+    #[test]
+    fn enter_or_leaving_the_field_commits_a_change() {
+        let (next, commit) = draft_step(
+            draft("qwen3", None),
+            "llama3.2",
+            "qwen3".into(),
+            FieldEvent::Commit,
+        );
+        assert_eq!((next, commit), (None, Some("qwen3".to_string())));
+        let (next, commit) = draft_step(
+            draft("llama3.2", Some("Not a model.")),
+            "llama3.2",
+            "llama3.2".into(),
+            FieldEvent::Commit,
+        );
+        assert_eq!(
+            (next, commit),
+            (None, None),
+            "the saved text saves nothing and clears the problem"
+        );
+    }
+
+    #[test]
+    fn escape_restores_the_saved_text() {
+        let (next, commit) = draft_step(
+            draft("half typed", Some("Enter a whole number from 0 to 200.")),
+            "10",
+            "half typed".into(),
+            FieldEvent::Escape,
+        );
+        assert_eq!((next, commit), (None, None));
+    }
+
+    #[test]
+    fn a_rejected_commit_stays_in_its_field_with_the_problem() {
+        let ctx = egui::Context::default();
+        let committed = Committed {
+            text: "Ctrl+Bogus".to_string(),
+            key: draft_id("hotkeys.dictate"),
+        };
+        committed.reject(&ctx, "Unknown key Bogus");
+        let kept = ctx.data(|data| data.get_temp::<Draft>(draft_id("hotkeys.dictate")));
+        assert_eq!(kept, draft("Ctrl+Bogus", Some("Unknown key Bogus")));
+        forget_draft(&ctx, "hotkeys.dictate");
+        let kept = ctx.data(|data| data.get_temp::<Draft>(draft_id("hotkeys.dictate")));
+        assert_eq!(kept, None);
+    }
+
+    #[test]
+    fn a_rejected_value_keeps_its_problem_while_the_user_fixes_it() {
+        let (next, _) = draft_step(
+            draft("50000", Some("Enter a whole number from 0 to 200.")),
+            "10",
+            "5000".into(),
+            FieldEvent::Editing,
+        );
+        assert_eq!(
+            next,
+            draft("5000", Some("Enter a whole number from 0 to 200."))
+        );
     }
 
     #[test]

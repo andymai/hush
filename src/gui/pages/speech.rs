@@ -2,15 +2,17 @@
 //! transcription runs, the model, the language and the languages detection
 //! may pick, the GPU, the microphone, and how long a recording may run.
 
-use crate::config::server;
 use crate::config::settings::{TranscriptionBackend, TranscriptionConfig};
+use crate::config::{server, Config};
 use crate::gui::icons;
 use crate::gui::meter::{self, Meter};
+use crate::gui::pages::text_setting;
 use crate::gui::theme::{palette, FIELD_WIDTH};
 use crate::gui::widgets::{
     dropdown, icon_button, list, list_item, meter as level_meter, option, row, section, stepper,
-    switch_row, value_field, Button,
+    switch_row, Button,
 };
+use crate::gui::{checked_change, choose};
 use crate::gui::{megabytes, Gui};
 use crate::transcription::device::GpuAvailability;
 use crate::transcription::models::{vad_model, ModelManager, ModelSize};
@@ -49,22 +51,37 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Transcription");
+    let shown_before = gui
+        .pending
+        .backend
+        .unwrap_or(gui.config.transcription.backend);
+    let waiting = gui.pending.backend.and_then(|backend| {
+        checked_change(&gui.config, |config| config.transcription.backend = backend)
+            .err()
+            .map(|reason| format!("Not switched yet: set the server below. {}", reason))
+    });
+    let mut shown = shown_before;
     row("speech.backend", "Transcribe on")
         .describe(
             "This machine keeps the audio here. Groq and OpenAI can be faster on a slow \
              computer, and they receive the audio of every dictation. An OpenAI-compatible \
              server receives the audio at the address you set.",
         )
+        .problem(waiting.as_deref())
         .show(ui, |ui| {
-            let current = &mut gui.config.transcription.backend;
-            dropdown(ui, "backend", FIELD_WIDTH, backend_label(*current), |ui| {
+            dropdown(ui, "backend", FIELD_WIDTH, backend_label(shown), |ui| {
                 for backend in TranscriptionBackend::ALL {
-                    option(ui, current, backend, backend_label(backend));
+                    option(ui, &mut shown, backend, backend_label(backend));
                 }
             });
         });
+    if shown != shown_before {
+        gui.pending.backend = choose(&mut gui.config, shown, |config, backend| {
+            config.transcription.backend = backend
+        });
+    }
 
-    let backend = gui.config.transcription.backend;
+    let backend = shown;
     if backend == TranscriptionBackend::OpenAiCompatible {
         server_settings(gui, ui);
         return;
@@ -100,21 +117,22 @@ fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
         .reserve(0.0)
         .show(ui, |_| {});
 
-    let (model, placeholder) = match backend {
+    type Slot = fn(&mut Config) -> &mut String;
+    let (key, slot, placeholder): (&str, Slot, &str) = match backend {
         TranscriptionBackend::Groq => (
-            &mut gui.config.transcription.groq_model,
+            "speech.groq_model",
+            |config| &mut config.transcription.groq_model,
             "whisper-large-v3-turbo",
         ),
         TranscriptionBackend::OpenAi => (
-            &mut gui.config.transcription.openai_model,
+            "speech.openai_model",
+            |config| &mut config.transcription.openai_model,
             "gpt-4o-mini-transcribe",
         ),
         TranscriptionBackend::Local | TranscriptionBackend::OpenAiCompatible => return,
     };
     let title = format!("{} model", service);
-    row("speech.cloud_model", &title).show(ui, |ui| {
-        value_field(ui, model, placeholder);
-    });
+    text_setting(gui, ui, row(key, &title), placeholder, slot);
 }
 
 fn server_settings(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -124,28 +142,31 @@ fn server_settings(gui: &mut Gui, ui: &mut egui::Ui) {
         .describe(&description)
         .reserve(0.0)
         .show(ui, |_| {});
-    row("speech.server_url", "Server address")
-        .describe("Hush adds /v1/audio/transcriptions when the address does not end with it.")
-        .show(ui, |ui| {
-            value_field(
-                ui,
-                &mut gui.config.transcription.server_url,
-                "http://localhost:8080/v1",
-            );
-        });
-    row("speech.server_model", "Server model").show(ui, |ui| {
-        value_field(
-            ui,
-            &mut gui.config.transcription.server_model,
-            "whisper-large-v3",
-        );
-    });
+    text_setting(
+        gui,
+        ui,
+        row("speech.server_url", "Server address")
+            .describe("Hush adds /v1/audio/transcriptions when the address does not end with it."),
+        "http://localhost:8080/v1",
+        |config| &mut config.transcription.server_url,
+    );
+    text_setting(
+        gui,
+        ui,
+        row("speech.server_model", "Server model"),
+        "whisper-large-v3",
+        |config| &mut config.transcription.server_model,
+    );
 }
 
 /// Whether the OpenAI-compatible server is set up, a title, and where the
 /// audio goes: a local server, or a service that receives it.
 pub fn server_status(gui: &Gui) -> (bool, String, String) {
-    let transcription = &gui.config.transcription;
+    let mut transcription = gui.config.transcription.clone();
+    if let Some(backend) = gui.pending.backend {
+        transcription.backend = backend;
+    }
+    let transcription = &transcription;
     if let Err(e) = transcription.validate_server() {
         return (
             false,
@@ -453,7 +474,11 @@ fn detection(gui: &mut Gui, ui: &mut egui::Ui) {
         }
     });
     if let Some(index) = remove {
-        languages.remove(index);
+        let name = language_name(&gui.config.transcription.detect_languages[index]);
+        gui.remove(format!("Removed {}", name), |gui| {
+            gui.config.transcription.detect_languages.remove(index);
+            true
+        });
     }
 }
 

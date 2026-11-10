@@ -2,11 +2,12 @@
 //! rules for applications that need one or the other.
 
 use crate::config::settings::MAX_TYPING_DELAY_MS;
+use crate::config::Config;
 use crate::gui::icons;
+use crate::gui::pages::number_setting;
 use crate::gui::theme::FIELD_WIDTH;
 use crate::gui::widgets::{
-    dropdown, icon_button, intro, list, list_item, number, option, row, section, submitted, Button,
-    Field,
+    dropdown, icon_button, intro, list, list_item, option, row, section, submitted, Button, Field,
 };
 use crate::gui::Gui;
 use crate::text::InsertionMethod;
@@ -33,15 +34,16 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                 }
             });
         });
-    row("output.typing_delay", "Between keystrokes")
-        .describe("Raise it if an application drops letters.")
-        .reserve(110.0)
-        .show(ui, |ui| {
-            let mut delay = gui.config.insertion.typing_delay_ms;
-            if number(ui, &mut delay, 0..=MAX_TYPING_DELAY_MS, "ms").changed() {
-                gui.config.insertion.typing_delay_ms = delay;
-            }
-        });
+    number_setting(
+        gui,
+        ui,
+        row("output.typing_delay", "Between keystrokes")
+            .describe("Raise it if an application drops letters.")
+            .reserve(110.0),
+        0..=MAX_TYPING_DELAY_MS,
+        "ms",
+        |config| &mut config.insertion.typing_delay_ms,
+    );
     by_application(gui, ui);
 }
 
@@ -53,7 +55,7 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
          enough: konsole matches org.kde.konsole. The History page shows the \
          class of each application you dictate into.",
     );
-    app_list(
+    let removed = app_list(
         ui,
         "output.uinput_apps",
         "Always type in",
@@ -61,7 +63,10 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
         &mut gui.config.insertion.uinput_apps,
         &mut gui.new_uinput_app,
     );
-    app_list(
+    if let Some(index) = removed {
+        remove_app(gui, index, |config| &mut config.insertion.uinput_apps);
+    }
+    let removed = app_list(
         ui,
         "output.clipboard_apps",
         "Always paste in",
@@ -69,6 +74,20 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
         &mut gui.config.insertion.clipboard_apps,
         &mut gui.new_clipboard_app,
     );
+    if let Some(index) = removed {
+        remove_app(gui, index, |config| &mut config.insertion.clipboard_apps);
+    }
+}
+
+/// Remove the rule at `index` of the list that `apps` reaches, with Undo.
+fn remove_app(gui: &mut Gui, index: usize, apps: fn(&mut Config) -> &mut Vec<String>) {
+    let Some(app) = apps(&mut gui.config).get(index).cloned() else {
+        return;
+    };
+    gui.remove(format!("Removed {}", app), |gui| {
+        apps(&mut gui.config).remove(index);
+        true
+    });
 }
 
 fn app_list(
@@ -78,7 +97,7 @@ fn app_list(
     description: &str,
     apps: &mut Vec<String>,
     draft: &mut String,
-) {
+) -> Option<usize> {
     let mut add = false;
     row(key, title)
         .describe(description)
@@ -111,9 +130,7 @@ fn app_list(
                 });
         }
     });
-    if let Some(index) = remove {
-        apps.remove(index);
-    }
+    remove
 }
 
 /// Add a trimmed class unless it is blank or already listed in any case.

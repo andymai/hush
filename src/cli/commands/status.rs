@@ -56,6 +56,9 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
     if let Some(model) = reply.as_ref().and_then(|reply| reply.model_state) {
         println!("Model: {}", model);
     }
+    if let Some(reason) = reply.as_ref().and_then(|reply| reply.safe_mode.as_deref()) {
+        println!("Safe mode: {}", safe_mode_line(reason));
+    }
     println!();
 
     // Always show basic status
@@ -100,6 +103,17 @@ pub struct StatusReport {
     pub os: &'static str,
     pub arch: &'static str,
     pub config_error: Option<String>,
+    /// Why the daemon runs in safe mode, else `None`
+    pub safe_mode: Option<String>,
+}
+
+/// What safe mode means, with its reason, for `hush status` and `hush doctor`.
+pub fn safe_mode_line(reason: &str) -> String {
+    format!(
+        "the daemon writes and deletes nothing in the history and the kept audio, because {}. \
+         Fix the file, then run hush daemon restart",
+        reason
+    )
 }
 
 impl StatusReport {
@@ -148,6 +162,7 @@ impl StatusReport {
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,
             config_error,
+            safe_mode: reply.and_then(|reply| reply.safe_mode.clone()),
         }
     }
 }
@@ -220,6 +235,7 @@ mod tests {
                 "model_state",
                 "os",
                 "running",
+                "safe_mode",
                 "sample_rate",
                 "state",
                 "use_gpu"

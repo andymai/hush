@@ -139,7 +139,7 @@ pub const SMALL_LINE: f32 = 16.0;
 pub const SIDEBAR_WIDTH: f32 = 232.0;
 /// The title bar, and the sidebar's header beside it
 pub const BAR_HEIGHT: f32 = 48.0;
-pub const FOOTER_HEIGHT: f32 = 48.0;
+pub const FOOTER_HEIGHT: f32 = 32.0;
 /// The widest the column of settings gets, padding included
 pub const COLUMN_MAX: f32 = 672.0;
 pub const PAGE_PADDING: f32 = 24.0;
