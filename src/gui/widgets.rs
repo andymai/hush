@@ -227,6 +227,12 @@ impl<'a> Row<'a> {
         self
     }
 
+    /// The control goes under the text, which takes the whole width.
+    pub fn control_below(mut self) -> Self {
+        self.control = f32::INFINITY;
+        self
+    }
+
     pub fn show<R>(self, ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         ui.push_id(self.key, |ui| self.draw(ui, add)).inner
     }
@@ -1099,9 +1105,22 @@ impl Committed {
             text: self.text,
             problem: Some(problem.into()),
         };
-        ctx.data_mut(|data| data.insert_temp(self.key, draft));
+        ctx.data_mut(|data| {
+            data.insert_temp(self.key, draft);
+            *data.get_temp_mut_or_default::<u32>(rejections_id()) += 1;
+        });
         ctx.request_repaint();
     }
+}
+
+fn rejections_id() -> egui::Id {
+    egui::Id::new("hush-rejections")
+}
+
+/// How many commits were rejected since the last call, so a close that
+/// committed the focused field can stop when it did not save.
+pub fn take_rejections(ctx: &egui::Context) -> u32 {
+    ctx.data_mut(|data| data.remove_temp::<u32>(rejections_id()).unwrap_or(0))
 }
 
 /// The outcome of one frame of a [`setting_field`].
@@ -1548,12 +1567,33 @@ mod tests {
         }
 
         fn frame(&self, events: Vec<egui::Event>, saved: &str, focus: bool) -> String {
+            self.frame_with(events, saved, focus, false)
+        }
+
+        /// A frame in which the window takes the focus away before the
+        /// field draws, as a close request does.
+        fn closing_frame(&self, saved: &str) -> String {
+            self.frame_with(Vec::new(), saved, false, true)
+        }
+
+        fn frame_with(
+            &self,
+            events: Vec<egui::Event>,
+            saved: &str,
+            focus: bool,
+            surrender: bool,
+        ) -> String {
             let mut outcome = String::new();
             let input = egui::RawInput {
                 events,
                 ..Default::default()
             };
             let _ = self.ctx.run(input, |ctx| {
+                if surrender {
+                    if let Some(focused) = ctx.memory(|memory| memory.focused()) {
+                        ctx.memory_mut(|memory| memory.surrender_focus(focused));
+                    }
+                }
                 egui::CentralPanel::default().show(ctx, |ui| {
                     outcome = match setting_field(ui, "test", saved, "", FieldKind::Value, focus) {
                         FieldOutcome::Idle => "idle".into(),
@@ -1640,6 +1680,14 @@ mod tests {
         window.frame(Vec::new(), "llama", true);
         window.frame(vec![typed("3")], "llama", false);
         assert_eq!(window.frame(click_away(), "llama", false), "commit llama3");
+    }
+
+    #[test]
+    fn a_close_that_takes_the_focus_away_commits_the_field() {
+        let window = Window::new();
+        window.frame(Vec::new(), "llama", true);
+        window.frame(vec![typed("3")], "llama", false);
+        assert_eq!(window.closing_frame("llama"), "commit llama3");
     }
 
     #[test]

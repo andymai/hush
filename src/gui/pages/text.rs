@@ -12,6 +12,7 @@ use crate::gui::widgets::{
     section, submitted, switch, switch_row, text_area, value_field, Button, Field, Size, Variant,
 };
 use crate::gui::Gui;
+use crate::gui::{checked_change, choose};
 use crate::hotkey::warnings;
 use crate::text_processing::learn::{self, ListImport};
 use crate::text_processing::styles::{self, StyleConfig, StyleName};
@@ -88,19 +89,26 @@ fn tone(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Polish");
+    let shown_before = gui.pending.provider.unwrap_or(gui.config.llm.provider);
+    let waiting = gui.pending.provider.and_then(|provider| {
+        checked_change(&gui.config, |config| config.llm.provider = provider)
+            .err()
+            .map(|reason| format!("Not switched yet: set the server below. {}", reason))
+    });
+    let mut shown = shown_before;
     row("text.llm_provider", "Polish with")
         .describe(
             "Only the text is ever sent, never the audio. Anthropic needs \
              ANTHROPIC_API_KEY in ~/.config/hush/.env. An OpenAI-compatible server \
              receives the text at the address you set.",
         )
+        .problem(waiting.as_deref())
         .show(ui, |ui| {
-            let current = &mut gui.config.llm.provider;
             dropdown(
                 ui,
                 "llm_provider",
                 FIELD_WIDTH,
-                provider_name(*current),
+                provider_name(shown),
                 |ui| {
                     for provider in [
                         LlmSetting::Auto,
@@ -109,16 +117,21 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
                         LlmSetting::OpenAiCompatible,
                         LlmSetting::None,
                     ] {
-                        option(ui, current, provider, provider_name(provider));
+                        option(ui, &mut shown, provider, provider_name(provider));
                     }
                 },
             );
         });
+    if shown != shown_before {
+        gui.pending.provider = choose(&mut gui.config, shown, |config, provider| {
+            config.llm.provider = provider
+        });
+    }
     row("text.polish", "Tidy up every transcript")
         .describe("Otherwise the model only handles spoken commands.")
         .reserve(36.0)
         .show(ui, |ui| {
-            ui.add_enabled_ui(gui.config.llm.provider != LlmSetting::None, |ui| {
+            ui.add_enabled_ui(shown != LlmSetting::None, |ui| {
                 switch(ui, &mut gui.config.llm.polish);
             });
         });
@@ -197,13 +210,24 @@ fn writing_styles(gui: &mut Gui, ui: &mut egui::Ui) {
         }
     });
     if let Some(name) = remove {
-        match remove_style(&mut gui.config, &name) {
-            Ok(()) => {
-                if gui.style_draft.original.as_deref() == Some(name.as_str()) {
-                    gui.style_draft = StyleDraft::default();
-                }
+        let mut refused = None;
+        gui.remove(
+            format!("Removed the style {}", name),
+            |gui| match remove_style(&mut gui.config, &name) {
+                Ok(()) => {
+                    if gui.style_draft.original.as_deref() == Some(name.as_str()) {
+                        gui.style_draft = StyleDraft::default();
+                    }
+                    true
+                },
+                Err(message) => {
+                    refused = Some(message);
+                    false
+                },
             },
-            Err(message) => gui.say(message),
+        );
+        if let Some(message) = refused {
+            gui.say(message);
         }
     }
     if let Some(name) = change {
@@ -510,7 +534,9 @@ fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
         });
     }
     if let Some(term) = remove {
-        learn::forget_in(&mut gui.vocabulary, &term);
+        gui.remove(format!("Removed {}", term), |gui| {
+            learn::forget_in(&mut gui.vocabulary, &term)
+        });
     }
     let muted = palette(ui.ctx()).muted;
     widgets::text(

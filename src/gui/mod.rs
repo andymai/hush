@@ -21,13 +21,17 @@ use crate::config::settings::{Appearance, TranscriptionBackend, TranscriptionCon
 use crate::config::Config;
 use crate::hotkey::keymap::ModifierKeys;
 use crate::hotkey::Role;
-use crate::ipc::{client, DaemonState};
+use crate::ipc::client::{self, Probe};
+use crate::ipc::DaemonState;
 use crate::permissions::PermissionStatus;
 use crate::text::layout::Layout;
 use crate::text_processing::DomainVocabulary;
 use crate::transcription::models::{ModelManager, ModelSize};
 use anyhow::{Context, Result};
-use autosave::{Daemon, Debounce, Feedback, Saved};
+use autosave::{
+    close_step, daemon_reads_a_change, CloseState, CloseStep, Daemon, Debounce, Feedback, Files,
+    Pending, Undo,
+};
 use capture::{Capture, Outcome};
 use meter::Meter;
 use pages::history::HistoryView;
@@ -237,18 +241,29 @@ pub struct Gui {
     /// screenshot
     appearance_override: Option<Appearance>,
     screenshot: Option<Screenshot>,
-    /// The last save, or why the window's settings cannot save
-    pub feedback: Option<Feedback>,
+    /// The files behind the window, as it last read or wrote them
+    pub files: Files,
+    /// The last save of each file, or why it cannot save
+    config_feedback: Option<Feedback>,
+    vocabulary_feedback: Option<Feedback>,
     /// Settings that failed to save, so they are not tried again each frame
     rejected: Option<Config>,
     rejected_vocabulary: Option<DomainVocabulary>,
+    /// Choices that wait for other settings before they can save
+    pub pending: Pending,
+    /// The last removal, which Undo in the footer puts back
+    pub undo: Option<Undo>,
     /// Reset everything waits for a second click
     pub confirm_reset: bool,
+    /// The page of the last frame, to disarm a second click on a change
+    last_page: Page,
     debounce: Debounce,
     attempt: Arc<Mutex<Option<Attempt>>>,
     attempting: bool,
-    /// The window closes once the pending restart is under way
+    /// The window closes once its fields and an owed restart are done
     closing: bool,
+    /// A close found something unsaved; the next close discards it
+    close_warned: bool,
     restart: Option<Restart>,
     poll: Poll,
     last_poll: Instant,
@@ -256,11 +271,13 @@ pub struct Gui {
 
 impl Gui {
     fn new() -> Result<Self> {
-        let config = match Config::load() {
-            Ok(config) => config,
+        let (config, config_error) = match Config::load() {
+            Ok(config) => (config, None),
             Err(e) => {
-                warn!("Falling back to the built-in defaults: {}", e);
-                Config::defaults().context("The built-in defaults are unreadable")?
+                warn!("Showing the built-in defaults: {:#}", e);
+                let defaults =
+                    Config::defaults().context("The built-in defaults are unreadable")?;
+                (defaults, Some(format!("{:#}", e)))
             },
         };
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -269,7 +286,14 @@ impl Gui {
             .build()
             .context("Failed to start the background runtime")?;
         let machine = Machine::read(&config.transcription.server_key_env);
-        let vocabulary = load_vocabulary();
+        let (vocabulary, vocabulary_error) = match load_vocabulary() {
+            Ok(vocabulary) => (vocabulary, None),
+            Err(e) => {
+                warn!("Showing an empty vocabulary: {:#}", e);
+                (DomainVocabulary::default(), Some(format!("{:#}", e)))
+            },
+        };
+        let files = Files::read(config_error, vocabulary_error);
         let manager = ModelManager::new(crate::config::paths::models_dir()).ok();
         let catalogue = MODEL_ORDER
             .iter()
@@ -279,8 +303,9 @@ impl Gui {
             })
             .collect();
         let screenshot = Screenshot::from_env();
+        let page = Page::from_env().unwrap_or(Page::Overview);
         Ok(Self {
-            page: Page::from_env().unwrap_or(Page::Overview),
+            page,
             saved: config.clone(),
             config,
             saved_vocabulary: vocabulary.clone(),
@@ -322,14 +347,20 @@ impl Gui {
                 .as_ref()
                 .and_then(|_| theme::appearance_from_env()),
             screenshot,
-            feedback: None,
+            files,
+            config_feedback: None,
+            vocabulary_feedback: None,
             rejected: None,
             rejected_vocabulary: None,
+            pending: Pending::default(),
+            undo: None,
             confirm_reset: false,
+            last_page: page,
             debounce: Debounce::default(),
             attempt: Arc::new(Mutex::new(None)),
             attempting: false,
             closing: false,
+            close_warned: false,
             restart: None,
             poll: Poll::default(),
             last_poll: Instant::now(),
@@ -341,11 +372,41 @@ impl Gui {
     }
 
     /// Put a change into the window's settings, which save at the end of the
-    /// frame. A change that would stop settings that save from saving is
-    /// refused with the reason, and the settings keep their value.
+    /// frame. A change that would stop the settings from saving is refused
+    /// with the reason, and the settings keep their value.
     pub fn try_set(&mut self, change: impl FnOnce(&mut Config)) -> Result<(), String> {
         self.config = checked_change(&self.config, change)?;
         Ok(())
+    }
+
+    /// Make a removal that Undo in the footer can put back. `removal` says
+    /// whether it removed something.
+    pub fn remove(&mut self, label: impl Into<String>, removal: impl FnOnce(&mut Gui) -> bool) {
+        let before = (self.config.clone(), self.vocabulary.clone());
+        if removal(self) {
+            self.undo = Some(Undo::new(label.into(), before, Instant::now()));
+        }
+    }
+
+    /// Put back what the last removal took.
+    pub fn undo(&mut self) {
+        if let Some(undo) = self.undo.take() {
+            (self.config, self.vocabulary) = undo.before;
+        }
+    }
+
+    /// Put each unfinished choice into the settings once they can take it.
+    fn settle_pending(&mut self) {
+        if let Some(backend) = self.pending.backend {
+            self.pending.backend = choose(&mut self.config, backend, |config, backend| {
+                config.transcription.backend = backend
+            });
+        }
+        if let Some(provider) = self.pending.provider {
+            self.pending.provider = choose(&mut self.config, provider, |config, provider| {
+                config.llm.provider = provider
+            });
+        }
     }
 
     /// Write what changed: the configuration, the vocabulary, or both. A
@@ -354,62 +415,194 @@ impl Gui {
         if self.screenshot_mode() {
             return;
         }
-        if self.config == self.saved && self.vocabulary == self.saved_vocabulary {
-            if matches!(self.feedback, Some(Feedback::Failed(_))) {
-                self.feedback = None;
-            }
+        self.settle_pending();
+        if self.config == self.saved {
             self.rejected = None;
-            self.rejected_vocabulary = None;
-        }
-        if self.config != self.saved && self.rejected.as_ref() != Some(&self.config) {
+            if matches!(self.config_feedback, Some(Feedback::Failed(_))) {
+                self.config_feedback = None;
+            }
+        } else if self.files.config_error.is_some() {
+            self.config_feedback = Some(Feedback::Failed(
+                "Not saved: the configuration file does not load. Replace it at the top of \
+                 the page, or fix the file and open the window again."
+                    .to_string(),
+            ));
+        } else if self.rejected.as_ref() != Some(&self.config) {
             self.save_config(now);
         }
-        if self.vocabulary != self.saved_vocabulary
-            && self.rejected_vocabulary.as_ref() != Some(&self.vocabulary)
-        {
-            match save_vocabulary(&self.vocabulary) {
-                Ok(()) => {
-                    self.saved_vocabulary = self.vocabulary.clone();
-                    self.rejected_vocabulary = None;
-                    self.feedback = Some(Feedback::Saved(now));
-                    self.debounce.change(now);
-                },
-                Err(e) => {
-                    self.rejected_vocabulary = Some(self.vocabulary.clone());
-                    self.feedback = Some(Feedback::Failed(format!(
-                        "Could not save the vocabulary: {:#}",
-                        e
-                    )));
-                },
+        if self.vocabulary == self.saved_vocabulary {
+            self.rejected_vocabulary = None;
+            if matches!(self.vocabulary_feedback, Some(Feedback::Failed(_))) {
+                self.vocabulary_feedback = None;
+            }
+        } else if self.files.vocabulary_error.is_some() {
+            self.vocabulary_feedback = Some(Feedback::Failed(
+                "Not saved: the vocabulary file does not load. Replace it at the top of \
+                 the page, or fix the file and open the window again."
+                    .to_string(),
+            ));
+        } else if self.rejected_vocabulary.as_ref() != Some(&self.vocabulary) {
+            self.save_vocabulary(now);
+        }
+        if let Some(undo) = self.undo.as_mut() {
+            if !undo.still(&self.config, &self.vocabulary, now) {
+                self.undo = None;
             }
         }
     }
 
     fn save_config(&mut self, now: Instant) {
-        let path = crate::config::paths::config_path();
-        let restart = match autosave::save_config(&self.saved, &self.config, |config| {
-            config.save_to_file(&path)
-        }) {
-            Saved::Written { restart } => restart,
-            Saved::Refused(problem) => {
+        let written = self.files.write_config(&self.saved, &self.config);
+        let (base, merged) = match written {
+            Ok(written) => written,
+            Err(e) => {
                 self.rejected = Some(self.config.clone());
-                self.feedback = Some(Feedback::Failed(problem));
+                self.config_feedback = Some(Feedback::Failed(format!("Not saved: {:#}", e)));
                 return;
             },
         };
-        let keep_days = self.config.history.keep_audio_days;
-        if keep_days != self.saved.history.keep_audio_days {
+        let keep_days = merged.history.keep_audio_days;
+        if keep_days != base.history.keep_audio_days {
             if let Err(e) = crate::audio::store::sweep_now(keep_days) {
                 warn!("Could not sweep the kept audio: {:#}", e);
             }
             self.history.reload();
         }
-        if restart {
+        if daemon_reads_a_change(&base, &merged) {
             self.debounce.change(now);
         }
-        self.saved = self.config.clone();
+        self.config = merged.clone();
+        self.saved = merged;
         self.rejected = None;
-        self.feedback = Some(Feedback::Saved(now));
+        self.close_warned = false;
+        self.config_feedback = Some(Feedback::Saved(now));
+    }
+
+    fn save_vocabulary(&mut self, now: Instant) {
+        match self
+            .files
+            .write_vocabulary(&self.saved_vocabulary, &self.vocabulary)
+        {
+            Ok(merged) => {
+                self.vocabulary = merged.clone();
+                self.saved_vocabulary = merged;
+                self.rejected_vocabulary = None;
+                self.close_warned = false;
+                self.vocabulary_feedback = Some(Feedback::Saved(now));
+                self.debounce.change(now);
+            },
+            Err(e) => {
+                self.rejected_vocabulary = Some(self.vocabulary.clone());
+                self.vocabulary_feedback =
+                    Some(Feedback::Failed(format!("Vocabulary not saved: {:#}", e)));
+            },
+        }
+    }
+
+    /// Keep a copy of the file that does not load, then write the window's
+    /// settings over it.
+    pub fn replace_config(&mut self) {
+        match self.files.replace_config(&self.config) {
+            Ok(backup) => {
+                self.saved = self.config.clone();
+                self.rejected = None;
+                self.config_feedback = Some(Feedback::Saved(Instant::now()));
+                match backup {
+                    Some(backup) => self.say(format!("Kept the old file as {}.", backup.display())),
+                    None => self.say("Wrote the configuration."),
+                }
+            },
+            Err(e) => self.say(format!("Could not replace the file: {:#}", e)),
+        }
+    }
+
+    /// [`Gui::replace_config`] for the vocabulary.
+    pub fn replace_vocabulary(&mut self) {
+        match self.files.replace_vocabulary(&self.vocabulary) {
+            Ok(backup) => {
+                self.saved_vocabulary = self.vocabulary.clone();
+                self.rejected_vocabulary = None;
+                self.vocabulary_feedback = Some(Feedback::Saved(Instant::now()));
+                match backup {
+                    Some(backup) => self.say(format!("Kept the old file as {}.", backup.display())),
+                    None => self.say("Wrote the vocabulary."),
+                }
+            },
+            Err(e) => self.say(format!("Could not replace the file: {:#}", e)),
+        }
+    }
+
+    /// What a close would lose, when anything.
+    fn unsaved(&self) -> Option<&'static str> {
+        if self.config != self.saved || self.vocabulary != self.saved_vocabulary {
+            Some("Some settings did not save")
+        } else if self.pending.backend.is_some() || self.pending.provider.is_some() {
+            Some("A choice waits for other settings")
+        } else {
+            None
+        }
+    }
+
+    /// Before the pages draw: a close request commits the focused field
+    /// first, and asks once when something would be lost.
+    fn intercept_close(&mut self, ctx: &egui::Context) {
+        if !ctx.input(|input| input.viewport().close_requested()) {
+            return;
+        }
+        let focused = ctx.memory(|memory| memory.focused());
+        let step = close_step(CloseState {
+            focused: focused.is_some(),
+            closing: self.closing,
+            warned: self.close_warned,
+            unsaved: self.unsaved().is_some(),
+            restart_owed: self.restart_owed(),
+        });
+        match step {
+            CloseStep::CommitField => {
+                if let Some(focused) = focused {
+                    ctx.memory_mut(|memory| memory.surrender_focus(focused));
+                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.closing = true;
+            },
+            CloseStep::Warn => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.close_warned = true;
+                let reason = self.unsaved().unwrap_or("Something did not save");
+                self.say(format!("{}. Close again to discard it.", reason));
+            },
+            CloseStep::WaitForRestart => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.closing = true;
+            },
+            // A second close while a take keeps the restart waiting closes
+            // at once; the daemon reads the change when it next starts.
+            CloseStep::Close => {},
+        }
+    }
+
+    /// After the pages drew: a close that committed the focused field stops
+    /// when the field did not save, or when something else would be lost.
+    fn closing_after_pages(&mut self, rejected: bool) {
+        if !self.closing {
+            return;
+        }
+        if rejected {
+            self.closing = false;
+            self.close_warned = true;
+            self.say("A field did not save. Close again to discard it.");
+        } else if !self.close_warned {
+            if let Some(reason) = self.unsaved() {
+                self.closing = false;
+                self.close_warned = true;
+                self.say(format!("{}. Close again to discard it.", reason));
+            }
+        }
+    }
+
+    /// Whether the window may close now that it wants to.
+    fn may_close(&self) -> bool {
+        !self.restart_owed() && (self.close_warned || self.unsaved().is_none())
     }
 
     /// Restart the daemon once the changes stop and it is idle, and close
@@ -433,15 +626,6 @@ impl Gui {
                 Attempt::Failed(e) => self.say(format!("Could not restart Hush: {}", e)),
             }
         }
-        // A second close while a take keeps the restart waiting closes at
-        // once; the daemon reads the change when it next starts.
-        if ctx.input(|input| input.viewport().close_requested())
-            && self.restart_owed()
-            && !self.closing
-        {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.closing = true;
-        }
         if self.closing {
             self.debounce.hurry(now);
         }
@@ -452,10 +636,10 @@ impl Gui {
         if self.debounce.fire(now, daemon) {
             self.attempt_restart(ctx);
         }
-        if self.closing && !self.restart_owed() {
+        if self.closing && self.may_close() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if let Some(wait) = self.debounce.wait(now) {
+        if let Some(wait) = self.debounce.wait(now, FAST_POLL) {
             ctx.request_repaint_after(wait.max(Duration::from_millis(20)));
         }
     }
@@ -467,15 +651,16 @@ impl Gui {
     }
 
     /// Ask the daemon once more on a thread, so a take that began after the
-    /// last poll is not cut, then restart it.
+    /// last poll is not cut, then restart it. A daemon that does not answer
+    /// in time may be busy, so the restart waits.
     fn attempt_restart(&mut self, ctx: &egui::Context) {
         self.attempting = true;
         let slot = Arc::clone(&self.attempt);
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let attempt = match client::status_blocking(STATUS_TIMEOUT) {
-                None => Attempt::NotRunning,
-                Some(DaemonState::Idle) => {
+            let attempt = match client::probe_blocking(STATUS_TIMEOUT) {
+                Probe::NotRunning => Attempt::NotRunning,
+                Probe::State(DaemonState::Idle) => {
                     let binary = std::env::current_exe().unwrap_or_else(|_| "hush".into());
                     match std::process::Command::new(binary)
                         .args(["daemon", "restart"])
@@ -485,7 +670,7 @@ impl Gui {
                         Err(e) => Attempt::Failed(e.to_string()),
                     }
                 },
-                Some(_) => Attempt::Deferred,
+                Probe::State(_) | Probe::NoAnswer => Attempt::Deferred,
             };
             *slot.lock() = Some(attempt);
             ctx.request_repaint();
@@ -497,12 +682,25 @@ impl Gui {
         self.debounce.pending() && self.machine.busy()
     }
 
-    /// The last save, while the footer shows it.
+    /// How the last saves went, while the footer shows it: a failure of
+    /// either file first, else the latest Saved.
     pub fn save_feedback(&self) -> Option<&Feedback> {
-        match &self.feedback {
-            Some(Feedback::Saved(at)) if at.elapsed() > SAVED_DURATION => None,
-            other => other.as_ref(),
+        let failed = [&self.config_feedback, &self.vocabulary_feedback]
+            .into_iter()
+            .flatten()
+            .find(|feedback| matches!(feedback, Feedback::Failed(_)));
+        if failed.is_some() {
+            return failed;
         }
+        [&self.config_feedback, &self.vocabulary_feedback]
+            .into_iter()
+            .flatten()
+            .filter_map(|feedback| match feedback {
+                Feedback::Saved(at) if at.elapsed() <= SAVED_DURATION => Some((at, feedback)),
+                _ => None,
+            })
+            .max_by_key(|(at, _)| **at)
+            .map(|(_, feedback)| feedback)
     }
 
     /// Read the machine on a background thread; `take_refresh` picks up the
@@ -626,36 +824,37 @@ impl Gui {
     }
 }
 
-/// `config` with `change`, unless the change would stop settings that save
-/// from saving. Settings that already fail to save, such as a server picked
-/// before its address, take any change, so the user can finish them.
-fn checked_change(config: &Config, change: impl FnOnce(&mut Config)) -> Result<Config, String> {
+/// `config` with `change`, unless the changed settings would not save.
+pub fn checked_change(config: &Config, change: impl FnOnce(&mut Config)) -> Result<Config, String> {
     let mut changed = config.clone();
     change(&mut changed);
-    if config.validate().is_ok() {
-        changed.validate().map_err(|e| e.to_string())?;
-    }
+    changed.validate().map_err(|e| e.to_string())?;
     Ok(changed)
 }
 
-fn load_vocabulary() -> DomainVocabulary {
-    let path = DomainVocabulary::default_path();
-    if !path.exists() {
-        return DomainVocabulary::default();
+/// Apply `choice` with `apply` when the settings can take it; otherwise the
+/// settings stay as they are and the choice comes back to wait.
+pub fn choose<T: Copy>(
+    config: &mut Config,
+    choice: T,
+    apply: impl FnOnce(&mut Config, T),
+) -> Option<T> {
+    match checked_change(config, |config| apply(config, choice)) {
+        Ok(next) => {
+            *config = next;
+            None
+        },
+        Err(_) => Some(choice),
     }
-    DomainVocabulary::load_from_file(&path).unwrap_or_else(|e| {
-        warn!("Could not read the vocabulary file: {}", e);
-        DomainVocabulary::default()
-    })
 }
 
-fn save_vocabulary(vocabulary: &DomainVocabulary) -> Result<()> {
+/// The vocabulary file; a missing file is an empty vocabulary.
+fn load_vocabulary() -> Result<DomainVocabulary> {
     let path = DomainVocabulary::default_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    if !path.exists() {
+        return Ok(DomainVocabulary::default());
     }
-    vocabulary.save_to_file(&path)
+    DomainVocabulary::load_from_file(&path)
 }
 
 impl Gui {
@@ -720,6 +919,12 @@ impl eframe::App for Gui {
         {
             self.toast = None;
         }
+        if self.page != self.last_page {
+            self.last_page = self.page;
+            self.confirm_reset = false;
+            self.history.disarm();
+        }
+        self.intercept_close(ctx);
 
         let colours = theme::palette(ctx);
         egui::SidePanel::left("nav")
@@ -754,11 +959,20 @@ impl eframe::App for Gui {
         chrome::resize_edges(ctx);
         chrome::window_border(ctx);
         let now = Instant::now();
-        let before = self.feedback.clone();
+        let rejected = widgets::take_rejections(ctx) > 0;
+        let before = (
+            self.config_feedback.clone(),
+            self.vocabulary_feedback.clone(),
+        );
         self.persist(now);
-        if self.feedback != before {
+        if (
+            self.config_feedback.clone(),
+            self.vocabulary_feedback.clone(),
+        ) != before
+        {
             ctx.request_repaint();
         }
+        self.closing_after_pages(rejected);
         self.drive_restart(ctx, now);
 
         if let Some(screenshot) = self.screenshot.as_mut() {
@@ -904,20 +1118,38 @@ mod tests {
     }
 
     #[test]
-    fn settings_that_cannot_save_yet_take_the_changes_that_finish_them() {
+    fn an_unfinished_choice_waits_outside_the_settings_until_they_take_it() {
+        let set = |config: &mut Config, backend| config.transcription.backend = backend;
         let mut config = Config::defaults().unwrap();
-        config.transcription.backend = TranscriptionBackend::OpenAiCompatible;
-        assert!(config.validate().is_err(), "no server address yet");
-        let config = checked_change(&config, |c| {
+        let server = TranscriptionBackend::OpenAiCompatible;
+        assert_eq!(
+            choose(&mut config, server, set),
+            Some(server),
+            "no address yet"
+        );
+        assert_eq!(config.transcription.backend, TranscriptionBackend::Local);
+        assert!(config.validate().is_ok(), "the settings still save");
+
+        config = checked_change(&config, |c| {
             c.transcription.server_url = "http://localhost:8080/v1".into()
         })
         .unwrap();
-        assert!(config.validate().is_err(), "no model yet");
-        let config = checked_change(&config, |c| {
+        assert_eq!(
+            choose(&mut config, server, set),
+            Some(server),
+            "no model yet"
+        );
+        config = checked_change(&config, |c| {
             c.transcription.server_model = "whisper-large-v3".into()
         })
         .unwrap();
-        assert!(config.validate().is_ok());
+        assert_eq!(choose(&mut config, server, set), None);
+        assert_eq!(config.transcription.backend, server);
+        assert_eq!(
+            choose(&mut config, TranscriptionBackend::Groq, set),
+            None,
+            "a choice that saves applies at once"
+        );
     }
 
     #[test]

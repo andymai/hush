@@ -2,6 +2,7 @@
 //! rules for applications that need one or the other.
 
 use crate::config::settings::MAX_TYPING_DELAY_MS;
+use crate::config::Config;
 use crate::gui::icons;
 use crate::gui::pages::number_setting;
 use crate::gui::theme::FIELD_WIDTH;
@@ -54,7 +55,7 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
          enough: konsole matches org.kde.konsole. The History page shows the \
          class of each application you dictate into.",
     );
-    app_list(
+    let removed = app_list(
         ui,
         "output.uinput_apps",
         "Always type in",
@@ -62,7 +63,10 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
         &mut gui.config.insertion.uinput_apps,
         &mut gui.new_uinput_app,
     );
-    app_list(
+    if let Some(index) = removed {
+        remove_app(gui, index, |config| &mut config.insertion.uinput_apps);
+    }
+    let removed = app_list(
         ui,
         "output.clipboard_apps",
         "Always paste in",
@@ -70,6 +74,20 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
         &mut gui.config.insertion.clipboard_apps,
         &mut gui.new_clipboard_app,
     );
+    if let Some(index) = removed {
+        remove_app(gui, index, |config| &mut config.insertion.clipboard_apps);
+    }
+}
+
+/// Remove the rule at `index` of the list that `apps` reaches, with Undo.
+fn remove_app(gui: &mut Gui, index: usize, apps: fn(&mut Config) -> &mut Vec<String>) {
+    let Some(app) = apps(&mut gui.config).get(index).cloned() else {
+        return;
+    };
+    gui.remove(format!("Removed {}", app), |gui| {
+        apps(&mut gui.config).remove(index);
+        true
+    });
 }
 
 fn app_list(
@@ -79,7 +97,7 @@ fn app_list(
     description: &str,
     apps: &mut Vec<String>,
     draft: &mut String,
-) {
+) -> Option<usize> {
     let mut add = false;
     row(key, title)
         .describe(description)
@@ -112,9 +130,7 @@ fn app_list(
                 });
         }
     });
-    if let Some(index) = remove {
-        apps.remove(index);
-    }
+    remove
 }
 
 /// Add a trimmed class unless it is blank or already listed in any case.

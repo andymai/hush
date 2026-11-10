@@ -414,7 +414,11 @@ fn chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap, chord: &str) {
         .show(ui, |ui| {
             if icon_button(ui, icons::X, "Remove this key").clicked() {
                 gui.capture = None;
-                map.entries_mut(&mut gui.config.hotkey).remove(chord);
+                gui.remove(format!("Removed the key {}", chord), |gui| {
+                    map.entries_mut(&mut gui.config.hotkey)
+                        .remove(chord)
+                        .is_some()
+                });
                 return;
             }
             if let Some(value) = map.entries_mut(&mut gui.config.hotkey).get_mut(chord) {
@@ -556,9 +560,16 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
             }
             if clear && icon_button(ui, icons::X, "Clear the key").clicked() {
                 gui.capture = None;
-                if let Some(slot) = gui.config.hotkey.chord_mut(role) {
-                    slot.clear();
-                }
+                gui.remove(
+                    format!("Cleared the key for {}", role.label()),
+                    |gui| match gui.config.hotkey.chord_mut(role) {
+                        Some(slot) => {
+                            slot.clear();
+                            true
+                        },
+                        None => false,
+                    },
+                );
             }
             if icon_button(ui, icons::PENCIL, "Type the key's name instead").clicked() {
                 gui.capture = None;

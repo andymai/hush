@@ -9,7 +9,7 @@ pub mod speech;
 pub mod text;
 
 use super::icons;
-use super::widgets::Row;
+use super::widgets::{row, section, Button, Row, Variant};
 use super::Gui;
 use crate::config::Config;
 use std::ops::RangeInclusive;
@@ -71,6 +71,7 @@ impl Page {
 }
 
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
+    file_problems(gui, ui);
     match gui.page {
         Page::Overview => overview::show(gui, ui),
         Page::Hotkeys => hotkeys::show(gui, ui),
@@ -79,6 +80,54 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         Page::Output => output::show(gui, ui),
         Page::Desktop => desktop::show(gui, ui),
         Page::History => history::show(gui, ui),
+    }
+}
+
+/// A file that did not load, above every page: the window shows defaults
+/// and saves nothing to that file until the user replaces it.
+fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
+    if gui.files.config_error.is_none() && gui.files.vocabulary_error.is_none() {
+        return;
+    }
+    section(ui, "Files");
+    if let Some(error) = gui.files.config_error.clone() {
+        let description = format!(
+            "The window shows the built-in defaults and saves nothing to the file until \
+             you replace it. {}",
+            error
+        );
+        row("files.config", "The configuration file does not load")
+            .status(false)
+            .describe(&description)
+            .control_below()
+            .show(ui, |ui| {
+                let replace = Button::new("Replace with defaults, keep config.toml.bak")
+                    .icon(icons::ROTATE_CCW)
+                    .variant(Variant::Danger);
+                if ui.add(replace).clicked() {
+                    gui.replace_config();
+                }
+            });
+    }
+    if let Some(error) = gui.files.vocabulary_error.clone() {
+        let path = gui.files.vocabulary_path().display().to_string();
+        let description = format!(
+            "The window shows an empty vocabulary and saves nothing to the file until you \
+             replace it. {}: {}",
+            path, error
+        );
+        row("files.vocabulary", "The vocabulary file does not load")
+            .status(false)
+            .describe(&description)
+            .control_below()
+            .show(ui, |ui| {
+                let replace = Button::new("Replace with this list, keep vocabulary.json.bak")
+                    .icon(icons::ROTATE_CCW)
+                    .variant(Variant::Danger);
+                if ui.add(replace).clicked() {
+                    gui.replace_vocabulary();
+                }
+            });
     }
 }
 

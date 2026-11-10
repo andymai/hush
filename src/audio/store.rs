@@ -219,6 +219,19 @@ fn remove(kept: &Kept, swept: &mut Swept) -> Result<()> {
     Ok(())
 }
 
+/// The kept takes that a limit of `keep_days` would delete, by age alone.
+pub fn older_than(kept: &[Kept], keep_days: u64, now: SystemTime) -> Swept {
+    let limit = Duration::from_secs(keep_days.saturating_mul(DAY.as_secs()));
+    kept.iter()
+        .filter(|kept| {
+            keep_days == 0 || now.duration_since(kept.modified).unwrap_or_default() > limit
+        })
+        .fold(Swept::default(), |swept, kept| Swept {
+            files: swept.files + 1,
+            bytes: swept.bytes + kept.bytes,
+        })
+}
+
 /// [`sweep`] of the default folders, now.
 pub fn sweep_now(keep_days: u64) -> Result<Swept> {
     sweep(
@@ -256,6 +269,39 @@ pub fn clear(dir: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use std::fs::File;
+
+    #[test]
+    fn a_lower_limit_counts_the_takes_it_would_delete() {
+        let now = SystemTime::now();
+        let take = |days: u64, bytes: u64| Kept {
+            path: PathBuf::from(format!("{days}.flac")),
+            modified: now - DAY * days as u32,
+            bytes,
+        };
+        let kept = [take(1, 10), take(5, 20), take(40, 30)];
+        assert_eq!(
+            older_than(&kept, 30, now),
+            Swept {
+                files: 1,
+                bytes: 30
+            }
+        );
+        assert_eq!(
+            older_than(&kept, 3, now),
+            Swept {
+                files: 2,
+                bytes: 50
+            }
+        );
+        assert_eq!(
+            older_than(&kept, 0, now),
+            Swept {
+                files: 3,
+                bytes: 60
+            }
+        );
+        assert_eq!(older_than(&kept, 60, now), Swept::default());
+    }
 
     struct Folders {
         _root: tempfile::TempDir,

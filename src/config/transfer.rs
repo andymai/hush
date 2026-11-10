@@ -214,6 +214,29 @@ pub fn write_atomic(path: &Path, contents: &[u8], replace: bool) -> Result<()> {
     Ok(())
 }
 
+/// Replace the file at `path`, or the file that a link at `path` names,
+/// through [`write_atomic`], so that the daemon never reads half of it.
+pub fn replace_file(path: &Path, contents: &[u8]) -> Result<()> {
+    let path = link_target(path);
+    if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+    write_atomic(&path, contents, true)
+}
+
+/// Copy the file at `path` to the same name with `.bak` added, and return
+/// the copy's path. A missing file has nothing to keep.
+pub fn back_up(path: &Path) -> Result<Option<PathBuf>> {
+    let path = link_target(path);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let backup = backup_path(&path);
+    fs::copy(&path, &backup).with_context(|| format!("Failed to back up {}", path.display()))?;
+    Ok(Some(backup))
+}
+
 /// A new file, written in full beside its target and not yet in its place.
 struct Staged {
     path: PathBuf,
@@ -366,6 +389,32 @@ fn refuse_keys(text: &str, keys: &[(String, String)]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_replaced_file_keeps_its_link_and_a_backup_keeps_the_old_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles").join("config.toml");
+        fs::create_dir_all(real.parent().unwrap()).unwrap();
+        fs::write(&real, "old").unwrap();
+        let link = dir.path().join("config.toml");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let backup = back_up(&link).unwrap().unwrap();
+        assert_eq!(backup, real.with_file_name("config.toml.bak"));
+        assert_eq!(fs::read_to_string(&backup).unwrap(), "old");
+
+        replace_file(&link, b"new").unwrap();
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&real).unwrap(), "new");
+
+        let fresh = dir.path().join("sub").join("vocabulary.json");
+        assert_eq!(back_up(&fresh).unwrap(), None);
+        replace_file(&fresh, b"{}").unwrap();
+        assert_eq!(fs::read_to_string(&fresh).unwrap(), "{}");
+    }
 
     struct Machine {
         _dir: tempfile::TempDir,

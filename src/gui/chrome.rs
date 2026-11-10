@@ -8,7 +8,7 @@ use super::autosave::Feedback;
 use super::icons;
 use super::pages::Page;
 use super::theme::{self, palette};
-use super::widgets;
+use super::widgets::{self, Button, Size, Variant};
 use super::Gui;
 use egui::epaint::{Mesh, RectShape, TessellationOptions, Tessellator};
 use egui::{
@@ -355,7 +355,17 @@ pub fn footer(gui: &mut Gui, ui: &mut Ui) {
     let small = || theme::sans(theme::SMALL);
     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
-        if let Some((message, _)) = &gui.toast {
+        if let Some(label) = gui.undo.as_ref().map(|undo| undo.label.clone()) {
+            widgets::icon(ui, icons::TRASH, colours.muted);
+            widgets::text(ui, &label, small(), colours.ink);
+            let undo = Button::new("Undo")
+                .icon(icons::ROTATE_CCW)
+                .variant(Variant::Ghost)
+                .size(Size::Small);
+            if ui.add(undo).clicked() {
+                gui.undo();
+            }
+        } else if let Some((message, _)) = &gui.toast {
             widgets::icon(ui, icons::INFO, colours.muted);
             let message = message.clone();
             widgets::text(ui, &message, small(), colours.ink);
