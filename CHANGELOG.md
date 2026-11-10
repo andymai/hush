@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/andymai/hush/compare/v0.25.0...v0.26.0) (2026-11-10)
+
+
+### Features
+
+* **gui:** restyle the settings window with light and dark themes ([#303](https://github.com/andymai/hush/issues/303)) ([3c8de03](https://github.com/andymai/hush/commit/3c8de038d959f3daa8e88cd834265b656471bae4))
+
 ## [0.25.0](https://github.com/andymai/hush/compare/v0.24.2...v0.25.0) (2026-11-10)
 
 
