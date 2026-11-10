@@ -94,7 +94,7 @@ fn open_stream(device: &Device, config: StreamConfig, sink: &Sink) -> Result<Str
 
 /// Calculate RMS (Root Mean Square) amplitude from audio samples
 /// Returns a value between 0.0 and 1.0
-fn calculate_rms_amplitude(samples: &[f32]) -> f32 {
+pub(crate) fn calculate_rms_amplitude(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return 0.0;
     }
@@ -426,6 +426,17 @@ impl AudioCapture {
 
     pub fn is_recording(&self) -> bool {
         self.sink.is_recording.load(Ordering::Acquire)
+    }
+
+    /// A copy of the current recording from sample `offset` on. The
+    /// recording keeps every sample until it stops.
+    pub fn samples_from(&self, offset: usize) -> Vec<f32> {
+        self.sink
+            .buffer
+            .lock()
+            .get(offset..)
+            .map(<[f32]>::to_vec)
+            .unwrap_or_default()
     }
 
     /// When the first audio of the current recording arrived. `None` while

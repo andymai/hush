@@ -24,6 +24,7 @@ pub mod gpu_fallback;
 pub mod guard;
 pub mod language;
 pub mod models;
+pub mod parts;
 pub mod slot;
 pub mod whisper;
 
