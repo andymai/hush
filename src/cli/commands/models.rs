@@ -142,7 +142,8 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
     Ok(())
 }
 
-/// Download a Whisper model, and the voice activity detection model when it
+/// Download a Whisper model, the voice activity detection model when it is
+/// missing, and the language-ID model when `detect_languages` is set and it
 /// is missing.
 ///
 /// Returns the path to the downloaded model file.
@@ -184,6 +185,20 @@ pub async fn download_model(model_size: &str, force: bool) -> Result<std::path::
             Err(e) => println!(
                 "⚠️  The voice activity detection model did not download ({:#}). \
                  Hush works without it; run this command again to get it.",
+                e
+            ),
+        }
+    }
+
+    let limits_detection =
+        crate::Config::load().is_ok_and(|config| !config.transcription.detect_languages.is_empty());
+    if limits_detection && manager.langid_model_path().is_none() {
+        println!("📥 Downloading the language-ID model for detect_languages");
+        match manager.ensure_langid_downloaded().await {
+            Ok(langid) => println!("✅ Language-ID model downloaded to {:?}", langid),
+            Err(e) => println!(
+                "⚠️  The language-ID model did not download ({:#}). Without it, Whisper \
+                 picks from every language; run this command again to get it.",
                 e
             ),
         }

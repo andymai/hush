@@ -1,15 +1,13 @@
-//! GPU detection through ggml's backend registry.
+//! GPU detection through the device registry of transcribe.cpp.
 //!
-//! whisper.cpp registers every backend it was built with (CPU, CUDA, Vulkan)
-//! in a static registry, so the devices it will actually use can be listed
-//! without loading a model.
+//! transcribe.cpp registers every ggml backend it was built with (CPU, CUDA,
+//! Vulkan) in a static registry, so the devices it will actually use can be
+//! listed without loading a model.
 
 use crate::transcription::cpu;
-use std::ffi::CStr;
-use std::os::raw::c_char;
-use std::sync::OnceLock;
+use std::sync::{Once, OnceLock};
 use tracing::info;
-use whisper_rs::whisper_rs_sys as sys;
+use transcribe_cpp::{Backend, Device, DeviceType};
 
 static GPU_AVAILABILITY: OnceLock<GpuAvailability> = OnceLock::new();
 
@@ -34,15 +32,17 @@ impl std::fmt::Display for GpuType {
     }
 }
 
-/// One device known to ggml's backend registry.
+/// One device known to the registry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendDevice {
     /// Backend device name, such as `CUDA0`, `Vulkan0`, or `CPU`
     pub name: String,
     /// Human-readable description, such as the GPU or CPU model
     pub description: String,
-    /// Whether ggml classifies the device as a GPU
+    /// Whether ggml classifies the device as a discrete GPU
     pub is_gpu: bool,
+    /// Whether the device is the CPU, not an integrated GPU or accelerator
+    pub is_cpu: bool,
 }
 
 /// GPU availability and device information
@@ -70,7 +70,7 @@ impl GpuAvailability {
                 None => {
                     let cpu = devices
                         .iter()
-                        .find(|d| !d.is_gpu)
+                        .find(|d| d.is_cpu)
                         .map(|d| d.description.clone())
                         .unwrap_or_else(|| "CPU".to_string());
                     info!("No GPU backend available; using CPU ({})", cpu);
@@ -100,14 +100,16 @@ impl GpuAvailability {
         Self::detect().gpu_type
     }
 
-    /// whisper.cpp's own summary of the compiled backends and CPU features
+    /// The speech engine and every device it can run on, one per line.
     pub fn system_info() -> String {
         if let Err(e) = cpu::ensure_supported() {
             return e.to_string();
         }
-        // SAFETY: whisper_print_system_info returns a pointer to a static
-        // buffer owned by whisper.cpp; it is never null and is not freed.
-        unsafe { cstr_to_string(sys::whisper_print_system_info()) }
+        let mut info = format!("transcribe.cpp {}", transcribe_cpp::version());
+        for device in backend_devices() {
+            info.push_str(&format!("\n{}: {}", device.name, device.description));
+        }
+        info
     }
 }
 
@@ -132,41 +134,59 @@ fn gpu_type_for(backend_name: &str) -> GpuType {
     }
 }
 
-/// Every device registered with ggml, in registry order, or none when this
-/// CPU is below the binary's floor.
-pub fn backend_devices() -> Vec<BackendDevice> {
-    // The first registry call registers the CPU backend, and that runs ggml
-    // code built for the floor.
+/// Send the log lines of transcribe.cpp and ggml to tracing instead of
+/// stderr. Call before the first registry call or model load.
+pub fn route_engine_logs() {
+    static ROUTE: Once = Once::new();
+    ROUTE.call_once(|| {
+        // A subscriber that `init()` installed has a log bridge already.
+        let _ = tracing_log::LogTracer::builder()
+            .with_max_level(tracing_log::log::LevelFilter::Debug)
+            .init();
+        transcribe_cpp::init_logging();
+    });
+}
+
+/// The registry's devices, or none when this CPU is below the binary's
+/// floor. The first registry call registers the CPU backend, and that runs
+/// ggml code built for the floor.
+fn registry() -> Vec<Device> {
     if !cpu::supported() {
         return Vec::new();
     }
-    // SAFETY: the registry is populated by static initializers in the linked
-    // backends; every index below `ggml_backend_dev_count()` yields a live
-    // device whose name and description strings outlive the process.
-    unsafe {
-        let count = sys::ggml_backend_dev_count();
-        (0..count)
-            .filter_map(|index| {
-                let device = sys::ggml_backend_dev_get(index);
-                if device.is_null() {
-                    return None;
-                }
-                Some(BackendDevice {
-                    name: cstr_to_string(sys::ggml_backend_dev_name(device)),
-                    description: cstr_to_string(sys::ggml_backend_dev_description(device)),
-                    is_gpu: sys::ggml_backend_dev_type(device)
-                        == sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU,
-                })
-            })
-            .collect()
-    }
+    route_engine_logs();
+    transcribe_cpp::devices()
 }
 
-unsafe fn cstr_to_string(ptr: *const c_char) -> String {
-    if ptr.is_null() {
-        String::new()
-    } else {
-        CStr::from_ptr(ptr).to_string_lossy().into_owned()
+/// Every device registered with ggml, in registry order.
+pub fn backend_devices() -> Vec<BackendDevice> {
+    registry()
+        .into_iter()
+        .map(|device| BackendDevice {
+            is_gpu: device.device_type == DeviceType::Gpu,
+            is_cpu: device.device_type == DeviceType::Cpu,
+            name: device.name,
+            description: device.description,
+        })
+        .collect()
+}
+
+/// The GPU that [`GpuAvailability::detect`] reports, with the backend
+/// request that loads a model on it.
+pub fn gpu_device() -> Option<(Backend, Device)> {
+    registry()
+        .into_iter()
+        .find(|device| device.device_type == DeviceType::Gpu)
+        .and_then(|device| backend_for(&device.kind).map(|backend| (backend, device)))
+}
+
+fn backend_for(kind: &str) -> Option<Backend> {
+    match kind {
+        "vulkan" => Some(Backend::Vulkan),
+        "cuda" => Some(Backend::Cuda),
+        "rocm" => Some(Backend::Rocm),
+        "metal" => Some(Backend::Metal),
+        _ => None,
     }
 }
 
@@ -184,7 +204,7 @@ mod tests {
     #[test]
     fn registry_always_lists_the_cpu() {
         let devices = backend_devices();
-        assert!(devices.iter().any(|d| !d.is_gpu), "{devices:?}");
+        assert!(devices.iter().any(|d| d.is_cpu && !d.is_gpu), "{devices:?}");
         assert!(devices.iter().all(|d| !d.name.is_empty()));
     }
 
@@ -195,6 +215,14 @@ mod tests {
         assert_eq!(gpu_type_for("CPU"), GpuType::Cpu);
     }
 
+    #[test]
+    fn a_gpu_kind_maps_to_its_backend_request() {
+        assert_eq!(backend_for("vulkan"), Some(Backend::Vulkan));
+        assert_eq!(backend_for("cuda"), Some(Backend::Cuda));
+        assert_eq!(backend_for("cpu"), None);
+        assert_eq!(backend_for("unknown"), None);
+    }
+
     #[cfg(not(any(feature = "cuda", feature = "vulkan")))]
     #[test]
     fn cpu_only_build_reports_no_gpu() {
@@ -202,10 +230,13 @@ mod tests {
         assert!(!gpu.available);
         assert_eq!(gpu.gpu_type, GpuType::Cpu);
         assert!(!gpu.device_name.is_empty());
+        assert!(gpu_device().is_none());
     }
 
     #[test]
-    fn system_info_mentions_the_cpu_features() {
-        assert!(!GpuAvailability::system_info().is_empty());
+    fn system_info_names_the_engine_and_the_cpu() {
+        let info = GpuAvailability::system_info();
+        assert!(info.starts_with("transcribe.cpp "), "{info}");
+        assert!(info.contains("\nCPU: "), "{info}");
     }
 }

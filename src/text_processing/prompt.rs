@@ -8,7 +8,7 @@ const MAX_TERMS: usize = 40;
 /// The words of the previous part that the next part's prompt carries.
 const CARRY_WORDS: usize = 40;
 
-/// Drop control characters (whisper.cpp rejects interior NULs) and cap the
+/// Drop control characters (transcribe.cpp rejects interior NULs) and cap the
 /// length on a character boundary.
 fn sanitize(text: &str, max_chars: usize) -> String {
     let cleaned: String = text

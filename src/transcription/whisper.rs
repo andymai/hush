@@ -1,34 +1,39 @@
-//! Speech-to-text through whisper.cpp, via whisper-rs.
+//! Speech-to-text through transcribe.cpp, which runs Whisper on ggml.
 
 use crate::audio::level;
 use crate::logging::{transcription as logging, RequestContext};
 use crate::transcription::cpu;
-use crate::transcription::device::GpuAvailability;
+use crate::transcription::device::{self, GpuAvailability};
 use crate::transcription::gpu_fallback;
-use crate::transcription::language;
+use crate::transcription::langid;
 use crate::Result;
 use anyhow::Context;
 use parking_lot::Mutex;
 use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Once};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
-use whisper_rs::{
-    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
-    WhisperVadContext, WhisperVadContextParams, WhisperVadParams,
+use transcribe_cpp::{
+    Backend, Model, ModelOptions, RunExtension, RunOptions, Session, SessionOptions, Task,
+    TimestampKind, Transcript, VadOptions, VadSession, VadSessionOptions, WhisperRunOptions,
 };
 
-/// Sample rate whisper.cpp expects
+/// Sample rate Whisper expects
 pub const WHISPER_SAMPLE_RATE: u32 = 16_000;
+
+/// The most prompt tokens Whisper keeps: half of its 448-token text context,
+/// less the token that starts the prompt. transcribe.cpp drops the rest from
+/// the front.
+pub const PROMPT_TOKEN_BUDGET: usize = 223;
 
 /// Audio kept on each side of a stretch of speech, so that soft first and
 /// last sounds of a word stay in.
 const VAD_SPEECH_PAD_MS: i32 = 100;
 
-/// Shorter speech is dropped as noise. whisper.cpp uses 250 ms, which can
-/// drop a dictated "no" or "OK".
+/// Shorter speech is dropped as noise. Silero's default of 250 ms can drop a
+/// dictated "no" or "OK".
 const VAD_MIN_SPEECH_MS: i32 = 100;
 
 /// Silence put between two stretches of speech, as whisper.cpp does.
@@ -46,7 +51,7 @@ pub struct TranscriptionResult {
     pub detected: Option<&'static str>,
 }
 
-/// What one run of whisper.cpp heard.
+/// What one run of Whisper heard.
 struct Heard {
     text: String,
     detected: Option<&'static str>,
@@ -61,19 +66,32 @@ impl Heard {
     }
 }
 
-/// The context must outlive the state. The state is created once so that its
-/// GPU buffers are reused across dictations instead of reallocated per call.
+/// A run that the model refuses on any device, so a retry on the CPU cannot
+/// help.
+#[derive(Debug, thiserror::Error)]
+#[error("Transcription failed: {0}")]
+struct Rejected(transcribe_cpp::Error);
+
+/// The session is created once so that its GPU buffers are reused across
+/// dictations instead of reallocated per call.
 struct Engine {
-    context: WhisperContext,
-    state: Mutex<WhisperState>,
+    model: Model,
+    session: Mutex<Session>,
+    /// The description of the device that holds the weights
+    device: String,
+    /// The language codes the model accepts; empty when it lists none
+    languages: Vec<String>,
+    /// Whether the model knows more than one language, unlike an `.en` model
+    multilingual: bool,
 }
 
 pub struct WhisperTranscriber {
     /// A CPU engine takes the place of a GPU engine that fails a take.
     engine: Mutex<Arc<Engine>>,
-    /// whisper-rs runs `whisper_full_with_state`, which ignores the VAD
-    /// fields of `FullParams`, so Hush runs the Silero model itself.
-    vad: Option<Arc<Mutex<WhisperVadContext>>>,
+    vad: Option<Arc<Mutex<VadSession>>>,
+    /// The models folder that holds the language-ID model, when limited
+    /// detection uses it
+    langid_dir: Option<PathBuf>,
     gpu: &'static GpuAvailability,
     using_gpu: AtomicBool,
     model_path: PathBuf,
@@ -83,8 +101,9 @@ pub struct WhisperTranscriber {
 }
 
 impl WhisperTranscriber {
-    /// Load a ggml model. `use_gpu` is honored when a GPU backend exists,
-    /// unless that GPU failed a take with the same driver before.
+    /// Load a Whisper model, a ggml `.bin` or a GGUF file. `use_gpu` is
+    /// honored when a GPU backend exists, unless that GPU failed a take with
+    /// the same driver before.
     pub async fn new(model_path: &Path, use_gpu: bool) -> Result<Self> {
         cpu::ensure_supported()?;
         let ctx = RequestContext::new("whisper_transcriber_init")
@@ -99,9 +118,7 @@ impl WhisperTranscriber {
             ));
         }
 
-        // Route whisper.cpp and ggml log lines through tracing instead of stderr.
-        static LOGGING_HOOKS: Once = Once::new();
-        LOGGING_HOOKS.call_once(whisper_rs::install_logging_hooks);
+        device::route_engine_logs();
 
         gpu_fallback::wait_for_gpu(use_gpu).await;
         let gpu = GpuAvailability::detect();
@@ -125,10 +142,21 @@ impl WhisperTranscriber {
             "Loading Whisper model"
         );
 
-        let engine = load_engine(model_path, using_gpu).await?;
+        let (engine, using_gpu) = match load_engine(model_path, using_gpu).await {
+            Ok(engine) => (engine, using_gpu),
+            Err(e) if using_gpu => {
+                warn!(
+                    "Whisper did not load on the GPU, so it loads on the CPU: {:#}",
+                    e
+                );
+                (load_engine(model_path, false).await?, false)
+            },
+            Err(e) => return Err(e),
+        };
         let transcriber = Self {
             engine: Mutex::new(Arc::new(engine)),
             vad: None,
+            langid_dir: None,
             gpu,
             using_gpu: AtomicBool::new(using_gpu),
             model_path: model_path.to_path_buf(),
@@ -169,22 +197,20 @@ impl WhisperTranscriber {
     /// Load the Silero voice activity detection model, so that Whisper gets
     /// only the speech in each take.
     pub fn load_vad(&mut self, model_path: &Path) -> Result<()> {
-        let path = model_path.to_str().ok_or_else(|| {
-            anyhow::anyhow!(
-                "VAD model path contains invalid UTF-8: {}",
-                model_path.display()
-            )
-        })?;
-        let mut params = WhisperVadContextParams::new();
-        params.set_n_threads(cpu_threads().min(4));
-        let context = WhisperVadContext::new(path, params).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to load the VAD model {}: {}",
-                model_path.display(),
-                e
-            )
-        })?;
-        self.vad = Some(Arc::new(Mutex::new(context)));
+        let session = Model::load_with(model_path, &cpu_options())
+            .and_then(|model| {
+                model.vad_session_with(&VadSessionOptions {
+                    n_threads: cpu_threads().min(4),
+                })
+            })
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to load the VAD model {}: {}",
+                    model_path.display(),
+                    e
+                )
+            })?;
+        self.vad = Some(Arc::new(Mutex::new(session)));
         info!(
             "Voice activity detection loaded from {}",
             model_path.display()
@@ -196,39 +222,45 @@ impl WhisperTranscriber {
         self.vad.is_some()
     }
 
-    /// How many tokens whisper.cpp makes of `prompt`, or `None` when it
-    /// cannot tokenize it.
+    /// Pick the language of a take in `auto` among `detect_languages` with
+    /// the language-ID model in `models_dir`. Takes before the model is there
+    /// let Whisper detect the language within the set.
+    pub fn with_langid(mut self, models_dir: &Path) -> Self {
+        self.langid_dir = Some(models_dir.to_path_buf());
+        self
+    }
+
+    /// The languages that limited detection may pick.
+    pub fn detect_languages(&self) -> &[String] {
+        &self.detect_languages
+    }
+
+    /// Whether the model knows more than one language, so that detection can
+    /// choose. An `.en` model knows only English.
+    pub fn is_multilingual(&self) -> bool {
+        self.engine().multilingual
+    }
+
+    /// How many tokens Whisper makes of `prompt`, or `None` when it cannot
+    /// tokenize it.
     pub fn prompt_tokens(&self, prompt: &str) -> Option<usize> {
         if prompt.contains('\0') {
             return None;
         }
-        // whisper-rs reads a negative "too many tokens" answer as a length,
-        // so the capacity must never run out: whisper.cpp makes at most one
-        // token of each byte.
         self.engine()
-            .context
-            .tokenize(prompt, prompt.len() + 1)
+            .model
+            .tokenize(&format!(" {}", whisper_prompt(prompt)))
             .ok()
             .map(|tokens| tokens.len())
     }
 
-    /// The most prompt tokens whisper.cpp keeps: half of the text context,
-    /// less the token that starts the prompt. It drops the rest from the
-    /// front.
+    /// The most prompt tokens Whisper keeps.
     pub fn prompt_token_budget(&self) -> usize {
-        usize::try_from(self.engine().context.n_text_ctx() / 2 - 1).unwrap_or(0)
+        PROMPT_TOKEN_BUDGET
     }
 
     fn engine(&self) -> Arc<Engine> {
         Arc::clone(&self.engine.lock())
-    }
-
-    fn threads(&self) -> i32 {
-        if self.is_using_gpu() {
-            1
-        } else {
-            cpu_threads()
-        }
     }
 
     pub async fn transcribe_async(
@@ -300,7 +332,9 @@ impl WhisperTranscriber {
             .run_take(Arc::clone(&samples), prompt.clone(), language.clone())
             .await
         {
-            Err(e) if self.is_using_gpu() => self.retry_on_cpu(e, samples, prompt, language).await,
+            Err(e) if self.is_using_gpu() && e.downcast_ref::<Rejected>().is_none() => {
+                self.retry_on_cpu(e, samples, prompt, language).await
+            },
             heard => heard,
         };
         let Heard { text, detected } = match heard {
@@ -337,8 +371,8 @@ impl WhisperTranscriber {
     ) -> Result<Heard> {
         let engine = self.engine();
         let vad = self.vad.clone();
+        let langid_dir = self.langid_dir.clone();
         let detect = Arc::clone(&self.detect_languages);
-        let threads = self.threads();
         tokio::task::spawn_blocking(move || {
             let trimmed = vad.as_deref().and_then(|vad| match speech_in(vad, &samples) {
                 Ok(speech) => Some(speech),
@@ -347,18 +381,29 @@ impl WhisperTranscriber {
                     None
                 },
             });
-            let Some(samples) = whisper_input(&samples, trimmed.as_deref()) else {
-                debug!("Voice activity detection found no speech in a quiet take");
+            let Some(speech) = whisper_input(&samples, trimmed.as_deref()) else {
+                debug!("The take is too quiet to hold speech");
                 return Ok(Heard::nothing());
             };
-            run_full(
-                &engine,
-                samples,
-                &language,
-                &detect,
-                threads,
-                prompt.as_deref(),
-            )
+            let prompt = prompt.as_deref();
+            if language != "auto" || detect.is_empty() || !engine.multilingual {
+                let (text, _) = run_full(&engine, speech, &language, prompt)?;
+                return Ok(Heard {
+                    text,
+                    detected: None,
+                });
+            }
+            if let Some(code) = langid_dir
+                .as_deref()
+                .and_then(|dir| langid::pick(dir, &samples, speech, &detect))
+            {
+                let (text, _) = run_full(&engine, speech, code, prompt)?;
+                return Ok(Heard {
+                    text,
+                    detected: Some(code),
+                });
+            }
+            detect_within(&engine, speech, prompt, &detect)
         })
         .await
         .map_err(|e| anyhow::anyhow!("Transcription task failed: {}", e))?
@@ -400,84 +445,216 @@ impl WhisperTranscriber {
     }
 
     pub fn get_device_info(&self) -> String {
+        let device = self.engine().device.clone();
         if self.is_using_gpu() {
-            format!("GPU: {} ({})", self.gpu.device_name, self.gpu.gpu_type)
+            format!("GPU: {} ({})", device, self.gpu.gpu_type)
         } else if self.gpu.available {
             "CPU".to_string()
         } else {
-            format!("CPU: {}", self.gpu.device_name)
+            format!("CPU: {}", device)
         }
     }
 }
 
-/// Load a ggml model and make its state, on the GPU when `use_gpu` is true.
-async fn load_engine(model_path: &Path, use_gpu: bool) -> Result<Engine> {
-    let path = model_path
-        .to_str()
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Model path contains invalid UTF-8: {}",
-                model_path.display()
-            )
-        })?
-        .to_owned();
-    let mut params = WhisperContextParameters::default();
-    params.use_gpu(use_gpu);
-
-    // Loading a large model takes seconds, so keep it off the async runtime.
-    let context =
-        tokio::task::spawn_blocking(move || WhisperContext::new_with_params(&path, params))
-            .await
-            .map_err(|e| anyhow::anyhow!("Model loading task failed: {}", e))?
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to load Whisper model {}: {}",
-                    model_path.display(),
-                    e
-                )
-            })?;
-    let state = context
-        .create_state()
-        .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
-    Ok(Engine {
-        context,
-        state: Mutex::new(state),
-    })
+pub(crate) fn cpu_options() -> ModelOptions {
+    ModelOptions {
+        backend: Backend::Cpu,
+        ..Default::default()
+    }
 }
 
+/// Load a Whisper model and make its session, on the GPU when `use_gpu` is
+/// true.
+async fn load_engine(model_path: &Path, use_gpu: bool) -> Result<Engine> {
+    let path = model_path.to_path_buf();
+    // Loading a large model takes seconds, so keep it off the async runtime.
+    tokio::task::spawn_blocking(move || {
+        let (options, threads) = if use_gpu {
+            let (backend, gpu) = device::gpu_device()
+                .ok_or_else(|| anyhow::anyhow!("ggml lists no GPU to load Whisper on"))?;
+            let options = ModelOptions {
+                backend,
+                device: Some(gpu),
+                ..Default::default()
+            };
+            (options, 1)
+        } else {
+            (cpu_options(), cpu_threads())
+        };
+        let model = Model::load_with(&path, &options).map_err(|e| {
+            anyhow::anyhow!("Failed to load Whisper model {}: {}", path.display(), e)
+        })?;
+        if model.arch() != "whisper" {
+            return Err(anyhow::anyhow!(
+                "{} is a {} model, not a Whisper model",
+                path.display(),
+                model.arch()
+            ));
+        }
+        let session = model
+            .session_with(&SessionOptions {
+                n_threads: threads,
+                ..Default::default()
+            })
+            .map_err(|e| anyhow::anyhow!("Failed to create the Whisper session: {}", e))?;
+        let device = model
+            .device()
+            .map(|device| device.description)
+            .unwrap_or_else(|_| model.backend());
+        let (languages, multilingual) = model
+            .capabilities()
+            .map(|caps| (caps.languages, caps.supports_language_detect))
+            .unwrap_or_default();
+        debug!(backend = %model.backend(), threads, multilingual, "Whisper session ready");
+        Ok(Engine {
+            model,
+            session: Mutex::new(session),
+            device,
+            languages,
+            multilingual,
+        })
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Model loading task failed: {}", e))?
+}
+
+/// The prompt as Whisper gets it. transcribe.cpp refuses a prompt that holds
+/// a special token such as `<|en|>`, so no `<|` stays in the text.
+fn whisper_prompt(prompt: &str) -> String {
+    let mut text = prompt.trim().to_string();
+    while text.contains("<|") {
+        text = text.replace("<|", "<");
+    }
+    text
+}
+
+/// The language hint for a run: `None` lets Whisper detect it. A model that
+/// does not list the language gets no hint, so an `.en` model transcribes
+/// English as whisper.cpp did, instead of refusing the take.
+fn take_language<'a>(language: &'a str, known: &[String]) -> Option<&'a str> {
+    if language == "auto" {
+        return None;
+    }
+    if known.is_empty() || known.iter().any(|code| code == language) {
+        return Some(language);
+    }
+    debug!(
+        language,
+        "The model does not list this language, so it gets no hint"
+    );
+    None
+}
+
+/// Within one take, each 30-second window after the first is conditioned on
+/// the prompt and the text before it, which slide out as the text grows, as
+/// whisper.cpp does. Nothing carries from one take to the next.
+fn run_options(language: Option<&str>, prompt: Option<&str>) -> RunOptions {
+    RunOptions {
+        task: Task::Transcribe,
+        timestamps: TimestampKind::Segment,
+        language: language.map(str::to_string),
+        family: Some(RunExtension::Whisper(WhisperRunOptions {
+            initial_prompt: prompt.map(whisper_prompt),
+            condition_on_prev_tokens: Some(true),
+            ..Default::default()
+        })),
+        ..Default::default()
+    }
+}
+
+/// The text of a run, and the language Whisper detected when it got no hint.
 fn run_full(
     engine: &Engine,
     samples: &[f32],
     language: &str,
-    detect: &[String],
-    threads: i32,
     prompt: Option<&str>,
+) -> Result<(String, Option<String>)> {
+    use transcribe_cpp::Error;
+
+    let options = run_options(take_language(language, &engine.languages), prompt);
+    let transcript = match engine.session.lock().run(samples, &options) {
+        Ok(transcript) => transcript,
+        Err(
+            Error::OutputTruncated {
+                message,
+                partial: Some(partial),
+            }
+            | Error::OutputRepetition {
+                message,
+                partial: Some(partial),
+            },
+        ) => {
+            warn!("Whisper stopped early, so the text ends there: {}", message);
+            *partial
+        },
+        Err(e @ (Error::InvalidArgument(_) | Error::Unsupported(_))) => {
+            return Err(Rejected(e).into());
+        },
+        Err(e) => return Err(anyhow::anyhow!("Transcription failed: {}", e)),
+    };
+    Ok((transcript_text(&transcript), transcript.language))
+}
+
+/// Limited detection without the language-ID model: Whisper detects the
+/// language, and a take that it hears in a language outside `allowed` runs
+/// again in an allowed language (see [`langid::fallback`]), so the choice
+/// stays in the set.
+fn detect_within(
+    engine: &Engine,
+    speech: &[f32],
+    prompt: Option<&str>,
+    allowed: &[String],
 ) -> Result<Heard> {
-    let mut state = engine.state.lock();
-    let detected = (language == "auto" && !detect.is_empty())
-        .then(|| limited_detection(&mut state, samples, threads, detect))
-        .flatten();
-
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(Some(detected.unwrap_or(language)));
-    if let Some(prompt) = prompt {
-        params.set_initial_prompt(prompt);
+    let (text, heard) = run_full(engine, speech, "auto", prompt)?;
+    if let Some(code) = heard
+        .as_deref()
+        .and_then(|code| langid::allowed_code(code, allowed))
+    {
+        langid::confirm(code);
+        info!(
+            language = code,
+            "Whisper detected {} among {}",
+            code,
+            allowed.join(", ")
+        );
+        return Ok(Heard {
+            text,
+            detected: Some(code),
+        });
     }
-    params.set_translate(false);
-    params.set_no_context(true);
-    params.set_print_special(false);
-    params.set_print_progress(false);
-    params.set_print_realtime(false);
-    params.set_print_timestamps(false);
-    params.set_n_threads(threads);
+    let Some(first) = langid::fallback(allowed, &engine.languages) else {
+        return Ok(Heard {
+            text,
+            detected: None,
+        });
+    };
+    info!(
+        "Whisper heard {}, which is not among {}, so the take runs again in {}",
+        heard.as_deref().unwrap_or("no language"),
+        allowed.join(", "),
+        first
+    );
+    let (text, _) = run_full(engine, speech, first, prompt)?;
+    Ok(Heard {
+        text,
+        detected: Some(first),
+    })
+}
 
-    state
-        .full(params, samples)
-        .map_err(|e| anyhow::anyhow!("Transcription failed: {}", e))?;
-
+/// The text of every segment without non-speech tags, one space apart.
+fn transcript_text(transcript: &Transcript) -> String {
+    let segments: Vec<&str> = if transcript.segments.is_empty() {
+        vec![transcript.text.as_str()]
+    } else {
+        transcript
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect()
+    };
     let mut text = String::new();
-    for segment in state.as_iter() {
-        let segment = strip_non_speech(&segment.to_string());
+    for segment in segments {
+        let segment = strip_non_speech(segment);
         if segment.is_empty() {
             continue;
         }
@@ -486,96 +663,42 @@ fn run_full(
         }
         text.push_str(&segment);
     }
-    Ok(Heard { text, detected })
-}
-
-/// The most likely of the `allowed` languages in the first 30 seconds of
-/// `samples`. When detection fails, or gives no allowed language, the
-/// answer is `None`, and Whisper detects the language on its own.
-fn limited_detection(
-    state: &mut WhisperState,
-    samples: &[f32],
-    threads: i32,
-    allowed: &[String],
-) -> Option<&'static str> {
-    let probabilities = match language_probabilities(state, samples, threads) {
-        Ok(probabilities) => probabilities,
-        Err(e) => {
-            warn!("Language detection failed, so Whisper picks from every language: {e:#}");
-            return None;
-        },
-    };
-    match language::most_likely(probabilities, allowed) {
-        Some((code, probability)) => {
-            info!(
-                language = code,
-                probability,
-                "Detected {} among {}",
-                code,
-                allowed.join(", ")
-            );
-            Some(code)
-        },
-        None => {
-            warn!(
-                "Whisper gave no probability for {}, so it picks from every language",
-                allowed.join(", ")
-            );
-            None
-        },
-    }
-}
-
-/// Whisper's probability for each language code, from the spectrogram of
-/// `samples` at its start.
-fn language_probabilities(
-    state: &mut WhisperState,
-    samples: &[f32],
-    threads: i32,
-) -> Result<Vec<(&'static str, f32)>> {
-    let threads = usize::try_from(threads).unwrap_or(1).max(1);
-    state
-        .pcm_to_mel(samples, threads)
-        .map_err(|e| anyhow::anyhow!("spectrogram: {}", e))?;
-    let (_, probabilities) = state
-        .lang_detect(0, threads)
-        .map_err(|e| anyhow::anyhow!("detection: {}", e))?;
-    Ok(probabilities
-        .into_iter()
-        .enumerate()
-        .filter_map(|(id, probability)| {
-            let code = whisper_rs::get_lang_str(i32::try_from(id).ok()?)?;
-            Some((code, probability))
-        })
-        .collect())
+    text
 }
 
 /// The audio Whisper gets: the speech that voice activity detection found,
-/// or the whole take when it did not run. When it found no speech in a take
-/// that is loud enough to hold some, Whisper gets the whole take, because
-/// the model can miss one short word. A quiet take gets nothing.
+/// or the whole take when it found none or did not run. A quiet take gets
+/// nothing, because Whisper invents words such as "you" for silence.
 pub(crate) fn whisper_input<'a>(take: &'a [f32], speech: Option<&'a [f32]>) -> Option<&'a [f32]> {
     match speech {
-        None => Some(take),
         Some(speech) if !speech.is_empty() => Some(speech),
-        Some(_) if level::rms(take) >= level::QUIET_RMS => {
+        _ if level::rms(take) < level::QUIET_RMS => None,
+        None => Some(take),
+        Some(_) => {
             debug!("Voice activity detection found no speech, so Whisper gets the whole take");
             Some(take)
         },
-        Some(_) => None,
     }
 }
 
 /// The speech in `samples`, as the Silero model finds it.
-fn speech_in(vad: &Mutex<WhisperVadContext>, samples: &[f32]) -> Result<Vec<f32>> {
-    let mut params = WhisperVadParams::new();
-    params.set_min_speech_duration(VAD_MIN_SPEECH_MS);
-    params.set_speech_pad(VAD_SPEECH_PAD_MS);
-    let segments = vad
+fn speech_in(vad: &Mutex<VadSession>, samples: &[f32]) -> Result<Vec<f32>> {
+    let options = VadOptions {
+        min_speech_ms: VAD_MIN_SPEECH_MS,
+        speech_pad_ms: VAD_SPEECH_PAD_MS,
+        ..Default::default()
+    };
+    let found = vad
         .lock()
-        .segments_from_samples(params, samples)
+        .run(samples, &options)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
-    let spans: Vec<(f32, f32)> = segments.map(|s| (s.start, s.end)).collect();
+    let index = |sample: i64| usize::try_from(sample.max(0)).unwrap_or(usize::MAX);
+    let spans = merge_touching(
+        found
+            .segments
+            .iter()
+            .map(|segment| (index(segment.start_sample), index(segment.end_sample))),
+    );
     let speech = join_speech(samples, &spans);
     debug!(
         stretches = spans.len(),
@@ -586,23 +709,34 @@ fn speech_in(vad: &Mutex<WhisperVadContext>, samples: &[f32]) -> Result<Vec<f32>
     Ok(speech)
 }
 
-/// The stretches of `samples` that `spans` mark as speech (start and end in
-/// centiseconds), joined by a short silence. Each stretch but the last keeps
-/// a little audio after its end, without reaching into the next one.
-pub(crate) fn join_speech(samples: &[f32], spans: &[(f32, f32)]) -> Vec<f32> {
-    let at = |centiseconds: f32| -> usize {
-        let index = (centiseconds.max(0.0) / 100.0 * WHISPER_SAMPLE_RATE as f32).round();
-        (index as usize).min(samples.len())
-    };
+/// Spans in time order, with spans that touch or overlap made into one.
+/// Padding can make two stretches touch, and joining them as two would put
+/// silence into the middle of the speech.
+pub(crate) fn merge_touching(
+    spans: impl IntoIterator<Item = (usize, usize)>,
+) -> Vec<(usize, usize)> {
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in spans {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    merged
+}
+
+/// The stretches of `samples` that `spans` mark as speech (start and end
+/// sample), joined by a short silence. Each stretch but the last keeps a
+/// little audio after its end, without reaching into the next one.
+pub(crate) fn join_speech(samples: &[f32], spans: &[(usize, usize)]) -> Vec<f32> {
     let mut speech = Vec::new();
     let mut cursor = 0;
     for (i, &(start, end)) in spans.iter().enumerate() {
-        let start = at(start).max(cursor);
-        let mut end = at(end);
+        let start = start.min(samples.len()).max(cursor);
+        let mut end = end.min(samples.len());
         if let Some(&(next, _)) = spans.get(i + 1) {
-            end = (end + SPEECH_OVERLAP).min(at(next)).max(end);
+            end = (end + SPEECH_OVERLAP).min(next.min(samples.len())).max(end);
         }
-        let end = end.min(samples.len());
         if end <= start {
             continue;
         }
@@ -641,7 +775,7 @@ pub(crate) fn strip_non_speech(segment: &str) -> String {
     kept.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn cpu_threads() -> i32 {
+pub(crate) fn cpu_threads() -> i32 {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4)
@@ -714,6 +848,18 @@ mod tests {
         assert!(err.to_string().contains("not found"), "{err}");
     }
 
+    #[tokio::test]
+    async fn a_file_that_is_no_model_fails_to_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ggml-base.bin");
+        std::fs::write(&path, b"not a model").unwrap();
+        let err = WhisperTranscriber::new(&path, false)
+            .await
+            .err()
+            .expect("a file that is no model must fail");
+        assert!(err.to_string().contains("Failed to load"), "{err}");
+    }
+
     #[test]
     fn resample_scales_the_sample_count() {
         let input: Vec<f32> = (0..48_000).map(|i| (i as f32 * 0.01).sin()).collect();
@@ -745,9 +891,81 @@ mod tests {
     }
 
     #[test]
+    fn the_text_joins_segments_without_tags() {
+        let segment = |text: &str| transcribe_cpp::Segment {
+            text: text.to_string(),
+            ..Default::default()
+        };
+        let transcript = Transcript {
+            text: "ignored".to_string(),
+            segments: vec![
+                segment(" Ask not"),
+                segment("[BLANK_AUDIO]"),
+                segment("(wind blowing)"),
+                segment(" what you can do."),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(transcript_text(&transcript), "Ask not what you can do.");
+        let plain = Transcript {
+            text: " [MUSIC] Hello.".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(transcript_text(&plain), "Hello.");
+    }
+
+    #[test]
+    fn a_prompt_never_holds_a_special_token() {
+        assert_eq!(
+            whisper_prompt("  Kubernetes, PostgreSQL "),
+            "Kubernetes, PostgreSQL"
+        );
+        assert_eq!(whisper_prompt("a <|en|> b"), "a <en|> b");
+        assert!(!whisper_prompt("<<||endoftext|>").contains("<|"));
+    }
+
+    #[test]
+    fn a_run_transcribes_in_the_take_language_with_the_prompt() {
+        let options = run_options(Some("de"), Some("Gregor Samsa"));
+        assert_eq!(options.task, Task::Transcribe);
+        assert_eq!(options.language.as_deref(), Some("de"));
+        match options.family {
+            Some(RunExtension::Whisper(whisper)) => {
+                assert_eq!(whisper.initial_prompt.as_deref(), Some("Gregor Samsa"));
+                assert_eq!(
+                    whisper.condition_on_prev_tokens,
+                    Some(true),
+                    "later windows of a long take keep the prompt and the text before them"
+                );
+            },
+            other => panic!("expected the Whisper extension, got {other:?}"),
+        }
+        assert_eq!(run_options(None, None).language, None);
+    }
+
+    #[test]
+    fn a_language_the_model_does_not_list_gets_no_hint() {
+        let multilingual: Vec<String> = ["en", "de"].map(String::from).to_vec();
+        let english_only = vec!["en".to_string()];
+        assert_eq!(take_language("de", &multilingual), Some("de"));
+        assert_eq!(take_language("auto", &multilingual), None, "auto detects");
+        assert_eq!(
+            take_language("de", &english_only),
+            None,
+            "an .en model gets no hint"
+        );
+        assert_eq!(take_language("en", &english_only), Some("en"));
+        assert_eq!(
+            take_language("de", &[]),
+            Some("de"),
+            "a model without a list"
+        );
+    }
+
+    #[test]
     fn speech_stretches_are_joined_by_a_short_silence() {
         let samples: Vec<f32> = (0..48_000).map(|i| 1.0 + i as f32).collect();
-        let speech = join_speech(&samples, &[(50.0, 100.0), (200.0, 250.0)]);
+        let speech = join_speech(&samples, &[(8_000, 16_000), (32_000, 40_000)]);
         let first = 8_000..16_000 + SPEECH_OVERLAP;
         let second = 32_000..40_000;
         assert_eq!(speech.len(), first.len() + SPEECH_GAP + second.len());
@@ -762,13 +980,29 @@ mod tests {
     #[test]
     fn speech_overlap_never_repeats_audio() {
         let samples: Vec<f32> = (0..32_000).map(|i| i as f32).collect();
-        let speech = join_speech(&samples, &[(0.0, 100.0), (101.0, 150.0)]);
+        let speech = join_speech(&samples, &[(0, 16_000), (16_160, 24_000)]);
         let kept: Vec<f32> = speech.into_iter().filter(|s| *s != 0.0).collect();
         assert!(
             kept.windows(2).all(|pair| pair[0] < pair[1]),
             "no sample is copied twice"
         );
         assert_eq!(kept.last(), Some(&23_999.0));
+    }
+
+    #[test]
+    fn touching_stretches_become_one_without_silence_inside() {
+        assert_eq!(
+            merge_touching([(2_500, 77_000), (77_000, 149_500), (160_000, 170_000)]),
+            [(2_500, 149_500), (160_000, 170_000)]
+        );
+        assert_eq!(merge_touching([(0, 100), (50, 80)]), [(0, 100)]);
+        assert!(merge_touching([]).is_empty());
+
+        let samples: Vec<f32> = (0..160_000).map(|i| 1.0 + i as f32).collect();
+        let spans = merge_touching([(2_500, 77_000), (77_000, 149_500)]);
+        let speech = join_speech(&samples, &spans);
+        assert_eq!(speech.len(), 147_000);
+        assert!(speech.iter().all(|s| *s != 0.0), "no silence mid-speech");
     }
 
     #[test]
@@ -786,24 +1020,25 @@ mod tests {
             Some(&loud[..]),
             "VAD found nothing in a loud take: the whole take"
         );
+    }
 
+    #[test]
+    fn silence_reaches_whisper_neither_with_nor_without_vad() {
         let quiet = vec![0.002f32; 16_000];
         assert!(level::rms(&quiet) < level::QUIET_RMS);
-        assert_eq!(
-            whisper_input(&quiet, Some(&[])),
-            None,
-            "VAD found nothing in a quiet take: nothing"
-        );
-        assert_eq!(whisper_input(&quiet, None), Some(&quiet[..]));
+        assert_eq!(whisper_input(&quiet, Some(&[])), None, "VAD found nothing");
+        assert_eq!(whisper_input(&quiet, None), None, "VAD is off");
+        let silence = vec![0.0f32; 48_000];
+        assert_eq!(whisper_input(&silence, None), None, "digital silence");
     }
 
     #[test]
     fn no_speech_and_bad_spans_give_nothing() {
         let samples = vec![0.5f32; 16_000];
         assert!(join_speech(&samples, &[]).is_empty());
-        assert!(join_speech(&samples, &[(80.0, 40.0)]).is_empty());
-        assert_eq!(join_speech(&samples, &[(90.0, 500.0)]).len(), 1_600);
-        assert!(join_speech(&[], &[(0.0, 100.0)]).is_empty());
+        assert!(join_speech(&samples, &[(12_800, 6_400)]).is_empty());
+        assert_eq!(join_speech(&samples, &[(14_400, 80_000)]).len(), 1_600);
+        assert!(join_speech(&[], &[(0, 16_000)]).is_empty());
     }
 
     #[test]

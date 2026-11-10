@@ -4,7 +4,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
+use std::time::SystemTime;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, info, warn};
 
@@ -41,6 +42,74 @@ pub fn vad_model() -> ModelInfo {
 pub fn vad_model_path(models_dir: &Path) -> PathBuf {
     models_dir.join(VAD_FILENAME)
 }
+
+/// SpeechBrain's VoxLingua107 ECAPA-TDNN language-ID model, converted to
+/// GGUF with transcribe.cpp. `transcription.detect_languages` uses it.
+pub const LANGID_FILENAME: &str = "lang-id-voxlingua107-ecapa-Q8_0.gguf";
+
+/// The catalogue entry for the language-ID model.
+pub fn langid_model() -> ModelInfo {
+    ModelInfo {
+        name: "voxlingua107-langid".to_string(),
+        repo_id: "collectivecontext/hush-models".to_string(),
+        filename: LANGID_FILENAME.to_string(),
+        expected_size: 26_693_632,
+        sha256: Some(
+            "60176ea5a4d3a33d3ec2d9608d984a43d57307daf5bf22f6cd724b696989b8fa".to_string(),
+        ),
+    }
+}
+
+/// Where the language-ID model lives in `models_dir`, downloaded or not.
+pub fn langid_model_path(models_dir: &Path) -> PathBuf {
+    models_dir.join(LANGID_FILENAME)
+}
+
+/// The size and modification time of a file. A file with the same stamp as
+/// at its last check is taken to be the same file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    len: u64,
+    modified: SystemTime,
+}
+
+impl FileStamp {
+    fn of(path: &Path) -> Option<Self> {
+        let metadata = std::fs::metadata(path).ok()?;
+        Some(Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok()?,
+        })
+    }
+}
+
+/// The last size and SHA-256 check of each model file, so that a file is
+/// hashed again only when its size or modification time changes. The
+/// settings window asks every few hundred milliseconds.
+static CHECKED: LazyLock<parking_lot::Mutex<HashMap<PathBuf, (FileStamp, bool)>>> =
+    LazyLock::new(Default::default);
+
+/// What the size and SHA-256 check of a model file found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    Valid,
+    Missing,
+    WrongSize,
+    WrongHash,
+}
+
+/// A download with the expected size but another SHA-256: the published file
+/// differs from the pinned one, so a new try gets the same bytes.
+#[derive(Debug, thiserror::Error)]
+#[error("The download of {name} failed its SHA-256 check")]
+pub struct ChecksumMismatch {
+    pub name: String,
+}
+
+/// A download that cannot connect, or that gets no bytes for this long,
+/// fails instead of waiting without end.
+const DOWNLOAD_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+const DOWNLOAD_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelSize {
@@ -140,7 +209,7 @@ impl ModelManager {
     fn init_available_models() -> HashMap<ModelSize, ModelInfo> {
         let mut models = HashMap::new();
 
-        // Using ggml format from ggerganov/whisper.cpp - compatible with whisper-rs
+        // The ggml files of the whisper.cpp catalogue; transcribe.cpp loads them as they are.
         models.insert(
             ModelSize::Tiny,
             ModelInfo {
@@ -274,10 +343,10 @@ impl ModelManager {
         self.ensure_file(model_info, progress).await
     }
 
-    /// The voice activity detection model in this cache, when it is there.
+    /// The voice activity detection model in this cache, when a copy that
+    /// passes the size and SHA-256 check is there.
     pub fn vad_model_path(&self) -> Option<PathBuf> {
-        let path = self.cache_dir.join(VAD_FILENAME);
-        path.is_file().then_some(path)
+        self.valid_path(&vad_model())
     }
 
     /// Download the voice activity detection model unless a valid copy is
@@ -293,6 +362,48 @@ impl ModelManager {
         progress: &(dyn Fn(u64, u64) + Send + Sync),
     ) -> Result<PathBuf> {
         self.ensure_file(&vad_model(), progress).await
+    }
+
+    /// The language-ID model in this cache, when a copy that passes the size
+    /// and SHA-256 check is there.
+    pub fn langid_model_path(&self) -> Option<PathBuf> {
+        self.valid_path(&langid_model())
+    }
+
+    /// The file of `info` in this cache, when it passes the size and SHA-256
+    /// check.
+    pub fn valid_path(&self, info: &ModelInfo) -> Option<PathBuf> {
+        let path = self.cache_dir.join(&info.filename);
+        let stamp = FileStamp::of(&path)?;
+        if let Some((checked, valid)) = CHECKED.lock().get(&path) {
+            if *checked == stamp {
+                return valid.then_some(path);
+            }
+        }
+        let valid = match Self::verify(&path, info) {
+            Ok(verdict) => verdict == Verdict::Valid,
+            Err(e) => {
+                warn!("Could not check {}: {:#}", path.display(), e);
+                return None;
+            },
+        };
+        CHECKED.lock().insert(path.clone(), (stamp, valid));
+        valid.then_some(path)
+    }
+
+    /// Download the language-ID model unless a valid copy is already in the
+    /// cache.
+    pub async fn ensure_langid_downloaded(&self) -> Result<PathBuf> {
+        let info = langid_model();
+        self.ensure_langid_downloaded_with(&Self::terminal_progress(info.name))
+            .await
+    }
+
+    pub async fn ensure_langid_downloaded_with(
+        &self,
+        progress: &(dyn Fn(u64, u64) + Send + Sync),
+    ) -> Result<PathBuf> {
+        self.ensure_file(&langid_model(), progress).await
     }
 
     fn terminal_progress(name: String) -> impl Fn(u64, u64) + Send + Sync {
@@ -318,7 +429,7 @@ impl ModelManager {
         info!("Ensuring model {} is available", model_info.name);
         let model_path = self.cache_dir.join(&model_info.filename);
 
-        if self.is_model_valid(&model_path, model_info).await? {
+        if Self::is_valid(&model_path, model_info)? {
             info!(
                 "Model {} already cached at {:?}",
                 model_info.name, model_path
@@ -331,10 +442,6 @@ impl ModelManager {
             model_info.name, model_info.repo_id
         );
         self.download_model(model_info, progress).await?;
-
-        if !self.is_model_valid(&model_path, model_info).await? {
-            return Err(anyhow::anyhow!("Downloaded model failed validation"));
-        }
 
         info!(
             "Model {} successfully downloaded and validated",
@@ -369,6 +476,8 @@ impl ModelManager {
 
         let client = reqwest::Client::builder()
             .user_agent(concat!("hush/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
+            .read_timeout(DOWNLOAD_READ_TIMEOUT)
             .build()
             .context("Failed to build HTTP client")?;
         let response = client
@@ -399,11 +508,32 @@ impl ModelManager {
         drop(file);
         progress(total, total);
 
-        tokio::fs::rename(&partial, &target)
-            .await
-            .context("Failed to move the downloaded model into place")?;
-
+        Self::promote(&partial, &target, info)?;
         info!("Model downloaded to {}", target.display());
+        Ok(())
+    }
+
+    /// Move a finished download into place when it passes the size and
+    /// SHA-256 check, and delete it when it does not.
+    fn promote(partial: &Path, target: &Path, info: &ModelInfo) -> Result<()> {
+        let verdict = Self::verify(partial, info)?;
+        if verdict != Verdict::Valid {
+            if let Err(e) = std::fs::remove_file(partial) {
+                warn!("Could not delete {}: {}", partial.display(), e);
+            }
+            return Err(match verdict {
+                Verdict::WrongHash => ChecksumMismatch {
+                    name: info.name.clone(),
+                }
+                .into(),
+                _ => anyhow::anyhow!("The download of {} has the wrong size", info.name),
+            });
+        }
+        std::fs::rename(partial, target)
+            .context("Failed to move the downloaded model into place")?;
+        if let Some(stamp) = FileStamp::of(target) {
+            CHECKED.lock().insert(target.to_path_buf(), (stamp, true));
+        }
         Ok(())
     }
 
@@ -451,9 +581,13 @@ impl ModelManager {
         Ok(hex)
     }
 
-    async fn is_model_valid(&self, path: &Path, info: &ModelInfo) -> Result<bool> {
+    fn is_valid(path: &Path, info: &ModelInfo) -> Result<bool> {
+        Ok(Self::verify(path, info)? == Verdict::Valid)
+    }
+
+    fn verify(path: &Path, info: &ModelInfo) -> Result<Verdict> {
         if !path.exists() {
-            return Ok(false);
+            return Ok(Verdict::Missing);
         }
 
         // Check file size
@@ -470,7 +604,7 @@ impl ModelManager {
                 "Model file size mismatch: expected ~{}, got {}",
                 info.expected_size, file_size
             );
-            return Ok(false);
+            return Ok(Verdict::WrongSize);
         }
 
         // Verify SHA256 checksum if available
@@ -484,7 +618,7 @@ impl ModelManager {
                     "Model checksum mismatch for {:?}: expected {}, got {}",
                     path, expected_sha256, actual_sha256
                 );
-                return Ok(false);
+                return Ok(Verdict::WrongHash);
             }
             debug!("SHA256 checksum validated successfully");
         } else {
@@ -492,7 +626,7 @@ impl ModelManager {
         }
 
         debug!("Model validation passed for {:?}", path);
-        Ok(true)
+        Ok(Verdict::Valid)
     }
 
     pub fn list_available_models(&self) -> Vec<&ModelInfo> {
@@ -599,14 +733,152 @@ mod tests {
         let manager = ModelManager::new(temp_dir.path()).unwrap();
         assert_eq!(manager.vad_model_path(), None);
         std::fs::write(temp_dir.path().join(VAD_FILENAME), b"x").unwrap();
-        assert_eq!(
-            manager.vad_model_path(),
-            Some(temp_dir.path().join(VAD_FILENAME))
-        );
+        assert_eq!(manager.vad_model_path(), None, "a damaged file is no model");
         assert!(
             manager.list_cached_models().is_empty(),
             "the VAD model is not a Whisper model"
         );
+    }
+
+    #[test]
+    fn the_language_id_model_comes_from_the_hush_model_repo() {
+        let info = langid_model();
+        assert_eq!(
+            ModelManager::download_url(&info),
+            "https://huggingface.co/collectivecontext/hush-models/resolve/main/lang-id-voxlingua107-ecapa-Q8_0.gguf"
+        );
+        assert_eq!(info.sha256.as_deref().map(str::len), Some(64));
+
+        let temp_dir = TempDir::new().unwrap();
+        assert_eq!(
+            langid_model_path(temp_dir.path()),
+            temp_dir.path().join(LANGID_FILENAME)
+        );
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        assert_eq!(manager.langid_model_path(), None);
+        std::fs::write(temp_dir.path().join(LANGID_FILENAME), b"x").unwrap();
+        assert_eq!(
+            manager.langid_model_path(),
+            None,
+            "a damaged file is no model"
+        );
+        assert!(
+            manager.list_cached_models().is_empty(),
+            "the language-ID model is not a Whisper model"
+        );
+    }
+
+    fn hello_model() -> ModelInfo {
+        ModelInfo {
+            name: "hello".to_string(),
+            repo_id: "test/test".to_string(),
+            filename: "hello.bin".to_string(),
+            expected_size: 13,
+            sha256: Some(
+                "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f".to_string(),
+            ),
+        }
+    }
+
+    #[test]
+    fn a_download_that_fails_its_checksum_is_deleted_and_never_used() {
+        let temp_dir = TempDir::new().unwrap();
+        let info = hello_model();
+        let partial = temp_dir.path().join("hello.bin.part");
+        let target = temp_dir.path().join("hello.bin");
+        std::fs::write(&partial, b"Hello, World?").unwrap();
+        let err = ModelManager::promote(&partial, &target, &info).unwrap_err();
+        assert!(err.downcast_ref::<ChecksumMismatch>().is_some(), "{err}");
+        assert!(err.to_string().contains("SHA-256"), "{err}");
+        assert!(!partial.exists(), "the bad download is deleted");
+        assert!(
+            !target.exists(),
+            "the bad download never takes the model's place"
+        );
+    }
+
+    #[test]
+    fn a_download_that_passes_its_checksum_takes_its_place() {
+        let temp_dir = TempDir::new().unwrap();
+        let info = hello_model();
+        let partial = temp_dir.path().join("hello.bin.part");
+        let target = temp_dir.path().join("hello.bin");
+        std::fs::write(&partial, b"Hello, World!").unwrap();
+        ModelManager::promote(&partial, &target, &info).unwrap();
+        assert!(!partial.exists());
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        assert_eq!(manager.valid_path(&info), Some(target.clone()));
+        std::fs::write(&target, b"Hello, World?").unwrap();
+        let later = SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&target)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert_eq!(
+            manager.valid_path(&info),
+            None,
+            "a file damaged later fails"
+        );
+    }
+
+    #[test]
+    fn a_short_download_is_no_checksum_mismatch() {
+        let temp_dir = TempDir::new().unwrap();
+        let partial = temp_dir.path().join("hello.bin.part");
+        std::fs::write(&partial, b"Hello").unwrap();
+        let err =
+            ModelManager::promote(&partial, &temp_dir.path().join("hello.bin"), &hello_model())
+                .unwrap_err();
+        assert!(err.downcast_ref::<ChecksumMismatch>().is_none(), "{err}");
+        assert!(!partial.exists());
+    }
+
+    #[test]
+    fn a_check_that_cannot_read_the_file_is_not_kept() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: geteuid has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let temp_dir = TempDir::new().unwrap();
+        let info = hello_model();
+        let path = temp_dir.path().join("hello.bin");
+        std::fs::write(&path, b"Hello, World!").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        assert_eq!(manager.valid_path(&info), None, "unreadable");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            manager.valid_path(&info),
+            Some(path),
+            "a read error is not remembered as a bad file"
+        );
+    }
+
+    #[test]
+    fn a_file_is_hashed_again_only_when_its_stamp_changes() {
+        let temp_dir = TempDir::new().unwrap();
+        let info = hello_model();
+        let path = temp_dir.path().join("hello.bin");
+        std::fs::write(&path, b"Hello, World!").unwrap();
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        assert_eq!(manager.valid_path(&info), Some(path.clone()));
+        let stamp = FileStamp::of(&path).unwrap();
+        let file = std::fs::File::options().write(true).open(&path).unwrap();
+        std::io::Write::write_all(&mut &file, b"Hello, World?").unwrap();
+        file.set_modified(stamp.modified).unwrap();
+        assert_eq!(
+            manager.valid_path(&info),
+            Some(path.clone()),
+            "the same size and time: the cached check stands, with no hash"
+        );
+        file.set_modified(stamp.modified + std::time::Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(manager.valid_path(&info), None, "a new time: hashed again");
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(manager.valid_path(&info), None, "a missing file");
     }
 
     #[test]

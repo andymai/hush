@@ -84,10 +84,10 @@ xkeyboard-config = "*"
 [features]
 default = []
 
-# whisper.cpp GPU backends, mutually exclusive. Release binaries use vulkan,
+# transcribe.cpp GPU backends, mutually exclusive. Release binaries use vulkan,
 # which runs on NVIDIA, AMD, and Intel with only the graphics driver present.
-cuda = ["whisper-rs/cuda"]
-vulkan = ["whisper-rs/vulkan"]
+cuda = ["transcribe-cpp/cuda"]
+vulkan = ["transcribe-cpp/vulkan"]
 
 [dependencies]
 # Audio capture and processing
@@ -105,8 +105,10 @@ sha2 = "0.11"        # SHA256 checksum validation for model integrity
 indicatif = "0.18"   # Model download progress
 futures-util = "0.3" # Streaming download bodies
 
-# whisper.cpp; GPU backends are enabled through the cuda and vulkan features
-whisper-rs = { version = "0.16", features = ["tracing_backend", "raw-api"] }
+# transcribe.cpp runs Whisper on ggml; GPU backends are enabled through the cuda
+# and vulkan features. The link is static. Builds set TRANSCRIBE_CMAKE_ARGS to
+# -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF (Makefile, CI), so no OpenBLAS is linked.
+transcribe-cpp = { version = "0.4.1", default-features = false }
 
 # Text processing
 regex = "1.12" # Pattern matching for filler words
@@ -147,6 +149,7 @@ anyhow = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-log = "0.2" # transcribe.cpp logs through the log crate
 tracing-appender = "0.2"
 sysinfo = { version = "0.40", features = [
   "multithread",

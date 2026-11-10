@@ -49,12 +49,12 @@
           cmake
           pkg-config
           shaderc
-          rustPlatform.bindgenHook
         ];
         buildInputs = with pkgs; [
           alsa-lib
           vulkan-headers
           vulkan-loader
+          spirv-headers
           libx11
           libxi
           libxtst
@@ -64,8 +64,11 @@
           libGL
         ];
 
-        # cmake is for whisper.cpp inside the whisper-rs-sys build script, not for this source tree.
+        # cmake is for transcribe.cpp inside the transcribe-cpp-sys build script, not for this source tree.
         dontUseCmakeConfigure = true;
+
+        # transcribe-cpp-sys passes this to CMake, so the build never links a system BLAS.
+        TRANSCRIBE_CMAKE_ARGS = "-DTRANSCRIBE_USE_SYSTEM_BLAS=OFF";
 
         # CI runs the tests. Some of them open audio and input devices that the build sandbox does not have.
         doCheck = false;

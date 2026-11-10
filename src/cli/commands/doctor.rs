@@ -12,7 +12,7 @@ use crate::text_processing::hook::{self, Program};
 use crate::transcription::cpu;
 use crate::transcription::device::GpuAvailability;
 use crate::transcription::gpu_fallback::GpuFailure;
-use crate::transcription::models::{self, recommended_model, ModelManager, ModelSize};
+use crate::transcription::models::{recommended_model, ModelManager, ModelSize};
 use crate::AudioCapture;
 use anyhow::Result;
 use std::fmt;
@@ -119,9 +119,22 @@ pub async fn checks() -> Vec<Check> {
         let cpu_supported = cpu.level == Level::Ok;
         checks.push(cpu);
         checks.push(model_check(&config, &models_dir));
+        let manager = ModelManager::new(&models_dir).ok();
         checks.push(vad_check(
             &config.transcription,
-            models::vad_model_path(&models_dir).is_file(),
+            manager
+                .as_ref()
+                .and_then(ModelManager::vad_model_path)
+                .is_some(),
+        ));
+        let limits_detection = !config.transcription.detect_languages.is_empty();
+        checks.extend(langid_check(
+            &config.transcription,
+            limits_detection
+                && manager
+                    .as_ref()
+                    .and_then(ModelManager::langid_model_path)
+                    .is_some(),
         ));
         // Below the floor, ggml lists no devices, so a GPU line would blame the driver.
         if cpu_supported {
@@ -229,16 +242,46 @@ fn vad_check(config: &TranscriptionConfig, model_present: bool) -> Check {
     if model_present {
         return Check::ok(NAME, "Silero VAD trims silence before Whisper");
     }
+    Check::warn(
+        NAME,
+        "the Silero VAD model is missing or damaged, so Whisper gets silence too",
+        download_command(config),
+    )
+}
+
+/// `hush models download` for the configured model, which also fetches the
+/// VAD and language-ID models that are missing.
+fn download_command(config: &TranscriptionConfig) -> String {
     let size = if config.model_size.parse::<ModelSize>().is_ok() {
         config.model_size.clone()
     } else {
         crate::gui::size_key(recommended_model()).to_string()
     };
-    Check::warn(
+    format!("hush models download {}", size)
+}
+
+/// A line only when `detect_languages` limits detection, which needs the
+/// language-ID model.
+fn langid_check(config: &TranscriptionConfig, model_present: bool) -> Option<Check> {
+    const NAME: &str = "Language detection";
+    if config.detect_languages.is_empty() {
+        return None;
+    }
+    let languages = config.detect_languages.join(", ");
+    if model_present {
+        return Some(Check::ok(
+            NAME,
+            format!("VoxLingua107 picks among {}", languages),
+        ));
+    }
+    Some(Check::warn(
         NAME,
-        "the Silero VAD model is not downloaded, so Whisper gets silence too",
-        format!("hush models download {}", size),
-    )
+        format!(
+            "the language-ID model is missing or damaged, so Whisper picks among {} on its own",
+            languages
+        ),
+        download_command(config),
+    ))
 }
 
 fn cloud_check(config: &TranscriptionConfig, key_present: bool) -> Check {
@@ -769,6 +812,20 @@ mod tests {
         let off = vad_check(&config, false);
         assert_eq!(off.level, Level::Ok);
         assert!(off.detail.contains("switched off"));
+    }
+
+    #[test]
+    fn the_language_line_shows_only_when_detection_is_limited() {
+        let mut config = Config::defaults().unwrap().transcription;
+        assert!(langid_check(&config, false).is_none());
+        config.detect_languages = vec!["en".to_string(), "de".to_string()];
+        let missing = langid_check(&config, false).unwrap();
+        assert_eq!(missing.level, Level::Warn);
+        assert_eq!(missing.fix.as_deref(), Some("hush models download base"));
+        assert!(missing.detail.contains("en, de"), "{}", missing.detail);
+        let present = langid_check(&config, true).unwrap();
+        assert_eq!(present.level, Level::Ok);
+        assert!(present.detail.contains("en, de"), "{}", present.detail);
     }
 
     #[test]

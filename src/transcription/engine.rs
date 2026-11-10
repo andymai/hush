@@ -1,6 +1,7 @@
-//! The transcriber the config asks for: whisper.cpp on this machine, or the
-//! service or server the user chose. An HTTP backend never loads the model,
-//! and the local one never opens a connection.
+//! The transcriber the config asks for: Whisper through transcribe.cpp on
+//! this machine, or the service or server the user chose. An HTTP backend
+//! never loads the model, and the local one opens a connection only to fetch
+//! a missing language-ID model in the background.
 //!
 //! Every transcript then goes through the checks in [`guard`]: a transcript
 //! that echoes the prompt is made again without the prompt, and text that
@@ -10,6 +11,7 @@ use crate::config::settings::TranscriptionConfig;
 use crate::transcription::cloud::CloudTranscriber;
 use crate::transcription::cpu;
 use crate::transcription::guard::{self, EchoChoice};
+use crate::transcription::langid;
 use crate::transcription::language::Language;
 use crate::transcription::models::{self, ModelManager, ModelSize};
 use crate::transcription::whisper::{TranscriptionResult, WhisperTranscriber};
@@ -64,6 +66,10 @@ impl SpeechToText {
             .with_detect_languages(&config.detect_languages);
         if config.vad {
             load_vad(&mut whisper, models_dir, &config.model_size);
+        }
+        if !config.detect_languages.is_empty() && whisper.is_multilingual() {
+            whisper = whisper.with_langid(models_dir);
+            prepare_langid(models_dir, whisper.detect_languages()).await;
         }
         Ok(Self {
             backend: Backend::Local(whisper),
@@ -209,23 +215,37 @@ impl SpeechToText {
     }
 }
 
-/// Load the Silero model when it is downloaded. Without it, Whisper gets the
-/// whole take, and the log says once how to get the model.
+/// Load the Silero model when a copy that passes its checksum is there.
+/// Without it, Whisper gets the whole take, and the log says once how to get
+/// the model.
 fn load_vad(whisper: &mut WhisperTranscriber, models_dir: &Path, model_size: &str) {
-    let path = models::vad_model_path(models_dir);
-    if !path.is_file() {
+    let Some(path) = ModelManager::new(models_dir)
+        .ok()
+        .and_then(|manager| manager.vad_model_path())
+    else {
         warn!(
-            "Voice activity detection is off: {} is missing. Get it with: hush models download {}",
-            path.display(),
+            "Voice activity detection is off: {} is missing or damaged. Get it with: hush models download {}",
+            models::vad_model_path(models_dir).display(),
             model_size
         );
         return;
-    }
+    };
     if let Err(e) = whisper.load_vad(&path) {
         warn!(
             "Voice activity detection is off: {:#}. Get the model again with: hush models download {}",
             e, model_size
         );
+    }
+}
+
+/// Load the language-ID model with the Whisper model when its file is
+/// there, so that the first take can use it, or start its download in the
+/// background. The Whisper model never waits on the network.
+async fn prepare_langid(models_dir: &Path, languages: &[String]) {
+    let dir = models_dir.to_path_buf();
+    let languages = languages.to_vec();
+    if let Err(e) = tokio::task::spawn_blocking(move || langid::model(&dir, &languages)).await {
+        warn!("The language-ID model load stopped: {}", e);
     }
 }
 

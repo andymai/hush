@@ -93,6 +93,14 @@ pub async fn show_system_info() -> Result<()> {
     } else {
         println!("  💻 GPU: none available, using CPU ({})", gpu.device_name);
     }
+    let engine = GpuAvailability::system_info();
+    let mut lines = engine.lines();
+    if let Some(name) = lines.next() {
+        println!("  Speech engine: {}", name);
+    }
+    for device in lines {
+        println!("    {}", device);
+    }
 
     Ok(())
 }

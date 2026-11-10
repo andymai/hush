@@ -27,5 +27,9 @@ hush models download base     # fetch one
 hush doctor                   # which model is configured and whether it is there
 ```
 
+`hush models download` also fetches the Silero voice activity model, and, when
+`transcription.detect_languages` is set, the VoxLingua107 language-ID model
+(27 MB). The main README lists the source and license of each model.
+
 Each download is checked against a SHA256 checksum before it is used. Set
 `model_path` under `[transcription]` to point at a file elsewhere.
