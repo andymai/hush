@@ -114,8 +114,8 @@ pub fn resolve(appearance: Appearance, desktop: Option<Theme>) -> Theme {
     }
 }
 
-/// `HUSH_SETTINGS_APPEARANCE=dark hush settings` overrides the saved
-/// appearance, for screenshots.
+/// With `HUSH_SETTINGS_SCREENSHOT`, `HUSH_SETTINGS_APPEARANCE=dark`
+/// overrides the saved appearance.
 pub fn appearance_from_env() -> Option<Appearance> {
     appearance_named(&std::env::var("HUSH_SETTINGS_APPEARANCE").ok()?)
 }

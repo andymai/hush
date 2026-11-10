@@ -215,7 +215,8 @@ pub struct Gui {
     pub try_text: String,
     /// The desktop's light or dark preference, for the System appearance
     desktop: DesktopScheme,
-    /// The appearance that `HUSH_SETTINGS_APPEARANCE` forces
+    /// The appearance that `HUSH_SETTINGS_APPEARANCE` forces for a
+    /// screenshot
     appearance_override: Option<Appearance>,
     screenshot: Option<Screenshot>,
     restart: Option<Restart>,
@@ -287,7 +288,9 @@ impl Gui {
             history: HistoryView::default(),
             try_text: String::new(),
             desktop: DesktopScheme::default(),
-            appearance_override: theme::appearance_from_env(),
+            appearance_override: screenshot
+                .as_ref()
+                .and_then(|_| theme::appearance_from_env()),
             screenshot,
             restart: None,
             poll: Poll::default(),

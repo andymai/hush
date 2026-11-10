@@ -383,7 +383,7 @@ pub fn footer(gui: &mut Gui, ui: &mut Ui) {
                 .enabled(can_save);
             if ui
                 .add(save)
-                .on_hover_text("Writes the file and restarts Hush with it")
+                .on_hover_text("Writes the file, and restarts Hush when a change needs it")
                 .clicked()
             {
                 gui.save();
