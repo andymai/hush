@@ -340,6 +340,7 @@ pub struct Settled {
 /// Join the texts in part order, and move the file of each failed part to
 /// `recovery`.
 pub fn settle(mut outcomes: Vec<PartOutcome>, recovery: &Path) -> Settled {
+    info!("A hands-free take ends with {} parts", outcomes.len());
     outcomes.sort_by_key(|outcome| outcome.index);
     let mut texts = Vec::new();
     let mut files = Vec::new();
