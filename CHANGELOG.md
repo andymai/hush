@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.2](https://github.com/andymai/hush/compare/v0.24.1...v0.24.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* **hotkey:** stop a bare Alt or Super hotkey from opening app menus ([#298](https://github.com/andymai/hush/issues/298)) ([c760496](https://github.com/andymai/hush/commit/c760496ff9fb0f2286a798fe15bc24df057877cb))
+
 ## [0.24.1](https://github.com/andymai/hush/compare/v0.24.0...v0.24.1) (2026-11-10)
 
 
