@@ -1,0 +1,42 @@
+src/transcription/models.rs
+  s_115995023cd6f3::t_568a612d57e1b4 1112-1197
+  s_115995023cd6f3::t_ece480e84de25c 6
+  s_115995023cd6f3::t_057081996bdc64 224-331
+src/config/settings.rs
+  s_115995023cd6f3::t_1cac9a79ef7df9 520-526
+  s_115995023cd6f3::t_7cb4523f34b64c 991-1009
+  s_115995023cd6f3::t_fdb5d1d40f206c 990
+src/cli/commands/models.rs
+  s_115995023cd6f3::t_d7ba84d045331e 201-202
+  s_115995023cd6f3::t_b869e5c6b51121 153-155,203,242,246,249
+src/gui/pages/speech.rs
+  s_115995023cd6f3::t_b091b7ecf36b06 230,245
+  s_115995023cd6f3::t_813366971ce3c6 675-689
+  s_115995023cd6f3::t_38d93a44bc32f5 6
+  s_115995023cd6f3::t_f18d52897540fb 628-638
+  s_115995023cd6f3::t_4ff06348168428 674
+src/cli/commands/doctor.rs
+  s_115995023cd6f3::t_e79ccf9acbf41b 15,20,135-140,143,275-285,291,293,306-312,317,873,875,879,889,893,895,903,908,913-928
+src/gui/mod.rs
+  s_115995023cd6f3::t_552099cb88adc5 427
+src/transcription/engine.rs
+  s_115995023cd6f3::t_eb0f33bd004436 286
+src/transcription/whisper.rs
+  s_115995023cd6f3::t_aab09557517542 9,88-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c7267c2bcf3425c8cd098c2cab59b17b0453ba9e",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
