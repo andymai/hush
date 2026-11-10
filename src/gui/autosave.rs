@@ -63,7 +63,12 @@ pub struct Debounce {
 impl Debounce {
     /// A change the daemon reads: restart [`RESTART_DEBOUNCE`] after it.
     pub fn change(&mut self, now: Instant) {
-        self.due = Some(now + RESTART_DEBOUNCE);
+        self.change_in(now, RESTART_DEBOUNCE);
+    }
+
+    /// Try the restart again after `delay`.
+    pub fn change_in(&mut self, now: Instant, delay: Duration) {
+        self.due = Some(now + delay);
     }
 
     /// Restart as soon as the daemon allows, as when the window closes.
@@ -355,6 +360,40 @@ pub enum CloseStep {
     Close,
 }
 
+/// Where a close of the window stands.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct CloseFlow {
+    /// A close is under way; the window closes once nothing holds it
+    pub closing: bool,
+    /// The user saw what a close loses; the next close discards it
+    pub warned: bool,
+    /// This frame commits the focused field for a close, so its save does
+    /// not stop the close
+    pub commit_frame: bool,
+}
+
+impl CloseFlow {
+    /// A save of a change. A change by the user keeps the window open and
+    /// makes the next close ask again; a change by the window itself, such
+    /// as a model that finished its download, leaves the close as it is.
+    pub fn changed(&mut self, by_user: bool) {
+        if !by_user {
+            return;
+        }
+        self.warned = false;
+        if !self.commit_frame {
+            self.closing = false;
+        }
+    }
+
+    /// A save failed: the window stays open with the message, even after a
+    /// second close.
+    pub fn failed(&mut self) {
+        self.closing = false;
+        self.warned = false;
+    }
+}
+
 /// The state of the window when the close request came.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CloseState {
@@ -389,6 +428,20 @@ pub struct Pending {
     pub provider: Option<LlmSetting>,
 }
 
+/// After this many tries that the file or a silent daemon holds back, the
+/// restart tries at the normal poll rate.
+pub const BACKOFF_AFTER: u32 = 3;
+
+/// The wait before the next restart try, and the redraw rate meanwhile:
+/// quick at first, then at the normal poll rate.
+pub fn retry_delay(held_tries: u32, fast: Duration, normal: Duration) -> Duration {
+    if held_tries >= BACKOFF_AFTER {
+        normal
+    } else {
+        fast
+    }
+}
+
 /// How long Undo stays in the footer.
 pub const UNDO_DURATION: Duration = Duration::from_secs(10);
 
@@ -396,45 +449,54 @@ pub const UNDO_DURATION: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone)]
 pub struct Undo {
     pub label: String,
-    pub before: (Config, DomainVocabulary),
+    before: (Config, DomainVocabulary),
+    /// The settings right after the removal, before its save merged any
+    /// outside change: the difference from `before` is the removal alone
+    after: (Config, DomainVocabulary),
     at: Instant,
-    /// The settings just after the removal; any other change ends the Undo
-    after: Option<(Config, DomainVocabulary)>,
+    /// The settings after the removal's save; any later change ends the Undo
+    settled: Option<(Config, DomainVocabulary)>,
 }
 
 impl Undo {
-    pub fn new(label: String, before: (Config, DomainVocabulary), at: Instant) -> Self {
+    pub fn new(
+        label: String,
+        before: (Config, DomainVocabulary),
+        after: (Config, DomainVocabulary),
+        at: Instant,
+    ) -> Self {
         Self {
             label,
             before,
+            after,
             at,
-            after: None,
+            settled: None,
         }
     }
 
     /// The settings with the removal put back on top of `now`: what the
     /// removal changed goes back, and everything else in `now` stays.
     pub fn restore(&self, now: &(Config, DomainVocabulary)) -> Result<(Config, DomainVocabulary)> {
-        let after = self.after.as_ref().unwrap_or(now);
-        let config = rebase(&after.0, &self.before.0, &now.0)?;
+        let config = rebase(&self.after.0, &self.before.0, &now.0)?;
         config.validate()?;
-        let vocabulary = rebase(&after.1, &self.before.1, &now.1)?;
+        let vocabulary = rebase(&self.after.1, &self.before.1, &now.1)?;
         Ok((config, vocabulary))
     }
 
     /// Whether Undo still applies: within [`UNDO_DURATION`], and with no
-    /// change after the removal. The first call notes the settings after it.
+    /// change after the removal's save. The first call notes the settings
+    /// after that save.
     pub fn still(&mut self, config: &Config, vocabulary: &DomainVocabulary, now: Instant) -> bool {
         if now.saturating_duration_since(self.at) > UNDO_DURATION {
             return false;
         }
-        match &self.after {
+        match &self.settled {
             None => {
-                self.after = Some((config.clone(), vocabulary.clone()));
+                self.settled = Some((config.clone(), vocabulary.clone()));
                 true
             },
-            Some((after_config, after_vocabulary)) => {
-                after_config == config && after_vocabulary == vocabulary
+            Some((settled_config, settled_vocabulary)) => {
+                settled_config == config && settled_vocabulary == vocabulary
             },
         }
     }
@@ -590,11 +652,17 @@ mod tests {
         before.insertion.clipboard_apps = vec!["kitty".into(), "foot".into()];
         let mut after = before.clone();
         after.insertion.clipboard_apps.retain(|app| app != "kitty");
-        let mut undo = Undo::new("Removed kitty".into(), (before, vocabulary.clone()), start);
-        undo.still(&after, &vocabulary, start);
-
+        let mut undo = Undo::new(
+            "Removed kitty".into(),
+            (before, vocabulary.clone()),
+            (after.clone(), vocabulary.clone()),
+            start,
+        );
+        // The removal's save found an outside change on disk and merged it.
         let mut merged = after.clone();
         merged.llm.ollama_model = "qwen3".into();
+        assert!(undo.still(&merged, &vocabulary, start));
+
         let (config, _) = undo.restore(&(merged, vocabulary)).unwrap();
         assert_eq!(config.insertion.clipboard_apps, ["kitty", "foot"]);
         assert_eq!(config.llm.ollama_model, "qwen3", "the outside change stays");
@@ -607,15 +675,12 @@ mod tests {
         let vocabulary = DomainVocabulary::default();
         let mut after = before.clone();
         after.insertion.clipboard_apps.clear();
-        let mut undo = Undo::new(
-            "Removed kitty".into(),
-            (before.clone(), vocabulary.clone()),
-            start,
-        );
-        assert!(undo.still(&after, &vocabulary, start), "notes the removal");
+        let pair = |config: &Config| (config.clone(), vocabulary.clone());
+        let mut undo = Undo::new("Removed kitty".into(), pair(&before), pair(&after), start);
+        assert!(undo.still(&after, &vocabulary, start), "notes the save");
         assert!(undo.still(&after, &vocabulary, start + Duration::from_secs(5)));
         assert!(!undo.still(&after, &vocabulary, start + UNDO_DURATION * 2));
-        let mut undo = Undo::new("Removed kitty".into(), (before, vocabulary.clone()), start);
+        let mut undo = Undo::new("Removed kitty".into(), pair(&before), pair(&after), start);
         undo.still(&after, &vocabulary, start);
         let mut later = after.clone();
         later.tray.enabled = false;
@@ -659,6 +724,41 @@ mod tests {
             ..warned
         };
         assert_eq!(close_step(again), CloseStep::Close, "a second close goes");
+    }
+
+    #[test]
+    fn a_download_that_finishes_keeps_a_close_that_waits() {
+        let mut flow = CloseFlow {
+            closing: true,
+            ..CloseFlow::default()
+        };
+        flow.changed(false);
+        assert!(flow.closing, "the window's own change");
+        flow.changed(true);
+        assert!(!flow.closing, "the user's change keeps the window open");
+    }
+
+    #[test]
+    fn the_field_a_close_commits_does_not_stop_the_close() {
+        let mut flow = CloseFlow {
+            closing: true,
+            commit_frame: true,
+            ..CloseFlow::default()
+        };
+        flow.changed(true);
+        assert!(flow.closing);
+    }
+
+    #[test]
+    fn a_failed_save_after_the_second_close_keeps_the_window_open() {
+        let mut flow = CloseFlow {
+            closing: true,
+            warned: true,
+            commit_frame: true,
+        };
+        flow.failed();
+        assert!(!flow.closing);
+        assert!(!flow.warned, "the next close asks again");
     }
 
     #[test]
@@ -714,6 +814,20 @@ mod tests {
         let mut words: Vec<_> = merged.technical_terms.values().cloned().collect();
         words.sort();
         assert_eq!(words, ["Kubernetes", "PostgreSQL"]);
+    }
+
+    #[test]
+    fn a_held_restart_backs_off_to_the_normal_poll() {
+        let fast = Duration::from_millis(150);
+        let normal = Duration::from_millis(700);
+        assert_eq!(retry_delay(0, fast, normal), fast);
+        assert_eq!(retry_delay(BACKOFF_AFTER - 1, fast, normal), fast);
+        assert_eq!(retry_delay(BACKOFF_AFTER, fast, normal), normal);
+        let start = Instant::now();
+        let mut debounce = Debounce::default();
+        debounce.change_in(start, normal);
+        assert!(!debounce.fire(start + fast, Daemon::Idle));
+        assert!(debounce.fire(start + normal, Daemon::Idle));
     }
 
     #[test]

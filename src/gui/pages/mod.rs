@@ -91,21 +91,51 @@ fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
     }
     section(ui, "Files");
     if let Some(error) = gui.files.config_error.clone() {
-        let description = format!(
+        let loses_audio = replace_loses_audio(gui);
+        let mut description = format!(
             "The window shows the built-in defaults and saves nothing to the file until \
              you replace it. {}",
             error
         );
+        if loses_audio {
+            description.push_str(
+                "\n\nThe file has no history settings that Hush can read. The defaults keep no \
+                 audio, so Hush deletes the kept audio when it restarts with them. To keep it, \
+                 turn on Keep the audio on the History page first.",
+            );
+        }
+        let confirming = gui.confirm_replace && loses_audio;
         row("files.config", "The configuration file does not load")
             .status(false)
             .describe(&description)
             .control_below()
             .show(ui, |ui| {
-                let replace = Button::new("Replace with defaults, keep config.toml.bak")
+                if confirming {
+                    let replace = Button::new("Replace, and delete the kept audio")
+                        .icon(icons::TRASH)
+                        .variant(Variant::Danger);
+                    if ui.add(replace).clicked() {
+                        gui.replace_config();
+                    }
+                    if ui.add(Button::new("Keep the file")).clicked() {
+                        gui.confirm_replace = false;
+                    }
+                    return;
+                }
+                let label = if loses_audio {
+                    "Replace with defaults, which delete the kept audio"
+                } else {
+                    "Replace with defaults, keep config.toml.bak"
+                };
+                let replace = Button::new(label)
                     .icon(icons::ROTATE_CCW)
                     .variant(Variant::Danger);
                 if ui.add(replace).clicked() {
-                    gui.replace_config();
+                    if loses_audio {
+                        gui.confirm_replace = true;
+                    } else {
+                        gui.replace_config();
+                    }
                 }
             });
     }
@@ -129,6 +159,16 @@ fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
                 }
             });
     }
+}
+
+/// A replacement would write settings that keep no audio while Hush keeps
+/// some: the bad file has no history settings to keep, and the user did not
+/// turn on Keep the audio in the window.
+fn replace_loses_audio(gui: &Gui) -> bool {
+    gui.config.history.keep_audio_days == 0
+        && gui.files.history_in_file().is_none()
+        && crate::audio::store::list(&crate::audio::store::takes_dir())
+            .is_ok_and(|kept| !kept.is_empty())
 }
 
 /// A row with a field for the text setting that `slot` reaches. A commit

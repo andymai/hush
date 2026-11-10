@@ -29,8 +29,8 @@ use crate::text_processing::DomainVocabulary;
 use crate::transcription::models::{ModelManager, ModelSize};
 use anyhow::{Context, Result};
 use autosave::{
-    close_step, daemon_reads_a_change, CloseState, CloseStep, Daemon, Debounce, Feedback, Files,
-    Pending, Undo,
+    close_step, daemon_reads_a_change, CloseFlow, CloseState, CloseStep, Daemon, Debounce,
+    Feedback, Files, Pending, Undo,
 };
 use capture::{Capture, Outcome};
 use meter::Meter;
@@ -181,7 +181,12 @@ enum Attempt {
     /// `hush daemon restart` runs
     Issued,
     /// A take began after the last poll, so the restart waits
-    Deferred,
+    Busy,
+    /// The daemon gave no answer in time; it may be busy
+    NoAnswer,
+    /// The configuration file does not load now, so a restarted daemon would
+    /// run in safe mode
+    HeldByFile(String),
     /// The daemon stopped, so it reads the file when it starts
     NotRunning,
     Failed(String),
@@ -268,13 +273,17 @@ pub struct Gui {
     debounce: Debounce,
     attempt: Arc<Mutex<Option<Attempt>>>,
     attempting: bool,
-    /// The window closes once its fields and an owed restart are done
-    closing: bool,
-    /// A close found something unsaved; the next close discards it
-    close_warned: bool,
-    /// This frame commits the focused field for a close, so its save does
-    /// not stop the close
-    close_commit_frame: bool,
+    close: CloseFlow,
+    /// Why the last restart try found the configuration file broken
+    held_by_file: Option<String>,
+    /// Restart tries in a row that the file or a silent daemon held back
+    held_tries: u32,
+    /// The next save comes from the window itself, such as a model that
+    /// finished its download, not from the user
+    window_change: bool,
+    /// Replace with defaults, which deletes the kept audio, waits for a
+    /// second click
+    pub confirm_replace: bool,
     restart: Option<Restart>,
     poll: Poll,
     last_poll: Instant,
@@ -372,9 +381,11 @@ impl Gui {
             debounce: Debounce::default(),
             attempt: Arc::new(Mutex::new(None)),
             attempting: false,
-            closing: false,
-            close_warned: false,
-            close_commit_frame: false,
+            close: CloseFlow::default(),
+            held_by_file: None,
+            held_tries: 0,
+            window_change: false,
+            confirm_replace: false,
             restart: None,
             poll: Poll::default(),
             last_poll: Instant::now(),
@@ -398,11 +409,11 @@ impl Gui {
     pub fn remove(&mut self, label: impl Into<String>, removal: impl FnOnce(&mut Gui) -> bool) {
         let before = (self.config.clone(), self.vocabulary.clone());
         if removal(self) {
-            self.undo = Some(Undo::new(label.into(), before, Instant::now()));
+            let after = (self.config.clone(), self.vocabulary.clone());
+            self.undo = Some(Undo::new(label.into(), before, after, Instant::now()));
         }
     }
 
-    /// Put back what the last removal took.
     /// Put back what the last removal took, on top of the settings as they
     /// are now, so a change merged from outside since the removal stays. An
     /// undo never lowers the kept audio days, because that deletes audio.
@@ -493,6 +504,7 @@ impl Gui {
                 self.undo = None;
             }
         }
+        self.window_change = false;
     }
 
     fn save_config(&mut self, now: Instant) {
@@ -502,6 +514,7 @@ impl Gui {
             Err(e) => {
                 self.rejected = Some(self.config.clone());
                 self.config_feedback = Some(Feedback::Failed(format!("Not saved: {:#}", e)));
+                self.save_failed();
                 return;
             },
         };
@@ -539,6 +552,7 @@ impl Gui {
                 self.rejected_vocabulary = Some(self.vocabulary.clone());
                 self.vocabulary_feedback =
                     Some(Feedback::Failed(format!("Vocabulary not saved: {:#}", e)));
+                self.save_failed();
             },
         }
     }
@@ -552,6 +566,10 @@ impl Gui {
         }
         match self.files.replace_config(&config) {
             Ok(backup) => {
+                self.confirm_replace = false;
+                self.held_by_file = None;
+                // A daemon that started on the broken file runs in safe mode.
+                self.debounce.change(Instant::now());
                 self.config = config.clone();
                 self.saved = config;
                 self.rejected = None;
@@ -601,8 +619,8 @@ impl Gui {
         let focused = ctx.memory(|memory| memory.focused());
         let step = close_step(CloseState {
             focused: focused.is_some(),
-            closing: self.closing,
-            warned: self.close_warned,
+            closing: self.close.closing,
+            warned: self.close.warned,
             unsaved: self.unsaved().is_some(),
             restart_owed: self.restart_owed(),
         });
@@ -612,18 +630,18 @@ impl Gui {
                     ctx.memory_mut(|memory| memory.surrender_focus(focused));
                 }
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                self.closing = true;
-                self.close_commit_frame = true;
+                self.close.closing = true;
+                self.close.commit_frame = true;
             },
             CloseStep::Warn => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                self.close_warned = true;
+                self.close.warned = true;
                 let reason = self.unsaved().unwrap_or("Something did not save");
                 self.say(format!("{}. Close again to discard it.", reason));
             },
             CloseStep::WaitForRestart => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                self.closing = true;
+                self.close.closing = true;
             },
             // A second close while a take keeps the restart waiting closes
             // at once; the daemon reads the change when it next starts.
@@ -634,26 +652,27 @@ impl Gui {
     /// A new change after a close request: the window stays open, and the
     /// next close asks again when something would be lost.
     fn user_changed_something(&mut self) {
-        self.close_warned = false;
-        if !self.close_commit_frame {
-            self.closing = false;
-        }
+        self.close.changed(!self.window_change);
+    }
+
+    fn save_failed(&mut self) {
+        self.close.failed();
     }
 
     /// After the pages drew: a close that committed the focused field stops
     /// when the field did not save, or when something else would be lost.
     fn closing_after_pages(&mut self, rejected: bool) {
-        if !std::mem::take(&mut self.close_commit_frame) || !self.closing {
+        if !std::mem::take(&mut self.close.commit_frame) || !self.close.closing {
             return;
         }
         if rejected {
-            self.closing = false;
-            self.close_warned = true;
+            self.close.closing = false;
+            self.close.warned = true;
             self.say("A field did not save. Close again to discard it.");
-        } else if !self.close_warned {
+        } else if !self.close.warned {
             if let Some(reason) = self.unsaved() {
-                self.closing = false;
-                self.close_warned = true;
+                self.close.closing = false;
+                self.close.warned = true;
                 self.say(format!("{}. Close again to discard it.", reason));
             }
         }
@@ -661,7 +680,7 @@ impl Gui {
 
     /// Whether the window may close now that it wants to.
     fn may_close(&self) -> bool {
-        !self.restart_owed() && (self.close_warned || self.unsaved().is_none())
+        !self.restart_owed() && (self.close.warned || self.unsaved().is_none())
     }
 
     /// Restart the daemon once the changes stop and it is idle, and close
@@ -672,20 +691,28 @@ impl Gui {
             self.attempting = false;
             match attempt {
                 Attempt::Issued => {
+                    self.held_tries = 0;
+                    self.held_by_file = None;
                     self.restart = Some(Restart {
                         since: now,
                         went_down: false,
                     });
                 },
-                Attempt::Deferred => {
+                Attempt::Busy => {
+                    self.held_tries = 0;
                     self.debounce.change(now);
                     self.request_refresh(ctx);
                 },
-                Attempt::NotRunning => {},
+                Attempt::NoAnswer => self.hold_restart(now),
+                Attempt::HeldByFile(reason) => {
+                    self.held_by_file = Some(reason);
+                    self.hold_restart(now);
+                },
+                Attempt::NotRunning => self.held_tries = 0,
                 Attempt::Failed(e) => self.say(format!("Could not restart Hush: {}", e)),
             }
         }
-        if self.closing {
+        if self.close.closing {
             self.debounce.hurry(now);
         }
         let daemon = Daemon::of(
@@ -696,12 +723,25 @@ impl Gui {
         if self.debounce.fire(now, daemon) {
             self.attempt_restart(ctx);
         }
-        if self.closing && self.may_close() {
+        if self.close.closing && self.may_close() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if let Some(wait) = self.debounce.wait(now, FAST_POLL) {
+        if let Some(wait) = self.debounce.wait(now, self.restart_poll()) {
             ctx.request_repaint_after(wait.max(Duration::from_millis(20)));
         }
+    }
+
+    /// Try the held restart again, at the normal poll rate after a few tries.
+    fn hold_restart(&mut self, now: Instant) {
+        self.held_tries = self.held_tries.saturating_add(1);
+        let delay =
+            autosave::retry_delay(self.held_tries, autosave::RESTART_DEBOUNCE, POLL_INTERVAL);
+        self.debounce.change_in(now, delay);
+    }
+
+    /// The redraw and poll rate while a restart waits.
+    fn restart_poll(&self) -> Duration {
+        autosave::retry_delay(self.held_tries, FAST_POLL, POLL_INTERVAL)
     }
 
     /// A change that the daemon reads is saved, but the daemon does not run
@@ -713,7 +753,8 @@ impl Gui {
     /// A change waits for a restart that the broken configuration file holds
     /// back.
     pub fn restart_waits_for_file(&self) -> bool {
-        self.debounce.pending() && self.files.config_error.is_some()
+        self.debounce.pending()
+            && (self.files.config_error.is_some() || self.held_by_file.is_some())
     }
 
     /// Ask the daemon once more on a thread, so a take that began after the
@@ -724,8 +765,13 @@ impl Gui {
         let slot = Arc::clone(&self.attempt);
         let ctx = ctx.clone();
         std::thread::spawn(move || {
+            let loads = Config::load().map(|_| ());
             let attempt = match client::probe_blocking(STATUS_TIMEOUT) {
                 Probe::NotRunning => Attempt::NotRunning,
+                Probe::State(DaemonState::Idle) if loads.is_err() => {
+                    let reason = loads.err().map(|e| format!("{:#}", e)).unwrap_or_default();
+                    Attempt::HeldByFile(reason)
+                },
                 Probe::State(DaemonState::Idle) => {
                     let binary = std::env::current_exe().unwrap_or_else(|_| "hush".into());
                     match std::process::Command::new(binary)
@@ -736,7 +782,8 @@ impl Gui {
                         Err(e) => Attempt::Failed(e.to_string()),
                     }
                 },
-                Probe::State(_) | Probe::NoAnswer => Attempt::Deferred,
+                Probe::State(_) => Attempt::Busy,
+                Probe::NoAnswer => Attempt::NoAnswer,
             };
             *slot.lock() = Some(attempt);
             ctx.request_repaint();
@@ -792,6 +839,13 @@ impl Gui {
             return;
         };
         self.machine = machine;
+        if self.debounce.pending() {
+            match self.machine.probe {
+                Probe::NoAnswer => self.held_tries = self.held_tries.saturating_add(1),
+                Probe::State(_) if self.held_by_file.is_none() => self.held_tries = 0,
+                _ => {},
+            }
+        }
         let Some(restart) = self.restart.as_mut() else {
             return;
         };
@@ -841,6 +895,7 @@ impl Gui {
         };
         match finished {
             Some((Ok(()), fetched)) => {
+                self.window_change = true;
                 pages::speech::model_downloaded(&mut self.config.transcription, fetched);
                 self.say("Model ready.");
                 self.request_refresh(ctx);
@@ -878,11 +933,10 @@ impl Gui {
     }
 
     fn poll_interval(&self) -> Duration {
-        if self.applying()
-            || self.debounce.pending()
-            || self.capture.is_some()
-            || self.machine.busy()
-        {
+        if self.debounce.pending() {
+            return self.restart_poll();
+        }
+        if self.applying() || self.capture.is_some() || self.machine.busy() {
             FAST_POLL
         } else {
             POLL_INTERVAL
@@ -988,6 +1042,7 @@ impl eframe::App for Gui {
         if self.page != self.last_page {
             self.last_page = self.page;
             self.confirm_reset = false;
+            self.confirm_replace = false;
             self.history.disarm();
         }
         self.intercept_close(ctx);
