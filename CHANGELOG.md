@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/andymai/hush/compare/v0.16.0...v0.17.0) (2026-11-10)
+
+
+### Features
+
+* **release:** attest the build provenance of each artifact ([#277](https://github.com/andymai/hush/issues/277)) ([026894b](https://github.com/andymai/hush/commit/026894bb3efc87b6e7df8fcbd5b05bc2f74ac53e)), closes [#245](https://github.com/andymai/hush/issues/245)
+
 ## [0.16.0](https://github.com/andymai/hush/compare/v0.15.0...v0.16.0) (2026-11-09)
 
 
