@@ -13,6 +13,7 @@ pub use pages::speech::size_key;
 
 use crate::config::settings::{TranscriptionBackend, TranscriptionConfig};
 use crate::config::Config;
+use crate::hotkey::keymap::ModifierKeys;
 use crate::hotkey::Role;
 use crate::ipc::{client, DaemonState};
 use crate::permissions::PermissionStatus;
@@ -185,6 +186,8 @@ pub struct Gui {
     pub focus_editor: bool,
     /// The keyboard layout when the window opened.
     pub layout: Option<Layout>,
+    /// What the modifier keys type when the window opened.
+    pub modifier_keys: ModifierKeys,
     pub meter: Option<Meter>,
     pub meter_error: Option<String>,
     /// The microphone the meter was last asked to open, so a failure is
@@ -252,6 +255,7 @@ impl Gui {
             editing_key: None,
             focus_editor: false,
             layout: crate::text::layout::current(),
+            modifier_keys: ModifierKeys::session(),
             meter: None,
             meter_error: None,
             meter_wanted: None,

@@ -3,6 +3,7 @@
 //! `input` group membership as uinput provides.
 
 use super::combination::KeyCombination;
+use super::keymap::{KeymapWatch, ModifierKeys};
 use super::menu_mask::MenuMask;
 use super::{HotkeyAction, HotkeyBindings, HotkeyEvent};
 use crate::text_processing::StyleName;
@@ -10,6 +11,7 @@ use crate::transcription::Language;
 use anyhow::{anyhow, Result};
 use evdev::uinput::VirtualDevice;
 use evdev::{AttributeSetRef, BusType, Device, EventSummary, InputEvent, InputId, KeyCode};
+use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -23,16 +25,22 @@ use tracing::{debug, info, warn};
 
 const POLL_INTERVAL_MS: i32 = 200;
 const RESCAN_INTERVAL: Duration = Duration::from_secs(2);
+/// The supervisor reads the keymap names again after this many rescans,
+/// about every 30 seconds.
+const KEYMAP_RESCANS: u32 = 15;
+
+static PHYSICAL: Lazy<Arc<ModifierKeys>> = Lazy::new(|| Arc::new(ModifierKeys::physical()));
 
 /// Tracks held keys and reports when the combination becomes active or
-/// inactive. Left and right modifier variants are interchangeable; extra
-/// modifiers block the match so a bare `Space` hotkey never fires on
-/// `Ctrl+Space`.
+/// inactive. A modifier name means every key that types that modifier (see
+/// [`ModifierKeys`]); extra modifiers block the match so a bare `Space`
+/// hotkey never fires on `Ctrl+Space`.
 pub struct HotkeyMatcher {
     combination: KeyCombination,
     held: HashSet<KeyCode>,
     active: bool,
-    mask: bool,
+    mask_menu: bool,
+    keys: Arc<ModifierKeys>,
 }
 
 /// Outcome of one key event.
@@ -46,28 +54,28 @@ pub struct Processed {
     pub mask: bool,
 }
 
-const MODIFIER_PAIRS: [(KeyCode, KeyCode); 4] = [
-    (KeyCode::KEY_LEFTCTRL, KeyCode::KEY_RIGHTCTRL),
-    (KeyCode::KEY_LEFTSHIFT, KeyCode::KEY_RIGHTSHIFT),
-    (KeyCode::KEY_LEFTALT, KeyCode::KEY_RIGHTALT),
-    (KeyCode::KEY_LEFTMETA, KeyCode::KEY_RIGHTMETA),
-];
-
 impl HotkeyMatcher {
+    /// A matcher with the physical modifier keys, until
+    /// [`Matchers::set_keys`] gives it the keymap's.
     pub fn new(combination: KeyCombination) -> Self {
         Self {
             combination,
             held: HashSet::new(),
             active: false,
-            mask: false,
+            mask_menu: false,
+            keys: Arc::clone(&PHYSICAL),
         }
     }
 
     /// With `on`, report [`Processed::mask`] on each press of the chord when
-    /// it has only Alt and Super keys.
+    /// each of its keys types Alt or Super.
     pub fn with_menu_mask(mut self, on: bool) -> Self {
-        self.mask = on && self.combination.only_alt_or_super();
+        self.mask_menu = on;
         self
+    }
+
+    fn masks(&self) -> bool {
+        self.mask_menu && self.keys.only_alt_or_super(&self.combination)
     }
 
     /// Feed one key event (`value`: 1 press, 0 release, 2 repeat).
@@ -106,24 +114,18 @@ impl HotkeyMatcher {
         Processed {
             event,
             swallow: code == key && (was_active || self.active),
-            mask: self.mask && event == Some(HotkeyEvent::Pressed),
+            mask: self.masks() && event == Some(HotkeyEvent::Pressed),
         }
     }
 
     /// The hotkey's own key never counts as a held modifier, so a bare
     /// `RightAlt` hotkey matches even though Right Alt is a modifier.
     fn modifiers_match(&self) -> bool {
-        let wanted = self.combination.modifiers;
         let key = self.combination.evdev_key();
-        let required = [wanted.ctrl, wanted.shift, wanted.alt, wanted.super_key];
-        MODIFIER_PAIRS
-            .iter()
-            .zip(required)
-            .all(|((left, right), needed)| {
-                let held = (*left != key && self.held.contains(left))
-                    || (*right != key && self.held.contains(right));
-                held == needed
-            })
+        let held = self
+            .keys
+            .held(self.held.iter().copied().filter(|code| *code != key));
+        held == Some(self.combination.modifiers)
     }
 }
 
@@ -167,6 +169,23 @@ impl Matchers {
         }
     }
 
+    fn all_mut(&mut self) -> impl Iterator<Item = &mut HotkeyMatcher> {
+        std::iter::once(&mut self.primary)
+            .chain(self.languages.iter_mut().map(|(_, matcher)| matcher))
+            .chain(self.styles.iter_mut().map(|(_, matcher)| matcher))
+            .chain(self.cancel.iter_mut())
+            .chain(self.actions.iter_mut().map(|(_, matcher)| matcher))
+            .chain(self.command.iter_mut())
+    }
+
+    /// Give every chord the modifier keys of the session keymap.
+    pub fn set_keys(&mut self, keys: ModifierKeys) {
+        let keys = Arc::new(keys);
+        for matcher in self.all_mut() {
+            matcher.keys = Arc::clone(&keys);
+        }
+    }
+
     /// Whether a chord can report [`Processed::mask`].
     pub fn masks(&self) -> bool {
         std::iter::once(&self.primary)
@@ -174,7 +193,7 @@ impl Matchers {
             .chain(self.styles.iter().map(|(_, matcher)| matcher))
             .chain(self.actions.iter().map(|(_, matcher)| matcher))
             .chain(self.command.iter())
-            .any(|matcher| matcher.mask)
+            .any(HotkeyMatcher::masks)
     }
 
     /// Language and style chords report their press and release and are
@@ -381,6 +400,7 @@ pub struct EvdevHotkey {
     running: Arc<AtomicBool>,
     matcher: Arc<Mutex<Matchers>>,
     mask: SharedMask,
+    watch: Mutex<Option<Box<KeymapWatch>>>,
     sender: mpsc::Sender<HotkeyEvent>,
 }
 
@@ -417,7 +437,11 @@ impl EvdevHotkey {
             if exclusive { ", exclusive" } else { "" }
         );
 
-        let matchers = Matchers::new(&bindings, masks_menus(exclusive, mask_menu));
+        let mut matchers = Matchers::new(&bindings, masks_menus(exclusive, mask_menu));
+        let mut watch = KeymapWatch::new();
+        if let Some(keys) = watch.changed() {
+            matchers.set_keys(keys);
+        }
         let mask = if matchers.masks() {
             match open_mask() {
                 Ok(mask) => Some(Arc::new(Mutex::new(mask))),
@@ -439,6 +463,7 @@ impl EvdevHotkey {
             Self {
                 matcher: Arc::new(Mutex::new(matchers)),
                 mask,
+                watch: Mutex::new(Some(Box::new(watch))),
                 bindings,
                 exclusive,
                 running: Arc::new(AtomicBool::new(false)),
@@ -463,9 +488,15 @@ impl EvdevHotkey {
         let sender = self.sender.clone();
         let bindings = self.bindings.clone();
         let exclusive = self.exclusive;
+        let watch = self
+            .watch
+            .lock()
+            .take()
+            .map(|watch| *watch)
+            .unwrap_or_default();
         thread::Builder::new()
             .name("hush-hotkey-scan".into())
-            .spawn(move || supervise(running, matcher, mask, sender, bindings, exclusive))
+            .spawn(move || supervise(running, matcher, mask, watch, sender, bindings, exclusive))
             .map_err(|e| anyhow!("Failed to start hotkey thread: {}", e))?;
         Ok(())
     }
@@ -482,16 +513,27 @@ impl Drop for EvdevHotkey {
     }
 }
 
+/// Start a reader for each new device, and follow a change of the keymap
+/// options. The keymap names come from files and commands, so the readers
+/// never ask for them per key event.
 fn supervise(
     running: Arc<AtomicBool>,
     matcher: Arc<Mutex<Matchers>>,
     mask: SharedMask,
+    mut watch: KeymapWatch,
     sender: mpsc::Sender<HotkeyEvent>,
     bindings: HotkeyBindings,
     exclusive: bool,
 ) {
     let mut readers: HashMap<PathBuf, thread::JoinHandle<()>> = HashMap::new();
+    let mut rescans = 0u32;
     while running.load(Ordering::Acquire) {
+        rescans = rescans.wrapping_add(1);
+        if rescans.is_multiple_of(KEYMAP_RESCANS) {
+            if let Some(keys) = watch.changed() {
+                matcher.lock().set_keys(keys);
+            }
+        }
         readers.retain(|_, handle| !handle.is_finished());
         for (path, device) in devices_for(&bindings) {
             if readers.contains_key(&path) {
@@ -988,6 +1030,89 @@ mod tests {
             Some(HotkeyEvent::Pressed),
             "the bare key is still the dictation hotkey"
         );
+    }
+
+    #[test]
+    fn modifier_names_follow_the_keymap_and_bare_keys_stay_physical() {
+        use crate::hotkey::keymap::tests::{german, swapped};
+        let verbatim = crate::text_processing::styles::VERBATIM;
+        let bindings = HotkeyBindings::parse("RightAlt", Some("Escape"))
+            .unwrap()
+            .with_command("Ctrl+RightAlt")
+            .unwrap()
+            .with_style(verbatim, "Super+RightAlt")
+            .unwrap();
+        let mut m = Matchers::new(&bindings, false);
+        m.set_keys(swapped());
+
+        m.process(KeyCode::KEY_LEFTMETA, 1);
+        assert_eq!(
+            m.process(KeyCode::KEY_RIGHTALT, 1).event,
+            Some(HotkeyEvent::Command(true)),
+            "the Win key types Ctrl with ctrl:swap_lwin_lctl"
+        );
+        m.process(KeyCode::KEY_RIGHTALT, 0);
+        m.process(KeyCode::KEY_LEFTMETA, 0);
+
+        m.process(KeyCode::KEY_LEFTCTRL, 1);
+        assert_eq!(
+            m.process(KeyCode::KEY_RIGHTALT, 1).event,
+            Some(HotkeyEvent::Style(verbatim, true)),
+            "the Ctrl key types Super there"
+        );
+        m.process(KeyCode::KEY_RIGHTALT, 0);
+        m.process(KeyCode::KEY_LEFTCTRL, 0);
+
+        assert_eq!(
+            m.process(KeyCode::KEY_RIGHTALT, 1).event,
+            Some(HotkeyEvent::Pressed),
+            "the bare key is the physical Right Alt"
+        );
+        m.process(KeyCode::KEY_RIGHTALT, 0);
+
+        let mut physical = Matchers::new(&bindings, false);
+        physical.process(KeyCode::KEY_LEFTMETA, 1);
+        assert_eq!(
+            physical.process(KeyCode::KEY_RIGHTALT, 1).event,
+            Some(HotkeyEvent::Style(verbatim, true)),
+            "without the keymap, the Win key is Super"
+        );
+
+        let bindings = HotkeyBindings::parse("Space", None)
+            .unwrap()
+            .with_action(HotkeyAction::Learn, "Alt+Space")
+            .unwrap();
+        let mut m = Matchers::new(&bindings, false);
+        m.set_keys(german());
+        m.process(KeyCode::KEY_RIGHTALT, 1);
+        assert_eq!(
+            m.process(KeyCode::KEY_SPACE, 1).event,
+            None,
+            "AltGr is no Alt, and it blocks the bare key"
+        );
+        m.process(KeyCode::KEY_SPACE, 0);
+        m.process(KeyCode::KEY_RIGHTALT, 0);
+        m.process(KeyCode::KEY_LEFTALT, 1);
+        assert_eq!(
+            m.process(KeyCode::KEY_SPACE, 1).event,
+            Some(HotkeyEvent::Action(HotkeyAction::Learn))
+        );
+    }
+
+    #[test]
+    fn the_mask_follows_what_the_chord_types() {
+        use crate::hotkey::keymap::tests::swapped;
+        let bindings = HotkeyBindings::parse("LeftCtrl", None).unwrap();
+        let mut m = Matchers::new(&bindings, true);
+        assert!(!m.masks(), "Left Ctrl types Ctrl without the keymap");
+        m.set_keys(swapped());
+        assert!(m.masks(), "Left Ctrl types Super with the swap");
+        assert!(m.process(KeyCode::KEY_LEFTCTRL, 1).mask);
+
+        let bindings = HotkeyBindings::parse("LeftSuper", None).unwrap();
+        let mut m = Matchers::new(&bindings, true);
+        m.set_keys(swapped());
+        assert!(!m.masks(), "the Win key types Ctrl with the swap");
     }
 
     #[test]

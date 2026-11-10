@@ -177,11 +177,17 @@ pub fn current() -> Option<Layout> {
     session().map(|session| session.layout)
 }
 
+/// The session's keyboard layouts and options, without the queries for the
+/// active layout and for the keymap of Hush's own keyboard.
+pub fn keyboard() -> Option<Session> {
+    let kxkbrc = dirs::config_dir().map(|dir| dir.join("kxkbrc"));
+    detect(kxkbrc.as_deref())
+}
+
 /// The session's keyboard, with the active layout when the compositor
 /// reports it.
 pub fn session() -> Option<Session> {
-    let kxkbrc = dirs::config_dir().map(|dir| dir.join("kxkbrc"));
-    let mut session = detect(kxkbrc.as_deref())?;
+    let mut session = keyboard()?;
     let x11 = !wayland() && std::env::var_os("DISPLAY").is_some();
     if x11 {
         match_server_default(&mut session, run("localectl", &["status"]).as_deref());

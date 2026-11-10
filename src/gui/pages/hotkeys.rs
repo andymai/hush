@@ -196,12 +196,13 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         "Click a key, then press the one you want. A modifier on its own, such as \
          RightAlt, types no character in other applications.",
     );
-    if let Some(altgr) = warnings::altgr(gui.config.hotkey.bound(), gui.layout.as_ref()) {
+    if let Some(altgr) = warnings::altgr(
+        gui.config.hotkey.bound(),
+        gui.layout.as_ref(),
+        &gui.modifier_keys,
+    ) {
         ui.add_space(4.0);
-        caution(
-            ui,
-            &format!("{}. Use RightCtrl in place of RightAlt.", altgr),
-        );
+        caution(ui, &altgr_caution(&altgr));
     }
     ui.add_space(4.0);
 
@@ -322,6 +323,16 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         "Each key rewrites the selected text with the prompt of a style, with no speech. \
          A style needs polish on and a prompt to rewrite.",
     );
+}
+
+fn altgr_caution(altgr: &warnings::AltGr) -> String {
+    let advice = altgr.advice();
+    let mut chars = advice.chars();
+    let advice = match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => advice,
+    };
+    format!("{}. {}.", altgr, advice)
 }
 
 fn mode_name(mode: HotkeyMode) -> &'static str {

@@ -130,22 +130,10 @@ const MOUSE_BUTTONS: &[KeyDef] = &[
     },
 ];
 
-impl Modifiers {
-    /// Add the class a modifier key belongs to; other keys leave it unchanged.
-    pub fn add_key(&mut self, code: KeyCode) {
-        match code {
-            KeyCode::KEY_LEFTCTRL | KeyCode::KEY_RIGHTCTRL => self.ctrl = true,
-            KeyCode::KEY_LEFTSHIFT | KeyCode::KEY_RIGHTSHIFT => self.shift = true,
-            KeyCode::KEY_LEFTALT | KeyCode::KEY_RIGHTALT => self.alt = true,
-            KeyCode::KEY_LEFTMETA | KeyCode::KEY_RIGHTMETA => self.super_key = true,
-            _ => {},
-        }
-    }
-}
-
 impl KeyCombination {
     /// The chord for a key read from `/dev/input` with the modifiers held at
-    /// the time, or `None` for a key no hotkey can use.
+    /// the time, or `None` for a key no hotkey can use. The key is the
+    /// physical key; the modifiers are what the held keys type.
     pub fn from_evdev(code: KeyCode, modifiers: Modifiers) -> Option<Self> {
         KEYS.iter()
             .chain(MOUSE_BUTTONS.iter())
@@ -210,21 +198,6 @@ impl KeyCombination {
     /// Whether the chord needs a keyboard for its modifiers.
     pub fn has_modifiers(&self) -> bool {
         self.modifiers != Modifiers::default()
-    }
-
-    /// Whether each key of the chord is an Alt or a Super key, such as
-    /// `RightAlt` or `Super+LeftAlt`. When such a chord goes up with no
-    /// other key in between, many applications open their menu bar and
-    /// many desktops open their launcher.
-    pub fn only_alt_or_super(&self) -> bool {
-        let main = matches!(
-            self.key.evdev,
-            KeyCode::KEY_LEFTALT
-                | KeyCode::KEY_RIGHTALT
-                | KeyCode::KEY_LEFTMETA
-                | KeyCode::KEY_RIGHTMETA
-        );
-        main && !self.modifiers.ctrl && !self.modifiers.shift
     }
 
     pub fn x11_modifiers(&self) -> X11Modifiers {
@@ -297,9 +270,9 @@ mod tests {
 
     #[test]
     fn evdev_keys_become_chords_with_the_held_modifiers() {
-        let mut held = Modifiers::default();
-        held.add_key(KeyCode::KEY_LEFTCTRL);
-        held.add_key(KeyCode::KEY_A);
+        let held = crate::hotkey::keymap::ModifierKeys::physical()
+            .held([KeyCode::KEY_LEFTCTRL, KeyCode::KEY_A])
+            .unwrap();
         assert!(held.ctrl && !held.shift);
 
         let chord = KeyCombination::from_evdev(KeyCode::KEY_RIGHTALT, held).unwrap();
@@ -400,40 +373,6 @@ mod tests {
         assert!(KeyCombination::parse("Ctrl+A+B").is_err());
         assert!(KeyCombination::parse("Ctrl+Bogus").is_err());
         assert!(KeyCombination::parse("").is_err());
-    }
-
-    #[test]
-    fn only_chords_of_alt_and_super_keys_open_menus() {
-        for chord in [
-            "RightAlt",
-            "AltGr",
-            "LeftAlt",
-            "LeftSuper",
-            "RightMeta",
-            "Super+RightAlt",
-            "Alt+LeftMeta",
-            "Alt+Super+RightAlt",
-        ] {
-            assert!(
-                KeyCombination::parse(chord).unwrap().only_alt_or_super(),
-                "{chord}"
-            );
-        }
-        for chord in [
-            "Ctrl+RightAlt",
-            "Shift+RightAlt",
-            "Ctrl+LeftSuper",
-            "F13",
-            "Mouse4",
-            "RightCtrl",
-            "Alt+Space",
-            "Super+F",
-        ] {
-            assert!(
-                !KeyCombination::parse(chord).unwrap().only_alt_or_super(),
-                "{chord}"
-            );
-        }
     }
 
     #[test]

@@ -272,6 +272,19 @@ fn control_key_for(session: Option<&Session>) -> Result<Key, String> {
         .ok_or_else(|| "no key holds Ctrl with every XKB option list of the keyboard".to_string())
 }
 
+/// The XKB names of the keyboard that the user types on, which decide what
+/// its modifier keys type, or why Hush cannot know them.
+pub fn keyboard_names() -> Result<Names, String> {
+    keyboard_names_for(layout::keyboard().as_ref())
+}
+
+fn keyboard_names_for(session: Option<&Session>) -> Result<Names, String> {
+    modifier_names(session)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "the session names no keymap".to_string())
+}
+
 /// The key that holds Control on the session's keyboard, for a tap that
 /// must not guess: with `ctrl:swapcaps`, a Left Ctrl tap toggles Caps Lock.
 /// The error says why Hush cannot know the key.
@@ -479,6 +492,25 @@ mod tests {
         let mut swapcaps = ibus.clone();
         swapcaps.options = Some("ctrl:swapcaps".into());
         assert_eq!(control_key_for(Some(&swapcaps)), Ok(Key::RightCtrl));
+    }
+
+    #[test]
+    fn the_keyboard_names_are_the_session_names_without_the_second_list() {
+        let mut x11 = session("de", "", Active::Unknown);
+        x11.options = Some("ctrl:swapcaps".into());
+        x11.other_options = Some(String::new());
+        let names = keyboard_names_for(Some(&x11)).unwrap();
+        assert_eq!(
+            (names.layout.as_str(), names.options.as_str()),
+            ("de", "ctrl:swapcaps"),
+            "the user's keyboard has the session options"
+        );
+        let sway = Session {
+            options: None,
+            ..session("us", "", Active::Index(0))
+        };
+        assert!(keyboard_names_for(Some(&sway)).is_err());
+        assert!(keyboard_names_for(None).is_err());
     }
 
     #[test]

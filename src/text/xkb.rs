@@ -18,8 +18,8 @@ use xkbcommon_dl::{
     keysyms, xkb_compose_compile_flags, xkb_compose_feed_result, xkb_compose_state,
     xkb_compose_state_flags, xkb_compose_status, xkb_compose_table, xkb_context, xkb_context_flags,
     xkb_key_direction, xkb_keymap, xkb_keymap_compile_flags, xkb_keysym_t, xkb_log_level,
-    xkb_rule_names, xkb_state, xkb_state_component, XkbCommon, XkbCommonCompose, XKB_MOD_NAME_CTRL,
-    XKB_MOD_NAME_SHIFT,
+    xkb_rule_names, xkb_state, xkb_state_component, XkbCommon, XkbCommonCompose, XKB_MOD_NAME_ALT,
+    XKB_MOD_NAME_CTRL, XKB_MOD_NAME_LOGO, XKB_MOD_NAME_SHIFT,
 };
 
 /// XKB key codes are evdev codes plus 8.
@@ -137,10 +137,71 @@ pub fn holders(names: &[Names], group: u32) -> Result<Holders> {
     })
 }
 
+/// The keys that can hold a modifier, for [`key_classes`].
+const CLASS_KEYS: [Key; 11] = [
+    Key::LeftCtrl,
+    Key::RightCtrl,
+    Key::LeftShift,
+    Key::RightShift,
+    Key::LeftAlt,
+    Key::RightAlt,
+    Key::LeftMeta,
+    Key::RightMeta,
+    Key::CapsLock,
+    Key::Compose,
+    Key::NonUsBackslashAndPipe,
+];
+
+/// What the keys that can hold a modifier type in one keymap.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KeyClasses {
+    pub control: Vec<Key>,
+    pub shift: Vec<Key>,
+    pub alt: Vec<Key>,
+    pub super_keys: Vec<Key>,
+    /// The keys that type AltGr (ISO_Level3_Shift).
+    pub altgr: Vec<Key>,
+    /// The keys that hold another modifier: the fifth level, Mode_switch,
+    /// or Hyper.
+    pub other: Vec<Key>,
+}
+
+pub fn key_classes(names: &Names) -> Result<KeyClasses> {
+    let lib =
+        xkbcommon_dl::xkbcommon_option().ok_or_else(|| anyhow!("libxkbcommon is not installed"))?;
+    let context = Context::new(lib)?;
+    let keymap = Keymap::compile(&context, names)?;
+    let mut classes = KeyClasses::default();
+    for key in CLASS_KEYS {
+        let class = if holds(&keymap, 0, key, Held::Control)? {
+            &mut classes.control
+        } else if holds(&keymap, 0, key, Held::Shift)? {
+            &mut classes.shift
+        } else if holds(&keymap, 0, key, Held::Alt)? {
+            &mut classes.alt
+        } else if holds(&keymap, 0, key, Held::Super)? {
+            &mut classes.super_keys
+        } else {
+            match State::new(&keymap, 0)?.sym(key) {
+                keysyms::ISO_Level3_Shift => &mut classes.altgr,
+                keysyms::ISO_Level5_Shift
+                | keysyms::Mode_switch
+                | keysyms::Hyper_L
+                | keysyms::Hyper_R => &mut classes.other,
+                _ => continue,
+            }
+        };
+        class.push(key);
+    }
+    Ok(classes)
+}
+
 #[derive(Clone, Copy)]
 enum Held {
     Control,
     Shift,
+    Alt,
+    Super,
 }
 
 fn common_holder(keymaps: &[Keymap], group: u32, held: Held) -> Result<Option<Key>> {
@@ -160,9 +221,16 @@ fn common_holder(keymaps: &[Keymap], group: u32, held: Held) -> Result<Option<Ke
 /// down, and changes nothing else.
 fn holds(keymap: &Keymap, group: u32, key: Key, held: Held) -> Result<bool> {
     let state = State::new(keymap, group)?;
-    let wanted = match held {
-        Held::Control => [keysyms::Control_L, keysyms::Control_R],
-        Held::Shift => [keysyms::Shift_L, keysyms::Shift_R],
+    let wanted: &[xkb_keysym_t] = match held {
+        Held::Control => &[keysyms::Control_L, keysyms::Control_R],
+        Held::Shift => &[keysyms::Shift_L, keysyms::Shift_R],
+        Held::Alt => &[
+            keysyms::Alt_L,
+            keysyms::Alt_R,
+            keysyms::Meta_L,
+            keysyms::Meta_R,
+        ],
+        Held::Super => &[keysyms::Super_L, keysyms::Super_R],
     };
     if !wanted.contains(&state.sym(key)) {
         return Ok(false);
@@ -171,6 +239,8 @@ fn holds(keymap: &Keymap, group: u32, key: Key, held: Held) -> Result<bool> {
     let active = match held {
         Held::Control => state.control_active(),
         Held::Shift => state.shift_active(),
+        Held::Alt => state.mod_active(XKB_MOD_NAME_ALT),
+        Held::Super => state.mod_active(XKB_MOD_NAME_LOGO),
     };
     let ok = active && state.layout() == group;
     state.release(key);
@@ -815,6 +885,47 @@ pub(crate) mod tests {
                 level3: Some(Key::CapsLock)
             }])
         );
+    }
+
+    #[test]
+    fn each_modifier_key_gets_the_class_it_types() {
+        if !xkb_ready() {
+            return;
+        }
+        let classes = |layout: &str, options: &str| {
+            key_classes(&Names {
+                layout: layout.into(),
+                options: options.into(),
+                ..Names::default()
+            })
+            .unwrap()
+        };
+        let us = classes("us", "");
+        assert_eq!(us.control, [Key::LeftCtrl, Key::RightCtrl]);
+        assert_eq!(us.alt, [Key::LeftAlt, Key::RightAlt]);
+        assert_eq!(us.super_keys, [Key::LeftMeta, Key::RightMeta]);
+        assert!(us.altgr.is_empty() && us.other.is_empty());
+
+        let swapped = classes("us", "ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl");
+        assert_eq!(swapped.control, [Key::LeftMeta, Key::RightMeta]);
+        assert_eq!(swapped.super_keys, [Key::LeftCtrl, Key::RightCtrl]);
+
+        let swapcaps = classes("us", "ctrl:swapcaps");
+        assert_eq!(swapcaps.control, [Key::RightCtrl, Key::CapsLock]);
+        assert!(
+            !swapcaps.super_keys.contains(&Key::LeftCtrl)
+                && !swapcaps.other.contains(&Key::LeftCtrl),
+            "Left Ctrl types Caps Lock, which holds no modifier"
+        );
+
+        let alt_win = classes("us", "altwin:swap_alt_win");
+        assert_eq!(alt_win.alt, [Key::LeftMeta, Key::RightMeta]);
+        assert_eq!(alt_win.super_keys, [Key::LeftAlt, Key::RightAlt]);
+
+        let german = classes("de", "");
+        assert_eq!(german.alt, [Key::LeftAlt]);
+        assert_eq!(german.altgr, [Key::RightAlt]);
+        assert_eq!(classes("us", "lv3:caps_switch").altgr, [Key::CapsLock]);
     }
 
     #[test]

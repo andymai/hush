@@ -4,6 +4,7 @@
 use crate::config::server::{self, Sends};
 use crate::config::settings::{LlmSetting, TranscriptionBackend, TranscriptionConfig};
 use crate::config::{keys, paths, Config};
+use crate::hotkey::keymap::ModifierKeys;
 use crate::hotkey::{warnings, HotkeyBindings};
 use crate::text::layout::Layout;
 use crate::text::typing::{Resolver, Typing};
@@ -141,6 +142,7 @@ pub async fn checks() -> Vec<Check> {
     checks.extend(hotkeys_checks(
         &config,
         crate::text::layout::current().as_ref(),
+        &ModifierKeys::session(),
     ));
     checks.push(typing_check(&Resolver::new().resolve()));
     checks.push(window_check());
@@ -386,10 +388,10 @@ fn hotkey_check(config: &Config) -> Check {
     )
 }
 
-/// Chords that two actions share, Right Alt on an AltGr layout, and keys
-/// that type a character, language chords included: one line for each kind
-/// of problem.
-fn hotkeys_checks(config: &Config, layout: Option<&Layout>) -> Vec<Check> {
+/// Chords that two actions share, a key that types AltGr, and keys that type
+/// a character, language chords included: one line for each kind of
+/// problem.
+fn hotkeys_checks(config: &Config, layout: Option<&Layout>, keys: &ModifierKeys) -> Vec<Check> {
     const NAME: &str = "Hotkeys";
     let chords = config.hotkey.bound();
     let mut checks = Vec::new();
@@ -403,11 +405,11 @@ fn hotkeys_checks(config: &Config, layout: Option<&Layout>) -> Vec<Check> {
             "give each action its own chord in hush settings, or under [hotkey]",
         ));
     }
-    if let Some(altgr) = warnings::altgr(chords.clone(), layout) {
+    if let Some(altgr) = warnings::altgr(chords.clone(), layout, keys) {
         checks.push(Check::warn(
             NAME,
             altgr.to_string(),
-            "use RightCtrl in place of RightAlt in hush settings, or under [hotkey]",
+            format!("{} in hush settings, or under [hotkey]", altgr.advice()),
         ));
     }
     let printable = warnings::printable(chords, config.hotkey.hides_keys());
@@ -894,6 +896,7 @@ mod tests {
 
     #[test]
     fn the_hotkeys_line_names_conflicts_altgr_and_typing_keys() {
+        let physical = ModifierKeys::physical();
         let us = Layout::Xkb {
             layout: "us".into(),
             variant: String::new(),
@@ -903,22 +906,37 @@ mod tests {
             variant: String::new(),
         };
         let mut config = Config::defaults().unwrap();
-        let clean = hotkeys_checks(&config, Some(&us));
+        let clean = hotkeys_checks(&config, Some(&us), &physical);
         assert_eq!(clean.len(), 1);
         assert_eq!(clean[0].level, Level::Ok);
         assert_eq!(clean[0].name, "Hotkeys");
 
-        let altgr = hotkeys_checks(&config, Some(&german));
+        let altgr = hotkeys_checks(&config, Some(&german), &physical);
         assert_eq!(altgr.len(), 1);
         assert_eq!(altgr[0].level, Level::Warn);
         assert!(altgr[0].detail.contains("AltGr"), "{}", altgr[0].detail);
         assert!(altgr[0].fix.as_ref().unwrap().contains("RightCtrl"));
+        let moved = ModifierKeys::from_classes(&crate::text::xkb::KeyClasses {
+            control: vec![input_linux::Key::LeftCtrl, input_linux::Key::RightMeta],
+            super_keys: vec![input_linux::Key::RightCtrl, input_linux::Key::LeftMeta],
+            altgr: vec![input_linux::Key::RightAlt],
+            ..Default::default()
+        });
+        let altgr = hotkeys_checks(&config, Some(&german), &moved);
+        assert_eq!(
+            altgr[0].fix.as_deref(),
+            Some(
+                "use RightSuper, which types Ctrl on this layout, in place of RightAlt in hush \
+                 settings, or under [hotkey]"
+            ),
+            "Right Ctrl types Super with ctrl:swap_rwin_rctl"
+        );
 
         config.hotkey.combination = "F12".into();
         config.hotkey.paste_last = "f12".into();
         config.hotkey.learn = "ctrl+rightalt".into();
         config.hotkey.cancel = "Space".into();
-        let checks = hotkeys_checks(&config, Some(&us));
+        let checks = hotkeys_checks(&config, Some(&us), &physical);
         assert_eq!(checks.len(), 2);
         assert_eq!(checks[0].level, Level::Fail);
         assert_eq!(
@@ -942,7 +960,7 @@ mod tests {
             .hotkey
             .languages
             .insert("Shift+Q".into(), "fr".into());
-        let checks = hotkeys_checks(&config, Some(&us));
+        let checks = hotkeys_checks(&config, Some(&us), &physical);
         assert_eq!(checks.len(), 2);
         assert_eq!(
             checks[0].detail,
@@ -954,7 +972,7 @@ mod tests {
         );
 
         config.hotkey.exclusive = true;
-        assert_eq!(hotkeys_checks(&config, Some(&us)).len(), 1);
+        assert_eq!(hotkeys_checks(&config, Some(&us), &physical).len(), 1);
     }
 
     #[test]

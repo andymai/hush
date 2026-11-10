@@ -45,6 +45,9 @@ detect_languages = []
 # drop_phrases = ["thanks for watching", "please subscribe"]
 
 [hotkey]
+# In a chord, Ctrl, Shift, Alt, and Super mean the keys that type them with
+# the XKB options of the layout: with ctrl:swap_lwin_lctl, Ctrl is the Win
+# key. A key alone, such as RightAlt or RightCtrl, is the physical key.
 enabled = true
 combination = "RightAlt"  # a bare modifier types no character; also "F13", "Mouse4", or a chord like "Ctrl+Shift+Space"
 mode = "hold"             # hold: record while held; toggle: press to start, press again to stop
