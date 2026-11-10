@@ -194,6 +194,8 @@ pub struct Gui {
     pub level_shown: f32,
     pub new_term: String,
     pub editing_term: Option<TermEdit>,
+    /// Text that narrows the vocabulary list on the Text page
+    pub term_filter: String,
     /// The form on the Text page that adds or changes a style
     pub style_draft: StyleDraft,
     /// The plain-text word list that the Text page imports and exports
@@ -257,6 +259,7 @@ impl Gui {
             level_shown: 0.0,
             new_term: String::new(),
             editing_term: None,
+            term_filter: String::new(),
             style_draft: StyleDraft::default(),
             word_list: pages::text::DEFAULT_WORD_LIST.to_string(),
             new_uinput_app: String::new(),
