@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/andymai/hush/compare/v0.19.0...v0.20.0) (2026-11-10)
+
+
+### Features
+
+* **audio:** transcribe hands-free takes in parts ([#286](https://github.com/andymai/hush/issues/286)) ([80684d4](https://github.com/andymai/hush/commit/80684d45a24c24492313ecba102dd04b48f42908))
+
 ## [0.19.0](https://github.com/andymai/hush/compare/v0.18.0...v0.19.0) (2026-11-10)
 
 
