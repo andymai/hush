@@ -2003,6 +2003,7 @@ dependencies = [
  "futures-util",
  "global-hotkey",
  "hound",
+ "image",
  "indicatif",
  "input-linux",
  "ksni",

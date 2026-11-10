@@ -47,6 +47,40 @@ pub struct Config {
     /// Opt-in check for a newer release
     #[serde(default)]
     pub updates: UpdatesConfig,
+    /// The settings window
+    #[serde(default)]
+    pub gui: GuiConfig,
+}
+
+/// Settings window settings
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct GuiConfig {
+    /// Light, dark, or the desktop's preference
+    pub appearance: Appearance,
+}
+
+/// The colours of the settings window
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Appearance {
+    /// The desktop's light or dark preference
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Appearance {
+    pub const ALL: [Appearance; 3] = [Appearance::System, Appearance::Light, Appearance::Dark];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Appearance::System => "System",
+            Appearance::Light => "Light",
+            Appearance::Dark => "Dark",
+        }
+    }
 }
 
 /// Update check settings
@@ -1099,6 +1133,39 @@ model_size = "small"
         assert_eq!(Config::defaults().unwrap().hooks.transcript, "");
         let config = Config::parse_over_defaults("[hooks]\ntranscript = \"tr a-z A-Z\"\n").unwrap();
         assert_eq!(config.hooks.transcript, "tr a-z A-Z");
+    }
+
+    #[test]
+    fn the_window_follows_the_desktop_unless_told_otherwise() {
+        assert_eq!(
+            Config::defaults().unwrap().gui.appearance,
+            Appearance::System
+        );
+        for (text, appearance) in [
+            ("system", Appearance::System),
+            ("light", Appearance::Light),
+            ("dark", Appearance::Dark),
+        ] {
+            let config =
+                Config::parse_over_defaults(&format!("[gui]\nappearance = \"{text}\"\n")).unwrap();
+            assert_eq!(config.gui.appearance, appearance);
+            let saved = toml::to_string_pretty(&config).unwrap();
+            assert!(
+                saved.contains(&format!("appearance = \"{text}\"")),
+                "{saved}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_appearance_is_rejected() {
+        for text in ["blue", "Dark", ""] {
+            let err = Config::parse_over_defaults(&format!("[gui]\nappearance = \"{text}\"\n"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("`system`, `light`, `dark`"), "{err}");
+        }
+        assert!(Config::parse_over_defaults("[gui]\nappearance = 1\n").is_err());
     }
 
     #[test]

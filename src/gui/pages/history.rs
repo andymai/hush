@@ -4,8 +4,11 @@
 
 use crate::audio::{file, store};
 use crate::config::settings::MAX_KEEP_AUDIO_DAYS;
-use crate::gui::theme::{
-    field, hint, palette, quiet_button, row, toggle, toggle_row, ACCENT, BAD, MUTED,
+use crate::gui::icons;
+use crate::gui::theme::{self, palette};
+use crate::gui::widgets::{
+    self, chip, empty, icon_button, intro, number, row, section, switch, switch_row, text_area,
+    Button, Field, Size, Variant,
 };
 use crate::gui::Gui;
 use crate::ipc::{client, DaemonCommand};
@@ -24,11 +27,11 @@ use tracing::warn;
 const PAGE: usize = 50;
 /// A longer transcript shows its start; Copy still copies all of it.
 const PREVIEW_CHARS: usize = 400;
-const ENTRY_CONTROLS: f32 = 150.0;
-const CHIP_ROUNDING: f32 = 12.0;
-const AUDIO_CONTROLS: f32 = 120.0;
-const TOOLBAR_CONTROLS: f32 = 310.0;
-const RETENTION_CONTROLS: f32 = 190.0;
+/// Delete, Copy, and Fix; Again and Play add two more.
+const ENTRY_CONTROLS: f32 = 3.0 * 28.0;
+const AUDIO_CONTROLS: f32 = 2.0 * 28.0;
+const TOOLBAR_CONTROLS: f32 = 330.0;
+const RETENTION_CONTROLS: f32 = 170.0;
 /// The days that the switch sets when no other number was chosen.
 const DEFAULT_KEEP_DAYS: u64 = 30;
 const BUSY_REPAINT: Duration = Duration::from_millis(250);
@@ -201,24 +204,27 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     } else {
         "Hush keeps no new transcripts. The ones below stay until you delete them.".to_string()
     };
-    ui.add_space(6.0);
-    toggle_row(
+    section(ui, "Storage");
+    switch_row(
         ui,
+        "history.enabled",
         "Keep a history",
         &description,
         &mut gui.config.history.enabled,
     );
     retention_row(gui, ui);
-    if let Some(error) = &gui.history.error {
-        ui.add_space(6.0);
-        ui.colored_label(BAD, error);
-    }
 
+    section(ui, "Transcripts");
+    let colours = palette(ui.ctx());
+    if let Some(error) = &gui.history.error {
+        widgets::notice(ui, icons::CIRCLE_X, colours.bad, error);
+        ui.add_space(8.0);
+    }
     let view = &mut gui.history;
     let total = view.entries.len();
     if total == 0 {
-        ui.add_space(10.0);
-        ui.label(egui::RichText::new("Nothing yet. What you dictate shows up here.").color(MUTED));
+        widgets::divider(ui);
+        empty(ui, "Nothing yet. What you dictate shows up here.");
         return;
     }
 
@@ -233,32 +239,45 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     } else {
         format!("{} transcripts", total)
     };
-    row(&summary).reserve(TOOLBAR_CONTROLS).show(ui, |ui| {
-        if view.confirm_clear {
-            if ui.button("Keep them").clicked() {
-                view.confirm_clear = false;
+    row("history.toolbar", &summary)
+        .reserve(TOOLBAR_CONTROLS)
+        .show(ui, |ui| {
+            if view.confirm_clear {
+                if ui
+                    .add(
+                        Button::new("Delete all")
+                            .icon(icons::TRASH)
+                            .variant(Variant::Danger),
+                    )
+                    .clicked()
+                {
+                    action = Some(Action::Clear);
+                }
+                if ui.add(Button::new("Keep them")).clicked() {
+                    view.confirm_clear = false;
+                }
+            } else {
+                if ui
+                    .add(
+                        Button::new("Clear all")
+                            .icon(icons::TRASH)
+                            .variant(Variant::Quiet),
+                    )
+                    .clicked()
+                {
+                    view.confirm_clear = true;
+                }
+                let search = Field::new(&mut view.filter, "Search").icon(icons::SEARCH);
+                if ui.add(search).changed() {
+                    view.shown = PAGE;
+                }
             }
-            if ui
-                .button(egui::RichText::new("Delete all").color(BAD))
-                .clicked()
-            {
-                action = Some(Action::Clear);
-            }
-        } else {
-            if quiet_button(ui, "Clear all").clicked() {
-                view.confirm_clear = true;
-            }
-            if field(ui, &mut view.filter, "Search").changed() {
-                view.shown = PAGE;
-            }
-        }
-    });
+        });
 
     let shown = view.shown.max(PAGE);
     let matches = matching(&view.entries, &view.filter);
     if matches.is_empty() {
-        ui.add_space(10.0);
-        ui.label(egui::RichText::new("No transcript matches.").color(MUTED));
+        empty(ui, "No transcript matches.");
     }
     for entry in matches.iter().take(shown) {
         let when = entry
@@ -279,34 +298,43 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         }
         let audio = view.audio_of(entry);
         let reserve = ENTRY_CONTROLS + if audio.is_some() { AUDIO_CONTROLS } else { 0.0 };
-        row(&preview(&entry.text))
+        let key = format!("history.entry.{}", entry.at.to_rfc3339());
+        row(&key, &preview(&entry.text))
+            .plain()
             .describe(&meta)
             .reserve(reserve)
             .show(ui, |ui| {
-                if quiet_button(ui, "Delete").clicked() {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                if icon_button(ui, icons::TRASH, "Delete").clicked() {
                     action = Some(Action::Delete((*entry).clone()));
                 }
-                if quiet_button(ui, "Copy").clicked() {
+                if icon_button(ui, icons::COPY, "Copy").clicked() {
                     action = Some(Action::Copy(entry.text.clone()));
                 }
-                if quiet_button(ui, "Fix")
-                    .on_hover_text("Correct the text and learn the new words in it")
-                    .clicked()
+                if icon_button(
+                    ui,
+                    icons::PENCIL,
+                    "Fix: correct the text and learn the new words in it",
+                )
+                .clicked()
                 {
                     action = Some(Action::Fix((*entry).clone()));
                 }
                 if let Some(name) = audio {
-                    if quiet_button(ui, "Again")
-                        .on_hover_text("Transcribe the audio again with the current model")
-                        .clicked()
+                    if icon_button(
+                        ui,
+                        icons::ROTATE_CW,
+                        "Transcribe the audio again with the current model",
+                    )
+                    .clicked()
                     {
                         action = Some(Action::Again(name.to_string()));
                     }
                     if view.playing(name) {
-                        if quiet_button(ui, "Stop").clicked() {
+                        if icon_button(ui, icons::SQUARE, "Stop").clicked() {
                             action = Some(Action::StopPlaying);
                         }
-                    } else if quiet_button(ui, "Play").clicked() {
+                    } else if icon_button(ui, icons::PLAY, "Play").clicked() {
                         action = Some(Action::Play(name.to_string()));
                     }
                 }
@@ -328,16 +356,17 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     }
     let remaining = matches.len().saturating_sub(shown);
     if remaining > 0 {
-        ui.add_space(8.0);
+        widgets::divider(ui);
         if ui
-            .button(format!("Show more ({} left)", remaining))
+            .add(Button::new(&format!("Show more ({} left)", remaining)))
             .clicked()
         {
             view.shown = shown + PAGE;
         }
+        ui.add_space(8.0);
     }
-    ui.add_space(4.0);
-    hint(
+    widgets::divider(ui);
+    intro(
         ui,
         "Each entry names the window class of its application. Use that name \
          for the rules by application on the Output page.",
@@ -410,32 +439,35 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
 /// An entry open for a fix: its text in a box, with Save and Cancel.
 fn show_fix(ui: &mut egui::Ui, fix: &mut Fix, meta: &str) -> Option<Action> {
     let mut choice = None;
-    ui.add_space(6.0);
-    hint(ui, meta);
-    let response = ui.add(
-        egui::TextEdit::multiline(&mut fix.draft)
-            .desired_width(f32::INFINITY)
-            .desired_rows(2)
-            .margin(egui::vec2(8.0, 6.0)),
-    );
+    widgets::divider(ui);
+    ui.add_space(8.0);
+    let colours = palette(ui.ctx());
+    widgets::text(ui, meta, theme::sans(theme::SMALL), colours.muted);
+    let width = ui.available_width();
+    let response = text_area(ui, &mut fix.draft, "", 2, width);
     if std::mem::take(&mut fix.focus) {
         response.request_focus();
     }
     ui.horizontal(|ui| {
-        if ui.button("Save").clicked() {
+        let save = Button::new("Save")
+            .icon(icons::CHECK)
+            .variant(Variant::Primary)
+            .size(Size::Small);
+        if ui.add(save).clicked() {
             choice = Some(Action::SaveFix);
         }
-        if quiet_button(ui, "Cancel").clicked() {
+        let cancel = Button::new("Cancel")
+            .variant(Variant::Ghost)
+            .size(Size::Small);
+        if ui.add(cancel).clicked() {
             choice = Some(Action::CancelFix);
         }
-        hint(
-            ui,
-            "The entry keeps its time, app, and audio. Hush then suggests \
-             the new words for the vocabulary.",
-        );
     });
-    ui.add_space(6.0);
-    ui.separator();
+    intro(
+        ui,
+        "The entry keeps its time, app, and audio. Hush then suggests \
+         the new words for the vocabulary.",
+    );
     choice
 }
 
@@ -444,33 +476,28 @@ fn show_proposals(ui: &mut egui::Ui, terms: &[String]) -> Option<Action> {
     let mut choice = None;
     let colours = palette(ui.ctx());
     ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new("Learn from the fix:").color(MUTED));
+        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+        widgets::text(
+            ui,
+            "Learn from the fix:",
+            theme::sans(theme::SMALL),
+            colours.muted,
+        );
         for term in terms {
-            egui::Frame::none()
-                .fill(colours.raised)
-                .stroke(egui::Stroke::new(1.0_f32, colours.border_strong))
-                .rounding(CHIP_ROUNDING)
-                .inner_margin(egui::Margin::symmetric(10.0, 0.0))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(term).strong());
-                        let add = egui::Button::new(egui::RichText::new("Add").color(ACCENT))
-                            .frame(false);
-                        if ui
-                            .add(add)
-                            .on_hover_text("Add to the vocabulary, as hush learn does")
-                            .clicked()
-                        {
-                            choice = Some(Action::Learn(term.clone()));
-                        }
-                        if quiet_button(ui, "Skip").clicked() {
-                            choice = Some(Action::Skip(term.clone()));
-                        }
-                    });
-                });
+            chip(ui, |ui| {
+                widgets::text(ui, term, theme::medium(theme::BODY), colours.ink);
+                if icon_button(ui, icons::PLUS, "Add to the vocabulary, as hush learn does")
+                    .clicked()
+                {
+                    choice = Some(Action::Learn(term.clone()));
+                }
+                if icon_button(ui, icons::X, "Skip").clicked() {
+                    choice = Some(Action::Skip(term.clone()));
+                }
+            });
         }
     });
-    ui.separator();
+    ui.add_space(12.0);
     choice
 }
 
@@ -563,13 +590,13 @@ fn retention_row(gui: &mut Gui, ui: &mut egui::Ui) {
     let caution = (days == 0 && gui.saved.history.keep_audio_days > 0)
         .then_some("Saving deletes the audio that Hush kept.");
     ui.add_enabled_ui(gui.config.history.enabled, |ui| {
-        row("Keep the audio")
+        row("history.keep_audio", "Keep the audio")
             .describe(&description)
             .caution(caution)
-            .reserve(RETENTION_CONTROLS)
+            .reserve(if days > 0 { RETENTION_CONTROLS } else { 36.0 })
             .show(ui, |ui| {
                 let mut on = days > 0;
-                if toggle(ui, &mut on).changed() {
+                if switch(ui, &mut on).changed() {
                     gui.config.history.keep_audio_days = if on {
                         Some(gui.history.days)
                             .filter(|days| *days > 0)
@@ -579,10 +606,9 @@ fn retention_row(gui: &mut Gui, ui: &mut egui::Ui) {
                     };
                 }
                 if on {
-                    ui.label("days");
+                    ui.add_space(8.0);
                     let mut chosen = gui.config.history.keep_audio_days;
-                    let drag = egui::DragValue::new(&mut chosen).range(1..=MAX_KEEP_AUDIO_DAYS);
-                    if ui.add(drag).changed() {
+                    if number(ui, &mut chosen, 1..=MAX_KEEP_AUDIO_DAYS, "days").changed() {
                         gui.config.history.keep_audio_days = chosen;
                     }
                 }
@@ -595,25 +621,41 @@ fn retention_row(gui: &mut Gui, ui: &mut egui::Ui) {
 fn show_again(ui: &mut egui::Ui, again: &Again) -> Option<String> {
     let result = again.result.lock().clone();
     let mut copy = None;
-    ui.horizontal_wrapped(|ui| match result {
-        None => {
-            ui.spinner();
-            ui.label(egui::RichText::new("Transcribing again…").color(MUTED));
-        },
-        Some(Ok(text)) if text.is_empty() => {
-            ui.label(egui::RichText::new("Hush heard no speech in the audio.").color(MUTED));
-        },
+    let colours = palette(ui.ctx());
+    match result {
+        None => widgets::busy(ui, "Transcribing again…"),
+        Some(Ok(text)) if text.is_empty() => widgets::status(
+            ui,
+            icons::INFO,
+            colours.muted,
+            "Hush heard no speech in the audio.",
+        ),
         Some(Ok(text)) => {
-            if quiet_button(ui, "Copy").clicked() {
-                copy = Some(text.clone());
-            }
-            ui.label(egui::RichText::new(format!("Again: {}", preview(&text))).italics());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let button = Button::new("Copy").icon(icons::COPY).size(Size::Small);
+                if ui.add(button).clicked() {
+                    copy = Some(text.clone());
+                }
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(format!("Again: {}", preview(&text)))
+                            .font(theme::sans(theme::BODY))
+                            .color(colours.ink)
+                            .italics(),
+                    )
+                    .wrap(),
+                );
+            });
         },
-        Some(Err(error)) => {
-            ui.colored_label(BAD, format!("Could not transcribe again: {}", error));
-        },
-    });
-    ui.separator();
+        Some(Err(error)) => widgets::notice(
+            ui,
+            icons::CIRCLE_X,
+            colours.bad,
+            &format!("Could not transcribe again: {}", error),
+        ),
+    }
+    ui.add_space(12.0);
     copy
 }
 

@@ -6,10 +6,12 @@
 
 use crate::config::settings::HotkeyConfig;
 use crate::gui::capture::Capture;
+use crate::gui::icons;
 use crate::gui::pages::speech::language_picker;
-use crate::gui::theme::{
-    caution, field, hint, quiet_button, row, section, slider, toggle_row, ACCENT, CONTROL_HEIGHT,
-    FIELD_WIDTH, MUTED,
+use crate::gui::theme::palette;
+use crate::gui::widgets::{
+    dropdown, icon_button, intro, key_field, notice, number, option, row, section, segmented,
+    switch_row, Field,
 };
 use crate::gui::Gui;
 use crate::hotkey::warnings;
@@ -103,14 +105,23 @@ fn required(role: Role) -> bool {
     role == Role::Dictate
 }
 
-/// Width of the key button plus its Type and Clear actions.
-const KEY_COLUMN: f32 = 320.0;
+/// Width of a key field.
+const KEY_WIDTH: f32 = 200.0;
 
-/// Width of the key button, the language or style picker, and Remove.
-const CHORD_COLUMN: f32 = 420.0;
+/// Width of the key field plus its Type and Clear buttons.
+const KEY_COLUMN: f32 = KEY_WIDTH + 64.0;
+
+/// Width of a key field beside a language or style picker.
+const CHORD_KEY_WIDTH: f32 = 160.0;
 
 /// Width of the language or style picker beside a key.
 const PICKER_WIDTH: f32 = 130.0;
+
+/// Width of the key field, the picker, and Remove.
+const CHORD_COLUMN: f32 = CHORD_KEY_WIDTH + PICKER_WIDTH + 40.0;
+
+/// The longest press that `hotkey.tap_ms` may call a tap.
+const MAX_TAP_MS: u64 = 2000;
 
 /// Red text under a hotkey field that does not parse.
 pub fn combination_error(text: &str, required: bool) -> Option<String> {
@@ -191,7 +202,8 @@ fn reaches_the_app(chord: &KeyCombination) -> String {
 }
 
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
-    hint(
+    section(ui, "Dictation");
+    intro(
         ui,
         "Click a key, then press the one you want. A modifier on its own, such as \
          RightAlt, types no character in other applications.",
@@ -201,10 +213,10 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         gui.layout.as_ref(),
         &gui.modifier_keys,
     ) {
-        ui.add_space(4.0);
-        caution(ui, &altgr_caution(&altgr));
+        let warn = palette(ui.ctx()).warn;
+        notice(ui, icons::TRIANGLE_ALERT, warn, &altgr_caution(&altgr));
+        ui.add_space(8.0);
     }
-    ui.add_space(4.0);
 
     key_row(
         gui,
@@ -217,17 +229,13 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
             HotkeyMode::Toggle => "Tap to start, tap again to stop.",
         },
     );
-    row("Mode")
+    row("hotkeys.mode", "Mode")
         .describe("Hold to talk, or tap to start and tap to stop.")
+        .reserve(250.0)
         .show(ui, |ui| {
-            egui::ComboBox::from_id_salt("hotkey_mode")
-                .width(FIELD_WIDTH)
-                .selected_text(mode_name(gui.config.hotkey.mode))
-                .show_ui(ui, |ui| {
-                    for mode in [HotkeyMode::Hold, HotkeyMode::Toggle] {
-                        ui.selectable_value(&mut gui.config.hotkey.mode, mode, mode_name(mode));
-                    }
-                });
+            let options =
+                [HotkeyMode::Hold, HotkeyMode::Toggle].map(|mode| (mode, mode_name(mode)));
+            segmented(ui, &mut gui.config.hotkey.mode, &options);
         });
     key_row(
         gui,
@@ -256,36 +264,27 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         Role::Learn,
         "Adds the selected word to the vocabulary with its exact spelling.",
     );
-    row("Read keys through")
+    row("hotkeys.backend", "Read keys through")
         .describe("The input devices work on Wayland and X11 alike. X11 is the fallback.")
+        .reserve(280.0)
         .show(ui, |ui| {
-            egui::ComboBox::from_id_salt("hotkey_backend")
-                .width(FIELD_WIDTH)
-                .selected_text(backend_name(gui.config.hotkey.backend))
-                .show_ui(ui, |ui| {
-                    for backend in [
-                        HotkeyBackend::Auto,
-                        HotkeyBackend::Evdev,
-                        HotkeyBackend::X11,
-                    ] {
-                        ui.selectable_value(
-                            &mut gui.config.hotkey.backend,
-                            backend,
-                            backend_name(backend),
-                        );
-                    }
-                });
+            let options = [
+                HotkeyBackend::Auto,
+                HotkeyBackend::Evdev,
+                HotkeyBackend::X11,
+            ]
+            .map(|backend| (backend, backend_name(backend)));
+            segmented(ui, &mut gui.config.hotkey.backend, &options);
         });
-    row("Tap is shorter than")
+    row("hotkeys.tap_ms", "Tap is shorter than")
         .describe("A shorter press is a tap: taps lock and unlock, holds record.")
+        .reserve(110.0)
         .show(ui, |ui| {
-            slider(
-                ui,
-                egui::Slider::new(&mut gui.config.hotkey.tap_ms, 100..=1000).suffix(" ms"),
-            );
+            number(ui, &mut gui.config.hotkey.tap_ms, 100..=MAX_TAP_MS, "ms");
         });
-    toggle_row(
+    switch_row(
         ui,
+        "hotkeys.exclusive",
         "Keep the key from other applications",
         "Grabs the device the key belongs to. Needed for mouse buttons, which \
          browsers otherwise treat as Back.",
@@ -352,7 +351,7 @@ fn backend_name(backend: HotkeyBackend) -> &'static str {
 
 fn chord_keys(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap, title: &str, about: &str) {
     section(ui, title);
-    hint(ui, about);
+    intro(ui, about);
     let chords: Vec<String> = map.entries(&gui.config.hotkey).keys().cloned().collect();
     for chord in chords {
         chord_row(gui, ui, map, &chord);
@@ -380,17 +379,14 @@ fn picker(
             } else {
                 current.clone()
             };
-            egui::ComboBox::from_id_salt(id_salt)
-                .width(PICKER_WIDTH)
-                .selected_text(shown)
-                .show_ui(ui, |ui| {
-                    if !current.is_empty() && !style_names.iter().any(|n| n.as_str() == current) {
-                        ui.selectable_value(value, current.clone(), &current);
-                    }
-                    for name in style_names {
-                        ui.selectable_value(value, name.to_string(), name.as_str());
-                    }
-                });
+            dropdown(ui, id_salt, PICKER_WIDTH, &shown, |ui| {
+                if !current.is_empty() && !style_names.iter().any(|n| n.as_str() == current) {
+                    option(ui, value, current.clone(), &current);
+                }
+                for name in style_names {
+                    option(ui, value, name.to_string(), name.as_str());
+                }
+            });
         },
     }
 }
@@ -407,25 +403,25 @@ fn chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap, chord: &str) {
         .or_else(|| map_taken(&gui.config.hotkey, map, Some(chord), chord));
     let notice = map_caution(&gui.config.hotkey, map, chord);
     let style_names = map.style_names(&gui.config);
-    row(&map.title(&value))
+    let key = format!("hotkeys.{:?}.{}", map, chord).to_lowercase();
+    row(&key, &map.title(&value))
         .problem(error.as_deref())
         .caution(notice.as_deref())
         .reserve(CHORD_COLUMN)
         .show(ui, |ui| {
-            let button = capture_button(capturing, egui::RichText::new(chord).strong());
-            if ui
-                .add(button)
-                .on_hover_text("Click, then press the key you want")
-                .clicked()
-            {
-                toggle_capture(gui, target);
+            if icon_button(ui, icons::X, "Remove this key").clicked() {
+                gui.capture = None;
+                map.entries_mut(&mut gui.config.hotkey).remove(chord);
+                return;
             }
             if let Some(value) = map.entries_mut(&mut gui.config.hotkey).get_mut(chord) {
                 picker(ui, map, (map, chord), value, &style_names, "");
             }
-            if quiet_button(ui, "Remove").clicked() {
-                gui.capture = None;
-                map.entries_mut(&mut gui.config.hotkey).remove(chord);
+            if key_field(ui, chord, capturing, CHORD_KEY_WIDTH, "Not set")
+                .on_hover_text("Click, then press the key you want")
+                .clicked()
+            {
+                toggle_capture(gui, target);
             }
         });
 }
@@ -451,13 +447,18 @@ fn new_chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap) {
         ),
     };
     let style_names = map.style_names(&gui.config);
-    row(title)
+    let key = format!("hotkeys.{:?}.new", map).to_lowercase();
+    row(&key, title)
         .describe(about)
-        .reserve(CHORD_COLUMN)
+        .reserve(CHORD_KEY_WIDTH + PICKER_WIDTH + 8.0)
         .show(ui, |ui| {
-            let button = capture_button(capturing, egui::RichText::new("Choose the key"));
             let ready = !map.new_value(gui).is_empty();
-            if ui.add_enabled(ready, button).clicked() {
+            let clicked = ui
+                .add_enabled_ui(ready, |ui| {
+                    key_field(ui, "", capturing, CHORD_KEY_WIDTH, "Choose the key").clicked()
+                })
+                .inner;
+            if clicked {
                 toggle_capture(gui, target);
             }
             picker(
@@ -469,18 +470,6 @@ fn new_chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap) {
                 placeholder,
             );
         });
-}
-
-/// The button that captures a key: `idle` until it is clicked, then a
-/// prompt to press the key.
-fn capture_button(capturing: bool, idle: egui::RichText) -> egui::Button<'static> {
-    if capturing {
-        egui::Button::new(egui::RichText::new("Press a key or button…").color(ACCENT))
-            .min_size(egui::vec2(FIELD_WIDTH, CONTROL_HEIGHT))
-            .stroke(egui::Stroke::new(1.5_f32, ACCENT))
-    } else {
-        egui::Button::new(idle).min_size(egui::vec2(FIELD_WIDTH, CONTROL_HEIGHT))
-    }
 }
 
 fn toggle_capture(gui: &mut Gui, target: KeyTarget) {
@@ -528,17 +517,20 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
     let error = combination_error(&value, required(role))
         .or_else(|| taken(&gui.config.hotkey, role, &value));
     let notice = printable_caution(&gui.config.hotkey, role);
-    row(&role.label())
+    let key = format!("hotkeys.{:?}", role).to_lowercase();
+    row(&key, &role.label())
         .describe(hint_text)
         .problem(error.as_deref())
         .caution(notice.as_deref())
         .reserve(KEY_COLUMN)
         .show(ui, |ui| {
             if editing {
+                ui.add_space(64.0);
                 let Some(slot) = gui.config.hotkey.chord_mut(role) else {
                     return;
                 };
-                let response = field(ui, slot, "Ctrl+Shift+Space");
+                let invalid = error.is_some();
+                let response = ui.add(Field::new(slot, "Ctrl+Shift+Space").mono().invalid(invalid));
                 if gui.focus_editor {
                     response.request_focus();
                     gui.focus_editor = false;
@@ -548,14 +540,21 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
                 return;
             }
 
-            let idle = if value.is_empty() {
-                egui::RichText::new("Not set").color(MUTED)
-            } else {
-                egui::RichText::new(&value).strong()
-            };
-            let button = capture_button(capturing, idle);
-            if ui
-                .add(button)
+            let clear = !required(role) && !value.is_empty();
+            if !clear {
+                ui.add_space(32.0);
+            }
+            if clear && icon_button(ui, icons::X, "Clear the key").clicked() {
+                gui.capture = None;
+                if let Some(slot) = gui.config.hotkey.chord_mut(role) {
+                    slot.clear();
+                }
+            }
+            if icon_button(ui, icons::PENCIL, "Type the key's name instead").clicked() {
+                gui.capture = None;
+                start_typing(gui, role);
+            }
+            if key_field(ui, &value, capturing, KEY_WIDTH, "Not set")
                 .on_hover_text("Click, then press the key you want")
                 .clicked()
             {
@@ -564,19 +563,6 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
                 } else {
                     start_capture(gui, role);
                 }
-            }
-            if !required(role) && !value.is_empty() && quiet_button(ui, "Clear").clicked() {
-                gui.capture = None;
-                if let Some(slot) = gui.config.hotkey.chord_mut(role) {
-                    slot.clear();
-                }
-            }
-            if quiet_button(ui, "Type")
-                .on_hover_text("Type the key's name instead")
-                .clicked()
-            {
-                gui.capture = None;
-                start_typing(gui, role);
             }
         });
 }
