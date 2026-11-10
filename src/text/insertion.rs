@@ -155,6 +155,25 @@ fn chord_without_primary(window: Option<&WindowInfo>, profiles: &ProfilesConfig)
     }
 }
 
+/// The chord when the primary selection cannot take the text, or `None`
+/// when no chord pastes it. Under Shift Lock, Ctrl+V arrives as
+/// Ctrl+Shift+V, so a window that pastes the clipboard on Shift+Insert
+/// keeps Shift+Insert. A terminal pastes the primary selection on it, so
+/// no chord is left, and the take falls back to typing.
+fn fallback_without_primary(
+    window: Option<&WindowInfo>,
+    profiles: &ProfilesConfig,
+    shift_locked: bool,
+) -> Option<PasteChord> {
+    if !shift_locked {
+        return Some(chord_without_primary(window, profiles));
+    }
+    match window {
+        Some(window) if AppKind::classify(window, profiles) == AppKind::Terminal => None,
+        _ => Some(PasteChord::ShiftInsert),
+    }
+}
+
 /// Text for a terminal, where a line break runs the command. Each run of
 /// line breaks (`\n`, `\r\n`, `\r`) and the spaces next to them becomes one
 /// space, or nothing at the start or end of the text. Other control
@@ -432,6 +451,7 @@ impl TextInserter {
             selections.push(Selection::Primary);
         }
         let mut saved = Vec::with_capacity(selections.len());
+        let mut no_chord = None;
         for selection in selections {
             let snapshot = clipboard::snapshot(clipboard, selection, &clock);
             match clipboard.offer(selection, transcript.formats()) {
@@ -439,14 +459,33 @@ impl TextInserter {
                 Err(e) if selection == Selection::Clipboard => {
                     return Err(e).context("failed to set clipboard");
                 },
-                Err(e) => {
-                    chord = chord_without_primary(window, &self.profiles);
-                    warn!(
-                        "Could not set the {} ({:#}); pasting with {} instead",
-                        selection, e, chord
-                    );
+                Err(e) => match fallback_without_primary(window, &self.profiles, shift_locked) {
+                    Some(fallback) => {
+                        chord = fallback;
+                        warn!(
+                            "Could not set the {} ({:#}); pasting with {} instead",
+                            selection, e, chord
+                        );
+                    },
+                    None => {
+                        no_chord = Some(anyhow::anyhow!(
+                            "could not set the {} ({:#}), and under Shift Lock no other \
+                             chord pastes in a terminal",
+                            selection,
+                            e
+                        ));
+                        break;
+                    },
                 },
             }
+        }
+        if let Some(e) = no_chord {
+            for (selection, snapshot) in saved {
+                let outcome =
+                    clipboard::restore(clipboard, selection, snapshot, &transcript, &clock);
+                log_restore(selection, &outcome);
+            }
+            return Err(e);
         }
         wait_for_modifiers();
         debug!("Pasting with {}", chord);
@@ -837,6 +876,35 @@ mod tests {
         assert!(
             !presses_enter(dictation, false, "ls -la", &sent),
             "a window outside submit_apps"
+        );
+    }
+
+    #[test]
+    fn under_shift_lock_a_failed_primary_selection_keeps_shift_insert_or_types() {
+        let profiles = ProfilesConfig::defaults();
+        let editor = window("firefox");
+        let terminal = window("kitty");
+        assert_eq!(
+            fallback_without_primary(Some(&editor), &profiles, false),
+            Some(PasteChord::CtrlV)
+        );
+        assert_eq!(
+            fallback_without_primary(Some(&terminal), &profiles, false),
+            Some(PasteChord::CtrlShiftV)
+        );
+        assert_eq!(
+            fallback_without_primary(Some(&editor), &profiles, true),
+            Some(PasteChord::ShiftInsert),
+            "Ctrl+V would arrive as Ctrl+Shift+V; Shift+Insert pastes the clipboard here"
+        );
+        assert_eq!(
+            fallback_without_primary(None, &profiles, true),
+            Some(PasteChord::ShiftInsert)
+        );
+        assert_eq!(
+            fallback_without_primary(Some(&terminal), &profiles, true),
+            None,
+            "a terminal pastes the primary selection on Shift+Insert, so the take types"
         );
     }
 
