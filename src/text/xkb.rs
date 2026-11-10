@@ -654,6 +654,11 @@ pub(crate) mod tests {
         assert_eq!(taps(&dvorak, 'o'), Some(plain(Key::S)));
         assert_eq!(taps(&dvorak, ','), Some(plain(Key::W)));
         assert_eq!(taps(&dvorak, '\''), Some(plain(Key::Q)));
+        assert_eq!(
+            dvorak.plain_key('v'),
+            Some(Key::Dot),
+            "Ctrl+V presses this key"
+        );
 
         let es = table("es", "");
         assert_eq!(taps(&es, 'ñ'), Some(plain(Key::Semicolon)));

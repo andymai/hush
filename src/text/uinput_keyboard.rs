@@ -84,20 +84,18 @@ impl UinputKeyboard {
     }
 
     /// Hold the chord's modifiers, tap its key, and release the modifiers.
-    pub fn send_paste_shortcut(&mut self, chord: PasteChord) -> Result<()> {
+    /// `table` is the active layout's keys, so the chord presses the key
+    /// that types its letter there.
+    pub fn send_paste_shortcut(
+        &mut self,
+        chord: PasteChord,
+        table: Option<&KeyTable>,
+    ) -> Result<()> {
         if !self.ready {
             return Err(anyhow::anyhow!("Uinput keyboard not ready"));
         }
-        let (modifiers, key) = chord_keys(chord);
-        for modifier in modifiers {
-            self.send_key_event(*modifier, KeyState::PRESSED)?;
-            self.send_sync()?;
-        }
-        self.send_tap(Tap::plain(key))?;
-        for modifier in modifiers.iter().rev() {
-            self.send_key_event(*modifier, KeyState::RELEASED)?;
-        }
-        self.send_sync()
+        let (modifiers, key) = chord_keys(chord, table);
+        self.send_chord(modifiers, key)
     }
 
     pub fn set_typing_delay(&mut self, delay_ms: u64) {
@@ -220,75 +218,94 @@ impl UinputKeyboard {
         Ok(())
     }
 
-    /// Hold the tap's modifiers, press and release its key, and release the
-    /// modifiers, so no modifier stays down after a character.
     fn send_tap(&mut self, tap: Tap) -> Result<()> {
-        if self.device.is_none() {
-            return Ok(());
-        }
-        let modifiers = tap.modifiers();
-        let mut held = 0;
-        let mut sent = (|| {
-            for &modifier in &modifiers {
-                self.send_key_event(modifier, KeyState::PRESSED)?;
-                held += 1;
-                self.send_sync()?;
-            }
-            self.send_key_event(tap.key, KeyState::PRESSED)?;
-            self.send_sync()?;
-            thread::sleep(Duration::from_millis(1));
-            self.send_key_event(tap.key, KeyState::RELEASED)
-        })();
-        for &modifier in modifiers[..held].iter().rev() {
-            let released = self.send_key_event(modifier, KeyState::RELEASED);
-            sent = sent.and(released);
-        }
-        sent.and(self.send_sync())
+        self.send_chord(&tap.modifiers(), tap.key)
     }
 
-    fn send_key_event(&mut self, key: Key, state: KeyState) -> Result<()> {
-        if let Some(device) = &mut self.device {
-            // Create event using current timestamp
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
-            let time = EventTime::new(now.as_secs() as i64, (now.subsec_micros() as i64) * 1000);
-
-            let event = sys::input_event {
-                time: time.into_inner(),
-                type_: EventKind::Key as u16,
-                code: key as u16,
-                value: state.value,
-            };
-
-            device
-                .write(&[event])
-                .map_err(|e| anyhow::anyhow!("Failed to write input event: {}", e))?;
+    fn send_chord(&mut self, modifiers: &[Key], key: Key) -> Result<()> {
+        match &mut self.device {
+            Some(device) => press_chord(device, modifiers, key),
+            None => Ok(()),
         }
-        Ok(())
+    }
+}
+
+/// Where key events go: the uinput device, or a recorder in the tests.
+trait Events {
+    fn key(&mut self, key: Key, state: KeyState) -> Result<()>;
+    fn sync(&mut self) -> Result<()>;
+}
+
+impl Events for UInputHandle<File> {
+    fn key(&mut self, key: Key, state: KeyState) -> Result<()> {
+        write_event(self, EventKind::Key as u16, key as u16, state.value)
+            .map_err(|e| anyhow::anyhow!("Failed to write input event: {}", e))
     }
 
-    fn send_sync(&mut self) -> Result<()> {
-        if let Some(device) = &mut self.device {
-            // Create sync event using current timestamp
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
-            let time = EventTime::new(now.as_secs() as i64, (now.subsec_micros() as i64) * 1000);
-
-            let event = sys::input_event {
-                time: time.into_inner(),
-                type_: EventKind::Synchronize as u16,
-                code: SynchronizeKind::Report as u16,
-                value: 0,
-            };
-
-            device
-                .write(&[event])
-                .map_err(|e| anyhow::anyhow!("Failed to write sync event: {}", e))?;
-        }
-        Ok(())
+    fn sync(&mut self) -> Result<()> {
+        write_event(
+            self,
+            EventKind::Synchronize as u16,
+            SynchronizeKind::Report as u16,
+            0,
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to write sync event: {}", e))
     }
+}
+
+fn write_event(
+    device: &UInputHandle<File>,
+    kind: u16,
+    code: u16,
+    value: i32,
+) -> std::io::Result<()> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let time = EventTime::new(now.as_secs() as i64, (now.subsec_micros() as i64) * 1000);
+    let event = sys::input_event {
+        time: time.into_inner(),
+        type_: kind,
+        code,
+        value,
+    };
+    device.write(&[event]).map(drop)
+}
+
+/// Hold the modifiers in order, press and release the key, and release the
+/// modifiers in reverse. Every key that went down comes up again, also
+/// when a write fails, so no modifier stays held after a character or a
+/// paste.
+fn press_chord(events: &mut impl Events, modifiers: &[Key], key: Key) -> Result<()> {
+    let mut down = Vec::with_capacity(modifiers.len() + 1);
+    let pressed = press_all(
+        events,
+        modifiers.iter().copied().chain(std::iter::once(key)),
+        &mut down,
+    );
+    if pressed.is_ok() {
+        thread::sleep(Duration::from_millis(1));
+    }
+    let mut sent = pressed;
+    for &key in down.iter().rev() {
+        let released = events.key(key, KeyState::RELEASED);
+        sent = sent.and(released);
+    }
+    let synced = events.sync();
+    sent.and(synced)
+}
+
+fn press_all(
+    events: &mut impl Events,
+    keys: impl Iterator<Item = Key>,
+    down: &mut Vec<Key>,
+) -> Result<()> {
+    for key in keys {
+        events.key(key, KeyState::PRESSED)?;
+        down.push(key);
+        events.sync()?;
+    }
+    Ok(())
 }
 
 impl Drop for UinputKeyboard {
@@ -299,11 +316,17 @@ impl Drop for UinputKeyboard {
     }
 }
 
-/// The modifiers and the key of a paste chord.
-fn chord_keys(chord: PasteChord) -> (&'static [Key], Key) {
+/// The modifiers and the key of a paste chord. The letter is the key that
+/// types `v` on the active layout, so Ctrl+V stays Ctrl+V on Dvorak.
+/// Without a plain key for `v`, as on a Cyrillic layout, it is the US V
+/// key, which applications match to their Latin shortcuts.
+fn chord_keys(chord: PasteChord, table: Option<&KeyTable>) -> (&'static [Key], Key) {
+    let v = table
+        .and_then(|table| table.plain_key('v'))
+        .unwrap_or(Key::V);
     match chord {
-        PasteChord::CtrlV => (&[Key::LeftCtrl], Key::V),
-        PasteChord::CtrlShiftV => (&[Key::LeftCtrl, Key::LeftShift], Key::V),
+        PasteChord::CtrlV => (&[Key::LeftCtrl], v),
+        PasteChord::CtrlShiftV => (&[Key::LeftCtrl, Key::LeftShift], v),
         PasteChord::ShiftInsert => (&[Key::LeftShift], Key::Insert),
     }
 }
@@ -354,17 +377,143 @@ mod tests {
 
     #[test]
     fn each_paste_chord_presses_its_keys() {
+        let us = Some(KeyTable::us());
         assert_eq!(
-            chord_keys(PasteChord::CtrlV),
+            chord_keys(PasteChord::CtrlV, us),
             (&[Key::LeftCtrl][..], Key::V)
         );
         assert_eq!(
-            chord_keys(PasteChord::CtrlShiftV),
+            chord_keys(PasteChord::CtrlShiftV, None),
             (&[Key::LeftCtrl, Key::LeftShift][..], Key::V)
         );
         assert_eq!(
-            chord_keys(PasteChord::ShiftInsert),
+            chord_keys(PasteChord::ShiftInsert, us),
             (&[Key::LeftShift][..], Key::Insert)
         );
+    }
+
+    fn table(v: Option<Tap>) -> KeyTable {
+        let chars = v.map(|tap| ('v', vec![tap])).into_iter().collect();
+        KeyTable::new(chars, Key::LeftShift)
+    }
+
+    #[test]
+    fn the_paste_chord_presses_the_key_that_types_v() {
+        let dvorak = table(Some(Tap::plain(Key::Dot)));
+        assert_eq!(
+            chord_keys(PasteChord::CtrlV, Some(&dvorak)),
+            (&[Key::LeftCtrl][..], Key::Dot),
+            "V is on the US period key in Dvorak"
+        );
+        assert_eq!(
+            chord_keys(PasteChord::CtrlShiftV, Some(&dvorak)).1,
+            Key::Dot
+        );
+        assert_eq!(
+            chord_keys(PasteChord::ShiftInsert, Some(&dvorak)).1,
+            Key::Insert
+        );
+        let cyrillic = table(None);
+        assert_eq!(chord_keys(PasteChord::CtrlV, Some(&cyrillic)).1, Key::V);
+        let shifted_only = table(Some(Tap::shifted(Key::Dot)));
+        assert_eq!(
+            chord_keys(PasteChord::CtrlV, Some(&shifted_only)).1,
+            Key::V,
+            "only a plain key keeps the chord as it is"
+        );
+    }
+
+    /// Records events, and fails the write with the given number.
+    #[derive(Default)]
+    struct Recorder {
+        tried: Vec<Option<(Key, i32)>>,
+        events: Vec<Option<(Key, i32)>>,
+        fail_at: Option<usize>,
+    }
+
+    impl Recorder {
+        fn write(&mut self, event: Option<(Key, i32)>) -> Result<()> {
+            self.tried.push(event);
+            if self.fail_at == Some(self.tried.len()) {
+                return Err(anyhow::anyhow!("write {} failed", self.tried.len()));
+            }
+            self.events.push(event);
+            Ok(())
+        }
+
+        fn held(&self) -> Vec<Key> {
+            let mut held = Vec::new();
+            for &(key, value) in self.events.iter().flatten() {
+                if value == KeyState::PRESSED.value {
+                    held.push(key);
+                } else {
+                    held.retain(|&down| down != key);
+                }
+            }
+            held
+        }
+    }
+
+    impl Events for Recorder {
+        fn key(&mut self, key: Key, state: KeyState) -> Result<()> {
+            self.write(Some((key, state.value)))
+        }
+
+        fn sync(&mut self) -> Result<()> {
+            self.write(None)
+        }
+    }
+
+    #[test]
+    fn a_chord_holds_its_modifiers_around_the_key() {
+        let mut recorder = Recorder::default();
+        press_chord(&mut recorder, &[Key::LeftCtrl, Key::LeftShift], Key::V)
+            .expect("every write works");
+        let down = KeyState::PRESSED.value;
+        let up = KeyState::RELEASED.value;
+        assert_eq!(
+            recorder.events,
+            [
+                Some((Key::LeftCtrl, down)),
+                None,
+                Some((Key::LeftShift, down)),
+                None,
+                Some((Key::V, down)),
+                None,
+                Some((Key::V, up)),
+                Some((Key::LeftShift, up)),
+                Some((Key::LeftCtrl, up)),
+                None,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_write_still_releases_every_key() {
+        let up = KeyState::RELEASED.value;
+        for fail_at in 1..=10 {
+            let mut recorder = Recorder {
+                fail_at: Some(fail_at),
+                ..Recorder::default()
+            };
+            let sent = press_chord(&mut recorder, &[Key::RightAlt, Key::LeftShift], Key::Q);
+            assert!(sent.is_err(), "write {fail_at} fails");
+            let failed = recorder.tried[fail_at - 1];
+            for key in recorder.held() {
+                assert_eq!(
+                    failed,
+                    Some((key, up)),
+                    "write {fail_at} failed and left {key:?} held"
+                );
+            }
+            for &(key, value) in recorder.events.iter().flatten() {
+                if value != up {
+                    assert!(
+                        recorder.tried.contains(&Some((key, up))),
+                        "write {fail_at} failed and {key:?} got no release"
+                    );
+                }
+            }
+        }
     }
 }

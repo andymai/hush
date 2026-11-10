@@ -7,6 +7,7 @@
 //! is active; when it does not, insertion goes through the clipboard, which
 //! is layout independent.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -108,9 +109,21 @@ pub enum Active {
     Index(usize),
     /// No source says. With one layout in the list, that one is active.
     Unknown,
-    /// Hush cannot tell, for this reason.
-    Unclear(String),
+    /// Hush cannot tell, for this reason, and `fix` says what lets it type.
+    Unclear { why: String, fix: &'static str },
 }
+
+/// The fix when the session has several layouts and no word on the active
+/// one.
+pub const FIX_SEVERAL: &str = "to type, keep one layout, or use a desktop that reports the \
+     active layout (KDE Plasma, GNOME, Hyprland, Sway, X11)";
+const FIX_KWIN: &str = "to type, set the layouts in System Settings, then restart Hush";
+const FIX_PER_WINDOW: &str = "to type, turn off one source for each window: gsettings set \
+     org.gnome.desktop.input-sources per-window false";
+const FIX_GNOME_RECENT: &str =
+    "to type, keep one input source, or run IBus, which GNOME needs to record a switch";
+const FIX_X11: &str =
+    "to type, make the session layout the X server default with localectl set-x11-keymap";
 
 /// The session's keyboard: the layouts, the XKB rules, model, and options
 /// they compile with, and the active layout.
@@ -164,17 +177,25 @@ pub fn current() -> Option<Layout> {
 pub fn session() -> Option<Session> {
     let kxkbrc = dirs::config_dir().map(|dir| dir.join("kxkbrc"));
     let mut session = detect(kxkbrc.as_deref())?;
+    let x11 = !wayland() && std::env::var_os("DISPLAY").is_some();
+    if x11 {
+        match_server_default(&mut session, run("localectl", &["status"]).as_deref());
+    }
     if session.active == Active::Unknown && desktop_is("kde") {
         if let Some((names, index)) = kwin_layouts() {
-            session.active = kde_active(&session.layout, &names, index);
+            apply_kwin(&mut session, &names, index);
         }
     }
-    if session.active == Active::Unknown && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+    if session.active == Active::Unknown && x11 {
         if let Some(group) = x11_group() {
             session.active = Active::Index(group);
         }
     }
     Some(session)
+}
+
+fn wayland() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
 /// [`session`] without the active-layout queries, with `kxkbrc` in place of
@@ -197,17 +218,12 @@ fn detect(kxkbrc: Option<&Path>) -> Option<Session> {
             return Some(session);
         }
     }
-    if desktop_is("kde") {
-        let config = kxkbrc.and_then(read).map(|s| parse_kxkbrc(&s));
-        let options = config.as_ref().and_then(|config| config.options.clone());
-        if let Some(mut session) = config.and_then(|config| config.session) {
-            session.options = options.or_else(env_options);
-            return Some(session);
-        }
-        if let Some(mut session) = from_env() {
-            session.options = options.or_else(env_options);
-            return Some(session);
-        }
+    // KWin always compiles a keymap, so on KDE Wayland its rules decide.
+    // On KDE X11, kded applies the layouts to the X server, and setxkbmap
+    // reads them back.
+    if desktop_is("kde") && wayland() {
+        let config = kxkbrc.and_then(read).unwrap_or_default();
+        return Some(kwin_session(&parse_kxkbrc(&config), &XkbEnv::read()));
     }
     if desktop_is("gnome") {
         let get = |key: &str| {
@@ -216,48 +232,69 @@ fn detect(kxkbrc: Option<&Path>) -> Option<Session> {
                 &["get", "org.gnome.desktop.input-sources", key],
             )
         };
-        if let Some(session) = get("sources").and_then(|sources| {
-            parse_gnome(
-                &sources,
-                get("mru-sources").as_deref().unwrap_or_default(),
-                get("xkb-options").as_deref().unwrap_or_default(),
-            )
-        }) {
-            return Some(session);
+        if let Some(sources) = get("sources") {
+            let gnome = Gnome {
+                sources: &sources,
+                mru: &get("mru-sources").unwrap_or_default(),
+                options: &get("xkb-options").unwrap_or_default(),
+                per_window: get("per-window").is_some_and(|value| value.trim() == "true"),
+            };
+            if let Some(session) = parse_gnome(&gnome, || run("ibus", &["engine"])) {
+                return Some(session);
+            }
         }
     }
-    if let Some(session) = from_env() {
-        return Some(session);
-    }
     // Under Wayland, setxkbmap asks XWayland, whose rules often stay at the
-    // US default whatever the compositor uses.
-    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+    // US default whatever the compositor uses. Under X11, the X server's
+    // keymap is the truth, and the variables mean nothing to it.
+    if !wayland() {
         if let Some(session) = run("setxkbmap", &["-query"]).and_then(|s| parse_setxkbmap(&s)) {
             return Some(session);
         }
     }
+    if let Some(session) = from_env(&XkbEnv::read()) {
+        return Some(session);
+    }
     run("localectl", &["status"]).and_then(|s| parse_localectl(&s))
 }
 
-fn env_var(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+/// The `XKB_DEFAULT_*` variables, which compositors read when their own
+/// configuration names no layout. An unset variable is empty.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct XkbEnv {
+    rules: String,
+    model: String,
+    layout: String,
+    variant: String,
+    options: String,
 }
 
-fn env_options() -> Option<String> {
-    Some(env_var("XKB_DEFAULT_OPTIONS").unwrap_or_default())
+impl XkbEnv {
+    fn read() -> Self {
+        let var = |name: &str| {
+            std::env::var(name)
+                .map(|value| value.trim().to_string())
+                .unwrap_or_default()
+        };
+        Self {
+            rules: var("XKB_DEFAULT_RULES"),
+            model: var("XKB_DEFAULT_MODEL"),
+            layout: var("XKB_DEFAULT_LAYOUT"),
+            variant: var("XKB_DEFAULT_VARIANT"),
+            options: var("XKB_DEFAULT_OPTIONS"),
+        }
+    }
 }
 
-fn from_env() -> Option<Session> {
-    let layout = env_var("XKB_DEFAULT_LAYOUT")?;
-    let variant = env_var("XKB_DEFAULT_VARIANT").unwrap_or_default();
+fn from_env(env: &XkbEnv) -> Option<Session> {
+    if env.layout.is_empty() {
+        return None;
+    }
     Some(Session {
-        rules: env_var("XKB_DEFAULT_RULES").unwrap_or_default(),
-        model: env_var("XKB_DEFAULT_MODEL").unwrap_or_default(),
-        options: env_options(),
-        ..Session::new(Layout::xkb(layout, variant))
+        rules: env.rules.clone(),
+        model: env.model.clone(),
+        options: Some(env.options.clone()),
+        ..Session::new(Layout::xkb(env.layout.clone(), env.variant.clone()))
     })
 }
 
@@ -317,23 +354,20 @@ fn parse_localectl(text: &str) -> Option<Session> {
     field(text, "VC Keymap:").map(|keymap| Session::new(Layout::xkb(keymap, "")))
 }
 
-/// What KDE's kxkbrc says.
-#[derive(Debug, PartialEq, Eq)]
+/// The `[Layout]` group of KDE's kxkbrc. An unset key is empty.
+#[derive(Debug, Default, PartialEq, Eq)]
 struct Kxkbrc {
-    /// The layouts, when `Use` is true and the list is not empty.
-    session: Option<Session>,
+    layouts: String,
+    variants: String,
+    model: String,
     /// The options, which KWin applies only when `ResetOldOptions` is true.
     options: Option<String>,
 }
 
-/// KDE keeps its layouts, model, and options in kxkbrc.
 fn parse_kxkbrc(text: &str) -> Kxkbrc {
+    let mut config = Kxkbrc::default();
     let mut in_layout = false;
-    let mut used = false;
     let mut reset_options = false;
-    let mut layouts = None;
-    let mut variants = String::new();
-    let mut model = String::new();
     let mut options = String::new();
     for line in text.lines().map(str::trim) {
         if line.starts_with('[') {
@@ -346,31 +380,45 @@ fn parse_kxkbrc(text: &str) -> Kxkbrc {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        let value = value.trim();
+        let value = value.trim().to_string();
         match key.trim() {
-            "Use" => used = value == "true",
             "ResetOldOptions" => reset_options = value == "true",
-            "LayoutList" => layouts = Some(value.to_string()),
-            "VariantList" => variants = value.to_string(),
-            "Model" => model = value.to_string(),
-            "Options" => options = value.to_string(),
+            "LayoutList" => config.layouts = value,
+            "VariantList" => config.variants = value,
+            "Model" => config.model = value,
+            "Options" => options = value,
             _ => {},
         }
     }
-    let options = reset_options.then_some(options);
-    let session = layouts
-        .filter(|list| used && !first_entry(list).is_empty())
-        .map(|layouts| Session {
-            // KWin's default when kxkbrc names no model.
-            model: if model.is_empty() {
-                "pc104".to_string()
-            } else {
-                model
-            },
-            options: options.clone(),
-            ..Session::new(Layout::xkb(layouts, variants))
-        });
-    Kxkbrc { session, options }
+    config.options = reset_options.then_some(options);
+    config
+}
+
+/// The names KWin compiles its keymap from. KWin takes kxkbrc's
+/// `LayoutList` whatever `Use` says, else the `XKB_DEFAULT_*` layout, else
+/// the libxkbcommon default. Its model defaults to pc104, and it applies the
+/// kxkbrc options only with `ResetOldOptions=true`, else the variable.
+fn kwin_session(config: &Kxkbrc, env: &XkbEnv) -> Session {
+    let (layouts, variants) = if config.layouts.is_empty() {
+        (env.layout.clone(), env.variant.clone())
+    } else {
+        (config.layouts.clone(), config.variants.clone())
+    };
+    Session {
+        rules: env.rules.clone(),
+        model: if config.model.is_empty() {
+            "pc104".to_string()
+        } else {
+            config.model.clone()
+        },
+        options: Some(
+            config
+                .options
+                .clone()
+                .unwrap_or_else(|| env.options.clone()),
+        ),
+        ..Session::new(Layout::xkb(layouts, variants))
+    }
 }
 
 /// KWin's layout list and the index of the active layout, over D-Bus.
@@ -406,22 +454,99 @@ fn ask_kwin() -> Option<(Vec<String>, u32)> {
     Some((list.into_iter().map(|(short, _, _)| short).collect(), index))
 }
 
-/// KWin names its layouts as the raw items of the layout list. When they
-/// match the list Hush read, KWin's index is the active layout.
-fn kde_active(layout: &Layout, kwin: &[String], index: u32) -> Active {
-    let Layout::Xkb { layout: list, .. } = layout else {
-        return Active::Unknown;
+/// KWin names its layouts as the raw items of its layout list. One empty
+/// name means KWin found no layout and compiled the libxkbcommon default,
+/// which Hush compiles the same way. Otherwise, when the list matches the
+/// one Hush read, KWin's index is the active layout.
+fn apply_kwin(session: &mut Session, kwin: &[String], index: u32) {
+    if let [only] = kwin {
+        if only.trim().is_empty() {
+            session.layout = Layout::xkb("", "");
+            session.active = Active::Index(0);
+            return;
+        }
+    }
+    let Layout::Xkb { layout: list, .. } = &session.layout else {
+        return;
     };
     let read: Vec<&str> = list.split(',').map(str::trim).collect();
-    if read.len() == kwin.len() && read.iter().zip(kwin).all(|(a, b)| *a == b.trim()) {
-        Active::Index(index as usize)
-    } else {
-        Active::Unclear(format!(
-            "KWin uses the layouts {}, but Hush read {}",
-            kwin.join(","),
-            list
-        ))
+    session.active =
+        if read.len() == kwin.len() && read.iter().zip(kwin).all(|(a, b)| *a == b.trim()) {
+            Active::Index(index as usize)
+        } else {
+            Active::Unclear {
+                why: format!(
+                    "KWin uses the layouts {}, but Hush read {}",
+                    kwin.join(","),
+                    list
+                ),
+                fix: FIX_KWIN,
+            }
+        };
+}
+
+/// On X11, a keyboard that appears after login, as Hush's own does, gets the
+/// X server's default keymap, not a later `setxkbmap` change. The default is
+/// the X11 layout of `localectl`, or US when it names none. Hush types only
+/// when the session's layouts are that default, and leaves out AltGr when
+/// the options differ, because an option can move AltGr.
+fn match_server_default(session: &mut Session, localectl: Option<&str>) {
+    let Some(text) = localectl else {
+        session.active = Active::Unclear {
+            why: "on X11, Hush cannot read the default layout of the X server, which its own \
+                  keyboard gets (localectl does not answer)"
+                .to_string(),
+            fix: FIX_X11,
+        };
+        return;
+    };
+    let default = Layout::xkb(
+        field(text, "X11 Layout:").unwrap_or("us"),
+        field(text, "X11 Variant:").unwrap_or_default(),
+    );
+    if !same_layouts(&session.layout, &default) {
+        session.active = Active::Unclear {
+            why: format!(
+                "on X11, Hush's own keyboard gets the default layout {} of the X server, but \
+                 the session uses {}",
+                default, session.layout
+            ),
+            fix: FIX_X11,
+        };
+        return;
     }
+    let default_options = option_set(field(text, "X11 Options:").unwrap_or_default());
+    if session.options.as_deref().map(option_set) != Some(default_options) {
+        session.options = None;
+    }
+}
+
+fn same_layouts(a: &Layout, b: &Layout) -> bool {
+    let normal = |layout: &Layout| {
+        layout.entries().map(|entries| {
+            entries
+                .into_iter()
+                .map(|(layout, variant)| {
+                    let variant = variant.to_lowercase();
+                    let variant = if variant == "basic" {
+                        String::new()
+                    } else {
+                        variant
+                    };
+                    (layout.to_lowercase(), variant)
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+    matches!((normal(a), normal(b)), (Some(a), Some(b)) if a == b)
+}
+
+fn option_set(options: &str) -> BTreeSet<&str> {
+    options
+        .split(',')
+        .map(str::trim)
+        .filter(|option| !option.is_empty())
+        .collect()
 }
 
 fn x11_group() -> Option<usize> {
@@ -581,17 +706,67 @@ fn gnome_sources(text: &str) -> Vec<(String, String)> {
     sources
 }
 
-/// GNOME's input sources: the most recently used one is active. Without a
-/// recent one, a single source is active, and with several Hush cannot
-/// tell. An input method engine (`('ibus', 'mozc-jp')`) has no XKB names.
-fn parse_gnome(sources: &str, mru: &str, options: &str) -> Option<Session> {
-    let sources = gnome_sources(sources);
+/// What GNOME's input-sources settings say.
+struct Gnome<'a> {
+    sources: &'a str,
+    mru: &'a str,
+    options: &'a str,
+    per_window: bool,
+}
+
+/// GNOME's active input source. With one source, that one. With several,
+/// the most recently used one, but only when GNOME keeps one source for all
+/// windows and IBus runs the same source: gnome-shell writes `mru-sources`
+/// only on a switch by the user, and only when IBus is ready. With
+/// `per-window`, a focus change switches the source with no write at all.
+/// An input method engine (`('ibus', 'mozc-jp')`) has no XKB names.
+fn parse_gnome(gnome: &Gnome, engine: impl FnOnce() -> Option<String>) -> Option<Session> {
+    let sources = gnome_sources(gnome.sources);
     let first = sources.first()?;
-    let active = gnome_sources(mru)
-        .into_iter()
-        .find(|recent| sources.contains(recent))
-        .or_else(|| (sources.len() == 1).then(|| first.clone()));
-    let options: Vec<&str> = options
+    let active = if sources.len() == 1 {
+        Ok(first.clone())
+    } else if gnome.per_window {
+        Err(Active::Unclear {
+            fix: FIX_PER_WINDOW,
+            why: format!(
+                "GNOME keeps an input source for each window (per-window is on), so Hush cannot \
+             tell which of the {} sources is active",
+                sources.len()
+            ),
+        })
+    } else {
+        match gnome_sources(gnome.mru)
+            .into_iter()
+            .find(|recent| sources.contains(recent))
+        {
+            None => Err(Active::Unclear {
+                why: format!(
+                    "GNOME has {} input sources and names no recent one",
+                    sources.len()
+                ),
+                fix: FIX_GNOME_RECENT,
+            }),
+            Some(recent) => match engine() {
+                Some(engine) if engine_is(&engine, &recent) => Ok(recent),
+                Some(engine) => Err(Active::Unclear {
+                    why: format!(
+                        "IBus runs {}, but the most recent GNOME input source is {}",
+                        engine.trim(),
+                        recent.1
+                    ),
+                    fix: FIX_GNOME_RECENT,
+                }),
+                None => Err(Active::Unclear {
+                    why: "IBus does not name the active input source, so the list of recent \
+                          GNOME sources can be out of date"
+                        .to_string(),
+                    fix: FIX_GNOME_RECENT,
+                }),
+            },
+        }
+    };
+    let options: Vec<&str> = gnome
+        .options
         .split(['[', ']', ',', '\''])
         .map(str::trim)
         .filter(|option| !option.is_empty() && !option.starts_with('@'))
@@ -606,20 +781,28 @@ fn parse_gnome(sources: &str, mru: &str, options: &str) -> Option<Session> {
     // GNOME groups its sources into keymaps of its own, so Hush compiles
     // the active source alone.
     let (layout, active) = match active {
-        Some(source) => (to_layout(&source), Active::Index(0)),
-        None => (
-            to_layout(first),
-            Active::Unclear(format!(
-                "GNOME has {} input sources and names no recent one",
-                sources.len()
-            )),
-        ),
+        Ok(source) => (to_layout(&source), Active::Index(0)),
+        Err(unclear) => (to_layout(first), unclear),
     };
     Some(Session {
         options: Some(options.join(",")),
         active,
         ..Session::new(layout)
     })
+}
+
+/// gnome-shell sets the IBus engine `xkb:LAYOUT:VARIANT:LANGUAGE` for an
+/// XKB source, and the engine's own name for an IBus source.
+fn engine_is(engine: &str, (kind, id): &(String, String)) -> bool {
+    let engine = engine.trim();
+    if kind != "xkb" {
+        return engine == id;
+    }
+    let (layout, variant) = id.split_once('+').unwrap_or((id.as_str(), ""));
+    let mut parts = engine.split(':');
+    parts.next() == Some("xkb")
+        && parts.next() == Some(layout)
+        && parts.next().unwrap_or_default() == variant
 }
 
 /// The xkeyboard-config registry: each layout and variant with the
@@ -807,52 +990,143 @@ mod tests {
         );
     }
 
-    #[test]
-    fn kde_layouts_count_only_when_used() {
-        let kxkbrc = "[$Version]\nupdate_info=kxkb.upd:remove-empty-lists\n\n[Layout]\nDisplayNames=,\nLayoutList=us,de\nModel=pc105\nOptions=lv3:caps_switch\nResetOldOptions=true\nUse=true\nVariantList=dvorak,\n";
-        let config = parse_kxkbrc(kxkbrc);
-        let session = config.session.unwrap();
-        assert_eq!(session.layout, layout("us,de", "dvorak,"));
-        assert_eq!(session.model, "pc105");
-        assert_eq!(session.options.as_deref(), Some("lv3:caps_switch"));
-        assert_eq!(config.options.as_deref(), Some("lv3:caps_switch"));
-        assert_eq!(
-            parse_kxkbrc(&kxkbrc.replace("Use=true", "Use=false")).session,
-            None
-        );
-        assert_eq!(parse_kxkbrc("[Layout]\nUse=true\n").session, None);
+    fn env(layout: &str, variant: &str, options: &str) -> XkbEnv {
+        XkbEnv {
+            layout: layout.into(),
+            variant: variant.into(),
+            options: options.into(),
+            model: "pc105".into(),
+            ..XkbEnv::default()
+        }
     }
 
     #[test]
-    fn kwin_applies_options_only_with_reset_old_options() {
-        let kxkbrc = "[Layout]\nOptions=ctrl:swap_lwin_lctl\nResetOldOptions=false\n";
-        assert_eq!(parse_kxkbrc(kxkbrc).options, None);
-        let kxkbrc = "[Layout]\nOptions=ctrl:swap_lwin_lctl\nResetOldOptions=true\n";
-        let config = parse_kxkbrc(kxkbrc);
-        assert_eq!(config.options.as_deref(), Some("ctrl:swap_lwin_lctl"));
-        assert_eq!(
-            config.session, None,
-            "no layouts, so KWin reads the environment"
+    fn kwin_reads_the_layout_list_whatever_use_says() {
+        let kxkbrc = "[$Version]\nupdate_info=kxkb.upd:remove-empty-lists\n\n[Layout]\nDisplayNames=,\nLayoutList=us,de\nModel=pc105\nOptions=lv3:caps_switch\nResetOldOptions=true\nUse=true\nVariantList=dvorak,\n";
+        let session = kwin_session(&parse_kxkbrc(kxkbrc), &env("fr", "", ""));
+        assert_eq!(session.layout, layout("us,de", "dvorak,"));
+        assert_eq!(session.model, "pc105");
+        assert_eq!(session.options.as_deref(), Some("lv3:caps_switch"));
+        let unused = kwin_session(
+            &parse_kxkbrc(&kxkbrc.replace("Use=true", "Use=false")),
+            &env("fr", "", ""),
         );
-        let used = parse_kxkbrc("[Layout]\nLayoutList=de\nUse=true\n");
-        assert_eq!(used.session.unwrap().model, "pc104", "KWin's default model");
+        assert_eq!(
+            unused.layout,
+            layout("us,de", "dvorak,"),
+            "KWin never reads Use"
+        );
+    }
+
+    #[test]
+    fn without_a_layout_list_kwin_takes_the_variables_then_the_default() {
+        let kxkbrc = "[Layout]\nOptions=ctrl:swap_lwin_lctl\nResetOldOptions=true\n";
+        let session = kwin_session(
+            &parse_kxkbrc(kxkbrc),
+            &env("de", "nodeadkeys", "compose:ralt"),
+        );
+        assert_eq!(session.layout, layout("de", "nodeadkeys"));
+        assert_eq!(
+            session.options.as_deref(),
+            Some("ctrl:swap_lwin_lctl"),
+            "the kxkbrc options win with ResetOldOptions"
+        );
+        assert_eq!(
+            session.model, "pc104",
+            "KWin's default model, not the variable"
+        );
+
+        let kept = "[Layout]\nOptions=ctrl:swap_lwin_lctl\nResetOldOptions=false\n";
+        let session = kwin_session(&parse_kxkbrc(kept), &env("de", "", "compose:ralt"));
+        assert_eq!(session.options.as_deref(), Some("compose:ralt"));
+
+        let bare = kwin_session(&parse_kxkbrc(""), &XkbEnv::default());
+        assert_eq!(bare.layout, layout("", ""), "the libxkbcommon default");
+        assert_eq!(bare.options.as_deref(), Some(""));
     }
 
     #[test]
     fn kwin_names_the_active_layout_when_its_list_matches() {
         let kwin = vec!["us".to_string(), "de".to_string()];
-        assert_eq!(
-            kde_active(&layout("us,de", ",nodeadkeys"), &kwin, 1),
-            Active::Index(1)
+        let mut session = Session::new(layout("us,de", ",nodeadkeys"));
+        apply_kwin(&mut session, &kwin, 1);
+        assert_eq!(session.active, Active::Index(1));
+
+        let mut session = Session::new(layout("de", ""));
+        apply_kwin(&mut session, &kwin, 0);
+        assert!(matches!(session.active, Active::Unclear { .. }));
+
+        let mut session = Session::new(Layout::Described("German".into()));
+        apply_kwin(&mut session, &kwin, 0);
+        assert_eq!(session.active, Active::Unknown);
+    }
+
+    #[test]
+    fn an_empty_kwin_layout_is_the_default_keymap() {
+        let mut session = Session::new(layout("us", ""));
+        apply_kwin(&mut session, &[String::new()], 0);
+        assert_eq!(session.layout, layout("", ""));
+        assert_eq!(session.active, Active::Index(0));
+        assert!(session.layout.is_plain_us());
+    }
+
+    fn localectl(layout: &str, variant: &str, options: &str) -> String {
+        let mut text = "   System Locale: LANG=de_DE.UTF-8\n       VC Keymap: de\n".to_string();
+        for (name, value) in [
+            ("X11 Layout", layout),
+            ("X11 Variant", variant),
+            ("X11 Options", options),
+        ] {
+            if !value.is_empty() {
+                text.push_str(&format!("{:>16}: {}\n", name, value));
+            }
+        }
+        text
+    }
+
+    #[test]
+    fn x11_types_only_on_the_default_layout_of_the_server() {
+        let setxkbmap = |layout_list: &str, options: &str| Session {
+            options: Some(options.into()),
+            ..Session::new(layout(layout_list, ""))
+        };
+        let mut session = setxkbmap("de", "compose:ralt");
+        match_server_default(&mut session, Some(&localectl("de", "", "compose:ralt")));
+        assert_eq!(session.active, Active::Unknown);
+        assert_eq!(session.options.as_deref(), Some("compose:ralt"));
+
+        let mut session = setxkbmap("de", "");
+        match_server_default(&mut session, Some(&localectl("us", "", "")));
+        assert!(
+            matches!(&session.active, Active::Unclear { why, .. } if why.contains("default layout us")),
+            "a setxkbmap change does not reach Hush's own keyboard: {:?}",
+            session.active
         );
-        assert!(matches!(
-            kde_active(&layout("de", ""), &kwin, 0),
-            Active::Unclear(_)
-        ));
+
+        let mut session = setxkbmap("us", "");
+        match_server_default(&mut session, Some(&localectl("", "", "")));
         assert_eq!(
-            kde_active(&Layout::Described("German".into()), &kwin, 0),
-            Active::Unknown
+            session.active,
+            Active::Unknown,
+            "the X server defaults to US"
         );
+
+        let mut session = setxkbmap("us(intl)", "");
+        match_server_default(&mut session, Some(&localectl("us", "intl", "")));
+        assert_eq!(
+            session.active,
+            Active::Unknown,
+            "inline and listed variants agree"
+        );
+
+        let mut session = setxkbmap("de", "lv3:caps_switch");
+        match_server_default(&mut session, Some(&localectl("de", "", "")));
+        assert_eq!(session.active, Active::Unknown);
+        assert_eq!(session.options, None, "other options leave out AltGr");
+
+        let mut session = setxkbmap("us", "");
+        match_server_default(&mut session, None);
+        assert!(matches!(session.active, Active::Unclear { .. }));
     }
 
     #[test]
@@ -934,15 +1208,25 @@ mod tests {
         );
     }
 
-    #[test]
-    fn gnome_types_with_the_most_recent_source() {
-        let sources = "[('xkb', 'us+dvorak'), ('xkb', 'de')]\n";
-        let session = parse_gnome(
+    fn gnome<'a>(sources: &'a str, mru: &'a str, options: &'a str) -> Gnome<'a> {
+        Gnome {
             sources,
-            "[('xkb', 'de'), ('xkb', 'us+dvorak')]",
-            "['lv3:ralt_switch', 'compose:menu']",
-        )
-        .unwrap();
+            mru,
+            options,
+            per_window: false,
+        }
+    }
+
+    fn engine(name: &str) -> impl FnOnce() -> Option<String> + '_ {
+        move || Some(format!("{name}\n"))
+    }
+
+    #[test]
+    fn gnome_types_with_the_most_recent_source_that_ibus_runs() {
+        let sources = "[('xkb', 'us+dvorak'), ('xkb', 'de')]\n";
+        let mru = "[('xkb', 'de'), ('xkb', 'us+dvorak')]";
+        let options = "['lv3:ralt_switch', 'compose:menu']";
+        let session = parse_gnome(&gnome(sources, mru, options), engine("xkb:de::ger")).unwrap();
         assert_eq!(session.layout, layout("de", ""));
         assert_eq!(session.active, Active::Index(0));
         assert_eq!(
@@ -950,23 +1234,74 @@ mod tests {
             Some("lv3:ralt_switch,compose:menu")
         );
 
-        let session = parse_gnome(sources, "@a(ss) []", "@as []").unwrap();
+        let dvorak = "[('xkb', 'us+dvorak'), ('xkb', 'de')]";
+        let session =
+            parse_gnome(&gnome(sources, dvorak, ""), engine("xkb:us:dvorak:eng")).unwrap();
         assert_eq!(session.layout, layout("us+dvorak", ""));
-        assert!(matches!(session.active, Active::Unclear(_)));
-        assert_eq!(session.options.as_deref(), Some(""));
+        assert_eq!(session.active, Active::Index(0));
 
-        let single = parse_gnome("[('xkb', 'us')]", "@a(ss) []", "@as []").unwrap();
-        assert_eq!(single.active, Active::Index(0));
-        assert!(single.layout.is_plain_us());
+        let session = parse_gnome(
+            &gnome(sources, "@a(ss) []", "@as []"),
+            engine("xkb:de::ger"),
+        )
+        .unwrap();
+        assert_eq!(session.layout, layout("us+dvorak", ""));
+        assert!(matches!(session.active, Active::Unclear { .. }));
+        assert_eq!(session.options.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn gnome_pastes_when_the_recent_list_can_be_stale() {
+        let sources = "[('xkb', 'us'), ('xkb', 'de')]";
+        let mru = "[('xkb', 'us'), ('xkb', 'de')]";
+        let stale = parse_gnome(&gnome(sources, mru, ""), engine("xkb:de::ger")).unwrap();
+        assert!(
+            matches!(&stale.active, Active::Unclear { why, .. } if why.contains("IBus runs xkb:de::ger")),
+            "{:?}",
+            stale.active
+        );
+        let no_ibus = parse_gnome(&gnome(sources, mru, ""), || None).unwrap();
+        assert!(matches!(no_ibus.active, Active::Unclear { .. }));
+
+        let per_window = Gnome {
+            per_window: true,
+            ..gnome(sources, mru, "")
+        };
+        let session =
+            parse_gnome(&per_window, || panic!("per-window needs no IBus query")).unwrap();
+        assert!(
+            matches!(&session.active, Active::Unclear { why, .. } if why.contains("per-window")),
+            "{:?}",
+            session.active
+        );
+    }
+
+    #[test]
+    fn one_gnome_source_is_active_whatever_the_settings_say() {
+        let single = Gnome {
+            per_window: true,
+            ..gnome("[('xkb', 'de')]", "@a(ss) []", "@as []")
+        };
+        let session = parse_gnome(&single, || None).unwrap();
+        assert_eq!(session.layout, layout("de", ""));
+        assert_eq!(session.active, Active::Index(0));
+        assert!(parse_gnome(&gnome("[('xkb', 'us')]", "", ""), || None)
+            .unwrap()
+            .layout
+            .is_plain_us());
 
         let ime = parse_gnome(
-            "[('ibus', 'mozc-jp'), ('xkb', 'us')]",
-            "[('ibus', 'mozc-jp')]",
-            "",
+            &gnome(
+                "[('ibus', 'mozc-jp'), ('xkb', 'us')]",
+                "[('ibus', 'mozc-jp')]",
+                "",
+            ),
+            engine("mozc-jp"),
         )
         .unwrap();
         assert_eq!(ime.layout, Layout::Described("ibus mozc-jp".into()));
-        assert_eq!(parse_gnome("@a(ss) []", "", ""), None);
+        assert_eq!(ime.active, Active::Index(0));
+        assert_eq!(parse_gnome(&gnome("@a(ss) []", "", ""), || None), None);
     }
 
     #[test]

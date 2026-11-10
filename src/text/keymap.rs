@@ -250,6 +250,14 @@ impl KeyTable {
         self.chars.get(&ch).map(Vec::as_slice)
     }
 
+    /// The key that types `ch` with no modifier and no dead key.
+    pub fn plain_key(&self, ch: char) -> Option<Key> {
+        match self.taps(ch)? {
+            [tap] if tap.shift.is_none() && tap.level3.is_none() => Some(tap.key),
+            _ => None,
+        }
+    }
+
     pub fn dead_key_chars(&self) -> usize {
         self.chars.values().filter(|taps| taps.len() > 1).count()
     }

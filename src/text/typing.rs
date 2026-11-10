@@ -10,7 +10,7 @@
 //!   US table on plain US and pastes on every other layout.
 
 use super::keymap::KeyTable;
-use super::layout::{self, plain_us, Active, Session};
+use super::layout::{self, plain_us, Active, Session, FIX_SEVERAL};
 use super::xkb::{self, Names, Request};
 use std::fmt;
 use std::sync::Arc;
@@ -83,8 +83,6 @@ enum Plan {
     },
 }
 
-const FIX_ACTIVE: &str = "to type, keep one layout, or use a desktop that reports the active \
-     layout (KDE Plasma, GNOME, Hyprland, Sway, X11)";
 const FIX_NAMES: &str = "to type, set the layout by its XKB name";
 const FIX_LIBRARY: &str =
     "install libxkbcommon (libxkbcommon0 on Debian and Ubuntu) to type on this layout";
@@ -132,7 +130,7 @@ fn plan(session: Option<&Session>, library: bool) -> Plan {
                     index + 1,
                     entries.len()
                 ),
-                fix: FIX_ACTIVE,
+                fix: FIX_SEVERAL,
             };
         },
         Active::Unknown if entries.len() == 1 => 0,
@@ -143,21 +141,21 @@ fn plan(session: Option<&Session>, library: bool) -> Plan {
                     entries.len(),
                     session.layout
                 ),
-                fix: FIX_ACTIVE,
+                fix: FIX_SEVERAL,
             };
         },
-        Active::Unclear(why) => {
+        Active::Unclear { why, fix } => {
             return Plan::Paste {
                 why: why.clone(),
-                fix: FIX_ACTIVE,
+                fix,
             };
         },
     };
     let (layout, variant) = &entries[index];
-    let shown = if variant.is_empty() {
-        layout.clone()
-    } else {
-        format!("{}({})", layout, variant)
+    let shown = match (layout.as_str(), variant.as_str()) {
+        ("", _) => "the default layout".to_string(),
+        (layout, "") => layout.to_string(),
+        (layout, variant) => format!("{}({})", layout, variant),
     };
     let plain_us = plain_us(layout, variant);
     if !library {
@@ -338,11 +336,24 @@ mod tests {
             Some(&session(
                 "us,de",
                 "",
-                Active::Unclear("KWin disagrees".into()),
+                Active::Unclear {
+                    why: "KWin disagrees".into(),
+                    fix: "ask KWin",
+                },
             )),
             true,
         );
         assert_eq!(pastes(&unclear), "KWin disagrees");
+        assert!(
+            matches!(
+                unclear,
+                Plan::Paste {
+                    fix: "ask KWin",
+                    ..
+                }
+            ),
+            "the reason brings its own fix"
+        );
         let out_of_range = plan(Some(&session("us,de", "", Active::Index(2))), true);
         pastes(&out_of_range);
     }
@@ -378,6 +389,26 @@ mod tests {
         );
         let (names, group, _) = compiles(&plan);
         assert_eq!((names.layout.as_str(), group), ("es", 0));
+    }
+
+    #[test]
+    fn an_empty_layout_compiles_the_libxkbcommon_default() {
+        let kwin = session("", "", Active::Index(0));
+        let plan = plan(Some(&kwin), true);
+        let (names, group, _) = compiles(&plan);
+        assert_eq!((names.layout.as_str(), group), ("", 0));
+        assert!(matches!(
+            &plan,
+            Plan::Compile { layout, plain_us: true, .. } if layout == "the default layout"
+        ));
+        if !xkb_ready() {
+            return;
+        }
+        let typing = Resolver::new().resolve_for(Some(&kwin), true);
+        assert_eq!(typing.to_string(), "types key by key on the default layout");
+        assert!(typing
+            .table()
+            .is_some_and(|table| table.covers("Hello, world!")));
     }
 
     #[test]

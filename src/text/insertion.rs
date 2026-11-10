@@ -312,7 +312,8 @@ impl TextInserter {
                 self.type_with_uinput(&text, table, line_break, origin, submit_app)?
             },
             Chosen::Clipboard => {
-                if let Err(e) = self.paste(&text, window.as_ref(), origin, submit_app) {
+                let pasted = self.paste(&text, window.as_ref(), typing.table(), origin, submit_app);
+                if let Err(e) = pasted {
                     warn!("Paste failed ({}); typing what uinput can", e);
                     // Typing can skip characters, so Hush does not send the result.
                     self.type_with_uinput(&text, table, line_break, origin, false)?;
@@ -345,6 +346,7 @@ impl TextInserter {
         &mut self,
         text: &str,
         window: Option<&WindowInfo>,
+        table: Option<&KeyTable>,
         origin: Origin,
         submit_app: bool,
     ) -> Result<()> {
@@ -378,7 +380,7 @@ impl TextInserter {
         }
         wait_for_modifiers();
         debug!("Pasting with {}", chord);
-        let sent = self.uinput.send_paste_shortcut(chord);
+        let sent = self.uinput.send_paste_shortcut(chord, table);
         let pasted_at = clock.now();
         if presses_enter(origin, submit_app, text, &sent) {
             press_enter(&mut self.uinput, &clock, PASTED_SUBMIT_DELAY);
