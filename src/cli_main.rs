@@ -34,6 +34,14 @@ fn language_code(code: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// A `--style` value: a valid style name. Whether the style exists is a
+/// question for the config, which `hush start` reads.
+fn style_name(name: &str) -> Result<String, String> {
+    crate::text_processing::StyleName::from_name(name)
+        .map(|name| name.to_string())
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Subcommand)]
 pub enum Commands {
     /// Record once and exit (no hotkeys)
@@ -84,6 +92,10 @@ pub enum Commands {
         /// Language of the take it starts: a Whisper code such as de, or auto
         #[arg(long, value_name = "CODE", value_parser = language_code)]
         lang: Option<String>,
+
+        /// Style of the take it starts: verbatim, or a style under [styles]
+        #[arg(long, value_name = "NAME", value_parser = style_name)]
+        style: Option<String>,
     },
 
     /// Start recording (talks to the daemon)
@@ -91,6 +103,10 @@ pub enum Commands {
         /// Language of this take: a Whisper code such as de, or auto
         #[arg(long, value_name = "CODE", value_parser = language_code)]
         lang: Option<String>,
+
+        /// Style of this take: verbatim, or a style under [styles]
+        #[arg(long, value_name = "NAME", value_parser = style_name)]
+        style: Option<String>,
     },
 
     /// Stop recording and transcribe (talks to the daemon)
@@ -540,7 +556,7 @@ mod tests {
 
     fn lang_of(args: &[&str]) -> Option<String> {
         match Cli::try_parse_from(args).map(|cli| cli.command) {
-            Ok(Commands::Start { lang } | Commands::Toggle { lang }) => lang,
+            Ok(Commands::Start { lang, .. } | Commands::Toggle { lang, .. }) => lang,
             Ok(_) => panic!("{args:?} is not start or toggle"),
             Err(e) => panic!("{args:?}: {e}"),
         }
@@ -559,6 +575,34 @@ mod tests {
         );
         for bad in ["xx", "DE", "german"] {
             let error = match Cli::try_parse_from(["hush", "start", "--lang", bad]) {
+                Ok(_) => panic!("{bad} must fail"),
+                Err(error) => error,
+            };
+            assert_eq!(error.exit_code(), 2, "a usage error");
+        }
+    }
+
+    fn style_of(args: &[&str]) -> Option<String> {
+        match Cli::try_parse_from(args).map(|cli| cli.command) {
+            Ok(Commands::Start { style, .. } | Commands::Toggle { style, .. }) => style,
+            Ok(_) => panic!("{args:?} is not start or toggle"),
+            Err(e) => panic!("{args:?}: {e}"),
+        }
+    }
+
+    #[test]
+    fn start_and_toggle_take_a_style_name() {
+        assert_eq!(style_of(&["hush", "start"]), None);
+        assert_eq!(
+            style_of(&["hush", "start", "--style", "verbatim"]).as_deref(),
+            Some("verbatim")
+        );
+        assert_eq!(
+            style_of(&["hush", "toggle", "--lang", "de", "--style", "casual"]).as_deref(),
+            Some("casual")
+        );
+        for bad in ["Casual", "two words", "-x"] {
+            let error = match Cli::try_parse_from(["hush", "start", "--style", bad]) {
                 Ok(_) => panic!("{bad} must fail"),
                 Err(error) => error,
             };

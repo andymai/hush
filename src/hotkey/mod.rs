@@ -19,6 +19,7 @@
 //!         HotkeyEvent::Action(action) => println!("{:?}", action),
 //!         HotkeyEvent::Command(pressed) => println!("command chord {}", pressed),
 //!         HotkeyEvent::Language(language, pressed) => println!("{} chord {}", language, pressed),
+//!         HotkeyEvent::Style(style, pressed) => println!("{} chord {}", style, pressed),
 //!     }
 //! }
 //! # Ok::<(), anyhow::Error>(())
@@ -31,6 +32,7 @@ pub mod modifiers;
 pub mod warnings;
 pub mod x11;
 
+use crate::text_processing::StyleName;
 use crate::transcription::Language;
 use crate::Result;
 use serde::{Deserialize, Serialize};
@@ -54,6 +56,9 @@ pub enum HotkeyEvent {
     /// A language chord went down (`true`) or up (`false`). It works like
     /// the dictation hotkey, for a take in that language.
     Language(Language, bool),
+    /// A style chord went down (`true`) or up (`false`). It works like the
+    /// dictation hotkey, for a take in that style.
+    Style(StyleName, bool),
 }
 
 /// Secondary chords that run a daemon command.
@@ -64,7 +69,8 @@ pub enum HotkeyAction {
 }
 
 /// The keys a backend watches: the dictation hotkey, an optional cancel key,
-/// optional action chords, and a dictation chord for each language.
+/// optional action chords, and a dictation chord for each language and each
+/// style.
 #[derive(Debug, Clone)]
 pub struct HotkeyBindings {
     pub primary: KeyCombination,
@@ -72,6 +78,7 @@ pub struct HotkeyBindings {
     pub actions: Vec<(HotkeyAction, KeyCombination)>,
     pub command: Option<KeyCombination>,
     pub languages: Vec<(Language, KeyCombination)>,
+    pub styles: Vec<(StyleName, KeyCombination)>,
 }
 
 impl HotkeyBindings {
@@ -96,6 +103,7 @@ impl HotkeyBindings {
             actions: Vec::new(),
             command: None,
             languages: Vec::new(),
+            styles: Vec::new(),
         })
     }
 
@@ -157,12 +165,30 @@ impl HotkeyBindings {
         Ok(self)
     }
 
+    /// Bind a dictation chord for `style`.
+    pub fn with_style(mut self, style: StyleName, text: &str) -> Result<Self> {
+        let combination = KeyCombination::parse(text)?;
+        if self
+            .all()
+            .any(|existing| existing.to_string() == combination.to_string())
+        {
+            return Err(anyhow::anyhow!(
+                "{} is already bound; the {} style chord needs its own chord",
+                combination,
+                style
+            ));
+        }
+        self.styles.push((style, combination));
+        Ok(self)
+    }
+
     fn all(&self) -> impl Iterator<Item = &KeyCombination> {
         std::iter::once(&self.primary)
             .chain(self.cancel.iter())
             .chain(self.actions.iter().map(|(_, c)| c))
             .chain(self.command.iter())
             .chain(self.languages.iter().map(|(_, c)| c))
+            .chain(self.styles.iter().map(|(_, c)| c))
     }
 }
 
@@ -348,6 +374,35 @@ mod tests {
             .with_action(HotkeyAction::Learn, "Shift+RightAlt")
             .is_err());
         assert!(b.with_language(french, "F13").is_ok());
+    }
+
+    #[test]
+    fn style_chords_are_distinct_from_every_other_chord() {
+        let german = Language::parse("de").unwrap();
+        let verbatim = crate::text_processing::styles::VERBATIM;
+        let casual = StyleName::parse("casual").unwrap();
+        let b = HotkeyBindings::parse("RightAlt", Some("Escape"))
+            .unwrap()
+            .with_command("Ctrl+RightAlt")
+            .unwrap()
+            .with_language(german, "Shift+RightAlt")
+            .unwrap()
+            .with_style(verbatim, "Super+RightAlt")
+            .unwrap();
+        assert_eq!(
+            b.styles,
+            vec![(verbatim, KeyCombination::parse("Super+RightAlt").unwrap())]
+        );
+        assert!(b.clone().with_style(casual, "super+rightalt").is_err());
+        assert!(b.clone().with_style(casual, "Shift+RightAlt").is_err());
+        assert!(b.clone().with_style(casual, "Ctrl+RightAlt").is_err());
+        assert!(b.clone().with_style(casual, "Ctrl+Nope").is_err());
+        assert!(b.clone().with_language(german, "Super+RightAlt").is_err());
+        assert!(b
+            .clone()
+            .with_action(HotkeyAction::PasteLast, "Super+RightAlt")
+            .is_err());
+        assert!(b.with_style(casual, "F13").is_ok());
     }
 
     #[test]

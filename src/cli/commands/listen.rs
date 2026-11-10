@@ -30,6 +30,7 @@ use crate::ipc::{SessionCommand, TakeResult, TakeWaiter};
 use crate::notify::{notify, NoticeKind};
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
 use crate::text::WindowInfo;
+use crate::text_processing::styles::{self, StyleName};
 use crate::text_processing::transcripts::{self, Transcript};
 use crate::text_processing::{learn, llm, prompt, ProcessingContext};
 use crate::text_processing::{
@@ -169,6 +170,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     for (language, chord) in config.hotkey.language_keys() {
         println!("{} dictates in {}", chord, language.name());
     }
+    for (style, chord) in config.hotkey.style_keys() {
+        println!("{} dictates in the {} style", chord, style);
+    }
     println!("`hush toggle` starts and stops from a keybind; Ctrl+C or `hush daemon stop` quits");
     println!("═══════════════════════════════════════════════════════\n");
 
@@ -195,6 +199,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             window: Option<WindowInfo>,
             command: Option<CommandTarget>,
             trigger: Trigger,
+            style: Option<StyleName>,
             printer: Option<TakeWaiter>,
             /// The take at 16 kHz, when the history keeps its audio
             audio: Option<Vec<f32>>,
@@ -220,6 +225,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         info!("The tray chose {} for takes", chosen.name());
     }
     shared.set_chosen_language(chosen_language);
+    shared.set_styles(styles::names(&config.styles));
 
     {
         let quit_tx = audio_cmd_tx.clone();
@@ -248,6 +254,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             .with_command(&config.hotkey.command)?;
         for (language, chord) in config.hotkey.language_keys() {
             bindings = bindings.with_language(language, chord)?;
+        }
+        for (style, chord) in config.hotkey.style_keys() {
+            bindings = bindings.with_style(style, chord)?;
         }
         let (manager, receiver) =
             HotkeyManager::with_backend(bindings, config.hotkey.backend, config.hotkey.exclusive)?;
@@ -463,6 +472,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 Some(GestureAction::Start) => Some(SessionCommand::StartRecording(
                     Trigger::Hotkey,
                     gesture.language(),
+                    gesture.style(),
                 )),
                 // The overlay stays in Recording until transcription completes
                 Some(GestureAction::Stop) => Some(SessionCommand::StopRecording),
@@ -490,6 +500,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let text_inserter_clone = text_inserter.clone();
     let text_processor_clone = text_processor.clone();
     let profiles = config.profiles.clone();
+    let user_styles = config.styles.clone();
     let history = config.history.clone();
     let command_parser_clone = command_parser.clone();
     let command_executor_clone = command_executor.clone();
@@ -518,13 +529,24 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     window,
                     command,
                     trigger,
+                    style,
                     printer,
                     audio,
                     parts,
                 } => {
                     let _delete_after_delivery = parts;
                     shared_result.set_inserting();
-                    let context = ProcessingContext::new(window.clone(), &profiles);
+                    let app_style = window
+                        .as_ref()
+                        .and_then(|window| profiles.app_style(&window.class));
+                    let take_style = styles::for_take(style, app_style)
+                        .filter(|_| command.is_none())
+                        .and_then(|name| styles::resolve(&user_styles, name));
+                    if let Some(take_style) = &take_style {
+                        info!("The take uses the style {}", take_style.name);
+                    }
+                    let context =
+                        ProcessingContext::new(window.clone(), &profiles).with_style(take_style);
                     let hook_env = HookEnv {
                         app: window
                             .as_ref()
@@ -781,6 +803,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let mut current_window: Option<WindowInfo> = None;
     let mut current_trigger = Trigger::Hotkey;
     let mut current_language = config_language;
+    let mut current_style: Option<StyleName> = None;
     let mut command_target: Option<CommandTarget> = None;
     let mut media = MediaPause::new(config.audio.pause_media);
     let mut last_stream = StreamOutcome::Worked;
@@ -1083,9 +1106,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 if take.is_some() {
                     continue;
                 }
-                let (trigger, once) = match command {
-                    SessionCommand::StartRecording(trigger, once) => (trigger, once),
-                    _ => (Trigger::Command, None),
+                let (trigger, once, once_style) = match command {
+                    SessionCommand::StartRecording(trigger, once, style) => (trigger, once, style),
+                    _ => (Trigger::Command, None, None),
                 };
                 let is_command = trigger == Trigger::Command;
                 // Reset stop signal for new recording
@@ -1123,6 +1146,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         info!("The take is in {}", current_language.name());
                     }
                     shared.set_take_language(current_language);
+                    current_style = once_style;
                     shared.set_starting();
                     if model.begin_load() {
                         publish_model(&model);
@@ -1393,6 +1417,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             window,
                             command,
                             trigger: current_trigger,
+                            style: current_style,
                             printer,
                             audio: keep_audio.then_some(audio_data),
                             parts: part_files,

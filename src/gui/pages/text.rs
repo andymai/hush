@@ -1,18 +1,24 @@
 //! What happens to the words after Whisper: tone by application, polishing
-//! with a language model, and the words Hush must spell your way.
+//! with a language model, writing styles, and the words Hush must spell
+//! your way.
 
 use crate::config::settings::LlmSetting;
-use crate::config::{server, transfer};
+use crate::config::{server, transfer, Config};
 use crate::gui::theme::{
-    field, hint, quiet_button, row, section, toggle, toggle_row, FIELD_WIDTH, MUTED, TOGGLE_COLUMN,
+    field, hint, quiet_button, row, section, toggle, toggle_row, CONTROL_HEIGHT, FIELD_WIDTH,
+    MUTED, TOGGLE_COLUMN,
 };
 use crate::gui::Gui;
+use crate::hotkey::warnings;
 use crate::text_processing::learn::{self, ListImport};
+use crate::text_processing::styles::{self, StyleConfig, StyleName};
 use std::path::{Path, PathBuf};
 
 const VOCABULARY_HEIGHT: f32 = 220.0;
 const EDIT_COLUMN: f32 = 340.0;
 const LIST_COLUMN: f32 = FIELD_WIDTH + 140.0;
+const PROMPT_WIDTH: f32 = 320.0;
+const PROMPT_HEIGHT: f32 = 56.0;
 
 pub const DEFAULT_WORD_LIST: &str = "~/hush-vocabulary.txt";
 
@@ -24,9 +30,42 @@ pub struct TermEdit {
     pub focus: bool,
 }
 
+/// The style form: a new style, or the changes to one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StyleDraft {
+    /// The style that the form changes; `None` adds a style
+    pub original: Option<String>,
+    pub name: String,
+    pub prompt: String,
+    pub polish: bool,
+}
+
+impl Default for StyleDraft {
+    fn default() -> Self {
+        Self {
+            original: None,
+            name: String::new(),
+            prompt: String::new(),
+            polish: true,
+        }
+    }
+}
+
+impl StyleDraft {
+    fn of(name: &str, style: &StyleConfig) -> Self {
+        Self {
+            original: Some(name.to_string()),
+            name: name.to_string(),
+            prompt: style.prompt.clone(),
+            polish: style.polish,
+        }
+    }
+}
+
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     tone(gui, ui);
     polish(gui, ui);
+    writing_styles(gui, ui);
     vocabulary(gui, ui);
 }
 
@@ -100,6 +139,181 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
     row("OpenAI-compatible model").show(ui, |ui| {
         field(ui, &mut gui.config.llm.server_model, "llama3.2");
     });
+}
+
+fn writing_styles(gui: &mut Gui, ui: &mut egui::Ui) {
+    section(ui, "Styles");
+    hint(
+        ui,
+        "A style changes one recording. A style key on the Hotkeys page, \
+         hush start --style NAME, or profiles.app_styles in config.toml picks it.",
+    );
+    row(styles::VERBATIM.as_str())
+        .describe("Built in. No polish for the recording. The rule-based cleanup still runs.")
+        .show(ui, |_| {});
+    let names: Vec<String> = gui.config.styles.keys().cloned().collect();
+    let mut remove: Option<String> = None;
+    let mut change: Option<String> = None;
+    for name in &names {
+        let about = style_summary(&gui.config.styles[name]);
+        row(name).describe(&about).show(ui, |ui| {
+            if quiet_button(ui, "Remove").clicked() {
+                remove = Some(name.clone());
+            }
+            if quiet_button(ui, "Edit").clicked() {
+                change = Some(name.clone());
+            }
+        });
+    }
+    if let Some(name) = remove {
+        match remove_style(&mut gui.config, &name) {
+            Ok(()) => {
+                if gui.style_draft.original.as_deref() == Some(name.as_str()) {
+                    gui.style_draft = StyleDraft::default();
+                }
+            },
+            Err(message) => gui.say(message),
+        }
+    }
+    if let Some(name) = change {
+        if let Some(style) = gui.config.styles.get(&name) {
+            gui.style_draft = StyleDraft::of(&name, style);
+        }
+    }
+    style_form(gui, ui);
+}
+
+fn style_form(gui: &mut Gui, ui: &mut egui::Ui) {
+    let editing = gui.style_draft.original.clone();
+    ui.add_space(6.0);
+    match &editing {
+        Some(name) => hint(ui, &format!("Change the style {}:", name)),
+        None => hint(ui, "Add a style:"),
+    }
+    row("Name")
+        .describe("Lowercase letters, digits, - and _.")
+        .show(ui, |ui| {
+            field(ui, &mut gui.style_draft.name, "casual");
+        });
+    row("Prompt")
+        .describe("One line that Hush adds to the polish prompt.")
+        .reserve(PROMPT_WIDTH + 10.0)
+        .show(ui, |ui| {
+            ui.add_sized(
+                [PROMPT_WIDTH, PROMPT_HEIGHT],
+                egui::TextEdit::multiline(&mut gui.style_draft.prompt)
+                    .hint_text("Casual and brief, like a chat message to a friend."),
+            );
+        });
+    toggle_row(
+        ui,
+        "Polish",
+        "The model polishes recordings in this style, whatever Tidy up every transcript says.",
+        &mut gui.style_draft.polish,
+    );
+    let ready = !gui.style_draft.name.trim().is_empty();
+    let (done, cancel) = row("").reserve(FIELD_WIDTH).show(ui, |ui| {
+        let label = if editing.is_some() { "Done" } else { "Add" };
+        let done = ui
+            .add_enabled(
+                ready,
+                egui::Button::new(label).min_size(egui::vec2(80.0, CONTROL_HEIGHT)),
+            )
+            .clicked();
+        let cancel = editing.is_some() && quiet_button(ui, "Cancel").clicked();
+        (done, cancel)
+    });
+    if cancel {
+        gui.style_draft = StyleDraft::default();
+    } else if done {
+        match save_style(&mut gui.config, &gui.style_draft) {
+            Ok(()) => gui.style_draft = StyleDraft::default(),
+            Err(message) => gui.say(message),
+        }
+    }
+}
+
+fn style_summary(style: &StyleConfig) -> String {
+    let prompt = style.prompt.trim();
+    match (style.polish, prompt.is_empty()) {
+        (false, _) => "No polish.".to_string(),
+        (true, true) => "Polish, with no prompt.".to_string(),
+        (true, false) => {
+            let mut shown: String = prompt.chars().take(80).collect();
+            if prompt.chars().count() > 80 {
+                shown.push('…');
+            }
+            format!("Polish: {}", shown)
+        },
+    }
+}
+
+/// Put the draft into the config: add the style, or change the one that it
+/// edits. A new name moves each style key and app rule to the new name.
+pub fn save_style(config: &mut Config, draft: &StyleDraft) -> Result<(), String> {
+    let name = draft.name.trim();
+    let parsed = StyleName::parse(name)
+        .ok_or_else(|| format!("'{}' is not a style name: {}.", name, styles::NAME_RULE))?;
+    if parsed == styles::VERBATIM {
+        return Err("Verbatim is built in. Pick another name.".to_string());
+    }
+    let renamed = draft.original.as_deref().filter(|old| *old != name);
+    if draft.original.as_deref() != Some(name) && config.styles.contains_key(name) {
+        return Err(format!(
+            "A style with the name {} exists. Pick another name.",
+            name
+        ));
+    }
+    if let Some(old) = renamed {
+        config.styles.remove(old);
+        let uses = config
+            .hotkey
+            .styles
+            .values_mut()
+            .chain(config.profiles.app_styles.values_mut());
+        for value in uses.filter(|value| value.as_str() == old) {
+            *value = name.to_string();
+        }
+    }
+    config.styles.insert(
+        name.to_string(),
+        StyleConfig {
+            prompt: draft.prompt.trim().to_string(),
+            polish: draft.polish,
+        },
+    );
+    Ok(())
+}
+
+/// Where the config names a style, for a message.
+fn style_users(config: &Config, name: &str) -> Vec<String> {
+    let keys = config
+        .hotkey
+        .styles
+        .iter()
+        .filter(|(_, style)| style.as_str() == name)
+        .map(|(chord, _)| format!("the style key {}", chord));
+    let apps = config
+        .profiles
+        .app_styles
+        .iter()
+        .filter(|(_, style)| style.as_str() == name)
+        .map(|(app, _)| format!("profiles.app_styles for {}", app));
+    keys.chain(apps).collect()
+}
+
+/// Remove a style that nothing uses.
+pub fn remove_style(config: &mut Config, name: &str) -> Result<(), String> {
+    let users = style_users(config, name);
+    if !users.is_empty() {
+        return Err(format!(
+            "The style {} is in use: {}. Remove that first.",
+            name,
+            warnings::join(&users)
+        ));
+    }
+    config.styles.remove(name);
+    Ok(())
 }
 
 /// Where the text goes when the server URL is set.
@@ -354,6 +568,94 @@ mod tests {
             list_path("/tmp/words.txt", home),
             Path::new("/tmp/words.txt")
         );
+    }
+
+    fn draft(original: Option<&str>, name: &str, prompt: &str, polish: bool) -> StyleDraft {
+        StyleDraft {
+            original: original.map(str::to_string),
+            name: name.to_string(),
+            prompt: prompt.to_string(),
+            polish,
+        }
+    }
+
+    #[test]
+    fn the_style_form_adds_and_changes_styles() {
+        let mut config = Config::defaults().unwrap();
+        save_style(&mut config, &draft(None, " casual ", " Brief. ", true)).unwrap();
+        assert_eq!(config.styles["casual"].prompt, "Brief.");
+        assert!(config.styles["casual"].polish);
+
+        let err = save_style(&mut config, &draft(None, "casual", "x", true)).unwrap_err();
+        assert!(err.contains("exists"), "{err}");
+        let err = save_style(&mut config, &draft(None, "verbatim", "x", true)).unwrap_err();
+        assert!(err.contains("built in"), "{err}");
+        let err = save_style(&mut config, &draft(None, "Big Name", "x", true)).unwrap_err();
+        assert!(err.contains("'Big Name'"), "{err}");
+
+        save_style(
+            &mut config,
+            &draft(Some("casual"), "casual", "Short.", false),
+        )
+        .unwrap();
+        assert_eq!(config.styles["casual"].prompt, "Short.");
+        assert!(!config.styles["casual"].polish);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn a_new_name_moves_the_keys_and_app_rules() {
+        let mut config = Config::defaults().unwrap();
+        save_style(&mut config, &draft(None, "casual", "Brief.", true)).unwrap();
+        save_style(&mut config, &draft(None, "formal", "Formal.", true)).unwrap();
+        config.hotkey.styles.insert("F14".into(), "casual".into());
+        config.hotkey.styles.insert("F15".into(), "verbatim".into());
+        config
+            .profiles
+            .app_styles
+            .insert("slack".into(), "casual".into());
+
+        let err = save_style(&mut config, &draft(Some("casual"), "formal", "x", true)).unwrap_err();
+        assert!(err.contains("exists"), "{err}");
+        save_style(&mut config, &draft(Some("casual"), "chat", "Brief.", true)).unwrap();
+        assert!(!config.styles.contains_key("casual"));
+        assert_eq!(config.hotkey.styles["F14"], "chat");
+        assert_eq!(config.hotkey.styles["F15"], "verbatim");
+        assert_eq!(config.profiles.app_styles["slack"], "chat");
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn a_style_in_use_is_not_removed() {
+        let mut config = Config::defaults().unwrap();
+        save_style(&mut config, &draft(None, "casual", "Brief.", true)).unwrap();
+        config.hotkey.styles.insert("F14".into(), "casual".into());
+        config
+            .profiles
+            .app_styles
+            .insert("slack".into(), "casual".into());
+        let err = remove_style(&mut config, "casual").unwrap_err();
+        assert_eq!(
+            err,
+            "The style casual is in use: the style key F14 and profiles.app_styles for \
+             slack. Remove that first."
+        );
+        config.hotkey.styles.clear();
+        config.profiles.app_styles.clear();
+        remove_style(&mut config, "casual").unwrap();
+        assert!(config.styles.is_empty());
+    }
+
+    #[test]
+    fn a_style_summary_says_what_the_style_does() {
+        let style = |prompt: &str, polish| StyleConfig {
+            prompt: prompt.to_string(),
+            polish,
+        };
+        assert_eq!(style_summary(&style("Brief.", false)), "No polish.");
+        assert_eq!(style_summary(&style(" ", true)), "Polish, with no prompt.");
+        assert_eq!(style_summary(&style("Brief.", true)), "Polish: Brief.");
+        assert!(style_summary(&style(&"x".repeat(100), true)).ends_with('…'));
     }
 
     #[test]

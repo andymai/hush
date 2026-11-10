@@ -6,11 +6,12 @@
 //! on a single tap and still records while a longer press is held. The cancel
 //! key discards whatever is in progress.
 //!
-//! A language chord is a dictation key of its own. Only a second tap on the
-//! same key locks, only the held key's release ends a hold, and any
-//! dictation key stops a locked take.
+//! A language chord or a style chord is a dictation key of its own. Only a
+//! second tap on the same key locks, only the held key's release ends a
+//! hold, and any dictation key stops a locked take.
 
 use super::{HotkeyEvent, HotkeyMode};
+use crate::text_processing::StyleName;
 use crate::transcription::Language;
 use std::time::{Duration, Instant};
 
@@ -21,8 +22,13 @@ pub enum GestureAction {
     Cancel,
 }
 
-/// The dictation key: the hotkey (`None`) or a language chord.
-type Key = Option<Language>;
+/// The dictation key: the hotkey, a language chord, or a style chord.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Key {
+    Hotkey,
+    Language(Language),
+    Style(StyleName),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -52,14 +58,30 @@ impl GestureDetector {
         matches!(self.state, State::Locked { .. })
     }
 
-    /// The language of the chord that started the gesture, or `None` for
-    /// the hotkey and when no gesture is in progress.
-    pub fn language(&self) -> Option<Language> {
+    fn key(&self) -> Option<Key> {
         match self.state {
             State::Idle => None,
             State::Holding { key, .. } | State::TapPending { key, .. } | State::Locked { key } => {
-                key
+                Some(key)
             },
+        }
+    }
+
+    /// The language of the chord that started the gesture, or `None` for
+    /// another key and when no gesture is in progress.
+    pub fn language(&self) -> Option<Language> {
+        match self.key() {
+            Some(Key::Language(language)) => Some(language),
+            _ => None,
+        }
+    }
+
+    /// The style of the chord that started the gesture, or `None` for
+    /// another key and when no gesture is in progress.
+    pub fn style(&self) -> Option<StyleName> {
+        match self.key() {
+            Some(Key::Style(style)) => Some(style),
+            _ => None,
         }
     }
 
@@ -101,9 +123,10 @@ impl GestureDetector {
                 self.state = State::Idle;
                 return Some(GestureAction::Cancel);
             },
-            HotkeyEvent::Pressed => (None, true),
-            HotkeyEvent::Released => (None, false),
-            HotkeyEvent::Language(language, pressed) => (Some(language), pressed),
+            HotkeyEvent::Pressed => (Key::Hotkey, true),
+            HotkeyEvent::Released => (Key::Hotkey, false),
+            HotkeyEvent::Language(language, pressed) => (Key::Language(language), pressed),
+            HotkeyEvent::Style(style, pressed) => (Key::Style(style), pressed),
         };
         if pressed {
             self.press(key, now)
@@ -365,6 +388,48 @@ mod tests {
             Some(GestureAction::Stop),
             "any dictation key stops a locked take"
         );
+    }
+
+    #[test]
+    fn a_style_chord_is_a_dictation_key_of_its_own() {
+        let base = Instant::now();
+        let verbatim = crate::text_processing::styles::VERBATIM;
+        let de = german();
+        let mut g = GestureDetector::new(HotkeyMode::Hold, TAP);
+        assert_eq!(
+            g.feed(HotkeyEvent::Style(verbatim, true), at(base, 0)),
+            Some(GestureAction::Start)
+        );
+        assert_eq!(g.style(), Some(verbatim));
+        assert_eq!(g.language(), None);
+        assert_eq!(
+            g.feed(HotkeyEvent::Language(de, false), at(base, 800)),
+            None,
+            "only the held key ends the hold"
+        );
+        assert_eq!(
+            g.feed(HotkeyEvent::Style(verbatim, false), at(base, 900)),
+            Some(GestureAction::Stop)
+        );
+        assert_eq!(g.style(), None);
+
+        g.feed(HotkeyEvent::Style(verbatim, true), at(base, 1000));
+        g.feed(HotkeyEvent::Style(verbatim, false), at(base, 1100));
+        g.feed(HotkeyEvent::Style(verbatim, true), at(base, 1200));
+        assert!(g.is_locked(), "a double-tap locks");
+        assert_eq!(g.style(), Some(verbatim));
+        assert_eq!(
+            g.feed(HotkeyEvent::Pressed, at(base, 3000)),
+            Some(GestureAction::Stop),
+            "any dictation key stops a locked take"
+        );
+
+        g.feed(HotkeyEvent::Language(de, true), at(base, 4000));
+        g.feed(HotkeyEvent::Language(de, false), at(base, 4100));
+        g.feed(HotkeyEvent::Style(verbatim, true), at(base, 4200));
+        assert!(!g.is_locked(), "a tap on another key is a new hold");
+        assert_eq!(g.style(), Some(verbatim));
+        assert_eq!(g.language(), None);
     }
 
     #[test]

@@ -1,10 +1,11 @@
-//! Checks on the chords under `[hotkey]`, language chords included: two
-//! actions on one chord, Right Alt on a layout where it is AltGr, and keys
+//! Checks on the chords under `[hotkey]`, language and style chords
+//! included: two actions on one chord, Right Alt on a layout where it is AltGr, and keys
 //! that type a character. Each check is a pure function, so the settings
 //! window, the config load, and `hush doctor` give the same answer.
 
 use super::KeyCombination;
 use crate::text::layout::Layout;
+use crate::text_processing::StyleName;
 use crate::transcription::Language;
 use evdev::KeyCode;
 use std::fmt;
@@ -19,6 +20,8 @@ pub enum Role {
     Learn,
     /// A language chord: dictation in that language
     Language(Language),
+    /// A style chord: dictation in that style
+    Style(StyleName),
 }
 
 impl Role {
@@ -40,6 +43,7 @@ impl Role {
             Role::PasteLast => "Type last again".to_string(),
             Role::Learn => "Learn selection".to_string(),
             Role::Language(language) => format!("Dictate in {}", language.name()),
+            Role::Style(style) => format!("Dictate in the {} style", style),
         }
     }
 
@@ -52,12 +56,14 @@ impl Role {
             Role::PasteLast => "paste_last",
             Role::Learn => "learn",
             Role::Language(_) => "languages",
+            Role::Style(_) => "styles",
         }
     }
 
-    /// The chord starts a dictation: the dictation key or a language chord.
+    /// The chord starts a dictation: the dictation key, a language chord, or
+    /// a style chord.
     pub fn dictates(self) -> bool {
-        matches!(self, Role::Dictate | Role::Language(_))
+        matches!(self, Role::Dictate | Role::Language(_) | Role::Style(_))
     }
 }
 
@@ -419,6 +425,36 @@ mod tests {
         assert_eq!(german().config_key(), "languages");
         assert!(german().dictates() && Role::Dictate.dictates());
         assert!(!Role::Command.dictates());
+    }
+
+    #[test]
+    fn style_chords_conflict_with_every_other_chord() {
+        let verbatim = Role::Style(crate::text_processing::styles::VERBATIM);
+        let casual = Role::Style(StyleName::parse("casual").unwrap());
+        let mut bound = defaults().to_vec();
+        bound.push((german(), "Shift+RightAlt"));
+        bound.push((verbatim, "Super+RightAlt"));
+        bound.push((casual, "F14"));
+        assert!(conflicts(bound.clone()).is_empty());
+
+        bound.push((Role::Learn, "super+rightalt"));
+        bound.push((german(), "f14"));
+        let found = conflicts(bound.clone());
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].roles, vec![verbatim, Role::Learn]);
+        assert_eq!(
+            found[0].to_string(),
+            "Dictate in the verbatim style and Learn selection use Super+RightAlt"
+        );
+        assert_eq!(found[1].roles, vec![casual, german()]);
+        assert_eq!(
+            conflicts([(Role::Command, "Ctrl+RightAlt"), (casual, "ctrl+rightalt")])[0].roles,
+            vec![Role::Command, casual]
+        );
+        assert_eq!(verbatim.config_key(), "styles");
+        assert!(verbatim.dictates());
+        let typing = printable([(Role::Dictate, "RightAlt"), (casual, "Ctrl+G")], false);
+        assert_eq!(typing[0].0, casual);
     }
 
     #[test]

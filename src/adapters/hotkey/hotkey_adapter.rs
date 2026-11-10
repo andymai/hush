@@ -74,7 +74,8 @@ impl InputTrigger for HotkeyTriggerAdapter {
                 Some(HotkeyEvent::Cancel) => return Some(TriggerEvent::Cancel),
                 Some(HotkeyEvent::Action(_))
                 | Some(HotkeyEvent::Command(_))
-                | Some(HotkeyEvent::Language(..)) => continue,
+                | Some(HotkeyEvent::Language(..))
+                | Some(HotkeyEvent::Style(..)) => continue,
                 None => return None,
             }
         }
