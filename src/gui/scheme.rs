@@ -1,7 +1,8 @@
 //! The desktop's light or dark preference, read from the XDG desktop portal
-//! (`org.freedesktop.appearance` `color-scheme`), which GNOME, KDE, and the
-//! wlroots portals answer. A thread keeps listening, so the window changes
-//! with the desktop.
+//! (`org.freedesktop.appearance` `color-scheme`). GNOME and KDE answer it.
+//! On wlroots desktops, xdg-desktop-portal-wlr does not, so the gtk portal
+//! or darkman must. A thread keeps listening, so the window changes with
+//! the desktop.
 
 use egui::{Context, Theme};
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -65,10 +66,14 @@ fn listen(latest: &AtomicU8, ctx: &Context) -> zbus::Result<()> {
     let proxy = zbus::blocking::Proxy::new(&connection, DESTINATION, PATH, INTERFACE)?;
     // Listen before the read, so a change between the two is not lost.
     let changes = proxy.receive_signal("SettingChanged")?;
-    let value: OwnedValue = proxy
+    let read: zbus::Result<OwnedValue> = proxy
         .call("ReadOne", &(NAMESPACE, KEY))
-        .or_else(|_| proxy.call("Read", &(NAMESPACE, KEY)))?;
-    store(latest, ctx, &value);
+        .or_else(|_| proxy.call("Read", &(NAMESPACE, KEY)));
+    // A portal that starts late after login can still send each change.
+    match read {
+        Ok(value) => store(latest, ctx, &value),
+        Err(e) => debug!("The desktop portal gave no colour scheme yet: {}", e),
+    }
     for message in changes {
         let Ok((namespace, key, value)) =
             message.body().deserialize::<(String, String, OwnedValue)>()
@@ -125,17 +130,26 @@ mod tests {
 
     #[test]
     fn a_change_repaints_only_when_the_scheme_differs() {
-        let ctx = Context::default();
-        let latest = AtomicU8::new(UNKNOWN);
-        let scheme = DesktopScheme {
-            latest: Arc::new(AtomicU8::new(UNKNOWN)),
-        };
+        let scheme = DesktopScheme::default();
         assert_eq!(scheme.get(), None);
-        store(&latest, &ctx, &Value::U32(1));
-        assert_eq!(latest.load(Ordering::Acquire), DARK);
-        store(&latest, &ctx, &Value::U32(0));
-        assert_eq!(latest.load(Ordering::Acquire), UNKNOWN);
-        scheme.latest.store(LIGHT, Ordering::Release);
+
+        let ctx = Context::default();
+        store(&scheme.latest, &ctx, &Value::U32(1));
+        assert!(ctx.has_requested_repaint(), "no preference to dark");
+        assert_eq!(scheme.get(), Some(Theme::Dark));
+
+        let ctx = Context::default();
+        store(&scheme.latest, &ctx, &Value::U32(1));
+        assert!(!ctx.has_requested_repaint(), "dark again");
+        assert_eq!(scheme.get(), Some(Theme::Dark));
+
+        store(&scheme.latest, &ctx, &Value::U32(2));
+        assert!(ctx.has_requested_repaint(), "dark to light");
         assert_eq!(scheme.get(), Some(Theme::Light));
+
+        let ctx = Context::default();
+        store(&scheme.latest, &ctx, &Value::U32(0));
+        assert!(ctx.has_requested_repaint(), "light to no preference");
+        assert_eq!(scheme.get(), None);
     }
 }
