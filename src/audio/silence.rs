@@ -74,6 +74,12 @@ impl SilenceDetector {
                 .is_some_and(|since| now.saturating_duration_since(since) >= self.pause)
     }
 
+    /// Wait for new speech and a new pause, and keep the noise floor.
+    pub fn rearm(&mut self) {
+        self.voiced = Duration::ZERO;
+        self.quiet_since = None;
+    }
+
     fn threshold(&self) -> f32 {
         let mut levels: Vec<f32> = self.recent.iter().map(|(_, level)| *level).collect();
         levels.sort_by(f32::total_cmp);
@@ -217,6 +223,24 @@ mod tests {
             0.15,
             Duration::from_secs(3)
         ));
+    }
+
+    #[test]
+    fn a_rearmed_detector_needs_new_speech_and_a_new_pause() {
+        let mut detector = SilenceDetector::new(PAUSE);
+        let mut clock = Instant::now();
+        let pause = PAUSE + Duration::from_millis(200);
+        speak(&mut detector, &mut clock, 0.5, Duration::from_secs(2));
+        assert!(feed_for(&mut detector, &mut clock, 0.01, pause));
+        detector.rearm();
+        assert!(!feed_for(
+            &mut detector,
+            &mut clock,
+            0.01,
+            Duration::from_secs(5)
+        ));
+        speak(&mut detector, &mut clock, 0.5, Duration::from_secs(1));
+        assert!(feed_for(&mut detector, &mut clock, 0.01, pause));
     }
 
     #[test]

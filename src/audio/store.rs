@@ -5,6 +5,9 @@
 //!   `history.keep_audio_days` is more than 0.
 //! - `recover/`: the audio of a take that Hush could not transcribe, for
 //!   `hush recover`, kept for [`RECOVERY_DAYS`] whatever the setting.
+//! - `parts/`: the parts of a hands-free take until Hush inserts its text.
+//!   A part that fails moves to `recover/`, and so do the parts that a
+//!   stopped daemon left.
 //!
 //! [`sweep`] deletes files older than their limit, then the oldest files of
 //! both folders while the two together hold more than [`MAX_BYTES`].
@@ -34,6 +37,11 @@ pub fn recovery_dir() -> PathBuf {
     crate::config::paths::data_dir().join("recover")
 }
 
+/// `$XDG_DATA_HOME/hush/parts`
+pub fn parts_dir() -> PathBuf {
+    crate::config::paths::data_dir().join("parts")
+}
+
 /// Make `dir` with mode 0700, and give an existing folder that mode.
 pub fn private_dir(dir: &Path) -> Result<()> {
     std::fs::DirBuilder::new()
@@ -47,8 +55,18 @@ pub fn private_dir(dir: &Path) -> Result<()> {
 
 /// Save a take recorded at 16 kHz in `dir`, named for `at`. Returns the path.
 pub fn save(dir: &Path, samples: &[f32], at: DateTime<Utc>) -> Result<PathBuf> {
+    save_as(dir, &stem(at), samples)
+}
+
+/// The file name of a take that started at `at`, without its extension.
+pub fn stem(at: DateTime<Utc>) -> String {
+    at.format("%Y%m%dT%H%M%S%3fZ").to_string()
+}
+
+/// Save a take recorded at 16 kHz in `dir` as `<stem>.flac`, or with a
+/// number after the stem when that name is taken. Returns the path.
+pub fn save_as(dir: &Path, stem: &str, samples: &[f32]) -> Result<PathBuf> {
     private_dir(dir)?;
-    let stem = at.format("%Y%m%dT%H%M%S%3fZ").to_string();
     let mut path = dir.join(format!("{}.{}", stem, EXTENSION));
     let mut n = 1;
     while path.exists() {
@@ -74,6 +92,17 @@ pub fn move_to_recovery(path: &Path, recovery: &Path) -> Result<PathBuf> {
         )
     })?;
     Ok(target)
+}
+
+/// Move every part that `parts` holds into `recovery`: no take waits for
+/// them any more. Returns how many moved.
+pub fn recover_leftover_parts(parts: &Path, recovery: &Path) -> Result<usize> {
+    let mut moved = 0;
+    for kept in list(parts)? {
+        move_to_recovery(&kept.path, recovery)?;
+        moved += 1;
+    }
+    Ok(moved)
 }
 
 /// One kept file.
@@ -403,6 +432,18 @@ mod tests {
         assert_eq!(list(&f.recovery).unwrap()[0].path, moved);
         let mode = std::fs::metadata(&f.recovery).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[test]
+    fn parts_that_a_stopped_daemon_left_move_to_recovery() {
+        let f = folders();
+        let parts = f.takes.with_file_name("parts");
+        assert_eq!(recover_leftover_parts(&parts, &f.recovery).unwrap(), 0);
+        save_as(&parts, "take-part01", &[0.1; 160]).unwrap();
+        save_as(&parts, "take-part02", &[0.1; 160]).unwrap();
+        assert_eq!(recover_leftover_parts(&parts, &f.recovery).unwrap(), 2);
+        assert!(list(&parts).unwrap().is_empty());
+        assert_eq!(names(&f.recovery), ["take-part01.flac", "take-part02.flac"]);
     }
 
     #[test]

@@ -42,6 +42,7 @@ pub mod feedback;
 pub mod file;
 pub mod level;
 pub mod media;
+pub mod parts;
 pub mod silence;
 pub mod store;
 pub mod take;

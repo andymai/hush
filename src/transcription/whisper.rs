@@ -42,6 +42,23 @@ pub struct TranscriptionResult {
     pub text: String,
     pub confidence: f32,
     pub processing_time: Duration,
+    /// The language that limited detection chose, when it ran and chose one
+    pub detected: Option<&'static str>,
+}
+
+/// What one run of whisper.cpp heard.
+struct Heard {
+    text: String,
+    detected: Option<&'static str>,
+}
+
+impl Heard {
+    fn nothing() -> Self {
+        Self {
+            text: String::new(),
+            detected: None,
+        }
+    }
 }
 
 /// The context must outlive the state. The state is created once so that its
@@ -256,6 +273,7 @@ impl WhisperTranscriber {
                 text: String::new(),
                 confidence: 0.0,
                 processing_time: start.elapsed(),
+                detected: None,
             });
         }
 
@@ -278,15 +296,15 @@ impl WhisperTranscriber {
             .map(|p| p.replace('\0', ""))
             .filter(|p| !p.trim().is_empty());
 
-        let text = match self
+        let heard = match self
             .run_take(Arc::clone(&samples), prompt.clone(), language.clone())
             .await
         {
             Err(e) if self.is_using_gpu() => self.retry_on_cpu(e, samples, prompt, language).await,
-            text => text,
+            heard => heard,
         };
-        let text = match text {
-            Ok(text) => text,
+        let Heard { text, detected } = match heard {
+            Ok(heard) => heard,
             Err(e) => {
                 logging::log_transcription_error(&ctx, &e);
                 return Err(e);
@@ -307,6 +325,7 @@ impl WhisperTranscriber {
             text,
             confidence,
             processing_time,
+            detected,
         })
     }
 
@@ -315,7 +334,7 @@ impl WhisperTranscriber {
         samples: Arc<[f32]>,
         prompt: Option<String>,
         language: String,
-    ) -> Result<String> {
+    ) -> Result<Heard> {
         let engine = self.engine();
         let vad = self.vad.clone();
         let detect = Arc::clone(&self.detect_languages);
@@ -330,7 +349,7 @@ impl WhisperTranscriber {
             });
             let Some(samples) = whisper_input(&samples, trimmed.as_deref()) else {
                 debug!("Voice activity detection found no speech in a quiet take");
-                return Ok(String::new());
+                return Ok(Heard::nothing());
             };
             run_full(
                 &engine,
@@ -353,7 +372,7 @@ impl WhisperTranscriber {
         samples: Arc<[f32]>,
         prompt: Option<String>,
         language: String,
-    ) -> Result<String> {
+    ) -> Result<Heard> {
         warn!(
             "Whisper failed on the GPU, so the take runs again on the CPU, \
              and the CPU stays in use for this session: {:#}",
@@ -433,16 +452,14 @@ fn run_full(
     detect: &[String],
     threads: i32,
     prompt: Option<&str>,
-) -> Result<String> {
+) -> Result<Heard> {
     let mut state = engine.state.lock();
-    let language = if language == "auto" && !detect.is_empty() {
-        limited_detection(&mut state, samples, threads, detect)
-    } else {
-        language.to_string()
-    };
+    let detected = (language == "auto" && !detect.is_empty())
+        .then(|| limited_detection(&mut state, samples, threads, detect))
+        .flatten();
 
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(Some(&language));
+    params.set_language(Some(detected.unwrap_or(language)));
     if let Some(prompt) = prompt {
         params.set_initial_prompt(prompt);
     }
@@ -469,23 +486,23 @@ fn run_full(
         }
         text.push_str(&segment);
     }
-    Ok(text)
+    Ok(Heard { text, detected })
 }
 
 /// The most likely of the `allowed` languages in the first 30 seconds of
-/// `samples`. When detection fails, or gives no allowed language, Whisper
-/// detects the language on its own (`auto`).
+/// `samples`. When detection fails, or gives no allowed language, the
+/// answer is `None`, and Whisper detects the language on its own.
 fn limited_detection(
     state: &mut WhisperState,
     samples: &[f32],
     threads: i32,
     allowed: &[String],
-) -> String {
+) -> Option<&'static str> {
     let probabilities = match language_probabilities(state, samples, threads) {
         Ok(probabilities) => probabilities,
         Err(e) => {
             warn!("Language detection failed, so Whisper picks from every language: {e:#}");
-            return "auto".to_string();
+            return None;
         },
     };
     match language::most_likely(probabilities, allowed) {
@@ -497,14 +514,14 @@ fn limited_detection(
                 code,
                 allowed.join(", ")
             );
-            code.to_string()
+            Some(code)
         },
         None => {
             warn!(
                 "Whisper gave no probability for {}, so it picks from every language",
                 allowed.join(", ")
             );
-            "auto".to_string()
+            None
         },
     }
 }

@@ -33,7 +33,7 @@ jobs:
       - name: Install PipeWire, WirePlumber, and the ALSA plugin
         run: |
           sudo apt-get install -y --no-install-recommends \
-            pipewire pipewire-bin pipewire-alsa wireplumber dbus jq
+            pipewire pipewire-bin pipewire-alsa wireplumber dbus jq sox
           # The harness hides /dev/uinput from the test daemon in a user
           # namespace, which AppArmor blocks by default on Ubuntu 24.04.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true

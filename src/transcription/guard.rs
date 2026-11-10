@@ -171,6 +171,39 @@ pub fn after_echo(first: &str, retry: &str, prompt: &str) -> EchoChoice {
     }
 }
 
+/// Why a transcript gets a retry without the prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Echo<'a> {
+    /// The output echoes `terms`, the window title and learned terms.
+    Terms(&'a str),
+    /// One word of the prompt loops in the output.
+    Loop,
+}
+
+impl Echo<'_> {
+    /// Which transcript to keep after the retry.
+    pub fn choose(self, first: &str, retry: &str) -> EchoChoice {
+        match self {
+            Echo::Terms(terms) => after_echo(first, retry, terms),
+            Echo::Loop if is_punctuation_only(retry) => EchoChoice::Drop,
+            Echo::Loop => EchoChoice::Retry,
+        }
+    }
+}
+
+/// Whether `output` repeats the prompt instead of the speech. `terms` is
+/// the start of `prompt` from the window and the learned terms; the rest of
+/// `prompt` is the text before a part of a take. Speech can repeat that
+/// text, so it counts only when one of its words loops.
+pub fn echo_in<'a>(output: &str, prompt: Option<&str>, terms: Option<&'a str>) -> Option<Echo<'a>> {
+    if let Some(terms) = terms.filter(|terms| is_prompt_echo(output, terms)) {
+        return Some(Echo::Terms(terms));
+    }
+    prompt
+        .filter(|prompt| has_prompt_term_run(output, prompt))
+        .map(|_| Echo::Loop)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,6 +367,58 @@ mod tests {
             ),
             EchoChoice::Retry
         );
+    }
+
+    #[test]
+    fn a_part_may_repeat_the_text_before_it() {
+        let carried = "Als Gregor Samsa eines Morgens erwachte.";
+        let prompt = format!("{} {}", PROMPT, carried);
+        let repeat = "Als Gregor Samsa eines Morgens erwachte.";
+        assert!(
+            is_prompt_echo(repeat, &prompt),
+            "the whole prompt would drop it"
+        );
+        assert_eq!(echo_in(repeat, Some(&prompt), Some(PROMPT)), None);
+        assert_eq!(echo_in(repeat, Some(carried), None), None);
+
+        let looped = "Samsa Samsa Samsa Samsa";
+        let echo = echo_in(looped, Some(&prompt), Some(PROMPT));
+        assert_eq!(
+            echo,
+            Some(Echo::Loop),
+            "a loop on a carried word still counts"
+        );
+        assert_eq!(
+            Echo::Loop.choose(looped, repeat),
+            EchoChoice::Retry,
+            "the retry had no prompt to echo"
+        );
+        assert_eq!(Echo::Loop.choose(looped, " . "), EchoChoice::Drop);
+
+        assert_eq!(
+            echo_in(PROMPT, Some(&prompt), Some(PROMPT)),
+            Some(Echo::Terms(PROMPT)),
+            "an echo of the window and terms counts as before"
+        );
+    }
+
+    #[test]
+    fn one_pass_keeps_the_rules_of_the_whole_prompt() {
+        for output in [
+            PROMPT,
+            "So Kubernetes, Kubernetes, Kubernetes and then more words follow here.",
+            "Move the PostgreSQL backup to the new Kubernetes cluster.",
+        ] {
+            let echo = echo_in(output, Some(PROMPT), Some(PROMPT));
+            assert_eq!(echo.is_some(), is_prompt_echo(output, PROMPT), "{output:?}");
+            if let Some(echo) = echo {
+                assert_eq!(
+                    echo.choose(output, "the cluster is up"),
+                    after_echo(output, "the cluster is up", PROMPT)
+                );
+            }
+        }
+        assert_eq!(echo_in("anything", None, None), None);
     }
 
     #[test]

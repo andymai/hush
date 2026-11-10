@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use parking_lot::Mutex;
 use std::path::Path;
@@ -37,6 +37,7 @@ use crate::text_processing::{
     LlmProvider, ProcessingConfig, TextProcessor, TranscriptHook, Trigger,
 };
 use crate::transcription::language::{self, Language};
+use crate::transcription::parts::{settle as settle_parts, PartFiles, PromptContext, TakeParts};
 use crate::transcription::{IdleTimer, ModelSlot, SlotState, SpeechToText, WHISPER_SAMPLE_RATE};
 use crate::tray::{self, TrayLanguages};
 use crate::AudioCapture;
@@ -197,6 +198,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             printer: Option<TakeWaiter>,
             /// The take at 16 kHz, when the history keeps its audio
             audio: Option<Vec<f32>>,
+            /// The parts of a hands-free take, deleted once the text is in
+            parts: PartFiles,
         },
         Error(String),
     }
@@ -207,6 +210,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     // Single instance and control socket, before any device is opened
     let handles = daemon::claim(audio_cmd_tx.clone()).await?;
     let shared = Arc::clone(&handles.shared);
+    // After the claim, so that no other daemon still uses these parts.
+    recover_leftover_parts();
     let config_language = Language::parse(&config.transcription.language).unwrap_or(Language::AUTO);
     shared.set_config_language(config_language);
     let chosen_language =
@@ -308,7 +313,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     .await?;
     info!("✅ Transcriber ready: {}", transcriber.describe());
     let local_model = !config.transcription.backend.is_cloud();
-    let mut model = ModelSlot::loaded(transcriber, model_loader(&config.transcription));
+    let mut model = ModelSlot::loaded(Arc::new(transcriber), model_loader(&config.transcription));
     let unload_after_mins = if local_model {
         config.transcription.unload_after_mins
     } else {
@@ -321,7 +326,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             unload_after_mins
         );
     }
-    let publish_model = |model: &ModelSlot<SpeechToText>| {
+    let publish_model = |model: &ModelSlot<Arc<SpeechToText>>| {
         shared.set_model_state(model_state(local_model, model.state()));
     };
     publish_model(&model);
@@ -515,7 +520,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     trigger,
                     printer,
                     audio,
+                    parts,
                 } => {
+                    let _delete_after_delivery = parts;
                     shared_result.set_inserting();
                     let context = ProcessingContext::new(window.clone(), &profiles);
                     let hook_env = HookEnv {
@@ -760,6 +767,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         }
     };
     let mut take: Option<TakeClock> = None;
+    let mut take_parts: Option<TakeParts<SpeechToText>> = None;
     let cap = LengthCap::new(config.audio.max_recording_secs);
     let mut cap_warned = false;
     let mut cap_shown: Option<u64> = None;
@@ -817,6 +825,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         let _ = feedback.play_start();
                     },
                     Some(StartEvent::TimedOut) => {
+                        if let Some(parts) = take_parts.take() {
+                            parts.discard();
+                        }
                         let device = audio_capture.get_device_name();
                         error!(
                             device = %device,
@@ -853,6 +864,34 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 let Some(clock) = take.filter(TakeClock::is_live) else {
                     continue;
                 };
+                // A held key ends its own take, so only a hands-free take
+                // is long enough to need parts.
+                let in_parts = command_target.is_none()
+                    && (hands_free.load(Ordering::Acquire)
+                        || matches!(current_trigger, Trigger::Ipc | Trigger::Tray));
+                if in_parts && take_parts.is_none() {
+                    let context = context_prompt.then(|| PromptContext {
+                        window: current_window.clone(),
+                        terms: text_processor
+                            .as_ref()
+                            .map(|processor| processor.user_terms())
+                            .unwrap_or_default(),
+                    });
+                    take_parts = Some(TakeParts::new(
+                        store::parts_dir(),
+                        store::stem(Utc::now()),
+                        context,
+                        current_language,
+                    ));
+                }
+                if let Some(parts) = take_parts.as_mut() {
+                    parts.feed(&audio_capture.samples_from(parts.read()));
+                    if parts.needs_model() {
+                        if let Some(loaded) = model.current() {
+                            parts.provide(loaded);
+                        }
+                    }
+                }
                 if is_stalled(audio_capture.last_frame_at(), now, clock.is_live()) {
                     last_stream = StreamOutcome::Stalled;
                     let device = audio_capture.get_device_name();
@@ -1022,6 +1061,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 let Some(clock) = take.take() else {
                     continue;
                 };
+                if let Some(parts) = take_parts.take() {
+                    parts.discard();
+                }
                 discard_audio(
                     &mut audio_capture,
                     &amplitude_stop_signal,
@@ -1067,6 +1109,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     ));
                 } else {
                     take = Some(TakeClock::new(stream_started));
+                    if let Some(parts) = take_parts.take() {
+                        parts.discard();
+                    }
                     // Only a hold-mode press can become a tap that discards
                     // the take; a toggle-mode tap locks it.
                     let can_be_tap = trigger == Trigger::Hotkey && hotkey_mode == HotkeyMode::Hold;
@@ -1167,7 +1212,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     );
                     continue;
                 };
+                let parts = take_parts.take();
                 if clock.stop_action() == StopAction::Discard {
+                    if let Some(parts) = parts {
+                        parts.discard();
+                    }
                     discard_audio(
                         &mut audio_capture,
                         &amplitude_stop_signal,
@@ -1200,6 +1249,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     Ok(data) => data,
                     Err(e) => {
                         error!("Failed to stop recording: {}", e);
+                        if let Some(parts) = parts {
+                            parts.keep(&store::recovery_dir());
+                        }
                         shared.set_idle();
                         finish(
                             printer,
@@ -1220,6 +1272,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 };
 
                 if audio_data.is_empty() {
+                    if let Some(parts) = parts {
+                        parts.discard();
+                    }
                     shared.set_idle();
                     finish(printer, TakeResult::NoSpeech);
                     if transcription_tx
@@ -1237,6 +1292,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     TakeLevel::Sound => None,
                 };
                 if let Some(empty) = empty_take {
+                    if let Some(parts) = parts {
+                        parts.discard();
+                    }
                     debug!(
                         peak_dbfs = level::dbfs(level::peak(&audio_data)),
                         rms_dbfs = level::dbfs(level::rms(&audio_data)),
@@ -1258,35 +1316,68 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     info!("The take waits for the model to load");
                     show(OverlayState::processing("Loading the model"));
                 }
-                let transcription = match model.ready().await {
-                    Ok(transcriber) => {
-                        let initial_prompt = if context_prompt {
-                            let terms = text_processor
-                                .as_ref()
-                                .map(|processor| processor.user_terms())
-                                .unwrap_or_default();
-                            prompt::whisper_prompt(window.as_ref(), &terms, |prompt| {
-                                transcriber.prompt_fits(prompt)
-                            })
-                        } else {
-                            None
-                        };
-                        transcriber
-                            .transcribe_in(
-                                &audio_data,
-                                WHISPER_SAMPLE_RATE,
-                                initial_prompt.as_deref(),
-                                Some(current_language),
-                            )
+                let chunked = parts.as_ref().is_some_and(TakeParts::has_parts);
+                let mut part_files = PartFiles::default();
+                let transcription: Result<String> = match parts.filter(TakeParts::has_parts) {
+                    Some(parts) => {
+                        let loaded = model
+                            .ready()
                             .await
+                            .map(Arc::clone)
+                            .map_err(|e| e.context("The model did not load"));
+                        let outcomes = parts.finish(&audio_data, loaded.as_ref().ok()).await;
+                        let count = outcomes.len();
+                        let settled = settle_parts(outcomes, &store::recovery_dir());
+                        info!(
+                            parts = count,
+                            failed = settled.failed,
+                            "Joined the parts of the take"
+                        );
+                        part_files = settled.files;
+                        match loaded {
+                            Err(e) => Err(e),
+                            Ok(_) if settled.failed > 0 && settled.text.is_empty() => {
+                                Err(anyhow!("No part of the take transcribed"))
+                            },
+                            Ok(_) => {
+                                if settled.failed > 0 {
+                                    report_failed_parts(settled.failed, count);
+                                }
+                                Ok(settled.text)
+                            },
+                        }
                     },
-                    Err(e) => Err(e.context("The model did not load")),
+                    None => match model.ready().await {
+                        Ok(transcriber) => {
+                            let initial_prompt = if context_prompt {
+                                let terms = text_processor
+                                    .as_ref()
+                                    .map(|processor| processor.user_terms())
+                                    .unwrap_or_default();
+                                prompt::whisper_prompt(window.as_ref(), &terms, |prompt| {
+                                    transcriber.prompt_fits(prompt)
+                                })
+                            } else {
+                                None
+                            };
+                            transcriber
+                                .transcribe_in(
+                                    &audio_data,
+                                    WHISPER_SAMPLE_RATE,
+                                    initial_prompt.as_deref(),
+                                    Some(current_language),
+                                )
+                                .await
+                        },
+                        Err(e) => Err(e.context("The model did not load")),
+                    }
+                    .map(|result| result.text),
                 };
                 publish_model(&model);
 
                 let transcription_result = match transcription {
-                    Ok(result) => {
-                        if result.text.trim().is_empty() {
+                    Ok(text) => {
+                        if text.trim().is_empty() {
                             report_empty_take(
                                 EmptyTake::NoSpeech,
                                 &audio_capture.get_device_name(),
@@ -1298,17 +1389,20 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             continue;
                         }
                         TranscriptionResult::Success {
-                            text: result.text,
+                            text,
                             window,
                             command,
                             trigger: current_trigger,
                             printer,
                             audio: keep_audio.then_some(audio_data),
+                            parts: part_files,
                         }
                     },
                     Err(e) => {
                         error!("Transcription failed: {:#}", e);
-                        let kept = keep_for_recovery(&audio_data, keep_audio_days);
+                        // The parts of a take that failed are in the recovery
+                        // folder already.
+                        let kept = chunked || keep_for_recovery(&audio_data, keep_audio_days);
                         // The overlay is too narrow for the service's reason,
                         // and a bad key or quota needs the user to act.
                         let reason = (!local_model).then(|| format!("{:#}", e));
@@ -1362,6 +1456,31 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
 const RECOVER_HINT: &str = "Hush kept the audio. Run `hush recover` to transcribe it again.";
 
+/// Tell the user that some parts of a take are missing from its text.
+fn report_failed_parts(failed: usize, count: usize) {
+    notify(
+        NoticeKind::Problem,
+        "Part of the take did not transcribe",
+        &format!(
+            "Hush inserts the text of the take without {} of its {} parts. Run `hush recover` to transcribe them.",
+            failed, count
+        ),
+    );
+}
+
+/// Move the parts of a take that the last daemon did not finish to the
+/// recovery folder.
+fn recover_leftover_parts() {
+    match store::recover_leftover_parts(&store::parts_dir(), &store::recovery_dir()) {
+        Ok(0) => {},
+        Ok(moved) => info!(
+            "Moved {} parts of an unfinished take to the recovery folder",
+            moved
+        ),
+        Err(e) => warn!("Could not recover the parts of an unfinished take: {:#}", e),
+    }
+}
+
 /// Delete the kept audio that is too old, then the oldest over the cap.
 fn sweep_kept_audio(keep_days: u64) {
     match store::sweep_now(keep_days) {
@@ -1407,7 +1526,7 @@ fn keep_for_recovery(samples: &[f32], keep_days: u64) -> bool {
 }
 
 /// The text of a WAV or FLAC file, from the daemon's model.
-async fn transcribe_file(model: &mut ModelSlot<SpeechToText>, path: &Path) -> Result<String> {
+async fn transcribe_file(model: &mut ModelSlot<Arc<SpeechToText>>, path: &Path) -> Result<String> {
     let samples = file::read_for_whisper(path)?;
     let transcriber = model.ready().await.context("The model did not load")?;
     Ok(transcriber
@@ -1419,12 +1538,14 @@ async fn transcribe_file(model: &mut ModelSlot<SpeechToText>, path: &Path) -> Re
 /// Builds the transcriber again after the idle timer freed it.
 fn model_loader(
     config: &TranscriptionConfig,
-) -> impl Fn() -> futures_util::future::BoxFuture<'static, Result<SpeechToText>> {
+) -> impl Fn() -> futures_util::future::BoxFuture<'static, Result<Arc<SpeechToText>>> {
     let config = config.clone();
     move || {
         let config = config.clone();
         Box::pin(async move {
-            SpeechToText::from_config(&config, &paths::models_dir(), &keys::env_file()).await
+            SpeechToText::from_config(&config, &paths::models_dir(), &keys::env_file())
+                .await
+                .map(Arc::new)
         })
     }
 }

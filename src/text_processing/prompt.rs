@@ -5,6 +5,8 @@ use crate::text::WindowInfo;
 
 const MAX_TITLE_CHARS: usize = 120;
 const MAX_TERMS: usize = 40;
+/// The words of the previous part that the next part's prompt carries.
+const CARRY_WORDS: usize = 40;
 
 /// Drop control characters (whisper.cpp rejects interior NULs) and cap the
 /// length on a character boundary.
@@ -73,12 +75,74 @@ pub fn whisper_prompt(
     }
 }
 
+/// The prompt of the next part of a take: `base`, which [`whisper_prompt`]
+/// made, then the end of the text of the part before. Whisper then goes on
+/// from that text, so a sentence keeps its case and punctuation across the
+/// cut. Words go from the start of the carried text until `fits` accepts
+/// the prompt.
+pub fn with_previous(
+    base: Option<&str>,
+    previous: &str,
+    fits: impl Fn(&str) -> bool,
+) -> Option<String> {
+    let previous = sanitize(previous, usize::MAX);
+    let words: Vec<&str> = previous.split_whitespace().collect();
+    let mut tail = &words[words.len().saturating_sub(CARRY_WORDS)..];
+    loop {
+        let prompt = match (base, tail.is_empty()) {
+            (_, true) => return base.map(str::to_string),
+            (Some(base), false) => format!("{} {}", base, tail.join(" ")),
+            (None, false) => tail.join(" "),
+        };
+        if fits(&prompt) {
+            return Some(prompt);
+        }
+        tail = &tail[1..];
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn any(_: &str) -> bool {
         true
+    }
+
+    #[test]
+    fn the_next_part_carries_the_end_of_the_last_one() {
+        assert_eq!(
+            with_previous(Some("Code. Kubernetes."), "we ship the fix", any).as_deref(),
+            Some("Code. Kubernetes. we ship the fix")
+        );
+        assert_eq!(
+            with_previous(None, " so the\u{0} build\n passes, ", any).as_deref(),
+            Some("so the build passes,")
+        );
+        assert_eq!(with_previous(None, "  ", any), None);
+        assert_eq!(
+            with_previous(Some("Hush."), "", any).as_deref(),
+            Some("Hush.")
+        );
+
+        let long: Vec<String> = (0..100).map(|i| format!("w{}", i)).collect();
+        let carried = with_previous(None, &long.join(" "), any).unwrap();
+        assert_eq!(carried.split(' ').count(), CARRY_WORDS);
+        assert!(carried.ends_with("w99"), "the end of the text stays");
+    }
+
+    #[test]
+    fn the_carried_text_shrinks_before_the_base_does() {
+        let fits = |prompt: &str| prompt.chars().count() <= 20;
+        assert_eq!(
+            with_previous(Some("Base."), "one two three four five", fits).as_deref(),
+            Some("Base. four five")
+        );
+        assert_eq!(
+            with_previous(Some("Base."), "unbelievablylongword", fits).as_deref(),
+            Some("Base."),
+            "the base alone, which whisper_prompt already fit"
+        );
     }
 
     fn window(title: &str) -> WindowInfo {

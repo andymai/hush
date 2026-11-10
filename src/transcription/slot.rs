@@ -87,6 +87,15 @@ impl<T: Send + 'static> ModelSlot<T> {
         }
     }
 
+    /// The model when it is loaded, without a wait. Call
+    /// [`ModelSlot::settle`] first to pick up a load that finished.
+    pub fn current(&self) -> Option<&T> {
+        match &self.slot {
+            Slot::Loaded(model) => Some(model),
+            _ => None,
+        }
+    }
+
     /// Drop the model, or the load in progress. True when something was
     /// dropped. A load in progress drops its model when it finishes.
     pub fn unload(&mut self) -> bool {
@@ -271,6 +280,19 @@ mod tests {
             tokio::task::yield_now().await;
         }
         slot.state()
+    }
+
+    #[tokio::test]
+    async fn the_current_model_is_there_only_when_loaded() {
+        let fake = Fake::new(0);
+        let (mut slot, _) = fake.slot();
+        assert!(slot.current().is_some());
+        slot.unload();
+        assert!(slot.current().is_none());
+        slot.begin_load();
+        assert!(slot.current().is_none(), "a part waits for the load");
+        assert_eq!(settled(&mut slot).await, SlotState::Loaded);
+        assert!(slot.current().is_some());
     }
 
     #[tokio::test]
