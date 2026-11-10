@@ -22,6 +22,10 @@ pub struct Transcript {
     /// when the compositor does not report it
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub app: String,
+    /// The name of the take's FLAC file in the audio folder, when Hush kept
+    /// the audio
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<String>,
 }
 
 impl Transcript {
@@ -30,7 +34,13 @@ impl Transcript {
             at: Utc::now(),
             text: text.into(),
             app: app.into(),
+            audio: None,
         }
+    }
+
+    pub fn with_audio(mut self, file_name: impl Into<String>) -> Self {
+        self.audio = Some(file_name.into());
+        self
     }
 }
 
@@ -225,6 +235,30 @@ mod tests {
         assert!(read(&path).unwrap().is_empty());
         append(&path, &Transcript::new("after", ""), 10).unwrap();
         assert_eq!(texts(&path), ["after"]);
+    }
+
+    #[test]
+    fn entries_with_and_without_audio_share_one_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.jsonl");
+        std::fs::write(
+            &path,
+            "{\"at\":\"2026-01-02T03:04:05Z\",\"text\":\"from an older Hush\",\"app\":\"kitty\"}\n",
+        )
+        .unwrap();
+        let kept = Transcript::new("with sound", "").with_audio("20261109T163405123Z.flac");
+        append(&path, &kept, 10).unwrap();
+        append(&path, &Transcript::new("without", ""), 10).unwrap();
+
+        let entries = read(&path).unwrap();
+        assert_eq!(entries[0].text, "from an older Hush");
+        assert_eq!(entries[0].audio, None);
+        assert_eq!(entries[1], kept);
+        assert_eq!(entries[2].audio, None);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(raw.matches("\"audio\"").count(), 1, "{raw}");
+        assert!(delete(&path, &kept).unwrap());
+        assert_eq!(texts(&path), ["from an older Hush", "without"]);
     }
 
     #[test]

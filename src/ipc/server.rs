@@ -4,12 +4,13 @@
 //! when the take ends, and a watch replies once for each state change.
 
 use super::protocol::{
-    DaemonCommand, DaemonResponse, DaemonState, ModelState, TakeResult, PRINT_TIMEOUT,
+    DaemonCommand, DaemonResponse, DaemonState, ModelState, TakeResult, FILE_TIMEOUT, PRINT_TIMEOUT,
 };
 use crate::text_processing::{learn, Trigger};
 use crate::transcription::language::{self, Language};
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
+use std::collections::VecDeque;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
@@ -39,6 +40,8 @@ pub enum SessionCommand {
     ReloadVocabulary,
     /// The tray chose the language of later takes; `None` follows the config
     ChooseLanguage(Option<Language>),
+    /// A file waits in [`SharedState::next_file`]
+    TranscribeFile,
     Quit,
 }
 
@@ -72,6 +75,12 @@ struct Languages {
     take: Option<Language>,
 }
 
+/// A file that a client asked the session to transcribe.
+pub struct FileJob {
+    pub path: PathBuf,
+    pub reply: TakeWaiter,
+}
+
 /// Current phase, model state, languages, and the last transcript, written
 /// by the session and read by IPC.
 pub struct SharedState {
@@ -80,6 +89,7 @@ pub struct SharedState {
     languages: Mutex<Languages>,
     last_text: Mutex<Option<String>>,
     waiter: Mutex<Option<oneshot::Sender<TakeResult>>>,
+    files: Mutex<VecDeque<FileJob>>,
     changes: watch::Sender<()>,
 }
 
@@ -97,6 +107,7 @@ impl SharedState {
             languages: Mutex::new(Languages::default()),
             last_text: Mutex::new(None),
             waiter: Mutex::new(None),
+            files: Mutex::new(VecDeque::new()),
             changes: watch::channel(()).0,
         }
     }
@@ -126,6 +137,27 @@ impl SharedState {
             .take()
             .filter(|tx| !tx.is_closed())
             .map(TakeWaiter)
+    }
+
+    /// Queue a file for the session; the receiver gets its text.
+    pub fn queue_file(&self, path: PathBuf) -> oneshot::Receiver<TakeResult> {
+        let (tx, rx) = oneshot::channel();
+        self.files.lock().push_back(FileJob {
+            path,
+            reply: TakeWaiter(tx),
+        });
+        rx
+    }
+
+    /// The next queued file whose client still waits.
+    pub fn next_file(&self) -> Option<FileJob> {
+        let mut files = self.files.lock();
+        while let Some(job) = files.pop_front() {
+            if !job.reply.0.is_closed() {
+                return Some(job);
+            }
+        }
+        None
     }
 
     pub fn set_last_text(&self, text: String) {
@@ -316,6 +348,9 @@ async fn handle_client(
         Ok(DaemonCommand::Stop { print: true }) => {
             stop_and_print(shared, control, PRINT_TIMEOUT).await
         },
+        Ok(DaemonCommand::Transcribe { path }) => {
+            transcribe_file(shared, control, path, FILE_TIMEOUT).await
+        },
         Ok(command) => respond(command, shared, control),
         Err(e) => DaemonResponse::error(format!("Invalid command: {}", e)),
     };
@@ -378,6 +413,30 @@ pub async fn stop_and_print(
     }
 }
 
+/// Have the session transcribe a file, and reply with its text.
+pub async fn transcribe_file(
+    shared: &SharedState,
+    control: &mpsc::Sender<SessionCommand>,
+    path: PathBuf,
+    timeout: Duration,
+) -> DaemonResponse {
+    if !path.is_absolute() {
+        return DaemonResponse::error(format!("{} is not an absolute path", path.display()));
+    }
+    let result = shared.queue_file(path);
+    if control.send(SessionCommand::TranscribeFile).is_err() {
+        return DaemonResponse::error("The daemon session is no longer running");
+    }
+    match tokio::time::timeout(timeout, result).await {
+        Ok(Ok(take)) => DaemonResponse::ok(shared.snapshot()).with_take(take),
+        Ok(Err(_)) => DaemonResponse::error("The file ended without a result"),
+        Err(_) => DaemonResponse::error(format!(
+            "Hush did not transcribe the file within {} minutes",
+            timeout.as_secs() / 60
+        )),
+    }
+}
+
 /// Map a command onto the session and describe the state it leads to.
 pub fn respond(
     command: DaemonCommand,
@@ -435,6 +494,9 @@ pub fn respond(
             Ok(term) => forward(SessionCommand::ReloadVocabulary, shared.snapshot())
                 .with_message(format!("Learned '{}'", term)),
             Err(e) => DaemonResponse::error(e.to_string()),
+        },
+        DaemonCommand::Transcribe { .. } => {
+            DaemonResponse::error("A transcription waits for its reply; send it over the socket")
         },
     }
 }
@@ -680,6 +742,56 @@ mod tests {
             Some(TakeResult::Ok {
                 text: "Ship it.".to_string()
             })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_file_reaches_the_session_and_its_text_comes_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hush.sock");
+        let shared = Arc::new(SharedState::new());
+        let (tx, rx) = mpsc::channel();
+        let _guard = start(&path, Arc::clone(&shared), tx).await.unwrap();
+
+        let session_shared = Arc::clone(&shared);
+        let session = std::thread::spawn(move || {
+            assert_eq!(rx.recv().unwrap(), SessionCommand::TranscribeFile);
+            let job = session_shared.next_file().expect("a file waits");
+            assert_eq!(job.path, PathBuf::from("/tmp/take.flac"));
+            job.reply.finish(TakeResult::Ok {
+                text: "Recovered.".to_string(),
+            });
+            assert!(session_shared.next_file().is_none());
+        });
+
+        let command = DaemonCommand::Transcribe {
+            path: PathBuf::from("/tmp/take.flac"),
+        };
+        let response = client::send_to(&path, command).await.unwrap();
+        session.join().unwrap();
+        assert!(response.ok);
+        assert_eq!(
+            response.take,
+            Some(TakeResult::Ok {
+                text: "Recovered.".to_string()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_relative_file_path_is_refused_and_a_gone_client_is_skipped() {
+        let shared = SharedState::new();
+        let (tx, rx) = mpsc::channel();
+        let response =
+            transcribe_file(&shared, &tx, PathBuf::from("take.flac"), FILE_TIMEOUT).await;
+        assert!(!response.ok);
+        assert!(rx.try_recv().is_err(), "nothing reaches the session");
+
+        drop(shared.queue_file(PathBuf::from("/tmp/a.flac")));
+        let _waiting = shared.queue_file(PathBuf::from("/tmp/b.flac"));
+        assert_eq!(
+            shared.next_file().map(|job| job.path),
+            Some(PathBuf::from("/tmp/b.flac"))
         );
     }
 

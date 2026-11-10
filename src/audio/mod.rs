@@ -39,9 +39,11 @@
 /// Currently supports Linux via ALSA/PulseAudio through the `cpal` library.
 pub mod capture;
 pub mod feedback;
+pub mod file;
 pub mod level;
 pub mod media;
 pub mod silence;
+pub mod store;
 pub mod take;
 
 pub use capture::AudioCapture;

@@ -122,6 +122,27 @@ pub enum Commands {
         text: Vec<String>,
     },
 
+    /// Print the text of a WAV or FLAC file, with the daemon's model when it runs
+    Transcribe {
+        /// The audio file
+        file: PathBuf,
+    },
+
+    /// Transcribe the audio of a take that Hush could not transcribe, then delete it
+    Recover {
+        /// Every kept recording, oldest first, instead of only the newest
+        #[arg(long, conflicts_with = "list")]
+        all: bool,
+
+        /// List the kept recordings and transcribe nothing
+        #[arg(long)]
+        list: bool,
+
+        /// Type the text at the cursor instead of printing it
+        #[arg(long = "type", conflicts_with = "list")]
+        type_text: bool,
+    },
+
     /// Setup and configuration commands
     Setup {
         #[command(subcommand)]
