@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/andymai/hush/compare/v0.27.0...v0.28.0) (2026-11-10)
+
+
+### Features
+
+* **gui:** save each settings change at once ([#308](https://github.com/andymai/hush/issues/308)) ([dc7d4bb](https://github.com/andymai/hush/commit/dc7d4bb3063bf667fb64950aee986bde48a944f3))
+
 ## [0.27.0](https://github.com/andymai/hush/compare/v0.26.0...v0.27.0) (2026-11-10)
 
 
