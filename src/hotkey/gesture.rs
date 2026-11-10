@@ -5,8 +5,13 @@
 //! window locks hands-free recording until the next press. Toggle mode locks
 //! on a single tap and still records while a longer press is held. The cancel
 //! key discards whatever is in progress.
+//!
+//! A language chord is a dictation key of its own. Only a second tap on the
+//! same key locks, only the held key's release ends a hold, and any
+//! dictation key stops a locked take.
 
 use super::{HotkeyEvent, HotkeyMode};
+use crate::transcription::Language;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,12 +21,15 @@ pub enum GestureAction {
     Cancel,
 }
 
+/// The dictation key: the hotkey (`None`) or a language chord.
+type Key = Option<Language>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
     Idle,
-    Holding { since: Instant },
-    TapPending { until: Instant },
-    Locked,
+    Holding { since: Instant, key: Key },
+    TapPending { until: Instant, key: Key },
+    Locked { key: Key },
 }
 
 pub struct GestureDetector {
@@ -41,7 +49,18 @@ impl GestureDetector {
 
     /// Recording continues without the key held.
     pub fn is_locked(&self) -> bool {
-        matches!(self.state, State::Locked)
+        matches!(self.state, State::Locked { .. })
+    }
+
+    /// The language of the chord that started the gesture, or `None` for
+    /// the hotkey and when no gesture is in progress.
+    pub fn language(&self) -> Option<Language> {
+        match self.state {
+            State::Idle => None,
+            State::Holding { key, .. } | State::TapPending { key, .. } | State::Locked { key } => {
+                key
+            },
+        }
     }
 
     /// The key is down and the recording ends when it comes up.
@@ -53,13 +72,13 @@ impl GestureDetector {
     /// [`expire`](Self::expire).
     pub fn deadline(&self) -> Option<Instant> {
         match self.state {
-            State::TapPending { until } => Some(until),
+            State::TapPending { until, .. } => Some(until),
             _ => None,
         }
     }
 
     pub fn expire(&mut self, now: Instant) {
-        if let State::TapPending { until } = self.state {
+        if let State::TapPending { until, .. } = self.state {
             if now >= until {
                 self.state = State::Idle;
             }
@@ -75,50 +94,70 @@ impl GestureDetector {
     }
 
     pub fn feed(&mut self, event: HotkeyEvent, now: Instant) -> Option<GestureAction> {
-        match (event, self.state) {
-            (HotkeyEvent::Action(_), _) | (HotkeyEvent::Command(_), _) => None,
-            (HotkeyEvent::Cancel, State::Idle) => None,
-            (HotkeyEvent::Cancel, _) => {
+        let (key, pressed) = match event {
+            HotkeyEvent::Action(_) | HotkeyEvent::Command(_) => return None,
+            HotkeyEvent::Cancel if self.state == State::Idle => return None,
+            HotkeyEvent::Cancel => {
                 self.state = State::Idle;
-                Some(GestureAction::Cancel)
+                return Some(GestureAction::Cancel);
             },
-            (HotkeyEvent::Pressed, State::Idle) => {
-                self.state = State::Holding { since: now };
+            HotkeyEvent::Pressed => (None, true),
+            HotkeyEvent::Released => (None, false),
+            HotkeyEvent::Language(language, pressed) => (Some(language), pressed),
+        };
+        if pressed {
+            self.press(key, now)
+        } else {
+            self.release(key, now)
+        }
+    }
+
+    fn press(&mut self, key: Key, now: Instant) -> Option<GestureAction> {
+        match self.state {
+            State::Idle => {
+                self.state = State::Holding { since: now, key };
                 Some(GestureAction::Start)
             },
-            (HotkeyEvent::Pressed, State::TapPending { until }) => {
-                self.state = if now <= until {
-                    State::Locked
+            State::TapPending { until, key: tapped } => {
+                self.state = if now <= until && key == tapped {
+                    State::Locked { key }
                 } else {
-                    State::Holding { since: now }
+                    State::Holding { since: now, key }
                 };
                 Some(GestureAction::Start)
             },
-            (HotkeyEvent::Pressed, State::Locked) => {
+            State::Locked { .. } => {
                 self.state = State::Idle;
                 Some(GestureAction::Stop)
             },
-            (HotkeyEvent::Pressed, State::Holding { .. }) => None,
-            (HotkeyEvent::Released, State::Holding { since }) => {
-                let tap = now.duration_since(since) < self.tap_window;
-                match (self.mode, tap) {
-                    (HotkeyMode::Hold, true) => {
-                        self.state = State::TapPending {
-                            until: now + self.tap_window,
-                        };
-                        Some(GestureAction::Cancel)
-                    },
-                    (HotkeyMode::Toggle, true) => {
-                        self.state = State::Locked;
-                        None
-                    },
-                    (_, false) => {
-                        self.state = State::Idle;
-                        Some(GestureAction::Stop)
-                    },
-                }
+            State::Holding { .. } => None,
+        }
+    }
+
+    fn release(&mut self, key: Key, now: Instant) -> Option<GestureAction> {
+        let State::Holding { since, key: held } = self.state else {
+            return None;
+        };
+        if key != held {
+            return None;
+        }
+        let tap = now.duration_since(since) < self.tap_window;
+        match (self.mode, tap) {
+            (HotkeyMode::Hold, true) => {
+                self.state = State::TapPending {
+                    until: now + self.tap_window,
+                    key,
+                };
+                Some(GestureAction::Cancel)
             },
-            (HotkeyEvent::Released, _) => None,
+            (HotkeyMode::Toggle, true) => {
+                self.state = State::Locked { key };
+                None
+            },
+            (_, false) => {
+                self.state = State::Idle;
+                Some(GestureAction::Stop)
+            },
         }
     }
 }
@@ -235,6 +274,96 @@ mod tests {
         assert_eq!(
             g.feed(HotkeyEvent::Released, at(base, 6000)),
             Some(GestureAction::Stop)
+        );
+    }
+
+    fn german() -> Language {
+        Language::parse("de").unwrap()
+    }
+
+    #[test]
+    fn a_language_chord_holds_locks_and_cancels_like_the_hotkey() {
+        let base = Instant::now();
+        let de = german();
+        let mut g = GestureDetector::new(HotkeyMode::Hold, TAP);
+        assert_eq!(
+            g.feed(HotkeyEvent::Language(de, true), at(base, 0)),
+            Some(GestureAction::Start)
+        );
+        assert_eq!(g.language(), Some(de));
+        assert!(g.is_holding());
+        assert_eq!(
+            g.feed(HotkeyEvent::Language(de, false), at(base, 900)),
+            Some(GestureAction::Stop)
+        );
+        assert_eq!(g.language(), None);
+
+        g.feed(HotkeyEvent::Language(de, true), at(base, 1000));
+        assert_eq!(
+            g.feed(HotkeyEvent::Language(de, false), at(base, 1100)),
+            Some(GestureAction::Cancel),
+            "a lone tap records nothing"
+        );
+        assert_eq!(
+            g.feed(HotkeyEvent::Language(de, true), at(base, 1200)),
+            Some(GestureAction::Start)
+        );
+        assert!(g.is_locked(), "a double-tap locks");
+        assert_eq!(g.language(), Some(de));
+        assert_eq!(
+            g.feed(HotkeyEvent::Cancel, at(base, 3000)),
+            Some(GestureAction::Cancel)
+        );
+
+        let mut g = GestureDetector::new(HotkeyMode::Toggle, TAP);
+        g.feed(HotkeyEvent::Language(de, true), at(base, 0));
+        assert_eq!(
+            g.feed(HotkeyEvent::Language(de, false), at(base, 100)),
+            None
+        );
+        assert!(g.is_locked(), "a tap locks in toggle mode");
+        assert_eq!(g.language(), Some(de));
+    }
+
+    #[test]
+    fn keys_do_not_mix_inside_one_gesture() {
+        let base = Instant::now();
+        let de = german();
+        let mut g = GestureDetector::new(HotkeyMode::Hold, TAP);
+        g.feed(HotkeyEvent::Language(de, true), at(base, 0));
+        assert_eq!(g.feed(HotkeyEvent::Pressed, at(base, 100)), None);
+        assert_eq!(
+            g.feed(HotkeyEvent::Released, at(base, 900)),
+            None,
+            "only the held key ends the hold"
+        );
+        assert!(g.is_holding());
+        assert_eq!(
+            g.feed(HotkeyEvent::Language(de, false), at(base, 1000)),
+            Some(GestureAction::Stop)
+        );
+
+        g.feed(HotkeyEvent::Pressed, at(base, 2000));
+        g.feed(HotkeyEvent::Released, at(base, 2100));
+        assert_eq!(
+            g.feed(HotkeyEvent::Language(de, true), at(base, 2200)),
+            Some(GestureAction::Start)
+        );
+        assert!(
+            !g.is_locked(),
+            "a tap on one key and a press on another is a new hold"
+        );
+        assert_eq!(g.language(), Some(de));
+        g.feed(HotkeyEvent::Language(de, false), at(base, 3000));
+
+        g.feed(HotkeyEvent::Language(de, true), at(base, 4000));
+        g.feed(HotkeyEvent::Language(de, false), at(base, 4100));
+        g.feed(HotkeyEvent::Language(de, true), at(base, 4200));
+        assert!(g.is_locked());
+        assert_eq!(
+            g.feed(HotkeyEvent::Pressed, at(base, 6000)),
+            Some(GestureAction::Stop),
+            "any dictation key stops a locked take"
         );
     }
 

@@ -23,6 +23,7 @@ use anyhow::{Context, Result};
 use capture::{Capture, Outcome};
 use meter::Meter;
 use pages::history::HistoryView;
+use pages::hotkeys::KeyTarget;
 use pages::text::TermEdit;
 use pages::Page;
 use parking_lot::Mutex;
@@ -171,7 +172,9 @@ pub struct Gui {
     pub runtime: tokio::runtime::Runtime,
     pub toast: Option<(String, Instant)>,
     /// The hotkey field waiting for a key press, and the reader collecting it.
-    pub capture: Option<(Role, Capture)>,
+    pub capture: Option<(KeyTarget, Capture)>,
+    /// The language code for the next language key; empty until one is picked.
+    pub new_language: String,
     /// The hotkey field showing a text box instead of a capture button, and
     /// its chord from before the edit.
     pub editing_key: Option<(Role, String)>,
@@ -235,6 +238,7 @@ impl Gui {
             runtime,
             toast: None,
             capture: None,
+            new_language: String::new(),
             editing_key: None,
             focus_editor: false,
             layout: crate::text::layout::current(),
@@ -377,17 +381,26 @@ impl Gui {
     }
 
     fn finish_capture(&mut self) {
-        let Some((role, capture)) = &self.capture else {
+        let Some((target, capture)) = &self.capture else {
             return;
         };
         match capture.outcome() {
             Outcome::Listening => {},
             Outcome::Chord(chord) => {
-                let role = *role;
+                let target = target.clone();
                 self.capture = None;
-                match pages::hotkeys::refusal(&self.config.hotkey, role, &chord) {
-                    Some(message) => self.say(message),
-                    None => *self.config.hotkey.chord_mut(role) = chord,
+                match target {
+                    KeyTarget::Action(role) => {
+                        match pages::hotkeys::refusal(&self.config.hotkey, role, &chord) {
+                            Some(message) => self.say(message),
+                            None => {
+                                if let Some(slot) = self.config.hotkey.chord_mut(role) {
+                                    *slot = chord;
+                                }
+                            },
+                        }
+                    },
+                    KeyTarget::Language(own) => pages::hotkeys::bind_language(self, own, chord),
                 }
             },
             Outcome::Ended => self.capture = None,

@@ -12,9 +12,18 @@ pub const NO_TAKE: &str = "No recording is in progress. Start one with: hush sta
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum DaemonCommand {
-    /// Start recording if idle, otherwise stop and transcribe
-    Toggle,
-    Start,
+    /// Start recording if idle, otherwise stop and transcribe. `language`
+    /// applies to the take it starts. A daemon from before the field ignores
+    /// it, and its reply then carries no `language`.
+    Toggle {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
+    },
+    /// Start recording, in `language` when set
+    Start {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
+    },
     /// Stop recording and transcribe; with `print`, reply with the final text
     /// and type nothing
     Stop {
@@ -154,6 +163,10 @@ pub struct DaemonResponse {
     /// Where the model is, in a status or watch reply
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_state: Option<ModelState>,
+    /// The language of the take a start began, or in a status or watch
+    /// reply, of the take in progress or the next one
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 impl DaemonResponse {
@@ -165,6 +178,7 @@ impl DaemonResponse {
             message: None,
             take: None,
             model_state: None,
+            language: None,
         }
     }
 
@@ -176,7 +190,13 @@ impl DaemonResponse {
             message: None,
             take: None,
             model_state: None,
+            language: None,
         }
+    }
+
+    pub fn with_language(mut self, language: Option<String>) -> Self {
+        self.language = language;
+        self
     }
 
     pub fn with_model_state(mut self, model_state: Option<ModelState>) -> Self {
@@ -202,7 +222,7 @@ mod tests {
     #[test]
     fn commands_serialize_as_tagged_objects() {
         assert_eq!(
-            serde_json::to_string(&DaemonCommand::Toggle).unwrap(),
+            serde_json::to_string(&DaemonCommand::Toggle { language: None }).unwrap(),
             r#"{"command":"toggle"}"#
         );
         let parsed: DaemonCommand = serde_json::from_str(r#"{"command":"cancel"}"#).unwrap();
@@ -243,6 +263,72 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&DaemonCommand::Watch).unwrap(),
             r#"{"command":"watch"}"#
+        );
+    }
+
+    #[test]
+    fn start_and_toggle_keep_the_old_form_and_add_a_language() {
+        for (command, old, new) in [
+            (
+                DaemonCommand::Start { language: None },
+                r#"{"command":"start"}"#,
+                r#"{"command":"start","language":"de"}"#,
+            ),
+            (
+                DaemonCommand::Toggle { language: None },
+                r#"{"command":"toggle"}"#,
+                r#"{"command":"toggle","language":"de"}"#,
+            ),
+        ] {
+            assert_eq!(serde_json::to_string(&command).unwrap(), old);
+            assert_eq!(
+                serde_json::from_str::<DaemonCommand>(old).unwrap(),
+                command,
+                "an older client sends no language"
+            );
+            let with_language = match command {
+                DaemonCommand::Start { .. } => DaemonCommand::Start {
+                    language: Some("de".to_string()),
+                },
+                _ => DaemonCommand::Toggle {
+                    language: Some("de".to_string()),
+                },
+            };
+            assert_eq!(serde_json::to_string(&with_language).unwrap(), new);
+            assert_eq!(
+                serde_json::from_str::<DaemonCommand>(new).unwrap(),
+                with_language
+            );
+        }
+    }
+
+    #[test]
+    fn an_older_daemon_reads_a_start_in_a_language_as_a_plain_start() {
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(tag = "command", rename_all = "snake_case")]
+        enum OldCommand {
+            Toggle,
+            Start,
+        }
+        let start: OldCommand =
+            serde_json::from_str(r#"{"command":"start","language":"de"}"#).unwrap();
+        assert_eq!(start, OldCommand::Start);
+        let toggle: OldCommand =
+            serde_json::from_str(r#"{"command":"toggle","language":"de"}"#).unwrap();
+        assert_eq!(toggle, OldCommand::Toggle);
+
+        let old: DaemonResponse =
+            serde_json::from_str(r#"{"ok":true,"state":{"state":"starting"}}"#).unwrap();
+        assert_eq!(old.language, None, "the reply of an older daemon");
+        let reply = DaemonResponse::ok(DaemonState::Starting).with_language(Some("de".into()));
+        let json = serde_json::to_string(&reply).unwrap();
+        assert_eq!(
+            json,
+            r#"{"ok":true,"state":{"state":"starting"},"language":"de"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonResponse>(&json).unwrap(),
+            reply
         );
     }
 

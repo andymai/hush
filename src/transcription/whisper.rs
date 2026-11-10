@@ -5,6 +5,7 @@ use crate::logging::{transcription as logging, RequestContext};
 use crate::transcription::cpu;
 use crate::transcription::device::GpuAvailability;
 use crate::transcription::gpu_fallback;
+use crate::transcription::language;
 use crate::Result;
 use anyhow::Context;
 use parking_lot::Mutex;
@@ -60,6 +61,8 @@ pub struct WhisperTranscriber {
     using_gpu: AtomicBool,
     model_path: PathBuf,
     language: String,
+    /// The languages that detection may pick; empty allows every language.
+    detect_languages: Arc<[String]>,
 }
 
 impl WhisperTranscriber {
@@ -113,6 +116,7 @@ impl WhisperTranscriber {
             using_gpu: AtomicBool::new(using_gpu),
             model_path: model_path.to_path_buf(),
             language: "en".to_string(),
+            detect_languages: Arc::from([]),
         };
         info!("Whisper model loaded on {}", transcriber.get_device_info());
         Ok(transcriber)
@@ -132,6 +136,17 @@ impl WhisperTranscriber {
 
     pub fn language(&self) -> &str {
         &self.language
+    }
+
+    /// Limit detection to these languages: a take in `auto` gets the most
+    /// likely of them. Empty allows every language.
+    pub fn with_detect_languages(mut self, languages: &[String]) -> Self {
+        self.detect_languages = languages
+            .iter()
+            .map(|code| code.trim().to_string())
+            .filter(|code| !code.is_empty())
+            .collect();
+        self
     }
 
     /// Load the Silero voice activity detection model, so that Whisper gets
@@ -216,7 +231,21 @@ impl WhisperTranscriber {
         sample_rate: u32,
         prompt: Option<&str>,
     ) -> Result<TranscriptionResult> {
+        self.transcribe_in(audio_data, sample_rate, prompt, None)
+            .await
+    }
+
+    /// [`Self::transcribe_with_prompt`] in `language`, a Whisper code or
+    /// `auto`; `None` is the language this transcriber was made with.
+    pub async fn transcribe_in(
+        &self,
+        audio_data: &[f32],
+        sample_rate: u32,
+        prompt: Option<&str>,
+        language: Option<&str>,
+    ) -> Result<TranscriptionResult> {
         let start = Instant::now();
+        let language = language.unwrap_or(&self.language).to_string();
         let ctx = RequestContext::new("whisper_transcription")
             .with_metadata("samples", &audio_data.len().to_string())
             .with_metadata("sample_rate", &sample_rate.to_string());
@@ -249,8 +278,11 @@ impl WhisperTranscriber {
             .map(|p| p.replace('\0', ""))
             .filter(|p| !p.trim().is_empty());
 
-        let text = match self.run_take(Arc::clone(&samples), prompt.clone()).await {
-            Err(e) if self.is_using_gpu() => self.retry_on_cpu(e, samples, prompt).await,
+        let text = match self
+            .run_take(Arc::clone(&samples), prompt.clone(), language.clone())
+            .await
+        {
+            Err(e) if self.is_using_gpu() => self.retry_on_cpu(e, samples, prompt, language).await,
             text => text,
         };
         let text = match text {
@@ -278,10 +310,15 @@ impl WhisperTranscriber {
         })
     }
 
-    async fn run_take(&self, samples: Arc<[f32]>, prompt: Option<String>) -> Result<String> {
+    async fn run_take(
+        &self,
+        samples: Arc<[f32]>,
+        prompt: Option<String>,
+        language: String,
+    ) -> Result<String> {
         let engine = self.engine();
         let vad = self.vad.clone();
-        let language = self.language.clone();
+        let detect = Arc::clone(&self.detect_languages);
         let threads = self.threads();
         tokio::task::spawn_blocking(move || {
             let trimmed = vad.as_deref().and_then(|vad| match speech_in(vad, &samples) {
@@ -295,7 +332,14 @@ impl WhisperTranscriber {
                 debug!("Voice activity detection found no speech in a quiet take");
                 return Ok(String::new());
             };
-            run_full(&engine, samples, &language, threads, prompt.as_deref())
+            run_full(
+                &engine,
+                samples,
+                &language,
+                &detect,
+                threads,
+                prompt.as_deref(),
+            )
         })
         .await
         .map_err(|e| anyhow::anyhow!("Transcription task failed: {}", e))?
@@ -308,6 +352,7 @@ impl WhisperTranscriber {
         gpu_error: anyhow::Error,
         samples: Arc<[f32]>,
         prompt: Option<String>,
+        language: String,
     ) -> Result<String> {
         warn!(
             "Whisper failed on the GPU, so the take runs again on the CPU, \
@@ -328,7 +373,7 @@ impl WhisperTranscriber {
         // A failed GPU can be slow to free its memory.
         tokio::task::spawn_blocking(move || drop(failed));
         info!("Whisper model loaded on {}", self.get_device_info());
-        self.run_take(samples, prompt).await
+        self.run_take(samples, prompt, language).await
     }
 
     pub fn is_using_gpu(&self) -> bool {
@@ -385,11 +430,19 @@ fn run_full(
     engine: &Engine,
     samples: &[f32],
     language: &str,
+    detect: &[String],
     threads: i32,
     prompt: Option<&str>,
 ) -> Result<String> {
+    let mut state = engine.state.lock();
+    let language = if language == "auto" && !detect.is_empty() {
+        limited_detection(&mut state, samples, threads, detect)
+    } else {
+        language.to_string()
+    };
+
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(Some(language));
+    params.set_language(Some(&language));
     if let Some(prompt) = prompt {
         params.set_initial_prompt(prompt);
     }
@@ -401,7 +454,6 @@ fn run_full(
     params.set_print_timestamps(false);
     params.set_n_threads(threads);
 
-    let mut state = engine.state.lock();
     state
         .full(params, samples)
         .map_err(|e| anyhow::anyhow!("Transcription failed: {}", e))?;
@@ -418,6 +470,67 @@ fn run_full(
         text.push_str(&segment);
     }
     Ok(text)
+}
+
+/// The most likely of the `allowed` languages in the first 30 seconds of
+/// `samples`. When detection fails, or gives no allowed language, Whisper
+/// detects the language on its own (`auto`).
+fn limited_detection(
+    state: &mut WhisperState,
+    samples: &[f32],
+    threads: i32,
+    allowed: &[String],
+) -> String {
+    let probabilities = match language_probabilities(state, samples, threads) {
+        Ok(probabilities) => probabilities,
+        Err(e) => {
+            warn!("Language detection failed, so Whisper picks from every language: {e:#}");
+            return "auto".to_string();
+        },
+    };
+    match language::most_likely(probabilities, allowed) {
+        Some((code, probability)) => {
+            info!(
+                language = code,
+                probability,
+                "Detected {} among {}",
+                code,
+                allowed.join(", ")
+            );
+            code.to_string()
+        },
+        None => {
+            warn!(
+                "Whisper gave no probability for {}, so it picks from every language",
+                allowed.join(", ")
+            );
+            "auto".to_string()
+        },
+    }
+}
+
+/// Whisper's probability for each language code, from the spectrogram of
+/// `samples` at its start.
+fn language_probabilities(
+    state: &mut WhisperState,
+    samples: &[f32],
+    threads: i32,
+) -> Result<Vec<(&'static str, f32)>> {
+    let threads = usize::try_from(threads).unwrap_or(1).max(1);
+    state
+        .pcm_to_mel(samples, threads)
+        .map_err(|e| anyhow::anyhow!("spectrogram: {}", e))?;
+    let (_, probabilities) = state
+        .lang_detect(0, threads)
+        .map_err(|e| anyhow::anyhow!("detection: {}", e))?;
+    Ok(probabilities
+        .into_iter()
+        .enumerate()
+        .filter_map(|(id, probability)| {
+            let code = whisper_rs::get_lang_str(i32::try_from(id).ok()?)?;
+            Some((code, probability))
+        })
+        .collect())
 }
 
 /// The audio Whisper gets: the speech that voice activity detection found,

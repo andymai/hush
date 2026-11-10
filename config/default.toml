@@ -27,13 +27,17 @@ server_model = ""                       # openai-compatible: the model name that
 server_key_env = ""                     # openai-compatible: the variable that holds the API key; "" sends no key
 # model_path = "/path/to/ggml-base.bin"  # derived from model_size when unset
 model_size = "base"       # tiny, base, small, medium, large, large-v2, large-v3
-language = "en"           # a two-letter code, or "auto" to detect the language you speak
+language = "en"           # a Whisper language code such as "en" or "de", or "auto" to detect the language you speak
 use_gpu = true
 beam_size = 5
 no_speech_threshold = 0.6
 context_prompt = true     # prime Whisper with the focused window's title and learned terms
 vad = true                # local only: send Whisper only the speech that the Silero model finds; `hush models download` gets the model
 unload_after_mins = 0     # local only: free the model's RAM and GPU memory after this many minutes without a take, and load it again on the next take; 0 never frees it
+# Local only: with language = "auto", Whisper picks the most likely of these
+# languages, e.g. ["en", "de"]. [] allows every language. Groq, OpenAI, and
+# a server detect the language on their own.
+detect_languages = []
 # Hush drops a transcript that is only one of these phrases, without case and
 # punctuation. Whisper invents them for silence or noise. When you set this
 # list, it replaces the built-in one ("thanks for watching", "please
@@ -51,6 +55,10 @@ tap_ms = 300              # shorter presses are taps: a tap discards, a double-t
 paste_last = ""           # chord that types the last transcript again, e.g. "Shift+RightAlt"
 learn = ""                # chord that adds the selected text to the vocabulary, e.g. "Super+RightAlt"
 command = "Ctrl+RightAlt" # Command Mode: hold, speak an instruction, release; the LLM rewrites the selection or the last transcript
+# A dictation key for each language, with the same hold, double-tap lock,
+# toggle mode, and cancel as the hotkey. The tray menu sets the language of
+# the hotkey until you change it again.
+languages = {} # e.g. { "Shift+RightAlt" = "de", "F13" = "auto" }
 
 [feedback]
 audio_enabled = true # start, stop, cancel, and warning tones

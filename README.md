@@ -49,7 +49,8 @@ Hold `Right Alt`, speak, release. Done.
 - **Speak at the tone.** Hush plays the start tone and shows the recording overlay when the first audio from the microphone arrives, not when you press the key. A microphone that sleeps between recordings can need a moment to wake, and the tone tells you that Hush hears you. If no audio arrives in five seconds, Hush discards the recording and shows a notification.
 - **Bind any key to it.** `hush toggle`, `hush start`, `hush stop`, and `hush cancel` talk to the daemon over a socket, so any compositor keybind can drive dictation. Hyprland: `bind = , F9, exec, hush toggle`. Sway: `bindsym F9 exec hush toggle`.
 - **Tone by application.** Text lands the way the focused app expects: lowercase and unpunctuated in terminals and editors, casual in chat, full sentences in mail and documents. In a terminal, each line break becomes a space, so dictated text cannot run a command. In chat, Hush types a line break as Shift+Enter, so a line break does not send the message. Add a window class to `insertion.submit_apps`, and Hush presses Enter after the text. The window title and your learned terms also prime Whisper, so names come out spelled your way. Works on X11, Hyprland, Sway, and KDE Plasma on Wayland.
-- **Any language Whisper knows.** Set `language = "auto"` under `[transcription]` to detect what you speak, or pick one in the settings window. On a keyboard layout other than plain US (Dvorak, Colemak, and US variants such as US International included), Hush pastes rather than typing key by key, so the letters come out right.
+- **Any language Whisper knows.** Set `language = "auto"` under `[transcription]` to detect what you speak, or pick one in the settings window. With `detect_languages = ["en", "de"]`, local Whisper picks only from the languages you speak. On a keyboard layout other than plain US (Dvorak, Colemak, and US variants such as US International included), Hush pastes rather than typing key by key, so the letters come out right.
+- **A key for each language.** `languages = { "Shift+RightAlt" = "de" }` under `[hotkey]` gives German its own key, with the same hold, double-tap lock, and cancel as the hotkey. The Language menu of the panel icon sets the language of the hotkey until you change it again, also after a restart. `hush start --lang de` and `hush toggle --lang de` set the language of one recording.
 - **Teach it your words.** Select a term Hush keeps misspelling and run `hush learn` (or `hush learn Kubernetes`); from then on it is written exactly that way. The Text page of `hush settings` lists, edits, and removes your words. `hush paste-last` re-types the last transcript, and when insertion fails the text waits on the clipboard.
 - **History.** Hush keeps the last 500 transcripts on your computer, in a file only you can read. The History page of `hush settings` searches them, copies one again, or deletes them. Turn it off with `history.enabled = false`.
 - **Command Mode.** Hold `Ctrl+Right Alt`, say what to do ("make this friendlier", "turn it into a bullet list"), release. Hush rewrites the selected text, or the last thing it typed when nothing is selected, through a local Ollama server, Anthropic, or an OpenAI-compatible server, whichever `[llm]` resolves to. Only text is sent, never audio.
@@ -75,6 +76,7 @@ Everyday dictation:
 |---|---|
 | `hush toggle` | Start or stop recording over the daemon socket |
 | `hush start` / `hush stop` / `hush cancel` | Start, stop, or discard a recording |
+| `hush start --lang de` / `hush toggle --lang de` | Start a recording in that language: a Whisper code, or `auto` |
 | `hush stop --print [--json]` | Stop, wait for the text, and print it instead of typing it |
 | `hush listen` | Run a dictation session attached to the terminal |
 | `hush record [-d secs]` | Record for N seconds (default 30) and transcribe |
@@ -160,6 +162,7 @@ text="$(hush stop --print)" && notify-send "Hush heard" "$text"
 | `gpu_type` | `cuda`, `vulkan`, or `cpu` |
 | `sample_rate` | Audio sample rate in Hz |
 | `hotkey` | The dictation hotkey |
+| `language` | The language of the recording in progress, else of the next recording: a Whisper code or `auto`. Without a daemon, `transcription.language` |
 | `devices` | Names of the audio input devices |
 | `os`, `arch` | Operating system and CPU architecture |
 | `config_error` | Why the configuration did not load, else `null` |
@@ -185,7 +188,8 @@ Give each state a color in the Waybar style sheet, for example `#custom-hush.rec
 | Key | Meaning | Default |
 |---|---|---|
 | `transcription.model_size` | tiny, base, small, medium, large, large-v2, large-v3 | base |
-| `transcription.language` | Two-letter code, or `auto` to detect what you speak | en |
+| `transcription.language` | A Whisper language code such as `en` or `de`, or `auto` to detect what you speak | en |
+| `transcription.detect_languages` | With `language = "auto"`, local Whisper picks the most likely of these languages, such as `["en", "de"]`. `[]` allows every language. Cloud and server backends detect the language on their own | `[]` |
 | `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
 | `transcription.context_prompt` | Prime Whisper with the focused window's title and learned terms | true |
 | `transcription.vad` | Send local Whisper only the speech in each take, found by the Silero model that `hush models download` gets. Without the model, Whisper gets the whole take | true |
@@ -204,6 +208,7 @@ Give each state a color in the Waybar style sheet, for example `#custom-hush.rec
 | `hotkey.paste_last` | Chord that re-types the last transcript, such as `Shift+RightAlt` | unbound |
 | `hotkey.learn` | Chord that adds the selected text to the vocabulary | unbound |
 | `hotkey.command` | Command Mode chord; `""` disables it | Ctrl+RightAlt |
+| `hotkey.languages` | A dictation key for each language, such as `{ "Shift+RightAlt" = "de" }`, with the same hold, double-tap lock, toggle mode, and cancel as `hotkey.combination`. The Language menu of the panel icon sets the language of `hotkey.combination` | none |
 | `llm.provider` | `auto` (Ollama when reachable, else Anthropic when a key exists), `ollama`, `anthropic`, `openai-compatible`, or `none`. `auto` never picks `openai-compatible` | auto |
 | `llm.ollama_url`, `llm.ollama_model` | The local Ollama server and model | localhost:11434, llama3.2 |
 | `llm.anthropic_model` | Anthropic model; the key comes from `ANTHROPIC_API_KEY` | claude-haiku-4-5 |

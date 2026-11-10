@@ -3,14 +3,15 @@
 //!
 //! The icon carries the daemon's state and its menu sends the same session
 //! commands the hotkey and the socket do, so nothing here is a second code
-//! path for dictation.
+//! path for dictation. Its Language menu picks the language of later takes.
 
 pub mod icon;
 
 use crate::ipc::{DaemonState, SessionCommand, SharedState};
 use crate::text_processing::Trigger;
+use crate::transcription::Language;
 use icon::IconState;
-use ksni::menu::StandardItem;
+use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
 use ksni::{Category, Handle, MenuItem, Status, ToolTip, Tray, TrayMethods};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -19,9 +20,62 @@ use tracing::{debug, info, warn};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+/// What the Language menu offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayLanguages {
+    /// `transcription.language`
+    pub config: Language,
+    /// The language of each language chord
+    pub chords: Vec<Language>,
+    /// The choice that stays until the user changes it; `None` follows the
+    /// config language
+    pub chosen: Option<Language>,
+}
+
+impl TrayLanguages {
+    /// The language of a take that starts without `--lang` or a chord.
+    pub fn active(&self) -> Language {
+        self.chosen.unwrap_or(self.config)
+    }
+
+    /// Auto, the config language, each chord language, and a saved choice
+    /// that is none of those, each once.
+    pub fn options(&self) -> Vec<Language> {
+        let mut options: Vec<Language> = Vec::new();
+        let candidates = [Language::AUTO, self.config]
+            .into_iter()
+            .chain(self.chords.iter().copied())
+            .chain(self.chosen);
+        for language in candidates {
+            if !options.contains(&language) {
+                options.push(language);
+            }
+        }
+        options
+    }
+
+    /// The menu label: the language's name, and `(default)` for the config
+    /// language.
+    pub fn label(&self, language: Language) -> String {
+        if language == self.config {
+            format!("{} (default)", language.name())
+        } else {
+            language.name().to_string()
+        }
+    }
+
+    /// Choose `language` for later takes. The config language clears the
+    /// choice.
+    fn choose(&mut self, language: Language) -> Option<Language> {
+        self.chosen = (language != self.config).then_some(language);
+        self.chosen
+    }
+}
+
 pub struct HushTray {
     state: DaemonState,
     hotkey: String,
+    languages: TrayLanguages,
     control: mpsc::Sender<SessionCommand>,
 }
 
@@ -97,7 +151,7 @@ impl Tray for HushTray {
         if self.in_take() {
             self.send(SessionCommand::StopRecording);
         } else {
-            self.send(SessionCommand::StartRecording(Trigger::Tray));
+            self.send(SessionCommand::StartRecording(Trigger::Tray, None));
         }
     }
 
@@ -123,6 +177,7 @@ impl Tray for HushTray {
                 ..Default::default()
             }
             .into(),
+            self.language_menu(),
             MenuItem::Separator,
             StandardItem {
                 label: "Type last transcript".into(),
@@ -156,6 +211,35 @@ impl Tray for HushTray {
     }
 }
 
+impl HushTray {
+    fn language_menu(&self) -> MenuItem<Self> {
+        let active = self.languages.active();
+        let submenu = self
+            .languages
+            .options()
+            .into_iter()
+            .map(|language| {
+                CheckmarkItem {
+                    label: self.languages.label(language),
+                    checked: language == active,
+                    activate: Box::new(move |tray: &mut Self| {
+                        let choice = tray.languages.choose(language);
+                        tray.send(SessionCommand::ChooseLanguage(choice));
+                    }),
+                    ..Default::default()
+                }
+                .into()
+            })
+            .collect();
+        SubMenu {
+            label: format!("Language: {}", active.name()),
+            submenu,
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 /// Open the settings window in its own process, so the daemon never owns one.
 fn open_settings() {
     let binary = std::env::current_exe().unwrap_or_else(|_| "hush".into());
@@ -185,10 +269,12 @@ pub async fn spawn(
     shared: Arc<SharedState>,
     control: mpsc::Sender<SessionCommand>,
     hotkey: String,
+    languages: TrayLanguages,
 ) -> Option<TrayGuard> {
     let tray = HushTray {
         state: shared.snapshot(),
         hotkey,
+        languages,
         control,
     };
     let handle = match tray.spawn().await {
@@ -233,16 +319,118 @@ fn worth_redrawing(before: DaemonState, after: DaemonState) -> bool {
 mod tests {
     use super::*;
 
+    fn lang(code: &str) -> Language {
+        Language::parse(code).unwrap()
+    }
+
     fn tray(state: DaemonState) -> (HushTray, mpsc::Receiver<SessionCommand>) {
         let (tx, rx) = mpsc::channel();
         (
             HushTray {
                 state,
                 hotkey: "RightAlt".to_string(),
+                languages: TrayLanguages {
+                    config: lang("en"),
+                    chords: vec![lang("de")],
+                    chosen: None,
+                },
                 control: tx,
             },
             rx,
         )
+    }
+
+    /// The Language submenu: each label, and whether it has a check mark.
+    fn language_items(tray: &HushTray) -> (String, Vec<(String, bool)>) {
+        let menu = tray.menu();
+        let submenu = menu
+            .iter()
+            .find_map(|item| match item {
+                MenuItem::SubMenu(submenu) => Some(submenu),
+                _ => None,
+            })
+            .expect("a Language submenu");
+        let items = submenu
+            .submenu
+            .iter()
+            .map(|item| match item {
+                MenuItem::Checkmark(item) => (item.label.clone(), item.checked),
+                other => panic!("only check items, not {:?}", other),
+            })
+            .collect();
+        (submenu.label.clone(), items)
+    }
+
+    fn pick(tray: &mut HushTray, label: &str) {
+        let menu = tray.menu();
+        let Some(MenuItem::SubMenu(submenu)) = menu
+            .into_iter()
+            .find(|item| matches!(item, MenuItem::SubMenu(_)))
+        else {
+            panic!("a Language submenu")
+        };
+        for item in submenu.submenu {
+            if let MenuItem::Checkmark(item) = item {
+                if item.label == label {
+                    (item.activate)(tray);
+                    return;
+                }
+            }
+        }
+        panic!("no item {label}");
+    }
+
+    #[test]
+    fn the_language_menu_checks_the_active_language() {
+        let (tray, _rx) = tray(DaemonState::Idle);
+        let (title, items) = language_items(&tray);
+        assert_eq!(title, "Language: English");
+        assert_eq!(
+            items,
+            [
+                ("Auto".to_string(), false),
+                ("English (default)".to_string(), true),
+                ("German".to_string(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_choice_stays_and_the_default_clears_it() {
+        let (mut tray, rx) = tray(DaemonState::Idle);
+        pick(&mut tray, "German");
+        assert_eq!(
+            rx.try_recv(),
+            Ok(SessionCommand::ChooseLanguage(Some(lang("de"))))
+        );
+        let (title, items) = language_items(&tray);
+        assert_eq!(title, "Language: German");
+        assert!(items.contains(&("German".to_string(), true)));
+
+        pick(&mut tray, "Auto");
+        assert_eq!(
+            rx.try_recv(),
+            Ok(SessionCommand::ChooseLanguage(Some(Language::AUTO)))
+        );
+        pick(&mut tray, "English (default)");
+        assert_eq!(rx.try_recv(), Ok(SessionCommand::ChooseLanguage(None)));
+        assert_eq!(tray.languages.active(), lang("en"));
+    }
+
+    #[test]
+    fn a_saved_choice_that_no_key_names_still_shows() {
+        let languages = TrayLanguages {
+            config: Language::AUTO,
+            chords: vec![lang("de"), lang("de")],
+            chosen: Some(lang("fr")),
+        };
+        assert_eq!(
+            languages.options(),
+            [Language::AUTO, lang("de"), lang("fr")],
+            "Auto is the config language, and each language shows once"
+        );
+        assert_eq!(languages.label(Language::AUTO), "Auto (default)");
+        assert_eq!(languages.active(), lang("fr"));
     }
 
     #[test]
@@ -273,7 +461,7 @@ mod tests {
         idle.activate(0, 0);
         assert_eq!(
             rx.try_recv(),
-            Ok(SessionCommand::StartRecording(Trigger::Tray))
+            Ok(SessionCommand::StartRecording(Trigger::Tray, None))
         );
 
         let (mut recording, rx) = tray(DaemonState::Recording { elapsed_ms: 0 });

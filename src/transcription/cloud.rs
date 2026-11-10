@@ -17,6 +17,7 @@ use serde::Deserialize;
 use std::borrow::Cow;
 use std::io::Cursor;
 use std::path::Path;
+use std::sync::Once;
 use std::time::{Duration, Instant};
 use tracing::info;
 
@@ -57,6 +58,16 @@ impl CloudTranscriber {
     /// The service `config.backend` names, with its key from the
     /// environment or `env_file` (`~/.config/hush/.env`).
     pub fn from_config(config: &TranscriptionConfig, env_file: &Path) -> Result<Self> {
+        if !config.detect_languages.is_empty() {
+            static NOTED: Once = Once::new();
+            NOTED.call_once(|| {
+                info!(
+                    "transcription.detect_languages applies only to the local backend; {} \
+                     detects the language on its own",
+                    config.backend.name()
+                )
+            });
+        }
         if config.backend != TranscriptionBackend::OpenAiCompatible {
             let key = config
                 .backend
@@ -194,13 +205,16 @@ impl CloudTranscriber {
     }
 
     /// The text fields of the request; the audio goes in a `file` part.
-    fn fields(&self, prompt: Option<&str>) -> Vec<(&'static str, String)> {
+    /// `language` is `auto` or a code; `auto` sends none, and the service
+    /// detects the language.
+    fn fields(&self, prompt: Option<&str>, language: &str) -> Vec<(&'static str, String)> {
         let mut fields = vec![
             ("model", self.model.clone()),
             ("response_format", "json".to_string()),
         ];
-        if self.language != "auto" {
-            fields.push(("language", self.language.clone()));
+        let language = language.trim();
+        if !language.is_empty() && language != "auto" {
+            fields.push(("language", language.to_string()));
         }
         if let Some(prompt) = prompt.map(str::trim).filter(|p| !p.is_empty()) {
             fields.push(("prompt", prompt.to_string()));
@@ -214,7 +228,20 @@ impl CloudTranscriber {
         sample_rate: u32,
         prompt: Option<&str>,
     ) -> Result<TranscriptionResult> {
+        self.transcribe_in(audio, sample_rate, prompt, None).await
+    }
+
+    /// [`Self::transcribe_with_prompt`] in `language`, a code or `auto`;
+    /// `None` is the language this transcriber was made with.
+    pub async fn transcribe_in(
+        &self,
+        audio: &[f32],
+        sample_rate: u32,
+        prompt: Option<&str>,
+        language: Option<&str>,
+    ) -> Result<TranscriptionResult> {
         let start = Instant::now();
+        let language = language.unwrap_or(&self.language);
         if audio.is_empty() {
             return Ok(TranscriptionResult {
                 text: String::new(),
@@ -248,7 +275,7 @@ impl CloudTranscriber {
         );
 
         let mut form = Form::new();
-        for (name, value) in self.fields(prompt) {
+        for (name, value) in self.fields(prompt, language) {
             form = form.text(name, value);
         }
         let file = Part::bytes(wav)
@@ -395,7 +422,8 @@ mod tests {
 
     #[test]
     fn the_request_names_the_language_and_carries_the_prompt() {
-        let fields = groq("de").fields(Some("  Hush, whisper.cpp. "));
+        let groq = groq("de");
+        let fields = groq.fields(Some("  Hush, whisper.cpp. "), &groq.language);
         assert!(fields.contains(&("model", "whisper-large-v3-turbo".to_string())));
         assert!(fields.contains(&("response_format", "json".to_string())));
         assert!(fields.contains(&("language", "de".to_string())));
@@ -405,11 +433,26 @@ mod tests {
     #[test]
     fn detection_and_an_empty_prompt_leave_their_fields_out() {
         for language in ["auto", "", "  "] {
-            let fields = groq(language).fields(Some("   "));
+            let groq = groq(language);
+            let fields = groq.fields(Some("   "), &groq.language);
             let names: Vec<&str> = fields.iter().map(|(name, _)| *name).collect();
             assert_eq!(names, ["model", "response_format"], "language {language:?}");
         }
-        assert_eq!(groq("en").fields(None).len(), 3);
+        assert_eq!(groq("en").fields(None, "en").len(), 3);
+    }
+
+    #[test]
+    fn a_take_language_replaces_the_configured_one() {
+        let english = groq("en");
+        assert!(english
+            .fields(None, "de")
+            .contains(&("language", "de".to_string())));
+        let names: Vec<&str> = english
+            .fields(None, "auto")
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(names, ["model", "response_format"], "auto sends none");
     }
 
     #[test]

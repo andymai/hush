@@ -7,6 +7,7 @@ use super::protocol::{
     DaemonCommand, DaemonResponse, DaemonState, ModelState, TakeResult, PRINT_TIMEOUT,
 };
 use crate::text_processing::{learn, Trigger};
+use crate::transcription::language::{self, Language};
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use std::os::unix::fs::PermissionsExt;
@@ -23,7 +24,9 @@ use tracing::{debug, warn};
 /// What the session loop consumes, from the hotkey thread and from IPC alike.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionCommand {
-    StartRecording(Trigger),
+    /// Start a take; the language, when set, comes from `--lang` or a
+    /// language chord and applies to this take only
+    StartRecording(Trigger, Option<Language>),
     /// Record a spoken instruction for Command Mode
     StartCommand,
     StopRecording,
@@ -34,6 +37,8 @@ pub enum SessionCommand {
     Learn,
     /// The vocabulary file changed
     ReloadVocabulary,
+    /// The tray chose the language of later takes; `None` follows the config
+    ChooseLanguage(Option<Language>),
     Quit,
 }
 
@@ -56,11 +61,23 @@ impl TakeWaiter {
     }
 }
 
-/// Current phase, model state, and the last transcript, written by the
-/// session and read by IPC.
+/// The languages that decide the language of a take.
+#[derive(Debug, Default, Clone, Copy)]
+struct Languages {
+    /// `transcription.language`
+    config: Option<Language>,
+    /// The tray choice
+    chosen: Option<Language>,
+    /// The language of the take in progress
+    take: Option<Language>,
+}
+
+/// Current phase, model state, languages, and the last transcript, written
+/// by the session and read by IPC.
 pub struct SharedState {
     phase: Mutex<Phase>,
     model: Mutex<Option<ModelState>>,
+    languages: Mutex<Languages>,
     last_text: Mutex<Option<String>>,
     waiter: Mutex<Option<oneshot::Sender<TakeResult>>>,
     changes: watch::Sender<()>,
@@ -77,6 +94,7 @@ impl SharedState {
         Self {
             phase: Mutex::new(Phase::Idle),
             model: Mutex::new(None),
+            languages: Mutex::new(Languages::default()),
             last_text: Mutex::new(None),
             waiter: Mutex::new(None),
             changes: watch::channel(()).0,
@@ -118,7 +136,9 @@ impl SharedState {
         self.last_text.lock().clone()
     }
 
+    /// The take, if any, is over: its language no longer applies.
     pub fn set_idle(&self) {
+        self.languages.lock().take = None;
         self.set(Phase::Idle);
     }
 
@@ -166,9 +186,47 @@ impl SharedState {
         *self.model.lock()
     }
 
+    pub fn set_config_language(&self, language: Language) {
+        self.languages.lock().config = Some(language);
+    }
+
+    /// Watchers hear the change.
+    pub fn set_chosen_language(&self, choice: Option<Language>) {
+        self.languages.lock().chosen = choice;
+        self.changes.send_replace(());
+    }
+
+    pub fn chosen_language(&self) -> Option<Language> {
+        self.languages.lock().chosen
+    }
+
+    /// The language of a take that starts now, with `once` from `--lang`
+    /// or a language chord. `None` until the session sets the config
+    /// language.
+    pub fn language_for(&self, once: Option<Language>) -> Option<Language> {
+        let languages = *self.languages.lock();
+        languages
+            .config
+            .map(|config| language::for_take(once, languages.chosen, config))
+    }
+
+    /// The language of the take that just started; [`Self::set_idle`]
+    /// clears it.
+    pub fn set_take_language(&self, language: Language) {
+        self.languages.lock().take = Some(language);
+    }
+
+    /// The language of the take in progress, else of the next take.
+    pub fn active_language(&self) -> Option<Language> {
+        let take = self.languages.lock().take;
+        take.or_else(|| self.language_for(None))
+    }
+
     /// The reply to a status or watch request.
     pub fn status(&self) -> DaemonResponse {
-        DaemonResponse::ok(self.snapshot()).with_model_state(self.model_state())
+        DaemonResponse::ok(self.snapshot())
+            .with_model_state(self.model_state())
+            .with_language(self.active_language().map(|l| l.code().to_string()))
     }
 
     pub fn snapshot(&self) -> DaemonState {
@@ -330,6 +388,23 @@ pub fn respond(
         Ok(()) => DaemonResponse::ok(next),
         Err(_) => DaemonResponse::error("The daemon session is no longer running"),
     };
+    // The reply names the take's language, so a client can tell this
+    // daemon from an older one that ignores `language`.
+    let start = |language: Option<String>| {
+        let once = match language.as_deref().map(Language::from_code).transpose() {
+            Ok(once) => once,
+            Err(e) => return DaemonResponse::error(e.to_string()),
+        };
+        let reply = forward(
+            SessionCommand::StartRecording(Trigger::Ipc, once),
+            DaemonState::Starting,
+        );
+        if !reply.ok {
+            return reply;
+        }
+        let language = shared.language_for(once).or(once);
+        reply.with_language(language.map(|l| l.code().to_string()))
+    };
     // A stop before the first audio frame discards the take.
     let after_stop = match shared.snapshot() {
         DaemonState::Starting => DaemonState::Idle,
@@ -338,20 +413,14 @@ pub fn respond(
     };
     match command {
         DaemonCommand::Status | DaemonCommand::Watch => shared.status(),
-        DaemonCommand::Toggle => {
+        DaemonCommand::Toggle { language } => {
             if shared.in_take() {
                 forward(SessionCommand::StopRecording, after_stop)
             } else {
-                forward(
-                    SessionCommand::StartRecording(Trigger::Ipc),
-                    DaemonState::Starting,
-                )
+                start(language)
             }
         },
-        DaemonCommand::Start => forward(
-            SessionCommand::StartRecording(Trigger::Ipc),
-            DaemonState::Starting,
-        ),
+        DaemonCommand::Start { language } => start(language),
         DaemonCommand::Stop { .. } => forward(SessionCommand::StopRecording, after_stop),
         DaemonCommand::Cancel => forward(SessionCommand::CancelRecording, DaemonState::Idle),
         DaemonCommand::Quit => forward(SessionCommand::Quit, DaemonState::Stopping),
@@ -379,18 +448,19 @@ mod tests {
     fn toggle_follows_the_take() {
         let shared = SharedState::new();
         let (tx, rx) = mpsc::channel();
+        let toggle = || DaemonCommand::Toggle { language: None };
         assert_eq!(
-            respond(DaemonCommand::Toggle, &shared, &tx).state,
+            respond(toggle(), &shared, &tx).state,
             Some(DaemonState::Starting)
         );
         assert_eq!(
             rx.try_recv(),
-            Ok(SessionCommand::StartRecording(Trigger::Ipc))
+            Ok(SessionCommand::StartRecording(Trigger::Ipc, None))
         );
 
         shared.set_starting();
         assert_eq!(
-            respond(DaemonCommand::Toggle, &shared, &tx).state,
+            respond(toggle(), &shared, &tx).state,
             Some(DaemonState::Idle),
             "a stop before the first frame discards the take"
         );
@@ -398,7 +468,7 @@ mod tests {
 
         shared.set_recording(Instant::now());
         assert_eq!(
-            respond(DaemonCommand::Toggle, &shared, &tx).state,
+            respond(toggle(), &shared, &tx).state,
             Some(DaemonState::Transcribing)
         );
         assert_eq!(rx.try_recv(), Ok(SessionCommand::StopRecording));
@@ -456,9 +526,85 @@ mod tests {
         let shared = SharedState::new();
         let (tx, rx) = mpsc::channel::<SessionCommand>();
         drop(rx);
-        let response = respond(DaemonCommand::Start, &shared, &tx);
+        let response = respond(DaemonCommand::Start { language: None }, &shared, &tx);
         assert!(!response.ok);
         assert!(response.error.unwrap().contains("no longer running"));
+    }
+
+    fn lang(code: &str) -> Language {
+        Language::parse(code).unwrap()
+    }
+
+    #[test]
+    fn a_start_in_a_language_reaches_the_session_and_names_it() {
+        let shared = SharedState::new();
+        shared.set_config_language(lang("en"));
+        let (tx, rx) = mpsc::channel();
+        let start = |code: &str| DaemonCommand::Start {
+            language: Some(code.to_string()),
+        };
+
+        let reply = respond(start("de"), &shared, &tx);
+        assert_eq!(reply.state, Some(DaemonState::Starting));
+        assert_eq!(reply.language.as_deref(), Some("de"));
+        assert_eq!(
+            rx.try_recv(),
+            Ok(SessionCommand::StartRecording(
+                Trigger::Ipc,
+                Some(lang("de"))
+            ))
+        );
+
+        let reply = respond(DaemonCommand::Start { language: None }, &shared, &tx);
+        assert_eq!(reply.language.as_deref(), Some("en"), "the config language");
+        shared.set_chosen_language(Some(lang("fr")));
+        let reply = respond(DaemonCommand::Toggle { language: None }, &shared, &tx);
+        assert_eq!(reply.language.as_deref(), Some("fr"), "the tray choice");
+        while rx.try_recv().is_ok() {}
+
+        let reply = respond(start("klingon"), &shared, &tx);
+        assert!(!reply.ok);
+        assert!(reply.error.unwrap().contains("'klingon'"));
+        assert!(rx.try_recv().is_err(), "nothing starts");
+
+        shared.set_recording(Instant::now());
+        let reply = respond(
+            DaemonCommand::Toggle {
+                language: Some("de".to_string()),
+            },
+            &shared,
+            &tx,
+        );
+        assert_eq!(reply.state, Some(DaemonState::Transcribing));
+        assert_eq!(reply.language, None, "a toggle that stops starts no take");
+        assert_eq!(rx.try_recv(), Ok(SessionCommand::StopRecording));
+    }
+
+    #[test]
+    fn status_names_the_language_of_the_take_or_the_next_one() {
+        let shared = SharedState::new();
+        assert_eq!(shared.status().language, None);
+        shared.set_config_language(lang("en"));
+        assert_eq!(shared.status().language.as_deref(), Some("en"));
+
+        let mut changes = shared.subscribe();
+        changes.mark_unchanged();
+        shared.set_chosen_language(Some(Language::AUTO));
+        assert!(
+            changes.has_changed().unwrap(),
+            "watchers hear a tray choice"
+        );
+        assert_eq!(shared.status().language.as_deref(), Some("auto"));
+        assert_eq!(shared.chosen_language(), Some(Language::AUTO));
+
+        shared.set_take_language(lang("de"));
+        shared.set_recording(Instant::now());
+        assert_eq!(shared.status().language.as_deref(), Some("de"));
+        shared.set_transcribing();
+        assert_eq!(shared.status().language.as_deref(), Some("de"));
+        shared.set_idle();
+        assert_eq!(shared.status().language.as_deref(), Some("auto"));
+        assert_eq!(shared.language_for(Some(lang("fr"))), Some(lang("fr")));
     }
 
     #[test]
@@ -566,11 +712,13 @@ mod tests {
         let status = client::send_to(&path, DaemonCommand::Status).await.unwrap();
         assert_eq!(status.state, Some(DaemonState::Idle));
 
-        let started = client::send_to(&path, DaemonCommand::Start).await.unwrap();
+        let started = client::send_to(&path, DaemonCommand::Start { language: None })
+            .await
+            .unwrap();
         assert_eq!(started.state, Some(DaemonState::Starting));
         assert_eq!(
             rx.recv().unwrap(),
-            SessionCommand::StartRecording(Trigger::Ipc)
+            SessionCommand::StartRecording(Trigger::Ipc, None)
         );
 
         drop(guard);

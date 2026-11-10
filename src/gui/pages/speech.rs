@@ -1,6 +1,6 @@
 //! What Hush listens with and how it turns speech into words: where the
-//! transcription runs, the model, the language, the GPU, the microphone, and
-//! how long a recording may run.
+//! transcription runs, the model, the language and the languages detection
+//! may pick, the GPU, the microphone, and how long a recording may run.
 
 use crate::config::server;
 use crate::config::settings::TranscriptionBackend;
@@ -9,6 +9,7 @@ use crate::gui::theme::{field, quiet_button, row, section, slider, toggle_row, F
 use crate::gui::{megabytes, Gui};
 use crate::transcription::device::GpuAvailability;
 use crate::transcription::models::{vad_model, ModelManager, ModelSize};
+use crate::transcription::Language;
 use std::sync::Arc;
 
 /// The languages Whisper handles best, plus detection.
@@ -307,27 +308,16 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
             "Detecting the language costs a little accuracy, so name it when you mostly speak one.",
         )
         .show(ui, |ui| {
-            let current = gui.config.transcription.language.clone();
-            egui::ComboBox::from_id_salt("language")
-                .width(FIELD_WIDTH)
-                .selected_text(language_name(&current))
-                .show_ui(ui, |ui| {
-                    if !LANGUAGES.iter().any(|(code, _)| *code == current) {
-                        ui.selectable_value(
-                            &mut gui.config.transcription.language,
-                            current.clone(),
-                            &current,
-                        );
-                    }
-                    for (code, name) in LANGUAGES {
-                        ui.selectable_value(
-                            &mut gui.config.transcription.language,
-                            code.to_string(),
-                            *name,
-                        );
-                    }
-                });
+            language_picker(
+                ui,
+                "language",
+                &mut gui.config.transcription.language,
+                true,
+                FIELD_WIDTH,
+                "",
+            );
         });
+    detection(gui, ui);
 
     let backend = gui.config.transcription.backend;
     if !backend.is_cloud() {
@@ -412,6 +402,82 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
         });
 }
 
+/// The languages that detection may pick. The row shows while the language
+/// is Detect it, and while the list holds a language to remove.
+fn detection(gui: &mut Gui, ui: &mut egui::Ui) {
+    let transcription = &gui.config.transcription;
+    if transcription.language != "auto" && transcription.detect_languages.is_empty() {
+        return;
+    }
+    let description = if transcription.backend.is_cloud() {
+        "Only Whisper on this machine uses this list. The service detects the language on its own."
+    } else {
+        "With Detect it, Whisper picks the most likely of these languages. With none, it picks \
+         from every language."
+    };
+    let mut added = String::new();
+    row("Detect only").describe(description).show(ui, |ui| {
+        language_picker(
+            ui,
+            "detect_add",
+            &mut added,
+            false,
+            FIELD_WIDTH,
+            "Add a language",
+        );
+    });
+    let list = &mut gui.config.transcription.detect_languages;
+    if !added.is_empty() && !list.contains(&added) {
+        list.push(added);
+    }
+    let mut remove = None;
+    ui.indent("detect_languages", |ui| {
+        for (index, code) in list.iter().enumerate() {
+            row(&language_name(code)).show(ui, |ui| {
+                if quiet_button(ui, "Remove").clicked() {
+                    remove = Some(index);
+                }
+            });
+        }
+    });
+    if let Some(index) = remove {
+        list.remove(index);
+    }
+}
+
+/// A drop-down of the languages Whisper handles best, plus `value` when it
+/// is another language. `with_auto` offers detection. An empty `value`
+/// shows `placeholder`.
+pub fn language_picker(
+    ui: &mut egui::Ui,
+    id_salt: impl std::hash::Hash,
+    value: &mut String,
+    with_auto: bool,
+    width: f32,
+    placeholder: &str,
+) {
+    let current = value.clone();
+    let shown = if current.is_empty() {
+        placeholder.to_string()
+    } else {
+        language_name(&current)
+    };
+    egui::ComboBox::from_id_salt(id_salt)
+        .width(width)
+        .selected_text(shown)
+        .show_ui(ui, |ui| {
+            if !current.is_empty() && !LANGUAGES.iter().any(|(code, _)| *code == current) {
+                ui.selectable_value(value, current.clone(), language_name(&current));
+            }
+            for (code, name) in LANGUAGES
+                .iter()
+                .filter(|(code, _)| with_auto || *code != "auto")
+            {
+                ui.selectable_value(value, code.to_string(), *name);
+            }
+        });
+}
+
 fn microphone(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Microphone");
     ensure_meter(gui);
@@ -492,8 +558,10 @@ fn language_name(code: &str) -> String {
     LANGUAGES
         .iter()
         .find(|(candidate, _)| *candidate == code)
-        .map(|(_, name)| (*name).to_string())
-        .unwrap_or_else(|| code.to_string())
+        .map(|(_, name)| *name)
+        .or_else(|| Language::parse(code).map(Language::name))
+        .unwrap_or(code)
+        .to_string()
 }
 
 fn start_download(gui: &mut Gui, size: ModelSize) {
@@ -593,9 +661,10 @@ mod tests {
         assert_eq!(language_name("auto"), "Detect it");
         assert_eq!(
             language_name("cy"),
-            "cy",
-            "an unlisted code shows as itself"
+            "Welsh",
+            "another Whisper language shows its name"
         );
+        assert_eq!(language_name("xx"), "xx", "an unknown code shows as itself");
         for (code, _) in LANGUAGES {
             assert!(
                 crate::config::Config::valid_language(code),

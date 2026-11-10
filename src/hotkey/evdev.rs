@@ -4,6 +4,7 @@
 
 use super::combination::KeyCombination;
 use super::{HotkeyAction, HotkeyBindings, HotkeyEvent};
+use crate::transcription::Language;
 use anyhow::{anyhow, Result};
 use evdev::uinput::VirtualDevice;
 use evdev::{AttributeSetRef, BusType, Device, EventSummary, InputEvent, InputId, KeyCode};
@@ -114,6 +115,7 @@ impl HotkeyMatcher {
 /// The dictation hotkey plus the cancel key, fed from every reader thread.
 pub struct Matchers {
     primary: HotkeyMatcher,
+    languages: Vec<(Language, HotkeyMatcher)>,
     cancel: Option<HotkeyMatcher>,
     actions: Vec<(HotkeyAction, HotkeyMatcher)>,
     command: Option<HotkeyMatcher>,
@@ -123,6 +125,11 @@ impl Matchers {
     pub fn new(bindings: &HotkeyBindings) -> Self {
         Self {
             primary: HotkeyMatcher::new(bindings.primary.clone()),
+            languages: bindings
+                .languages
+                .iter()
+                .map(|(language, combination)| (*language, HotkeyMatcher::new(combination.clone())))
+                .collect(),
             cancel: bindings.cancel.clone().map(HotkeyMatcher::new),
             actions: bindings
                 .actions
@@ -133,10 +140,22 @@ impl Matchers {
         }
     }
 
-    /// The cancel key and action chords only report their press, and are
-    /// never swallowed.
+    /// Language chords report their press and release and are swallowed
+    /// like the hotkey. The cancel key and action chords only report their
+    /// press, and are never swallowed.
     pub fn process(&mut self, code: KeyCode, value: i32) -> Processed {
         let mut processed = self.primary.process(code, value);
+        for (language, matcher) in self.languages.iter_mut() {
+            let own = matcher.process(code, value);
+            processed.swallow |= own.swallow;
+            if processed.event.is_none() {
+                processed.event = match own.event {
+                    Some(HotkeyEvent::Pressed) => Some(HotkeyEvent::Language(*language, true)),
+                    Some(HotkeyEvent::Released) => Some(HotkeyEvent::Language(*language, false)),
+                    _ => None,
+                };
+            }
+        }
         if let Some(cancel) = self.cancel.as_mut() {
             if cancel.feed(code, value) == Some(HotkeyEvent::Pressed) && processed.event.is_none() {
                 processed.event = Some(HotkeyEvent::Cancel);
@@ -209,6 +228,23 @@ fn bindings_match(keys: &AttributeSetRef<KeyCode>, bindings: &HotkeyBindings) ->
             .command
             .as_ref()
             .is_some_and(|command| device_matches(keys, command))
+        || bindings
+            .languages
+            .iter()
+            .any(|(_, combination)| device_matches(keys, combination))
+}
+
+/// Whether the device carries the main key of a chord that starts a
+/// dictation: the device an exclusive reader grabs.
+fn carries_dictation_key(device: &Device, bindings: &HotkeyBindings) -> bool {
+    std::iter::once(&bindings.primary)
+        .chain(
+            bindings
+                .languages
+                .iter()
+                .map(|(_, combination)| combination),
+        )
+        .any(|combination| carries_key(device, combination.evdev_key()))
 }
 
 /// Paths and devices of every readable device the bindings need.
@@ -356,9 +392,9 @@ fn supervise(
             let sender = sender.clone();
             let name = format!("hush-hotkey-{}", path.display());
             let spawn_path = path.clone();
-            // Only the device that carries the hotkey's key is grabbed; a
+            // Only a device that carries a dictation key is grabbed; a
             // keyboard read for modifiers stays untouched.
-            let grab = exclusive && carries_key(&device, bindings.primary.evdev_key());
+            let grab = exclusive && carries_dictation_key(&device, &bindings);
             match thread::Builder::new()
                 .name(name)
                 .spawn(move || read_device(&spawn_path, device, running, matcher, sender, grab))
@@ -737,6 +773,46 @@ mod tests {
             m.process(KeyCode::KEY_RIGHTALT, 1).event,
             Some(HotkeyEvent::Pressed),
             "the bare key is still the dictation hotkey"
+        );
+    }
+
+    #[test]
+    fn a_language_chord_works_like_the_hotkey_beside_it() {
+        let german = Language::parse("de").unwrap();
+        let bindings = HotkeyBindings::parse("RightAlt", Some("Escape"))
+            .unwrap()
+            .with_language(german, "Shift+RightAlt")
+            .unwrap();
+        let mut m = Matchers::new(&bindings);
+        m.process(KeyCode::KEY_LEFTSHIFT, 1);
+        let press = m.process(KeyCode::KEY_RIGHTALT, 1);
+        assert_eq!(press.event, Some(HotkeyEvent::Language(german, true)));
+        assert!(
+            press.swallow,
+            "an exclusive reader hides it like the hotkey"
+        );
+        assert!(m.process(KeyCode::KEY_RIGHTALT, 2).swallow);
+        let release = m.process(KeyCode::KEY_RIGHTALT, 0);
+        assert_eq!(release.event, Some(HotkeyEvent::Language(german, false)));
+        assert!(release.swallow);
+        m.process(KeyCode::KEY_LEFTSHIFT, 0);
+
+        assert_eq!(
+            m.process(KeyCode::KEY_RIGHTALT, 1).event,
+            Some(HotkeyEvent::Pressed),
+            "the bare key is still the dictation hotkey"
+        );
+        assert_eq!(
+            m.process(KeyCode::KEY_RIGHTALT, 0).event,
+            Some(HotkeyEvent::Released)
+        );
+
+        m.process(KeyCode::KEY_LEFTSHIFT, 1);
+        m.process(KeyCode::KEY_RIGHTALT, 1);
+        assert_eq!(
+            m.process(KeyCode::KEY_LEFTSHIFT, 0).event,
+            Some(HotkeyEvent::Language(german, false)),
+            "letting go of the modifier ends the hold"
         );
     }
 

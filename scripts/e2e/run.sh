@@ -91,6 +91,15 @@ assert_file() {
   fi
 }
 
+# The newest log file of the test daemon. Hush writes its log lines there, not
+# to stdout.
+hush_log_file() {
+  local file
+  file=$(find "$CASE_HOME/.local/share/hush/logs" -name '*.log' -printf '%T@ %p\n' 2>/dev/null |
+    sort -n | tail -n 1 | cut -d' ' -f2-)
+  printf '%s\n' "${file:-$CASE_HOME/.local/share/hush/logs/missing.log}"
+}
+
 assert_log_lacks() {
   if grep -qF -- "$1" "$CASE_DIR/daemon.log"; then
     fail "the daemon log contains '$1'"
@@ -433,10 +442,12 @@ wait_recording() {
 }
 
 # Start a take, play the clip into the virtual microphone in real time, and
-# wait a short tail. The case then stops the take.
+# wait a short tail. The case then stops the take. Arguments after the clip go
+# to `hush start`.
 record_clip() {
   local clip=$1 player _
-  hush_cli start >/dev/null || fail "hush start failed"
+  shift
+  hush_cli start "$@" >/dev/null || fail "hush start $* failed"
   wait_recording
   for _ in $(seq 20); do
     capture_on_mic && break
@@ -484,6 +495,24 @@ case_silence() {
   assert_exit 4 "$TAKE_EXIT" "hush stop --print --json"
   assert_eq no_speech "$(take_field status)" "the status"
   assert_eq null "$(take_field text)" "the text"
+}
+
+case_german_lang() {
+  start_daemon
+  record_clip "$SAMPLES/verwandlung_de.wav" --lang de
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  assert_words "$TAKE_TEXT" samsa morgens bett verwandelt
+}
+
+case_detect_limited() {
+  start_daemon 'transcription.language = "auto"
+transcription.detect_languages = ["en", "de"]'
+  record_clip "$SAMPLES/verwandlung_de.wav"
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  assert_words "$TAKE_TEXT" samsa morgens bett verwandelt
+  assert_file "$(hush_log_file)" "Detected de among en, de"
 }
 
 case_print_types_nothing() {

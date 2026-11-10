@@ -27,6 +27,13 @@ pub struct Cli {
     pub no_notifications: bool,
 }
 
+/// A `--lang` value: a code that Whisper knows, or `auto`.
+fn language_code(code: &str) -> Result<String, String> {
+    crate::transcription::Language::from_code(code)
+        .map(|language| language.code().to_string())
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Subcommand)]
 pub enum Commands {
     /// Record once and exit (no hotkeys)
@@ -73,10 +80,18 @@ pub enum Commands {
     },
 
     /// Start recording if idle, otherwise stop and transcribe (talks to the daemon)
-    Toggle,
+    Toggle {
+        /// Language of the take it starts: a Whisper code such as de, or auto
+        #[arg(long, value_name = "CODE", value_parser = language_code)]
+        lang: Option<String>,
+    },
 
     /// Start recording (talks to the daemon)
-    Start,
+    Start {
+        /// Language of this take: a Whisper code such as de, or auto
+        #[arg(long, value_name = "CODE", value_parser = language_code)]
+        lang: Option<String>,
+    },
 
     /// Stop recording and transcribe (talks to the daemon)
     Stop {
@@ -495,5 +510,38 @@ impl Cli {
             .with_thread_ids(false)
             .with_file(false)
             .init();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lang_of(args: &[&str]) -> Option<String> {
+        match Cli::try_parse_from(args).map(|cli| cli.command) {
+            Ok(Commands::Start { lang } | Commands::Toggle { lang }) => lang,
+            Ok(_) => panic!("{args:?} is not start or toggle"),
+            Err(e) => panic!("{args:?}: {e}"),
+        }
+    }
+
+    #[test]
+    fn start_and_toggle_take_a_whisper_language() {
+        assert_eq!(lang_of(&["hush", "start"]), None);
+        assert_eq!(
+            lang_of(&["hush", "start", "--lang", "de"]).as_deref(),
+            Some("de")
+        );
+        assert_eq!(
+            lang_of(&["hush", "toggle", "--lang", "auto"]).as_deref(),
+            Some("auto")
+        );
+        for bad in ["xx", "DE", "german"] {
+            let error = match Cli::try_parse_from(["hush", "start", "--lang", bad]) {
+                Ok(_) => panic!("{bad} must fail"),
+                Err(error) => error,
+            };
+            assert_eq!(error.exit_code(), 2, "a usage error");
+        }
     }
 }
