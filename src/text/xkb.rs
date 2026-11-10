@@ -12,7 +12,7 @@
 //! Hush loads libxkbcommon at run time, so a system without it falls back
 //! to the US table or to the clipboard.
 
-use super::keymap::{KeyTable, Tap, EXTRA_KEYS, MAIN_KEYS, MODIFIER_KEYS};
+use super::keymap::{KeyTable, TableLocks, Tap, EXTRA_KEYS, MAIN_KEYS, MODIFIER_KEYS};
 use anyhow::{anyhow, bail, Result};
 use input_linux::Key;
 use std::collections::HashMap;
@@ -127,7 +127,13 @@ pub fn build(request: &Request) -> Result<KeyTable> {
             chars.extend(sequences);
         }
     }
-    Ok(KeyTable::new(chars, shift.unwrap_or(Key::LeftShift)))
+    let shift_mask = keymap.mod_mask(XKB_MOD_NAME_SHIFT);
+    Ok(
+        KeyTable::new(chars, shift.unwrap_or(Key::LeftShift)).with_locks(TableLocks {
+            shift_locked: base.locked & shift_mask != 0,
+            no_shift: shift.is_none() && base.locked != 0,
+        }),
+    )
 }
 
 /// The keys that can hold Control or Shift, in the order Hush tries them.
@@ -491,6 +497,11 @@ enum Modifier {
 /// Shift, ISO_Level3_Shift for the third level. A press must add the
 /// modifier to the locked ones without a group change, and the release
 /// must leave only the locked ones. With Shift locked, no press adds Shift.
+///
+/// Between the press and the release, another key goes down and up, as
+/// in every tap. That key cancels `clearLocks`, so with `shift:breaks_caps`
+/// a Shift that types a letter keeps Caps Lock, and only a lone Shift tap
+/// ends it.
 fn find_modifier(
     keymap: &Keymap,
     base: Base,
@@ -506,10 +517,12 @@ fn find_modifier(
         if !free(key) {
             continue;
         }
-        let state = State::with_locks(keymap, base)?;
-        if !wanted.contains(&state.sym(key)) {
+        // With `shift:breaks_caps`, the locked level of Shift types no
+        // keysym, but its action still holds Shift.
+        if !wanted.contains(&State::new(keymap, base.group)?.sym(key)) {
             continue;
         }
+        let state = State::with_locks(keymap, base)?;
         let before = state.mods();
         state.press(key);
         let added = state.mods() & !before;
@@ -518,6 +531,8 @@ fn find_modifier(
                 Modifier::Shift => added & shift != 0,
                 Modifier::Level3 => added != 0 && added & shift == 0,
             };
+        state.press(Key::Space);
+        state.release(Key::Space);
         state.release(key);
         if holds && state.mods() == before && state.layout() == base.group {
             return Ok(Some(key));
@@ -1282,6 +1297,40 @@ pub(crate) mod tests {
             locked("us", "caps:shiftlock", Locked::Named(SHIFT_MOD)),
             "with caps:shiftlock the indicator shows Shift"
         );
+    }
+
+    #[test]
+    fn the_lock_flags_say_what_shift_does() {
+        if !xkb_ready() {
+            return;
+        }
+        let caps = locked("us", "", Locked::CapsIndicator);
+        assert_eq!(caps.locks(), TableLocks::default());
+        let shift_lock = locked("us", "caps:shiftlock", Locked::CapsIndicator);
+        assert_eq!(
+            shift_lock.locks(),
+            TableLocks {
+                shift_locked: true,
+                no_shift: true
+            }
+        );
+        assert_eq!(table("us", "").locks(), TableLocks::default());
+    }
+
+    #[test]
+    fn shift_breaks_caps_only_when_tapped_alone() {
+        if !xkb_ready() {
+            return;
+        }
+        let breaks = locked("us", "shift:breaks_caps", Locked::CapsIndicator);
+        assert_eq!(
+            taps(&breaks, 'a'),
+            Some(shifted(Key::A)),
+            "a key between Shift's press and release keeps Caps Lock"
+        );
+        assert_eq!(taps(&breaks, 'A'), Some(plain(Key::A)));
+        assert_eq!(breaks.locks(), TableLocks::default());
+        assert!(breaks.covers("Hello\nWorld"));
     }
 
     #[test]

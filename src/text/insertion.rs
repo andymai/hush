@@ -188,6 +188,35 @@ pub fn one_line(text: &str) -> String {
     line
 }
 
+/// Where a paste goes, and what the keyboard's locks do to its chord.
+#[derive(Clone, Copy)]
+struct PasteTarget<'a> {
+    window: Option<&'a WindowInfo>,
+    table: Option<&'a KeyTable>,
+    shift_locked: bool,
+}
+
+/// Under Shift Lock, every key Hush sends gets Shift, so Ctrl+V arrives as
+/// Ctrl+Shift+V, which is Paste Special in LibreOffice and the clipboard
+/// history in JetBrains editors. Shift+Insert pastes in every layout.
+pub fn paste_chord(chosen: PasteChord, shift_locked: bool) -> PasteChord {
+    if shift_locked && chosen != PasteChord::ShiftInsert {
+        debug!("Shift can be locked, so the paste uses Shift+Insert");
+        PasteChord::ShiftInsert
+    } else {
+        chosen
+    }
+}
+
+/// Under Shift Lock, Enter arrives as Shift+Enter, which starts a new line
+/// in chat instead of sending the message, so no Enter follows the take.
+pub fn submits(submit_app: bool, shift_locked: bool) -> bool {
+    if submit_app && shift_locked {
+        debug!("Shift can be locked, so no Enter follows the text");
+    }
+    submit_app && !shift_locked
+}
+
 /// Whether Enter follows an insertion: only after a dictation in a
 /// `submit_apps` window, only when the keys went out, and only when they
 /// carried text. A printed take and a hook that typed nothing never reach
@@ -330,6 +359,8 @@ impl TextInserter {
         };
 
         let typing = self.current_typing();
+        let shift_locked = self.typing.shift_locked();
+        let submit_app = submits(submit_app, shift_locked);
         // An explicit uinput choice, and a failed paste, type even when no
         // table fits the layout, with the US table as before.
         let table = typing.table().unwrap_or(KeyTable::us());
@@ -338,7 +369,12 @@ impl TextInserter {
                 self.type_with_uinput(&text, table, line_break, origin, submit_app)?
             },
             Chosen::Clipboard => {
-                let pasted = self.paste(&text, window.as_ref(), typing.table(), origin, submit_app);
+                let target = PasteTarget {
+                    window: window.as_ref(),
+                    table: typing.table(),
+                    shift_locked,
+                };
+                let pasted = self.paste(&text, target, origin, submit_app);
                 if let Err(e) = pasted {
                     warn!("Paste failed ({}); typing what uinput can", e);
                     // Typing can skip characters, so Hush does not send the result.
@@ -372,13 +408,20 @@ impl TextInserter {
     fn paste(
         &mut self,
         text: &str,
-        window: Option<&WindowInfo>,
-        table: Option<&KeyTable>,
+        target: PasteTarget,
         origin: Origin,
         submit_app: bool,
     ) -> Result<()> {
+        let PasteTarget {
+            window,
+            table,
+            shift_locked,
+        } = target;
         let clock = SystemClock;
-        let mut chord = choose_chord(window, &self.config, &self.profiles);
+        let mut chord = paste_chord(
+            choose_chord(window, &self.config, &self.profiles),
+            shift_locked,
+        );
         let clipboard = self
             .clipboard
             .as_deref_mut()
@@ -795,6 +838,24 @@ mod tests {
             !presses_enter(dictation, false, "ls -la", &sent),
             "a window outside submit_apps"
         );
+    }
+
+    #[test]
+    fn shift_lock_pastes_with_shift_insert_and_sends_no_enter() {
+        for chord in [
+            PasteChord::CtrlV,
+            PasteChord::CtrlShiftV,
+            PasteChord::ShiftInsert,
+        ] {
+            assert_eq!(paste_chord(chord, true), PasteChord::ShiftInsert, "{chord}");
+            assert_eq!(paste_chord(chord, false), chord, "{chord}");
+        }
+        assert!(submits(true, false));
+        assert!(
+            !submits(true, true),
+            "Enter would arrive as Shift+Enter, a new line in chat"
+        );
+        assert!(!submits(false, false));
     }
 
     #[test]

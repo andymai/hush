@@ -139,6 +139,19 @@ pub enum Stroke {
 pub struct KeyTable {
     chars: HashMap<char, Vec<Tap>>,
     shift: Key,
+    locks: TableLocks,
+}
+
+/// What a lock does to the keys outside the table: a line break and the
+/// paste and submit chords.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TableLocks {
+    /// Shift can be locked (Shift Lock), so every key Hush sends gets
+    /// Shift: Ctrl+V arrives as Ctrl+Shift+V, and Enter as Shift+Enter.
+    pub shift_locked: bool,
+    /// A lock is on and no key holds Shift without a side effect, so Hush
+    /// must not press Shift.
+    pub no_shift: bool,
 }
 
 const US: [(char, Key, bool); 95] = [
@@ -257,7 +270,19 @@ static US_TABLE: Lazy<KeyTable> = Lazy::new(|| {
 impl KeyTable {
     /// `shift` is the key that holds Shift for a chat line break.
     pub fn new(chars: HashMap<char, Vec<Tap>>, shift: Key) -> Self {
-        Self { chars, shift }
+        Self {
+            chars,
+            shift,
+            locks: TableLocks::default(),
+        }
+    }
+
+    pub fn with_locks(self, locks: TableLocks) -> Self {
+        Self { locks, ..self }
+    }
+
+    pub fn locks(&self) -> TableLocks {
+        self.locks
     }
 
     /// The plain US layout, for when libxkbcommon is not available.
@@ -302,7 +327,10 @@ impl KeyTable {
         } else {
             Key::LeftShift
         };
-        KeyTable::new(chars, shift)
+        KeyTable::new(chars, shift).with_locks(TableLocks {
+            shift_locked: self.locks.shift_locked || other.locks.shift_locked,
+            no_shift: self.locks.no_shift || other.locks.no_shift,
+        })
     }
 
     pub fn dead_key_chars(&self) -> usize {
@@ -310,19 +338,27 @@ impl KeyTable {
     }
 
     /// Whether the table has keys for every character. Line breaks and Tab
-    /// use the same keys on every layout.
+    /// use the same keys on every layout. Without a Shift key that is safe
+    /// to press, a line break, which is Shift+Enter in chat, does not count.
     pub fn covers(&self, text: &str) -> bool {
-        text.chars()
-            .all(|ch| matches!(ch, '\n' | '\r' | '\t') || self.chars.contains_key(&ch))
+        text.chars().all(|ch| match ch {
+            '\n' | '\r' => !self.locks.no_shift,
+            '\t' => true,
+            _ => self.chars.contains_key(&ch),
+        })
     }
 
     /// The taps that type a text. `\r\n`, `\r`, and `\n` are each one line
     /// break.
     pub fn strokes(&self, text: &str, line_break: LineBreak) -> Vec<Stroke> {
-        let enter = Tap {
-            key: Key::Enter,
-            shift: (line_break == LineBreak::ShiftEnter).then_some(self.shift),
-            level3: None,
+        let enter = match line_break {
+            LineBreak::ShiftEnter if self.locks.no_shift => Stroke::Unmapped('\n'),
+            LineBreak::ShiftEnter => Stroke::Tap(Tap {
+                key: Key::Enter,
+                shift: Some(self.shift),
+                level3: None,
+            }),
+            LineBreak::Enter => Stroke::Tap(Tap::plain(Key::Enter)),
         };
         let mut strokes = Vec::with_capacity(text.len());
         let mut chars = text.chars().peekable();
@@ -330,9 +366,9 @@ impl KeyTable {
             match ch {
                 '\r' => {
                     chars.next_if_eq(&'\n');
-                    strokes.push(Stroke::Tap(enter));
+                    strokes.push(enter);
                 },
-                '\n' => strokes.push(Stroke::Tap(enter)),
+                '\n' => strokes.push(enter),
                 '\t' => strokes.push(Stroke::Tap(Tap::plain(Key::Tab))),
                 _ => match self.chars.get(&ch) {
                     Some(taps) => strokes.extend(taps.iter().copied().map(Stroke::Tap)),
@@ -472,6 +508,52 @@ mod tests {
         assert_eq!(common.taps('z'), None, "only the other table has it");
         assert_eq!(common.taps('é'), None, "the dead keys differ");
         assert_eq!(common, other.common(&one));
+    }
+
+    #[test]
+    fn without_a_safe_shift_a_line_break_is_not_covered() {
+        let no_shift = KeyTable::us().clone().with_locks(TableLocks {
+            shift_locked: false,
+            no_shift: true,
+        });
+        assert!(no_shift.covers("one two\tthree"));
+        assert!(!no_shift.covers("one\ntwo"));
+        assert!(!no_shift.covers("one\r\ntwo"));
+        assert_eq!(
+            no_shift.strokes("a\nb", LineBreak::ShiftEnter),
+            [
+                tap(Key::A, false),
+                Stroke::Unmapped('\n'),
+                tap(Key::B, false)
+            ],
+            "an explicit uinput choice drops the chat line break, not Caps Lock"
+        );
+        assert_eq!(
+            no_shift.strokes("a\nb", LineBreak::Enter),
+            [
+                tap(Key::A, false),
+                tap(Key::Enter, false),
+                tap(Key::B, false)
+            ]
+        );
+        assert!(KeyTable::us().covers("one\ntwo"));
+    }
+
+    #[test]
+    fn common_keys_keep_every_lock_flag() {
+        let shift_locked = KeyTable::us().clone().with_locks(TableLocks {
+            shift_locked: true,
+            no_shift: true,
+        });
+        let common = KeyTable::us().common(&shift_locked);
+        assert_eq!(
+            common.locks(),
+            TableLocks {
+                shift_locked: true,
+                no_shift: true
+            }
+        );
+        assert_eq!(KeyTable::us().locks(), TableLocks::default());
     }
 
     #[test]

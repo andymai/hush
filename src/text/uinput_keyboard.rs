@@ -367,14 +367,20 @@ impl Drop for UinputKeyboard {
 /// key, which applications match to their Latin shortcuts. The modifiers
 /// are the keys that hold Control and Shift, so Ctrl+V stays Ctrl+V when
 /// an XKB option swaps Ctrl with another key.
+///
+/// When a lock is on and no key holds Shift without a side effect, the
+/// chord leaves Shift out. With Shift locked, Shift adds nothing, so the
+/// chord keeps it.
 fn chord_keys(chord: PasteChord, table: Option<&KeyTable>, keys: ChordKeys) -> (Vec<Key>, Key) {
     let v = table
         .and_then(|table| table.letter_key('v'))
         .unwrap_or(Key::V);
+    let locks = table.map(KeyTable::locks).unwrap_or_default();
+    let shift = (!locks.no_shift || locks.shift_locked).then_some(keys.shift);
     match chord {
         PasteChord::CtrlV => (vec![keys.control], v),
-        PasteChord::CtrlShiftV => (vec![keys.control, keys.shift], v),
-        PasteChord::ShiftInsert => (vec![keys.shift], Key::Insert),
+        PasteChord::CtrlShiftV => (std::iter::once(keys.control).chain(shift).collect(), v),
+        PasteChord::ShiftInsert => (shift.into_iter().collect(), Key::Insert),
     }
 }
 
@@ -456,6 +462,36 @@ mod tests {
         assert!(led_on(&bits, LedKind::CapsLock));
         assert!(!led_on(&bits, LedKind::NumLock));
         assert!(!led_on(&[], LedKind::CapsLock));
+    }
+
+    #[test]
+    fn without_a_safe_shift_the_chord_leaves_shift_out() {
+        use crate::text::keymap::TableLocks;
+        let locked = |shift_locked, no_shift| {
+            KeyTable::us().clone().with_locks(TableLocks {
+                shift_locked,
+                no_shift,
+            })
+        };
+        let no_shift = locked(false, true);
+        assert_eq!(
+            plain(PasteChord::CtrlShiftV, Some(&no_shift)),
+            (vec![Key::LeftCtrl], Key::V)
+        );
+        assert_eq!(
+            plain(PasteChord::ShiftInsert, Some(&no_shift)),
+            (vec![], Key::Insert)
+        );
+        let shift_lock = locked(true, true);
+        assert_eq!(
+            plain(PasteChord::ShiftInsert, Some(&shift_lock)),
+            (vec![Key::LeftShift], Key::Insert),
+            "with Shift locked, holding Shift changes nothing"
+        );
+        assert_eq!(
+            plain(PasteChord::CtrlShiftV, Some(KeyTable::us())),
+            (vec![Key::LeftCtrl, Key::LeftShift], Key::V)
+        );
     }
 
     #[test]
