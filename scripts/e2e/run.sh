@@ -400,7 +400,7 @@ start_daemon() {
     [ -f "$vad" ] && ln -sf "$vad" "$CASE_HOME/.local/share/hush/models/"
   done
   if [ -n "${HUSH_E2E_LANGID_MODEL:-}" ]; then
-    ln -sf "$HUSH_E2E_LANGID_MODEL" "$CASE_HOME/.local/share/hush/models/"
+    ln -sf "$HUSH_E2E_LANGID_MODEL" "$CASE_HOME/.local/share/hush/models/lang-id-voxlingua107-ecapa-Q8_0.gguf"
   fi
   home_env "$CASE_HOME"
   "${SANDBOX[@]}" setpriv --pdeathsig TERM -- env -i "${HOME_ENV[@]}" \

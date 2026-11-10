@@ -59,7 +59,7 @@ run unless `HUSH_E2E_LANGID_MODEL` names a copy.
 | --- | --- |
 | `HUSH_BIN` | The binary to test. The default is `target/debug/hush`, which the harness builds when it is missing. |
 | `HUSH_E2E_MODEL` | A ggml model file to use instead of `tiny`. |
-| `HUSH_E2E_LANGID_MODEL` | A language-ID GGUF file for the cases that set `detect_languages`. Without it, the test daemon downloads the model. |
+| `HUSH_E2E_LANGID_MODEL` | A copy of `lang-id-voxlingua107-ecapa-Q8_0.gguf` for the cases that set `detect_languages`. It must match the SHA-256 in `models.rs`. Without it, the test daemon downloads the model. |
 | `HUSH_E2E_KEEP=1` | Keep the temporary folder with the daemon logs. |
 | `HUSH_E2E_TAIL_SECS` | The time from the end of the clip to the stop. The default is 1.5. |
 
