@@ -604,7 +604,11 @@ fn read_device(
                     // Tap before the event goes out, so Ctrl is up again
                     // before Hush acts on the key and types.
                     if let Some(mask) = mask.as_ref() {
-                        if let Err(e) = mask.lock().follow(&processed) {
+                        let sending = crate::text::insertion::sending_keys();
+                        if processed.mask && sending {
+                            debug!("No menu mask tap: Hush sends keys to a window");
+                        }
+                        if let Err(e) = mask.lock().follow(&processed, sending) {
                             warn!("Menu mask tap failed: {}", e);
                         }
                     }

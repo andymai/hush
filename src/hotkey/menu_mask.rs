@@ -6,7 +6,9 @@
 //! lone modifier into a chord, so nothing opens. The tap presses the key
 //! that holds Control in the session keymap. An XKB option can move
 //! Control: with `ctrl:swapcaps`, the Left Ctrl key types Caps Lock. When
-//! Hush cannot read the options, as on Sway, it sends no tap.
+//! Hush cannot read the options, as on Sway, it sends no tap. While Hush
+//! types or pastes, it sends no tap either, because on KWin a Ctrl between
+//! typed keys turns a letter into a shortcut.
 //!
 //! The tap comes from a device of its own, not from the typing keyboard.
 //! The hotkey reader thread writes the tap at once, also while a take
@@ -59,9 +61,10 @@ impl MenuMask {
 }
 
 impl<D: Emit> MenuMask<D> {
-    /// Tap Ctrl when the event is the press of a chord that needs the mask.
-    pub fn follow(&mut self, processed: &Processed) -> io::Result<()> {
-        if processed.mask {
+    /// Tap Ctrl when the event is the press of a chord that needs the mask,
+    /// and Hush does not send keys to a window (`sending`).
+    pub fn follow(&mut self, processed: &Processed, sending: bool) -> io::Result<()> {
+        if processed.mask && !sending {
             self.tap()
         } else {
             Ok(())
@@ -191,9 +194,26 @@ mod tests {
         let mut mask = mask();
         for (value, taps) in [(1, 1), (2, 1), (2, 1), (0, 1), (1, 2), (0, 2)] {
             let processed = m.process(KeyCode::KEY_RIGHTALT, value);
-            mask.follow(&processed).unwrap();
+            mask.follow(&processed, false).unwrap();
             assert_eq!(mask.device.taps(), taps, "after value {value}");
         }
+    }
+
+    #[test]
+    fn no_tap_while_hush_types() {
+        let mut m = matchers("RightAlt", true);
+        let mut mask = mask();
+        let press = m.process(KeyCode::KEY_RIGHTALT, 1);
+        assert!(press.mask);
+        mask.follow(&press, true).unwrap();
+        assert!(
+            mask.device.events.is_empty(),
+            "a Ctrl between typed keys turns a letter into a shortcut"
+        );
+        m.process(KeyCode::KEY_RIGHTALT, 0);
+        mask.follow(&m.process(KeyCode::KEY_RIGHTALT, 1), false)
+            .unwrap();
+        assert_eq!(mask.device.taps(), 1);
     }
 
     #[test]
