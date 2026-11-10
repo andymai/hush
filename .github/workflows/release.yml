@@ -115,18 +115,23 @@ jobs:
       - run: cargo build --release --features vulkan
 
       # Inlined, like the dependencies step, so that a dispatch for an older tag
-      # also runs it. The libggml-cpu-*.so modules use AVX-512 and other
-      # instructions by design: ggml loads only the module that this CPU runs.
-      # The binary, libtranscribe, libggml, libggml-base, and the GPU module
-      # always load, so AVX-512 in their C or C++ code means a build for the
-      # runner CPU. Rust code targets baseline x86-64, so AVX-512 in a Rust
+      # also runs it. The CPU modules for AVX-512 CPUs use AVX-512 by design:
+      # ggml loads only the module that this CPU runs. The binary, libtranscribe,
+      # libggml, libggml-base, the GPU module, and the other CPU modules must
+      # have none, so AVX-512 in their C or C++ code means a build for the
+      # runner CPU. A CPU module that is not in the skip list gets the check. Rust code targets baseline x86-64, so AVX-512 in a Rust
       # function is a #[target_feature] path that its crate selects after a
       # runtime CPU check, as crc32fast does.
       - name: Check that code that always loads has no AVX-512
         run: |
           set -euo pipefail
           for file in target/release/hush target/release/lib/hush/*; do
-            case "${file##*/}" in libggml-cpu-*.so) continue ;; esac
+            case "${file##*/}" in
+              libggml-cpu-skylakex.so | libggml-cpu-cannonlake.so | \
+              libggml-cpu-cascadelake.so | libggml-cpu-icelake.so | \
+              libggml-cpu-cooperlake.so | libggml-cpu-sapphirerapids.so | \
+              libggml-cpu-zen4.so) continue ;;
+            esac
             echo "== $file"
             objdump -d --no-show-raw-insn "$file" | awk '
               /^[0-9a-f]+ <.+>:$/ {
