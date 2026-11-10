@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.0](https://github.com/andymai/hush/compare/v0.24.2...v0.25.0) (2026-11-10)
+
+
+### Features
+
+* **hotkey:** make modifier names in hotkey chords follow the keymap ([#301](https://github.com/andymai/hush/issues/301)) ([c655636](https://github.com/andymai/hush/commit/c6556368830893dcdf43441b658364a4e2d5033d))
+* **transcription:** run Whisper through transcribe.cpp ([#300](https://github.com/andymai/hush/issues/300)) ([92734a7](https://github.com/andymai/hush/commit/92734a72d72f0c2ef9dad7789a9bebbe11c20247))
+
 ## [0.24.2](https://github.com/andymai/hush/compare/v0.24.1...v0.24.2) (2026-11-10)
 
 
