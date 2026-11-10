@@ -597,7 +597,8 @@ fn run_full(
 
 /// Limited detection without the language-ID model: Whisper detects the
 /// language, and a take that it hears in a language outside `allowed` runs
-/// again in the first allowed language, so the choice stays in the set.
+/// again in an allowed language (see [`langid::fallback`]), so the choice
+/// stays in the set.
 fn detect_within(
     engine: &Engine,
     speech: &[f32],
@@ -609,6 +610,7 @@ fn detect_within(
         .as_deref()
         .and_then(|code| langid::allowed_code(code, allowed))
     {
+        langid::confirm(code);
         info!(
             language = code,
             "Whisper detected {} among {}",
@@ -620,7 +622,7 @@ fn detect_within(
             detected: Some(code),
         });
     }
-    let Some(first) = langid::first_allowed(allowed, &engine.languages) else {
+    let Some(first) = langid::fallback(allowed, &engine.languages) else {
         return Ok(Heard {
             text,
             detected: None,

@@ -158,6 +158,8 @@ struct Store {
     failed_for: Option<Vec<String>>,
     downloading: bool,
     retry: Retry,
+    /// The language that the last take with limited detection confirmed
+    confirmed: Option<&'static str>,
 }
 
 static STORE: LazyLock<Mutex<Store>> = LazyLock::new(|| {
@@ -166,6 +168,7 @@ static STORE: LazyLock<Mutex<Store>> = LazyLock::new(|| {
         failed_for: None,
         downloading: false,
         retry: Retry::new(),
+        confirmed: None,
     })
 });
 
@@ -280,6 +283,7 @@ pub(crate) fn pick(
                 code,
                 allowed.join(", ")
             );
+            confirm(code);
             Some(code)
         },
         Ok(None) => {
@@ -291,6 +295,31 @@ pub(crate) fn pick(
             None
         },
     }
+}
+
+/// Note the language that language ID or Whisper found within the allowed
+/// set for a take.
+pub(crate) fn confirm(code: &'static str) {
+    STORE.lock().confirmed = Some(code);
+}
+
+/// The language for a take that Whisper heard outside `allowed`: the one that
+/// the last take confirmed, when it is allowed and the model knows it, else
+/// the first allowed language that the model knows. transcribe.cpp gives no
+/// score for a Whisper run, so the take cannot run in each language and keep
+/// the most likely text.
+pub(crate) fn fallback(allowed: &[String], known: &[String]) -> Option<&'static str> {
+    fallback_from(STORE.lock().confirmed, allowed, known)
+}
+
+fn fallback_from(
+    confirmed: Option<&'static str>,
+    allowed: &[String],
+    known: &[String],
+) -> Option<&'static str> {
+    confirmed
+        .filter(|code| allowed_code(code, allowed).is_some() && knows(known, code))
+        .or_else(|| first_allowed(allowed, known))
 }
 
 fn knows(known: &[String], code: &str) -> bool {
@@ -309,7 +338,7 @@ pub(crate) fn allowed_code(code: &str, allowed: &[String]) -> Option<&'static st
 }
 
 /// The first of `allowed` that the model knows.
-pub(crate) fn first_allowed(allowed: &[String], known: &[String]) -> Option<&'static str> {
+fn first_allowed(allowed: &[String], known: &[String]) -> Option<&'static str> {
     allowed
         .iter()
         .filter_map(|code| Language::parse(code))
@@ -375,5 +404,30 @@ mod tests {
             "the first the model knows"
         );
         assert_eq!(first_allowed(&allowed, &codes(&["en"])), None);
+    }
+
+    #[test]
+    fn a_miss_runs_again_in_the_last_confirmed_language() {
+        let allowed = codes(&["en", "de"]);
+        assert_eq!(
+            fallback_from(Some("de"), &allowed, &[]),
+            Some("de"),
+            "German heard as Dutch stays German after a German take"
+        );
+        assert_eq!(
+            fallback_from(None, &allowed, &[]),
+            Some("en"),
+            "else the first"
+        );
+        assert_eq!(
+            fallback_from(Some("fr"), &allowed, &[]),
+            Some("en"),
+            "a confirmed language outside the set does not count"
+        );
+        assert_eq!(
+            fallback_from(Some("de"), &allowed, &codes(&["en"])),
+            Some("en"),
+            "nor one the model does not know"
+        );
     }
 }
