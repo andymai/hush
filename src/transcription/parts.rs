@@ -36,10 +36,12 @@ pub struct Transcribed {
 #[async_trait]
 pub trait PartModel: Send + Sync + 'static {
     fn prompt_fits(&self, prompt: &str) -> bool;
-    async fn transcribe_part(
+    /// `prompt` starts with `terms` and ends with the text before the part.
+    async fn transcribe(
         &self,
         audio: &[f32],
         prompt: Option<&str>,
+        terms: Option<&str>,
         language: Language,
     ) -> Result<Transcribed>;
 }
@@ -50,14 +52,15 @@ impl PartModel for SpeechToText {
         SpeechToText::prompt_fits(self, prompt)
     }
 
-    async fn transcribe_part(
+    async fn transcribe(
         &self,
         audio: &[f32],
         prompt: Option<&str>,
+        terms: Option<&str>,
         language: Language,
     ) -> Result<Transcribed> {
         let result = self
-            .transcribe_in(audio, WHISPER_SAMPLE_RATE, prompt, Some(language))
+            .transcribe_part(audio, WHISPER_SAMPLE_RATE, prompt, terms, Some(language))
             .await?;
         Ok(Transcribed {
             text: result.text,
@@ -185,7 +188,12 @@ async fn work<M: PartModel>(
                 let prompt =
                     prompt::with_previous(base.as_deref(), &carried, |p| loaded.prompt_fits(p));
                 loaded
-                    .transcribe_part(&pad(&part.audio), prompt.as_deref(), language)
+                    .transcribe(
+                        &pad(&part.audio),
+                        prompt.as_deref(),
+                        base.as_deref(),
+                        language,
+                    )
                     .await
                     .map(|transcribed| {
                         language = keep_language(language, transcribed.detected);
@@ -498,10 +506,11 @@ mod tests {
             prompt.chars().count() <= 200
         }
 
-        async fn transcribe_part(
+        async fn transcribe(
             &self,
             audio: &[f32],
             prompt: Option<&str>,
+            _terms: Option<&str>,
             language: Language,
         ) -> Result<Transcribed> {
             assert!(

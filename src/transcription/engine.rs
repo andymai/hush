@@ -122,19 +122,36 @@ impl SpeechToText {
         prompt: Option<&str>,
         language: Option<Language>,
     ) -> Result<TranscriptionResult> {
+        self.transcribe_part(audio, sample_rate, prompt, prompt, language)
+            .await
+    }
+
+    /// [`Self::transcribe_in`] for one part of a take. Whisper gets
+    /// `prompt`, which starts with `terms` (the window title and the learned
+    /// terms) and ends with the text before the part. Speech can repeat that
+    /// text, so the echo check counts it only when one of its words loops.
+    pub async fn transcribe_part(
+        &self,
+        audio: &[f32],
+        sample_rate: u32,
+        prompt: Option<&str>,
+        terms: Option<&str>,
+        language: Option<Language>,
+    ) -> Result<TranscriptionResult> {
         let prompt = prompt.map(str::trim).filter(|p| !p.is_empty());
+        let terms = terms.map(str::trim).filter(|t| !t.is_empty());
         let mut result = self
             .transcribe_once(audio, sample_rate, prompt, language)
             .await?;
 
-        if let Some(prompt) = prompt.filter(|p| guard::is_prompt_echo(&result.text, p)) {
+        if let Some(echo) = guard::echo_in(&result.text, prompt, terms) {
             info!("The transcript looks like an echo of the prompt, transcribing again without it");
             let detected = result.detected.and_then(Language::parse);
             let retry = self
                 .transcribe_once(audio, sample_rate, None, detected.or(language))
                 .await?;
             result.processing_time += retry.processing_time;
-            match guard::after_echo(&result.text, &retry.text, prompt) {
+            match echo.choose(&result.text, &retry.text) {
                 EchoChoice::Drop => {
                     info!("Dropped the transcript: without the prompt, it had no speech");
                     result.text.clear();

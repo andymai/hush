@@ -560,6 +560,24 @@ case_chunked_take() {
     fail "part files stay after the text went out"
 }
 
+# Every part of a hands-free take is in the language of the take, not only
+# the first. Two copies of the German clip with a pause last about 21 s.
+case_chunked_german() {
+  local clip=$CASE_DIR/long_de.wav pause=$CASE_DIR/pause.wav parts
+  command -v sox >/dev/null || fail "sox is missing; this case joins clips with it"
+  make_silence_wav 2 "$pause"
+  sox "$SAMPLES/verwandlung_de.wav" "$pause" "$SAMPLES/verwandlung_de.wav" "$clip"
+  start_daemon
+  record_clip "$clip" --lang de
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  assert_words "$TAKE_TEXT" samsa morgens bett verwandelt
+  [ "$(grep -o -i samsa <<<"$TAKE_TEXT" | wc -l)" -ge 2 ] ||
+    fail "a part is not in German: $TAKE_TEXT"
+  parts=$(grep -o 'ends with [0-9]* parts' "$(hush_log_file)" | grep -o '[0-9]*' | tail -n 1)
+  [ "${parts:-0}" -ge 2 ] || fail "the take was not cut into parts (parts: ${parts:-none})"
+}
+
 case_print_types_nothing() {
   start_daemon
   record_clip "$SAMPLES/jfk.wav"
