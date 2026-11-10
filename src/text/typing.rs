@@ -272,6 +272,33 @@ fn control_key_for(session: Option<&Session>) -> Result<Key, String> {
         .ok_or_else(|| "no key holds Ctrl with every XKB option list of the keyboard".to_string())
 }
 
+/// The keymap of the keyboard that the user types on, which decides what
+/// its modifier keys type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserKeymap {
+    pub names: Names,
+    /// The active layout, when the session reports it.
+    pub group: Option<u32>,
+}
+
+/// The user's keymap, or why Hush cannot know it.
+pub fn user_keymap() -> Result<UserKeymap, String> {
+    user_keymap_for(layout::keyboard().as_ref())
+}
+
+fn user_keymap_for(session: Option<&Session>) -> Result<UserKeymap, String> {
+    let names = modifier_names(session)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "the session names no keymap".to_string())?;
+    let layouts = names.layout.split(',').count();
+    let group = match session.map(|session| &session.active) {
+        Some(Active::Index(index)) if *index < layouts => u32::try_from(*index).ok(),
+        _ => None,
+    };
+    Ok(UserKeymap { names, group })
+}
+
 /// The key that holds Control on the session's keyboard, for a tap that
 /// must not guess: with `ctrl:swapcaps`, a Left Ctrl tap toggles Caps Lock.
 /// The error says why Hush cannot know the key.
@@ -479,6 +506,34 @@ mod tests {
         let mut swapcaps = ibus.clone();
         swapcaps.options = Some("ctrl:swapcaps".into());
         assert_eq!(control_key_for(Some(&swapcaps)), Ok(Key::RightCtrl));
+    }
+
+    #[test]
+    fn the_user_keymap_has_the_session_options_and_the_active_layout() {
+        let mut x11 = session("de,us", "", Active::Index(1));
+        x11.options = Some("ctrl:swapcaps".into());
+        x11.other_options = Some(String::new());
+        let keymap = user_keymap_for(Some(&x11)).unwrap();
+        assert_eq!(
+            (keymap.names.layout.as_str(), keymap.names.options.as_str()),
+            ("de,us", "ctrl:swapcaps"),
+            "the user's keyboard has the session options, not the second list"
+        );
+        assert_eq!(keymap.group, Some(1));
+        x11.active = Active::Unknown;
+        assert_eq!(user_keymap_for(Some(&x11)).unwrap().group, None);
+        x11.active = Active::Index(4);
+        assert_eq!(
+            user_keymap_for(Some(&x11)).unwrap().group,
+            None,
+            "an index past the list is unknown"
+        );
+        let sway = Session {
+            options: None,
+            ..session("us", "", Active::Index(0))
+        };
+        assert!(user_keymap_for(Some(&sway)).is_err());
+        assert!(user_keymap_for(None).is_err());
     }
 
     #[test]

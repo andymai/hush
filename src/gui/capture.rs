@@ -1,9 +1,11 @@
 //! Reads the next key or button from `/dev/input` for a hotkey field, so the
 //! chord is captured exactly as the daemon will see it: bare modifiers, F13
-//! and above, and mouse buttons included.
+//! and above, and mouse buttons included. A held modifier gets the name of
+//! what it types in the session keymap, as the daemon matches it.
 
 use crate::hotkey::combination::Modifiers;
 use crate::hotkey::evdev::is_hush_virtual;
+use crate::hotkey::keymap::ModifierKeys;
 use crate::hotkey::KeyCombination;
 use anyhow::{anyhow, Result};
 use evdev::{Device, EventSummary, KeyCode};
@@ -48,7 +50,8 @@ impl Capture {
         thread::Builder::new()
             .name("hush-key-capture".into())
             .spawn(move || {
-                let chord = listen(devices, &stop_flag);
+                let keys = ModifierKeys::session();
+                let chord = listen(devices, &stop_flag, &keys);
                 *shared.lock() = match chord {
                     Some(chord) => Outcome::Chord(chord.to_string()),
                     None => Outcome::Ended,
@@ -76,8 +79,14 @@ impl Drop for Capture {
 
 /// The chord is the last key pressed plus the modifiers held at that moment,
 /// reported when that key is released. A modifier released on its own is a
-/// chord too, which is how a bare `RightAlt` is captured.
-fn listen(mut devices: Vec<Device>, stop: &AtomicBool) -> Option<KeyCombination> {
+/// chord too, which is how a bare `RightAlt` is captured. A press while a
+/// key such as AltGr is down is no chord, because the daemon would never
+/// match it.
+fn listen(
+    mut devices: Vec<Device>,
+    stop: &AtomicBool,
+    keys: &ModifierKeys,
+) -> Option<KeyCombination> {
     let started = Instant::now();
     let mut held: HashSet<KeyCode> = HashSet::new();
     let mut candidate: Option<(KeyCode, Modifiers)> = None;
@@ -99,12 +108,8 @@ fn listen(mut devices: Vec<Device>, stop: &AtomicBool) -> Option<KeyCombination>
                 };
                 match value {
                     1 => {
-                        let mut modifiers = Modifiers::default();
-                        for key in &held {
-                            modifiers.add_key(*key);
-                        }
+                        candidate = press(keys, &held, code);
                         held.insert(code);
-                        candidate = Some((code, modifiers));
                     },
                     0 => {
                         held.remove(&code);
@@ -126,6 +131,16 @@ fn listen(mut devices: Vec<Device>, stop: &AtomicBool) -> Option<KeyCombination>
         }
     }
     None
+}
+
+/// The chord that a press can end in: the key, and what the held keys type.
+fn press(
+    keys: &ModifierKeys,
+    held: &HashSet<KeyCode>,
+    code: KeyCode,
+) -> Option<(KeyCode, Modifiers)> {
+    keys.held(held.iter().copied())
+        .map(|modifiers| (code, modifiers))
 }
 
 /// Indices of the devices with something to read, after at most `timeout_ms`.
@@ -154,4 +169,48 @@ fn poll_all(devices: &[Device], timeout_ms: i32) -> io::Result<Vec<usize>> {
         .filter(|(_, fd)| fd.revents & (libc::POLLIN | libc::POLLERR | libc::POLLHUP) != 0)
         .map(|(index, _)| index)
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hotkey::keymap::tests::{german, swapped};
+
+    fn label(keys: &ModifierKeys, held: &[KeyCode], code: KeyCode) -> Option<String> {
+        let held: HashSet<KeyCode> = held.iter().copied().collect();
+        let (key, modifiers) = press(keys, &held, code)?;
+        KeyCombination::from_evdev(key, modifiers).map(|chord| chord.to_string())
+    }
+
+    #[test]
+    fn a_held_modifier_gets_the_name_of_what_it_types() {
+        assert_eq!(
+            label(&swapped(), &[KeyCode::KEY_LEFTMETA], KeyCode::KEY_V).as_deref(),
+            Some("Ctrl+V"),
+            "the Win key types Ctrl with ctrl:swap_lwin_lctl"
+        );
+        assert_eq!(
+            label(&swapped(), &[KeyCode::KEY_LEFTCTRL], KeyCode::KEY_RIGHTALT).as_deref(),
+            Some("Super+RightAlt")
+        );
+        assert_eq!(
+            label(
+                &ModifierKeys::physical(),
+                &[KeyCode::KEY_LEFTMETA],
+                KeyCode::KEY_V
+            )
+            .as_deref(),
+            Some("Super+V")
+        );
+        assert_eq!(
+            label(&swapped(), &[], KeyCode::KEY_RIGHTCTRL).as_deref(),
+            Some("RightCtrl"),
+            "a key alone keeps its physical name"
+        );
+        assert_eq!(
+            label(&german(), &[KeyCode::KEY_RIGHTALT], KeyCode::KEY_Q),
+            None,
+            "the daemon never matches a chord with AltGr down"
+        );
+    }
 }

@@ -1,8 +1,9 @@
 //! Checks on the chords under `[hotkey]`, language, style, and rewrite
-//! chords included: two actions on one chord, Right Alt on a layout where it is AltGr, and keys
-//! that type a character. Each check is a pure function, so the settings
-//! window, the config load, and `hush doctor` give the same answer.
+//! chords included: two actions on one chord, a key that types AltGr, and
+//! keys that type a character. Each check is a pure function, so the
+//! settings window, the config load, and `hush doctor` give the same answer.
 
+use super::keymap::ModifierKeys;
 use super::KeyCombination;
 use crate::text::layout::Layout;
 use crate::text_processing::StyleName;
@@ -84,11 +85,48 @@ impl fmt::Display for Conflict {
     }
 }
 
-/// Right Alt as the main key of a chord, on a layout where Right Alt is AltGr.
+/// A key that types AltGr as the main key of a chord.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AltGr {
-    pub layout: String,
+    /// The layout as the session names it, when known.
+    pub layout: Option<String>,
+    /// The key that types AltGr.
+    pub key: KeyCombination,
     pub roles: Vec<Role>,
+    /// A key that types Ctrl, to use alone in place of `key`.
+    pub instead: Option<KeyCombination>,
+    /// Whether the keys come from the session keymap, not from their names.
+    pub keymap: bool,
+}
+
+impl AltGr {
+    /// What to do, as a clause: use a key that types Ctrl in place of the
+    /// AltGr key. The advice never names a key that types Super.
+    pub fn advice(&self) -> String {
+        match &self.instead {
+            Some(instead)
+                if matches!(
+                    instead.evdev_key(),
+                    KeyCode::KEY_LEFTCTRL | KeyCode::KEY_RIGHTCTRL
+                ) =>
+            {
+                let caveat = if self.keymap {
+                    String::new()
+                } else {
+                    format!(", if {} types Ctrl on your layout", instead)
+                };
+                format!("use {} in place of {}{}", instead, self.key, caveat)
+            },
+            Some(instead) => format!(
+                "use {}, which types Ctrl on this layout, in place of {}",
+                instead, self.key
+            ),
+            None => format!(
+                "use a key that types no character, such as F13, in place of {}",
+                self.key
+            ),
+        }
+    }
 }
 
 impl fmt::Display for AltGr {
@@ -98,10 +136,14 @@ impl fmt::Display for AltGr {
         } else {
             labels(&self.roles)
         };
+        let layout = match &self.layout {
+            Some(layout) => format!("the {} layout", layout),
+            None => "this layout".to_string(),
+        };
         write!(
             f,
-            "On the {} layout, Right Alt is AltGr: it types special characters, and each one can also start {}",
-            self.layout, target
+            "On {}, {} is AltGr: it types special characters, and each one can also start {}",
+            layout, self.key, target
         )
     }
 }
@@ -156,22 +198,27 @@ pub fn users<'a>(bound: impl IntoIterator<Item = (Role, &'a str)>, chord: &str) 
         .collect()
 }
 
-/// The actions whose main key is Right Alt, when the layout uses Right Alt
-/// as AltGr. Only the plain US layout has no AltGr, and an unknown layout
-/// counts as US.
+/// The actions whose main key types AltGr in the session keymap. Without
+/// the keymap, Right Alt is AltGr on every layout but plain US, and an
+/// unknown layout counts as US.
 pub fn altgr<'a>(
     bound: impl IntoIterator<Item = (Role, &'a str)>,
     layout: Option<&Layout>,
+    keys: &ModifierKeys,
 ) -> Option<AltGr> {
-    let layout = layout.filter(|layout| !layout.is_plain_us())?;
-    let roles: Vec<Role> = parsed(bound)
+    let altgr = keys.altgr_keys(layout);
+    let found: Vec<(Role, KeyCombination)> = parsed(bound)
         .into_iter()
-        .filter(|(_, chord)| chord.evdev_key() == KeyCode::KEY_RIGHTALT)
-        .map(|(role, _)| role)
+        .filter(|(_, chord)| altgr.contains(&chord.evdev_key()))
         .collect();
-    (!roles.is_empty()).then(|| AltGr {
-        layout: layout.to_string(),
-        roles,
+    let (_, first) = found.first()?;
+    let bare = |key| KeyCombination::from_evdev(key, Default::default());
+    Some(AltGr {
+        layout: layout.map(ToString::to_string),
+        key: bare(first.evdev_key())?,
+        roles: found.iter().map(|(role, _)| *role).collect(),
+        instead: keys.ctrl_key().and_then(bare),
+        keymap: keys.from_keymap(),
     })
 }
 
@@ -302,30 +349,80 @@ mod tests {
 
     #[test]
     fn right_alt_warns_on_every_layout_but_plain_us() {
-        assert_eq!(altgr(defaults(), Some(&xkb("us", ""))), None);
+        let physical = ModifierKeys::physical();
+        assert_eq!(altgr(defaults(), Some(&xkb("us", "")), &physical), None);
         assert_eq!(
-            altgr(defaults(), None),
+            altgr(defaults(), None, &physical),
             None,
             "an unknown layout counts as US"
         );
         for layout in [xkb("us(intl)", ""), xkb("de", ""), xkb("gb", "")] {
-            let warning = altgr(defaults(), Some(&layout)).expect("AltGr layout");
+            let warning = altgr(defaults(), Some(&layout), &physical).expect("AltGr layout");
             assert_eq!(warning.roles, vec![Role::Dictate, Role::Command]);
         }
-        let german = altgr(defaults(), Some(&xkb("de", ""))).unwrap();
+        let german = altgr(defaults(), Some(&xkb("de", "")), &physical).unwrap();
         assert_eq!(
             german.to_string(),
-            "On the de layout, Right Alt is AltGr: it types special characters, and each one can also start a dictation"
+            "On the de layout, RightAlt is AltGr: it types special characters, and each one can also start a dictation"
+        );
+        assert_eq!(
+            german.advice(),
+            "use RightCtrl in place of RightAlt, if RightCtrl types Ctrl on your layout",
+            "without the keymap, Hush cannot know what Right Ctrl types"
         );
     }
 
     #[test]
+    fn the_keymap_names_the_altgr_key_and_a_key_that_types_ctrl() {
+        use crate::hotkey::keymap::tests::{german as german_keys, swapped};
+        assert_eq!(
+            altgr(defaults(), Some(&xkb("de", "")), &swapped()),
+            None,
+            "the keymap types Alt_R on Right Alt, whatever the layout name"
+        );
+        let warning = altgr(defaults(), None, &german_keys()).unwrap();
+        assert!(warning
+            .to_string()
+            .starts_with("On this layout, RightAlt is AltGr"));
+        assert_eq!(warning.advice(), "use RightCtrl in place of RightAlt");
+
+        let moved = ModifierKeys::from_classes(&crate::text::xkb::KeyClasses {
+            control: vec![input_linux::Key::LeftCtrl, input_linux::Key::RightMeta],
+            super_keys: vec![input_linux::Key::RightCtrl, input_linux::Key::LeftMeta],
+            altgr: vec![input_linux::Key::RightAlt],
+            ..Default::default()
+        });
+        assert_eq!(
+            altgr(defaults(), Some(&xkb("de", "")), &moved)
+                .unwrap()
+                .advice(),
+            "use RightSuper, which types Ctrl on this layout, in place of RightAlt",
+            "Right Ctrl types Super with ctrl:swap_rwin_rctl"
+        );
+
+        let caps = ModifierKeys::from_classes(&crate::text::xkb::KeyClasses {
+            control: vec![input_linux::Key::LeftCtrl, input_linux::Key::RightCtrl],
+            altgr: vec![input_linux::Key::CapsLock],
+            ..Default::default()
+        });
+        assert_eq!(
+            altgr(defaults(), Some(&xkb("us", "")), &caps),
+            None,
+            "with lv3:caps_switch, Right Alt still types Alt"
+        );
+        let warning = altgr([(Role::Dictate, "CapsLock")], None, &caps).unwrap();
+        assert_eq!(warning.key.to_string(), "Capslock");
+    }
+
+    #[test]
     fn altgr_needs_right_alt_as_the_main_key() {
+        let physical = ModifierKeys::physical();
         let bound = [(Role::Dictate, "RightCtrl"), (Role::Command, "Alt+Space")];
-        assert_eq!(altgr(bound, Some(&xkb("de", ""))), None);
+        assert_eq!(altgr(bound, Some(&xkb("de", "")), &physical), None);
         let learn_only = altgr(
             [(Role::Dictate, "F13"), (Role::Learn, "Super+AltGr")],
             Some(&xkb("de", "")),
+            &physical,
         )
         .unwrap();
         assert_eq!(learn_only.roles, vec![Role::Learn]);
@@ -415,6 +512,7 @@ mod tests {
         let warning = altgr(
             [(Role::Dictate, "F13"), (german(), "Shift+RightAlt")],
             Some(&xkb("de", "")),
+            &ModifierKeys::physical(),
         )
         .unwrap();
         assert_eq!(warning.roles, vec![german()]);

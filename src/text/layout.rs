@@ -177,18 +177,46 @@ pub fn current() -> Option<Layout> {
     session().map(|session| session.layout)
 }
 
-/// The session's keyboard, with the active layout when the compositor
-/// reports it.
+/// Whose keymap a reader wants, where the compositor lists each keyboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reader {
+    /// Hush's own typing keyboard, whose keymap types the text.
+    Typing,
+    /// The keyboard that the user types on, whose keys the hotkey reader
+    /// reads.
+    User,
+}
+
+/// The keyboard that the user types on: its layouts, options, and active
+/// layout. It leaves out the keymap of Hush's own keyboard.
+pub fn keyboard() -> Option<Session> {
+    let kxkbrc = dirs::config_dir().map(|dir| dir.join("kxkbrc"));
+    let mut session = detect(kxkbrc.as_deref(), Reader::User)?;
+    find_active(&mut session, x11());
+    Some(session)
+}
+
+/// The session's keyboard as Hush's own keyboard types with it, with the
+/// active layout when the compositor reports it.
 pub fn session() -> Option<Session> {
     let kxkbrc = dirs::config_dir().map(|dir| dir.join("kxkbrc"));
-    let mut session = detect(kxkbrc.as_deref())?;
-    let x11 = !wayland() && std::env::var_os("DISPLAY").is_some();
+    let mut session = detect(kxkbrc.as_deref(), Reader::Typing)?;
+    let x11 = x11();
     if x11 {
         match_server_default(&mut session, run("localectl", &["status"]).as_deref());
     }
+    find_active(&mut session, x11);
+    Some(session)
+}
+
+fn x11() -> bool {
+    !wayland() && std::env::var_os("DISPLAY").is_some()
+}
+
+fn find_active(session: &mut Session, x11: bool) {
     if session.active == Active::Unknown && desktop_is("kde") {
         if let Some((names, index)) = kwin_layouts() {
-            apply_kwin(&mut session, &names, index);
+            apply_kwin(session, &names, index);
         }
     }
     if session.active == Active::Unknown && x11 {
@@ -196,7 +224,6 @@ pub fn session() -> Option<Session> {
             session.active = Active::Index(group);
         }
     }
-    Some(session)
 }
 
 fn wayland() -> bool {
@@ -206,11 +233,11 @@ fn wayland() -> bool {
 /// [`session`] without the active-layout queries, with `kxkbrc` in place of
 /// KDE's `~/.config/kxkbrc`. The compositor's own report comes first, then
 /// the variables that compositors read when nothing else is set.
-fn detect(kxkbrc: Option<&Path>) -> Option<Session> {
+fn detect(kxkbrc: Option<&Path>, reader: Reader) -> Option<Session> {
     if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
         let registry = Registry::load();
-        if let Some(session) =
-            run("hyprctl", &["devices", "-j"]).and_then(|s| parse_hyprland(&s, registry.as_ref()))
+        if let Some(session) = run("hyprctl", &["devices", "-j"])
+            .and_then(|s| parse_hyprland(&s, registry.as_ref(), reader))
         {
             return Some(session);
         }
@@ -218,7 +245,7 @@ fn detect(kxkbrc: Option<&Path>) -> Option<Session> {
     if std::env::var_os("SWAYSOCK").is_some() {
         let registry = Registry::load();
         if let Some(session) = run("swaymsg", &["-t", "get_inputs", "-r"])
-            .and_then(|s| parse_sway(&s, registry.as_ref()))
+            .and_then(|s| parse_sway(&s, registry.as_ref(), reader))
         {
             return Some(session);
         }
@@ -573,27 +600,26 @@ fn x11_group() -> Option<usize> {
 fn pick_keyboard<'a>(
     keyboards: &'a [serde_json::Value],
     own_name: &str,
+    reader: Reader,
     is_main: impl Fn(&serde_json::Value) -> bool,
 ) -> Option<&'a serde_json::Value> {
-    let name = |keyboard: &serde_json::Value| {
-        keyboard
-            .get("name")
-            .and_then(|n| n.as_str())
-            .unwrap_or_default()
-            .to_string()
+    let own = |keyboard: &serde_json::Value| {
+        keyboard.get("name").and_then(|n| n.as_str()) == Some(own_name)
     };
-    keyboards
-        .iter()
-        .find(|k| name(k) == own_name)
-        .or_else(|| keyboards.iter().find(|k| is_main(k)))
-        .or_else(|| keyboards.first())
+    let hush = keyboards.iter().find(|k| own(k));
+    let others = || keyboards.iter().filter(|k| !own(k));
+    let user = others().find(|k| is_main(k)).or_else(|| others().next());
+    match reader {
+        Reader::Typing => hush.or(user),
+        Reader::User => user.or(hush),
+    }
 }
 
 /// `hyprctl devices -j`: the keyboard's XKB names and its active layout.
-fn parse_hyprland(json: &str, registry: Option<&Registry>) -> Option<Session> {
+fn parse_hyprland(json: &str, registry: Option<&Registry>, reader: Reader) -> Option<Session> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     let keyboards = value.get("keyboards")?.as_array()?;
-    let keyboard = pick_keyboard(keyboards, HYPRLAND_DEVICE_NAME, |k| {
+    let keyboard = pick_keyboard(keyboards, HYPRLAND_DEVICE_NAME, reader, |k| {
         k.get("main").and_then(|m| m.as_bool()) == Some(true)
     })?;
     let text = |key: &str| {
@@ -628,7 +654,7 @@ fn parse_hyprland(json: &str, registry: Option<&Registry>) -> Option<Session> {
 /// `swaymsg -t get_inputs -r`: the keyboard's layout descriptions and
 /// active index. Sway names no XKB layout and no options, so Hush maps
 /// each description back to XKB names through the registry.
-fn parse_sway(json: &str, registry: Option<&Registry>) -> Option<Session> {
+fn parse_sway(json: &str, registry: Option<&Registry>, reader: Reader) -> Option<Session> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     let keyboards: Vec<serde_json::Value> = value
         .as_array()?
@@ -636,7 +662,7 @@ fn parse_sway(json: &str, registry: Option<&Registry>) -> Option<Session> {
         .filter(|input| input.get("type").and_then(|t| t.as_str()) == Some("keyboard"))
         .cloned()
         .collect();
-    let keyboard = pick_keyboard(&keyboards, DEVICE_NAME, |_| false)?;
+    let keyboard = pick_keyboard(&keyboards, DEVICE_NAME, reader, |_| false)?;
     let active_name = keyboard
         .get("xkb_active_layout_name")
         .and_then(|n| n.as_str())
@@ -1164,7 +1190,7 @@ mod tests {
         let json = r#"{"mice":[],"keyboards":[
             {"name":"at-translated-set-2-keyboard","rules":"","model":"pc105","layout":"us,de","variant":",nodeadkeys","options":"grp:alt_shift_toggle","active_keymap":"German (no dead keys)","main":true},
             {"name":"hush-voice-keyboard","rules":"","model":"","layout":"us,de","variant":",nodeadkeys","options":"","active_keymap":"English (US)","main":false}]}"#;
-        let session = parse_hyprland(json, Some(&registry())).unwrap();
+        let session = parse_hyprland(json, Some(&registry()), Reader::Typing).unwrap();
         assert_eq!(session.layout, layout("us,de", ",nodeadkeys"));
         assert_eq!(
             session.active,
@@ -1172,24 +1198,48 @@ mod tests {
             "Hush's device types in US"
         );
         assert_eq!(session.options.as_deref(), Some(""));
+        let user = parse_hyprland(json, Some(&registry()), Reader::User).unwrap();
+        assert_eq!(
+            (user.active, user.options.as_deref()),
+            (Active::Index(1), Some("grp:alt_shift_toggle")),
+            "the hotkey reader reads the user's main keyboard"
+        );
+        let hush_first = r#"{"keyboards":[
+            {"name":"hush-voice-keyboard","layout":"us","options":"","main":true},
+            {"name":"at-translated-set-2-keyboard","layout":"us","options":"ctrl:swapcaps","main":false}]}"#;
+        assert_eq!(
+            parse_hyprland(hush_first, None, Reader::User)
+                .unwrap()
+                .options
+                .as_deref(),
+            Some("ctrl:swapcaps"),
+            "Hush's own keyboard is never the user's, even as the main one"
+        );
 
         let main_only = r#"{"keyboards":[
             {"name":"at-translated-set-2-keyboard","layout":"us,de","variant":",nodeadkeys","options":"grp:alt_shift_toggle","active_keymap":"German (no dead keys)","main":true}]}"#;
-        let session = parse_hyprland(main_only, Some(&registry())).unwrap();
+        let session = parse_hyprland(main_only, Some(&registry()), Reader::Typing).unwrap();
         assert_eq!(session.active, Active::Index(1));
         assert_eq!(session.options.as_deref(), Some("grp:alt_shift_toggle"));
         assert_eq!(
-            parse_hyprland(main_only, None).unwrap().active,
+            parse_hyprland(main_only, None, Reader::Typing)
+                .unwrap()
+                .active,
             Active::Unknown,
             "without the registry the description maps to nothing"
         );
 
         let indexed = r#"{"keyboards":[{"name":"kb","layout":"us,de","active_layout_index":1,"active_keymap":"?","main":true}]}"#;
         assert_eq!(
-            parse_hyprland(indexed, None).unwrap().active,
+            parse_hyprland(indexed, None, Reader::Typing)
+                .unwrap()
+                .active,
             Active::Index(1)
         );
-        assert_eq!(parse_hyprland(r#"{"keyboards":[]}"#, None), None);
+        assert_eq!(
+            parse_hyprland(r#"{"keyboards":[]}"#, None, Reader::Typing),
+            None
+        );
     }
 
     #[test]
@@ -1197,19 +1247,19 @@ mod tests {
         let json = r#"[{"type":"pointer","name":"mouse"},
             {"type":"keyboard","name":"AT Keyboard","xkb_layout_names":["English (US)","German"],"xkb_active_layout_index":0,"xkb_active_layout_name":"English (US)"},
             {"type":"keyboard","name":"Hush Voice Keyboard","xkb_layout_names":["English (Dvorak)","German"],"xkb_active_layout_index":1,"xkb_active_layout_name":"German"}]"#;
-        let session = parse_sway(json, Some(&registry())).unwrap();
+        let session = parse_sway(json, Some(&registry()), Reader::Typing).unwrap();
         assert_eq!(session.layout, layout("us,de", "dvorak,"));
         assert_eq!(session.active, Active::Index(1));
         assert_eq!(session.options, None, "Sway does not report its options");
 
         let unknown = r#"[{"type":"keyboard","name":"kb","xkb_layout_names":["Klingon","German"],"xkb_active_layout_index":1,"xkb_active_layout_name":"German"}]"#;
-        let session = parse_sway(unknown, Some(&registry())).unwrap();
+        let session = parse_sway(unknown, Some(&registry()), Reader::Typing).unwrap();
         assert_eq!(session.layout, Layout::Described("German".into()));
         assert_eq!(
-            parse_sway(json, None).unwrap().layout,
+            parse_sway(json, None, Reader::Typing).unwrap().layout,
             Layout::Described("German".into())
         );
-        assert_eq!(parse_sway("[]", None), None);
+        assert_eq!(parse_sway("[]", None, Reader::Typing), None);
     }
 
     #[test]
@@ -1337,6 +1387,7 @@ mod tests {
     #[test]
     fn detection_never_panics() {
         let dir = tempfile::tempdir().unwrap();
-        let _ = detect(Some(&dir.path().join("kxkbrc")));
+        let _ = detect(Some(&dir.path().join("kxkbrc")), Reader::Typing);
+        let _ = detect(Some(&dir.path().join("kxkbrc")), Reader::User);
     }
 }

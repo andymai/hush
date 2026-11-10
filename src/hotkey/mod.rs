@@ -28,6 +28,7 @@
 pub mod combination;
 pub mod evdev;
 pub mod gesture;
+pub mod keymap;
 pub mod menu_mask;
 pub mod modifiers;
 pub mod warnings;
