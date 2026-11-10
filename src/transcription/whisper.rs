@@ -10,6 +10,7 @@ use crate::Result;
 use anyhow::Context;
 use parking_lot::Mutex;
 use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -80,13 +81,21 @@ struct Engine {
     session: Mutex<Session>,
     /// The description of the device that holds the weights
     device: String,
+    /// The language codes the model accepts; empty when it lists none
+    languages: Vec<String>,
+    /// Whether the model knows more than one language, unlike an `.en` model
+    multilingual: bool,
 }
+
+/// The language-ID model of a transcriber. It can arrive after the Whisper
+/// model, because Hush loads or downloads it in the background.
+pub type LangIdSlot = Arc<Mutex<Option<Arc<LanguageId>>>>;
 
 pub struct WhisperTranscriber {
     /// A CPU engine takes the place of a GPU engine that fails a take.
     engine: Mutex<Arc<Engine>>,
     vad: Option<Arc<Mutex<VadSession>>>,
-    langid: Option<Arc<LanguageId>>,
+    langid: LangIdSlot,
     gpu: &'static GpuAvailability,
     using_gpu: AtomicBool,
     model_path: PathBuf,
@@ -151,7 +160,7 @@ impl WhisperTranscriber {
         let transcriber = Self {
             engine: Mutex::new(Arc::new(engine)),
             vad: None,
-            langid: None,
+            langid: LangIdSlot::default(),
             gpu,
             using_gpu: AtomicBool::new(using_gpu),
             model_path: model_path.to_path_buf(),
@@ -217,19 +226,25 @@ impl WhisperTranscriber {
         self.vad.is_some()
     }
 
-    /// Load the language-ID model that picks among `detect_languages`.
-    pub fn load_langid(&mut self, model_path: &Path) -> Result<()> {
-        let langid = LanguageId::load(model_path, &self.detect_languages)?;
-        self.langid = Some(Arc::new(langid));
-        info!(
-            "Language identification loaded from {}",
-            model_path.display()
-        );
-        Ok(())
+    /// Where the language-ID model goes when it is ready. Takes before then
+    /// let Whisper detect the language within `detect_languages`.
+    pub fn langid_slot(&self) -> LangIdSlot {
+        Arc::clone(&self.langid)
     }
 
     pub fn has_langid(&self) -> bool {
-        self.langid.is_some()
+        self.langid.lock().is_some()
+    }
+
+    /// The languages that limited detection may pick.
+    pub fn detect_languages(&self) -> &[String] {
+        &self.detect_languages
+    }
+
+    /// Whether the model knows more than one language, so that detection can
+    /// choose. An `.en` model knows only English.
+    pub fn is_multilingual(&self) -> bool {
+        self.engine().multilingual
     }
 
     /// How many tokens Whisper makes of `prompt`, or `None` when it cannot
@@ -362,7 +377,7 @@ impl WhisperTranscriber {
     ) -> Result<Heard> {
         let engine = self.engine();
         let vad = self.vad.clone();
-        let langid = self.langid.clone();
+        let langid = self.langid.lock().clone();
         let detect = Arc::clone(&self.detect_languages);
         tokio::task::spawn_blocking(move || {
             let trimmed = vad.as_deref().and_then(|vad| match speech_in(vad, &samples) {
@@ -372,20 +387,26 @@ impl WhisperTranscriber {
                     None
                 },
             });
-            let Some(samples) = whisper_input(&samples, trimmed.as_deref()) else {
+            let Some(speech) = whisper_input(&samples, trimmed.as_deref()) else {
                 debug!("The take is too quiet to hold speech");
                 return Ok(Heard::nothing());
             };
-            let detected = (language == "auto" && !detect.is_empty())
-                .then(|| limited_detection(langid.as_deref(), samples, &detect))
-                .flatten();
-            let text = run_full(
-                &engine,
-                samples,
-                detected.unwrap_or(&language),
-                prompt.as_deref(),
-            )?;
-            Ok(Heard { text, detected })
+            let prompt = prompt.as_deref();
+            if language != "auto" || detect.is_empty() || !engine.multilingual {
+                let (text, _) = run_full(&engine, speech, &language, prompt)?;
+                return Ok(Heard {
+                    text,
+                    detected: None,
+                });
+            }
+            if let Some(code) = limited_detection(langid.as_deref(), &samples, speech, &detect) {
+                let (text, _) = run_full(&engine, speech, code, prompt)?;
+                return Ok(Heard {
+                    text,
+                    detected: Some(code),
+                });
+            }
+            detect_within(&engine, speech, prompt, &detect)
         })
         .await
         .map_err(|e| anyhow::anyhow!("Transcription task failed: {}", e))?
@@ -483,11 +504,17 @@ async fn load_engine(model_path: &Path, use_gpu: bool) -> Result<Engine> {
             .device()
             .map(|device| device.description)
             .unwrap_or_else(|_| model.backend());
-        debug!(backend = %model.backend(), threads, "Whisper session ready");
+        let (languages, multilingual) = model
+            .capabilities()
+            .map(|caps| (caps.languages, caps.supports_language_detect))
+            .unwrap_or_default();
+        debug!(backend = %model.backend(), threads, multilingual, "Whisper session ready");
         Ok(Engine {
             model,
             session: Mutex::new(session),
             device,
+            languages,
+            multilingual,
         })
     })
     .await
@@ -504,11 +531,28 @@ fn whisper_prompt(prompt: &str) -> String {
     text
 }
 
-fn run_options(language: &str, prompt: Option<&str>) -> RunOptions {
+/// The language hint for a run: `None` lets Whisper detect it. A model that
+/// does not list the language gets no hint, so an `.en` model transcribes
+/// English as whisper.cpp did, instead of refusing the take.
+fn take_language<'a>(language: &'a str, known: &[String]) -> Option<&'a str> {
+    if language == "auto" {
+        return None;
+    }
+    if known.is_empty() || known.iter().any(|code| code == language) {
+        return Some(language);
+    }
+    debug!(
+        language,
+        "The model does not list this language, so it gets no hint"
+    );
+    None
+}
+
+fn run_options(language: Option<&str>, prompt: Option<&str>) -> RunOptions {
     RunOptions {
         task: Task::Transcribe,
         timestamps: TimestampKind::Segment,
-        language: (language != "auto").then(|| language.to_string()),
+        language: language.map(str::to_string),
         family: Some(RunExtension::Whisper(WhisperRunOptions {
             initial_prompt: prompt.map(whisper_prompt),
             condition_on_prev_tokens: Some(false),
@@ -518,15 +562,16 @@ fn run_options(language: &str, prompt: Option<&str>) -> RunOptions {
     }
 }
 
+/// The text of a run, and the language Whisper detected when it got no hint.
 fn run_full(
     engine: &Engine,
     samples: &[f32],
     language: &str,
     prompt: Option<&str>,
-) -> Result<String> {
+) -> Result<(String, Option<String>)> {
     use transcribe_cpp::Error;
 
-    let options = run_options(language, prompt);
+    let options = run_options(take_language(language, &engine.languages), prompt);
     let transcript = match engine.session.lock().run(samples, &options) {
         Ok(transcript) => transcript,
         Err(
@@ -547,7 +592,72 @@ fn run_full(
         },
         Err(e) => return Err(anyhow::anyhow!("Transcription failed: {}", e)),
     };
-    Ok(transcript_text(&transcript))
+    Ok((transcript_text(&transcript), transcript.language))
+}
+
+/// Limited detection without the language-ID model: Whisper detects the
+/// language, and a take that it hears in a language outside `allowed` runs
+/// again in the first allowed language, so the choice stays in the set.
+fn detect_within(
+    engine: &Engine,
+    speech: &[f32],
+    prompt: Option<&str>,
+    allowed: &[String],
+) -> Result<Heard> {
+    let (text, heard) = run_full(engine, speech, "auto", prompt)?;
+    if let Some(code) = heard
+        .as_deref()
+        .and_then(|code| allowed_code(code, allowed))
+    {
+        info!(
+            language = code,
+            "Whisper detected {} among {}",
+            code,
+            allowed.join(", ")
+        );
+        return Ok(Heard {
+            text,
+            detected: Some(code),
+        });
+    }
+    let Some(first) = first_allowed(allowed, &engine.languages) else {
+        return Ok(Heard {
+            text,
+            detected: None,
+        });
+    };
+    info!(
+        "Whisper heard {}, which is not among {}, so the take runs again in {}",
+        heard.as_deref().unwrap_or("no language"),
+        allowed.join(", "),
+        first
+    );
+    let (text, _) = run_full(engine, speech, first, prompt)?;
+    Ok(Heard {
+        text,
+        detected: Some(first),
+    })
+}
+
+/// `code` as a Whisper language, when it is one of `allowed`.
+fn allowed_code(code: &str, allowed: &[String]) -> Option<&'static str> {
+    allowed
+        .iter()
+        .any(|wanted| wanted.trim() == code)
+        .then(|| Language::parse(code))
+        .flatten()
+        .filter(|language| !language.is_auto())
+        .map(Language::code)
+}
+
+/// The first of `allowed` that the model knows.
+fn first_allowed(allowed: &[String], known: &[String]) -> Option<&'static str> {
+    allowed
+        .iter()
+        .filter_map(|code| Language::parse(code))
+        .filter(|language| !language.is_auto())
+        .map(Language::code)
+        .find(|code| known.is_empty() || known.iter().any(|k| k == code))
 }
 
 /// The text of every segment without non-speech tags, one space apart.
@@ -581,6 +691,8 @@ pub struct LanguageId {
     session: Mutex<LangIdSession>,
     /// The model's label index and the Whisper code of each allowed language
     labels: Vec<(i32, &'static str)>,
+    /// The model refuses shorter audio.
+    min_samples: usize,
 }
 
 impl LanguageId {
@@ -626,6 +738,10 @@ impl LanguageId {
                 languages.join(", ")
             ));
         }
+        let info = model.langid_info().map_err(load_error)?;
+        let min_samples =
+            usize::try_from(i64::from(info.min_audio_ms) * i64::from(info.sample_rate) / 1000)
+                .unwrap_or(0);
         let session = model
             .langid_session_with(&LangIdSessionOptions {
                 n_threads: cpu_threads().min(4),
@@ -634,6 +750,7 @@ impl LanguageId {
         Ok(Self {
             session: Mutex::new(session),
             labels,
+            min_samples,
         })
     }
 
@@ -666,19 +783,35 @@ impl LanguageId {
     }
 }
 
-/// The most likely of the `allowed` languages in the first 30 seconds of
-/// `samples`. When detection fails or cannot run, the answer is `None`, and
-/// Whisper detects the language on its own.
+/// The audio that language ID hears: the speech, or the whole take when the
+/// speech is too short for the model, or the speech with silence after it
+/// when both are too short. A one-word take keeps its limited detection.
+fn langid_input<'a>(take: &'a [f32], speech: &'a [f32], min_samples: usize) -> Cow<'a, [f32]> {
+    if speech.len() >= min_samples {
+        return Cow::Borrowed(speech);
+    }
+    if take.len() >= min_samples {
+        return Cow::Borrowed(take);
+    }
+    let mut padded = speech.to_vec();
+    padded.resize(min_samples, 0.0);
+    Cow::Owned(padded)
+}
+
+/// The most likely of the `allowed` languages in the first 30 seconds of the
+/// speech in `take`. When the model is not ready or fails, the answer is
+/// `None`, and Whisper detects within the set instead.
 fn limited_detection(
     langid: Option<&LanguageId>,
-    samples: &[f32],
+    take: &[f32],
+    speech: &[f32],
     allowed: &[String],
 ) -> Option<&'static str> {
     let Some(langid) = langid else {
-        debug!("No language-ID model is loaded, so Whisper picks from every language");
+        debug!("The language-ID model is not ready, so Whisper detects the language");
         return None;
     };
-    match langid.most_likely(samples) {
+    match langid.most_likely(&langid_input(take, speech, langid.min_samples)) {
         Ok(Some((code, probability, allowed_mass))) => {
             info!(
                 language = code,
@@ -691,11 +824,11 @@ fn limited_detection(
             Some(code)
         },
         Ok(None) => {
-            info!("The speech is too short to tell its language, so Whisper picks from every language");
+            info!("The language-ID model could not tell the language, so Whisper detects it");
             None
         },
         Err(e) => {
-            warn!("Language detection failed, so Whisper picks from every language: {e:#}");
+            warn!("Language detection failed, so Whisper detects the language: {e:#}");
             None
         },
     }
@@ -969,7 +1102,7 @@ mod tests {
 
     #[test]
     fn a_run_transcribes_in_the_take_language_with_the_prompt() {
-        let options = run_options("de", Some("Gregor Samsa"));
+        let options = run_options(Some("de"), Some("Gregor Samsa"));
         assert_eq!(options.task, Task::Transcribe);
         assert_eq!(options.language.as_deref(), Some("de"));
         match options.family {
@@ -979,11 +1112,56 @@ mod tests {
             },
             other => panic!("expected the Whisper extension, got {other:?}"),
         }
+        assert_eq!(run_options(None, None).language, None);
+    }
+
+    #[test]
+    fn a_language_the_model_does_not_list_gets_no_hint() {
+        let multilingual: Vec<String> = ["en", "de"].map(String::from).to_vec();
+        let english_only = vec!["en".to_string()];
+        assert_eq!(take_language("de", &multilingual), Some("de"));
+        assert_eq!(take_language("auto", &multilingual), None, "auto detects");
         assert_eq!(
-            run_options("auto", None).language,
+            take_language("de", &english_only),
             None,
-            "auto lets Whisper detect"
+            "an .en model gets no hint"
         );
+        assert_eq!(take_language("en", &english_only), Some("en"));
+        assert_eq!(
+            take_language("de", &[]),
+            Some("de"),
+            "a model without a list"
+        );
+    }
+
+    #[test]
+    fn short_speech_still_reaches_language_id() {
+        let speech = vec![0.5f32; 4_000];
+        let take = vec![0.25f32; 20_000];
+        assert_eq!(langid_input(&take, &take, 8_000).len(), 20_000);
+        let whole = langid_input(&take, &speech, 8_000);
+        assert_eq!(&whole[..], &take[..], "short speech: the whole take");
+        let short_take = vec![0.25f32; 6_000];
+        let padded = langid_input(&short_take, &speech, 8_000);
+        assert_eq!(padded.len(), 8_000, "both short: padded to the minimum");
+        assert_eq!(&padded[..4_000], &speech[..]);
+        assert!(padded[4_000..].iter().all(|s| *s == 0.0));
+    }
+
+    #[test]
+    fn whisper_detection_stays_within_the_allowed_languages() {
+        let allowed: Vec<String> = ["de", "fr"].map(String::from).to_vec();
+        assert_eq!(allowed_code("de", &allowed), Some("de"));
+        assert_eq!(allowed_code("nl", &allowed), None, "Dutch is not allowed");
+        assert_eq!(allowed_code("auto", &["auto".to_string()]), None);
+        assert_eq!(first_allowed(&allowed, &[]), Some("de"));
+        let known: Vec<String> = ["en", "fr"].map(String::from).to_vec();
+        assert_eq!(
+            first_allowed(&allowed, &known),
+            Some("fr"),
+            "the first the model knows"
+        );
+        assert_eq!(first_allowed(&allowed, &["en".to_string()]), None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! The transcriber the config asks for: Whisper through transcribe.cpp on
 //! this machine, or the service or server the user chose. An HTTP backend
 //! never loads the model, and the local one opens a connection only to fetch
-//! a missing language-ID model.
+//! a missing language-ID model in the background.
 //!
 //! Every transcript then goes through the checks in [`guard`]: a transcript
 //! that echoes the prompt is made again without the prompt, and text that
@@ -13,9 +13,13 @@ use crate::transcription::cpu;
 use crate::transcription::guard::{self, EchoChoice};
 use crate::transcription::language::Language;
 use crate::transcription::models::{self, ModelManager, ModelSize};
-use crate::transcription::whisper::{TranscriptionResult, WhisperTranscriber};
+use crate::transcription::whisper::{
+    LangIdSlot, LanguageId, TranscriptionResult, WhisperTranscriber,
+};
 use crate::Result;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 /// A prompt longer than this is cut when no tokenizer can count it. Whisper
@@ -66,8 +70,8 @@ impl SpeechToText {
         if config.vad {
             load_vad(&mut whisper, models_dir, &config.model_size);
         }
-        if !config.detect_languages.is_empty() {
-            load_langid(&mut whisper, models_dir, &config.model_size).await;
+        if !config.detect_languages.is_empty() && whisper.is_multilingual() {
+            attach_langid(&whisper, models_dir, &config.model_size).await;
         }
         Ok(Self {
             backend: Backend::Local(whisper),
@@ -236,31 +240,66 @@ fn load_vad(whisper: &mut WhisperTranscriber, models_dir: &Path, model_size: &st
     }
 }
 
-/// Load the language-ID model for `transcription.detect_languages`, and
-/// download it first when it is missing. Without it, a take in `auto` lets
-/// Whisper pick from every language.
-async fn load_langid(whisper: &mut WhisperTranscriber, models_dir: &Path, model_size: &str) {
-    let path = models::langid_model_path(models_dir);
-    if !path.is_file() {
+/// Whether this process tried to download the language-ID model. One try is
+/// enough: every model load after an idle unload would try again.
+static LANGID_DOWNLOAD_TRIED: AtomicBool = AtomicBool::new(false);
+
+/// Load the language-ID model for `transcription.detect_languages` when a
+/// copy that passes its checksum is there. When it is missing or damaged,
+/// download it in the background, once per process, and attach it when it
+/// arrives: the Whisper model never waits on the network. Until then,
+/// Whisper detects the language within the allowed set.
+async fn attach_langid(whisper: &WhisperTranscriber, models_dir: &Path, model_size: &str) {
+    let slot = whisper.langid_slot();
+    let languages = whisper.detect_languages().to_vec();
+    let dir = models_dir.to_path_buf();
+    let present = tokio::task::spawn_blocking(move || {
+        ModelManager::new(&dir)
+            .ok()
+            .and_then(|manager| manager.langid_model_path())
+    })
+    .await
+    .ok()
+    .flatten();
+    if let Some(path) = present {
+        load_langid(slot, path, languages).await;
+        return;
+    }
+    if LANGID_DOWNLOAD_TRIED.swap(true, Ordering::AcqRel) {
+        debug!("The language-ID model is missing, and this process tried to download it");
+        return;
+    }
+    let models_dir = models_dir.to_path_buf();
+    let model_size = model_size.to_string();
+    tokio::spawn(async move {
         info!("Downloading the language-ID model that detect_languages needs");
-        let downloaded = match ModelManager::new(models_dir) {
+        let downloaded = match ModelManager::new(&models_dir) {
             Ok(manager) => manager.ensure_langid_downloaded_with(&|_, _| {}).await,
             Err(e) => Err(e),
         };
-        if let Err(e) = downloaded {
-            warn!(
-                "Limited language detection is off: the language-ID model did not download \
-                 ({:#}). Whisper picks from every language. Get the model with: hush models download {}",
+        match downloaded {
+            Ok(path) => load_langid(slot, path, languages).await,
+            Err(e) => warn!(
+                "The language-ID model did not download ({:#}), so Whisper detects the language \
+                 within detect_languages. Get the model with: hush models download {}",
                 e, model_size
-            );
-            return;
+            ),
         }
-    }
-    if let Err(e) = whisper.load_langid(&path) {
-        warn!(
-            "Limited language detection is off: {:#}. Whisper picks from every language",
+    });
+}
+
+async fn load_langid(slot: LangIdSlot, path: PathBuf, languages: Vec<String>) {
+    match tokio::task::spawn_blocking(move || LanguageId::load(&path, &languages)).await {
+        Ok(Ok(langid)) => {
+            *slot.lock() = Some(Arc::new(langid));
+            info!("Language identification is ready");
+        },
+        Ok(Err(e)) => warn!(
+            "Whisper detects the language within detect_languages, because the language-ID \
+             model did not load: {:#}",
             e
-        );
+        ),
+        Err(e) => warn!("The language-ID model load stopped: {}", e),
     }
 }
 

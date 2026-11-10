@@ -64,6 +64,11 @@ pub fn langid_model_path(models_dir: &Path) -> PathBuf {
     models_dir.join(LANGID_FILENAME)
 }
 
+/// A download that cannot connect, or that gets no bytes for this long,
+/// fails instead of waiting without end.
+const DOWNLOAD_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+const DOWNLOAD_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelSize {
     Tiny,
@@ -422,6 +427,8 @@ impl ModelManager {
 
         let client = reqwest::Client::builder()
             .user_agent(concat!("hush/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
+            .read_timeout(DOWNLOAD_READ_TIMEOUT)
             .build()
             .context("Failed to build HTTP client")?;
         let response = client
