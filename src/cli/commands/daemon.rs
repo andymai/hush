@@ -196,6 +196,47 @@ fn style_for_start(name: &str, user: Option<&BTreeMap<String, StyleConfig>>) -> 
     }
 }
 
+/// `hush rewrite STYLE`
+pub async fn handle_rewrite(style: &str) -> Result<()> {
+    let user = Config::load().ok().map(|config| config.styles);
+    let name = style_for_rewrite(style, user.as_ref())?;
+    let response = client::send(DaemonCommand::Rewrite {
+        style: name.to_string(),
+    })
+    .await?;
+    if !response.ok {
+        let error = rejection(response);
+        if error.starts_with("Invalid command") {
+            return Err(anyhow!(OLD_DAEMON_REWRITE));
+        }
+        return Err(anyhow!(error));
+    }
+    println!(
+        "{}",
+        response
+            .message
+            .unwrap_or_else(|| state_line(response.state))
+    );
+    Ok(())
+}
+
+/// The style that `hush rewrite` names. A style that the config does not
+/// know, or one that cannot rewrite, is a usage error. Without a readable
+/// config, the daemon decides.
+fn style_for_rewrite(
+    name: &str,
+    user: Option<&BTreeMap<String, StyleConfig>>,
+) -> Result<StyleName> {
+    let parsed =
+        StyleName::from_name(name).map_err(|e| Exit::new(ExitStatus::Usage, e.to_string()))?;
+    match user {
+        Some(user) => styles::rewriter(user, name, "for hush rewrite")
+            .map(|style| style.name)
+            .map_err(|e| Exit::new(ExitStatus::Usage, e.to_string()).into()),
+        None => Ok(parsed),
+    }
+}
+
 /// A daemon from before `--lang` starts the take in its own language, and
 /// its reply names no language.
 fn ignored_language(asked: Option<Language>, response: &DaemonResponse) -> bool {
@@ -230,6 +271,8 @@ const OLD_DAEMON: &str =
     "The running daemon is older than this client and typed the text. Restart it with: hush daemon restart";
 const OLD_DAEMON_LANGUAGE: &str =
     "The running daemon is older than this client and records in its own language. Restart it with: hush daemon restart";
+const OLD_DAEMON_REWRITE: &str =
+    "The running daemon is older than this client and cannot rewrite. Restart it with: hush daemon restart";
 const OLD_DAEMON_STYLE: &str =
     "The running daemon is older than this client and records without the style. Restart it with: hush daemon restart";
 
@@ -459,6 +502,44 @@ mod tests {
         );
         let error = style_for_start("No Such", None).unwrap_err();
         assert_eq!(ExitStatus::of_error(&error), ExitStatus::Usage);
+    }
+
+    #[test]
+    fn a_rewrite_needs_a_style_that_can_rewrite() {
+        let user: BTreeMap<String, StyleConfig> = [
+            (
+                "formal".to_string(),
+                StyleConfig {
+                    prompt: "Formal English.".to_string(),
+                    polish: true,
+                },
+            ),
+            (
+                "raw".to_string(),
+                StyleConfig {
+                    prompt: "Formal English.".to_string(),
+                    polish: false,
+                },
+            ),
+        ]
+        .into();
+        assert_eq!(
+            style_for_rewrite("formal", Some(&user)).unwrap().as_str(),
+            "formal"
+        );
+        for name in ["verbatim", "raw", "nosuch", "No Such"] {
+            let error = style_for_rewrite(name, Some(&user)).unwrap_err();
+            assert_eq!(ExitStatus::of_error(&error), ExitStatus::Usage, "{name}");
+        }
+        assert!(style_for_rewrite("verbatim", Some(&user))
+            .unwrap_err()
+            .to_string()
+            .contains("turns polish off"));
+        assert_eq!(
+            style_for_rewrite("formal", None).unwrap().as_str(),
+            "formal",
+            "without a config, the daemon decides"
+        );
     }
 
     #[test]

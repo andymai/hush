@@ -56,6 +56,10 @@ pub enum DaemonCommand {
     Transcribe {
         path: PathBuf,
     },
+    /// Rewrite the selected text with the prompt of `style`
+    Rewrite {
+        style: String,
+    },
 }
 
 /// What the daemon is doing right now.
@@ -344,6 +348,23 @@ mod tests {
                 with_language
             );
         }
+    }
+
+    #[test]
+    fn a_rewrite_names_its_style() {
+        let rewrite = DaemonCommand::Rewrite {
+            style: "formal".to_string(),
+        };
+        let json = r#"{"command":"rewrite","style":"formal"}"#;
+        assert_eq!(serde_json::to_string(&rewrite).unwrap(), json);
+        assert_eq!(
+            serde_json::from_str::<DaemonCommand>(json).unwrap(),
+            rewrite
+        );
+        assert!(
+            serde_json::from_str::<DaemonCommand>(r#"{"command":"rewrite"}"#).is_err(),
+            "a rewrite needs a style"
+        );
     }
 
     #[test]

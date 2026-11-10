@@ -393,6 +393,41 @@ impl TextProcessor {
     }
 }
 
+/// What a style rewrite of the selection comes to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RewriteOutcome {
+    /// Type this text over the selection
+    Replace(String),
+    /// Nothing is selected, so no LLM call was made
+    NothingSelected,
+    /// No LLM is configured
+    NoLlm,
+    /// The LLM call failed, and the selection stays as it is
+    Failed(String),
+    /// The LLM gave back nothing or the same text
+    Unchanged,
+}
+
+/// Rewrite the selected text with the prompt of `style` as the instruction,
+/// through the Command Mode rewrite.
+pub async fn rewrite_with_style(
+    processor: Option<&TextProcessor>,
+    style: &TakeStyle,
+    selection: Option<&str>,
+) -> RewriteOutcome {
+    let Some(text) = selection.filter(|text| !text.trim().is_empty()) else {
+        return RewriteOutcome::NothingSelected;
+    };
+    let Some(processor) = processor.filter(|processor| processor.is_llm_ready()) else {
+        return RewriteOutcome::NoLlm;
+    };
+    match processor.rewrite(&style.prompt, text).await {
+        Ok(result) if result.trim().is_empty() || result == text => RewriteOutcome::Unchanged,
+        Ok(result) => RewriteOutcome::Replace(result),
+        Err(e) => RewriteOutcome::Failed(format!("{:#}", e)),
+    }
+}
+
 /// Processing statistics
 #[derive(Debug, Clone)]
 pub struct ProcessingStats {
@@ -624,5 +659,67 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, unpolished, "a lost negation discards the polish");
+    }
+
+    #[tokio::test]
+    async fn a_style_rewrite_needs_a_selection_before_it_calls_the_llm() {
+        let formal = style("formal", "Formal English.", true).unwrap();
+        let unreachable = processor_with(ollama_at("http://127.0.0.1:1".into()));
+        for selection in [None, Some(""), Some(" \n ")] {
+            assert_eq!(
+                rewrite_with_style(Some(&unreachable), &formal, selection).await,
+                RewriteOutcome::NothingSelected,
+                "{selection:?}: a failed call would say Failed"
+            );
+        }
+        assert_eq!(
+            rewrite_with_style(None, &formal, Some("hi")).await,
+            RewriteOutcome::NoLlm
+        );
+        assert_eq!(
+            rewrite_with_style(
+                Some(&processor_with(LlmProvider::None)),
+                &formal,
+                Some("hi")
+            )
+            .await,
+            RewriteOutcome::NoLlm
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_style_rewrite_replaces_nothing() {
+        let formal = style("formal", "Formal English.", true).unwrap();
+        let unreachable = processor_with(ollama_at("http://127.0.0.1:1".into()));
+        let outcome = rewrite_with_style(Some(&unreachable), &formal, Some("hey there")).await;
+        assert!(
+            matches!(&outcome, RewriteOutcome::Failed(reason) if reason.contains("127.0.0.1:1")),
+            "{outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_style_rewrite_sends_the_style_prompt_as_the_instruction() {
+        let formal = style("formal", "Formal English.", true).unwrap();
+        let (url, request) = fake_ollama_request("Good day.").await;
+        let processor = processor_with(ollama_at(url));
+        assert_eq!(
+            rewrite_with_style(Some(&processor), &formal, Some("hey there")).await,
+            RewriteOutcome::Replace("Good day.".to_string())
+        );
+        let request = request.await.unwrap();
+        let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
+        let json: serde_json::Value = serde_json::from_str(body).unwrap();
+        let user = json["messages"][1]["content"].as_str().unwrap();
+        assert!(
+            user.starts_with("Instruction: Formal English.\n\nText:\nhey there"),
+            "{user}"
+        );
+
+        let same = processor_with(ollama_at(fake_ollama("hey there").await));
+        assert_eq!(
+            rewrite_with_style(Some(&same), &formal, Some("hey there")).await,
+            RewriteOutcome::Unchanged
+        );
     }
 }

@@ -1,9 +1,9 @@
 use crate::cli::commands::{
     handle_client_command, handle_config, handle_daemon_restart, handle_daemon_start,
     handle_daemon_status, handle_daemon_stop, handle_doctor, handle_listen, handle_manual,
-    handle_models, handle_record, handle_recover, handle_setup, handle_start, handle_status,
-    handle_status_follow, handle_status_json, handle_stop, handle_test, handle_transcribe,
-    SessionOptions,
+    handle_models, handle_record, handle_recover, handle_rewrite, handle_setup, handle_start,
+    handle_status, handle_status_follow, handle_status_json, handle_stop, handle_test,
+    handle_transcribe, SessionOptions,
 };
 use crate::cli::{Commands, DaemonCommands};
 use crate::ipc::DaemonCommand;
@@ -43,6 +43,7 @@ impl CommandDispatcher {
             Commands::Learn { .. } => "learn",
             Commands::Transcribe { .. } => "transcribe",
             Commands::Recover { .. } => "recover",
+            Commands::Rewrite { .. } => "rewrite",
             Commands::Setup { .. } => "setup",
             Commands::Test { .. } => "test",
             Commands::Models { .. } => "models",
@@ -157,6 +158,7 @@ impl CommandDispatcher {
                 list,
                 type_text,
             } => handle_recover(all, list, type_text).await,
+            Commands::Rewrite { style } => handle_rewrite(&style).await,
             Commands::Setup { setup_command } => handle_setup(setup_command).await,
             Commands::Test { test_command } => handle_test(test_command).await,
             Commands::Models { model_command } => handle_models(model_command).await,

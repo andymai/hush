@@ -1,7 +1,8 @@
-//! The keys that start, stop, cancel, and command a dictation, and a key
-//! for each language and each writing style. Each one is a button that
-//! captures the next key pressed; the action keys have a text box behind it
-//! for keys the capture cannot see.
+//! The keys that start, stop, cancel, and command a dictation, a key for
+//! each language and each writing style, and keys that rewrite the
+//! selection with a style. Each one is a button that captures the next key
+//! pressed; the action keys have a text box behind it for keys the capture
+//! cannot see.
 
 use crate::config::settings::HotkeyConfig;
 use crate::gui::capture::Capture;
@@ -23,6 +24,7 @@ use std::collections::BTreeMap;
 pub enum ChordMap {
     Languages,
     Styles,
+    Rewrite,
 }
 
 impl ChordMap {
@@ -30,6 +32,7 @@ impl ChordMap {
         match self {
             ChordMap::Languages => &hotkey.languages,
             ChordMap::Styles => &hotkey.styles,
+            ChordMap::Rewrite => &hotkey.rewrite,
         }
     }
 
@@ -37,6 +40,7 @@ impl ChordMap {
         match self {
             ChordMap::Languages => &mut hotkey.languages,
             ChordMap::Styles => &mut hotkey.styles,
+            ChordMap::Rewrite => &mut hotkey.rewrite,
         }
     }
 
@@ -45,6 +49,7 @@ impl ChordMap {
         match self {
             ChordMap::Languages => Language::parse(value).map(Role::Language),
             ChordMap::Styles => StyleName::parse(value).map(Role::Style),
+            ChordMap::Rewrite => StyleName::parse(value).map(Role::Rewrite),
         }
     }
 
@@ -52,6 +57,7 @@ impl ChordMap {
         match self {
             ChordMap::Languages => matches!(role, Role::Language(_)),
             ChordMap::Styles => matches!(role, Role::Style(_)),
+            ChordMap::Rewrite => matches!(role, Role::Rewrite(_)),
         }
     }
 
@@ -60,6 +66,7 @@ impl ChordMap {
             (Some(role), _) => role.label(),
             (None, ChordMap::Languages) => format!("Dictate in {}", value),
             (None, ChordMap::Styles) => format!("Dictate in the {} style", value),
+            (None, ChordMap::Rewrite) => format!("Rewrite in the {} style", value),
         }
     }
 
@@ -68,6 +75,16 @@ impl ChordMap {
         match self {
             ChordMap::Languages => &mut gui.new_language,
             ChordMap::Styles => &mut gui.new_style,
+            ChordMap::Rewrite => &mut gui.new_rewrite,
+        }
+    }
+
+    /// The styles that the picker offers: every style for a style key, and
+    /// only the styles that can rewrite for a rewrite key.
+    fn style_names(self, config: &crate::config::Config) -> Vec<StyleName> {
+        match self {
+            ChordMap::Rewrite => styles::rewriters(&config.styles),
+            _ => styles::names(&config.styles),
         }
     }
 }
@@ -289,6 +306,14 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         "Each key dictates in its own writing style, with the same hold, double-tap, and \
          cancel as the dictation key. Verbatim turns polish off. Add styles on the Text page.",
     );
+    chord_keys(
+        gui,
+        ui,
+        ChordMap::Rewrite,
+        "Rewrite keys",
+        "Each key rewrites the selected text with the prompt of a style, with no speech. \
+         A style needs polish on and a prompt to rewrite.",
+    );
 }
 
 fn mode_name(mode: HotkeyMode) -> &'static str {
@@ -329,7 +354,7 @@ fn picker(
         ChordMap::Languages => {
             language_picker(ui, id_salt, value, true, PICKER_WIDTH, placeholder);
         },
-        ChordMap::Styles => {
+        ChordMap::Styles | ChordMap::Rewrite => {
             let current = value.clone();
             let shown = if current.is_empty() {
                 placeholder.to_string()
@@ -362,7 +387,7 @@ fn chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap, chord: &str) {
     let error = combination_error(chord, true)
         .or_else(|| map_taken(&gui.config.hotkey, map, Some(chord), chord));
     let notice = map_caution(&gui.config.hotkey, map, chord);
-    let style_names = styles::names(&gui.config.styles);
+    let style_names = map.style_names(&gui.config);
     row(&map.title(&value))
         .problem(error.as_deref())
         .caution(notice.as_deref())
@@ -400,8 +425,13 @@ fn new_chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap) {
             "Pick a style, then click the button and press the key.",
             "Style",
         ),
+        ChordMap::Rewrite => (
+            "Add a rewrite key",
+            "Pick a style, then click the button and press the key.",
+            "Style",
+        ),
     };
-    let style_names = styles::names(&gui.config.styles);
+    let style_names = map.style_names(&gui.config);
     row(title)
         .describe(about)
         .reserve(CHORD_COLUMN)
@@ -684,6 +714,47 @@ mod tests {
         hotkey.styles.insert("Ctrl+G".into(), "verbatim".into());
         assert!(map_caution(&hotkey, style_map, "Ctrl+G").is_some());
         assert_eq!(map_caution(&hotkey, style_map, "Super+RightAlt"), None);
+    }
+
+    #[test]
+    fn rewrite_chords_are_taken_keys_but_not_their_own() {
+        let mut config = Config::defaults().unwrap();
+        config.styles.insert(
+            "formal".into(),
+            crate::text_processing::StyleConfig {
+                prompt: "Formal.".into(),
+                polish: true,
+            },
+        );
+        config
+            .hotkey
+            .styles
+            .insert("Super+RightAlt".into(), "formal".into());
+        config
+            .hotkey
+            .rewrite
+            .insert("Super+F".into(), "formal".into());
+        let rewrite = ChordMap::Rewrite;
+        assert_eq!(
+            refusal(&config.hotkey, Role::Learn, "super+f").as_deref(),
+            Some("Rewrite in the formal style already uses Super+F. Pick another key.")
+        );
+        assert_eq!(
+            map_taken(&config.hotkey, rewrite, Some("Super+F"), "Super+F"),
+            None
+        );
+        assert_eq!(
+            map_taken(&config.hotkey, rewrite, Some("Super+F"), "Super+RightAlt").as_deref(),
+            Some("Dictate in the formal style already uses Super+RightAlt.")
+        );
+        assert_eq!(rewrite.title("formal"), "Rewrite in the formal style");
+        let formal = StyleName::parse("formal").unwrap();
+        assert_eq!(rewrite.style_names(&config), vec![formal]);
+        assert_eq!(
+            ChordMap::Styles.style_names(&config),
+            vec![styles::VERBATIM, formal],
+            "verbatim cannot rewrite, but it can dictate"
+        );
     }
 
     #[test]

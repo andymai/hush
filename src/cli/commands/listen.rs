@@ -30,9 +30,11 @@ use crate::ipc::{SessionCommand, TakeResult, TakeWaiter};
 use crate::notify::{notify, NoticeKind};
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
 use crate::text::WindowInfo;
-use crate::text_processing::styles::{self, StyleName};
+use crate::text_processing::styles::{self, StyleName, TakeStyle};
 use crate::text_processing::transcripts::{self, Transcript};
-use crate::text_processing::{learn, llm, prompt, ProcessingContext};
+use crate::text_processing::{
+    learn, llm, prompt, rewrite_with_style, ProcessingContext, RewriteOutcome,
+};
 use crate::text_processing::{
     CommandExecutor, CommandParser, DomainVocabulary, EditingMode, HookEnv, InsertionHistory,
     LlmProvider, ProcessingConfig, TextProcessor, TranscriptHook, Trigger,
@@ -173,6 +175,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     for (style, chord) in config.hotkey.style_keys() {
         println!("{} dictates in the {} style", chord, style);
     }
+    for (style, chord) in config.hotkey.rewrite_keys() {
+        println!("{} rewrites the selection in the {} style", chord, style);
+    }
     println!("`hush toggle` starts and stops from a keybind; Ctrl+C or `hush daemon stop` quits");
     println!("═══════════════════════════════════════════════════════\n");
 
@@ -206,6 +211,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             /// The parts of a hands-free take, deleted once the text is in
             parts: PartFiles,
         },
+        /// Rewrite the selection, read when the command came, in a style
+        Rewrite {
+            style: StyleName,
+            selection: Option<String>,
+        },
         Error(String),
     }
 
@@ -226,6 +236,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     }
     shared.set_chosen_language(chosen_language);
     shared.set_styles(styles::names(&config.styles));
+    shared.set_rewriters(styles::rewriters(&config.styles));
 
     {
         let quit_tx = audio_cmd_tx.clone();
@@ -257,6 +268,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         }
         for (style, chord) in config.hotkey.style_keys() {
             bindings = bindings.with_style(style, chord)?;
+        }
+        for (style, chord) in config.hotkey.rewrite_keys() {
+            bindings = bindings.with_action(HotkeyAction::Rewrite(style), chord)?;
         }
         let (manager, receiver) =
             HotkeyManager::with_backend(bindings, config.hotkey.backend, config.hotkey.exclusive)?;
@@ -449,6 +463,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 let command = match action {
                     HotkeyAction::PasteLast => SessionCommand::PasteLast,
                     HotkeyAction::Learn => SessionCommand::Learn,
+                    HotkeyAction::Rewrite(style) => SessionCommand::Rewrite(style),
                 };
                 if audio_cmd_tx_clone.send(command).is_err() {
                     break;
@@ -751,6 +766,23 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     *state_handle_clone2.lock() = OverlayState::idle();
                     shared_result.set_idle();
                 },
+                TranscriptionResult::Rewrite { style, selection } => {
+                    let Some(style) = styles::resolve(&user_styles, style) else {
+                        continue;
+                    };
+                    shared_result.set_inserting();
+                    run_style_rewrite(
+                        &style,
+                        selection,
+                        text_processor_clone.as_deref(),
+                        &result_runtime,
+                        text_inserter_clone.as_ref(),
+                        &insertion_history_clone,
+                        &shared_result,
+                        feedback,
+                    );
+                    shared_result.set_idle();
+                },
                 TranscriptionResult::Error(error_msg) => {
                     error!("❌ Transcription failed: {}", error_msg);
                     let _ = feedback.play_error();
@@ -1042,6 +1074,19 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             SessionCommand::ReloadVocabulary => {
                 if let Some(processor) = text_processor.as_ref() {
                     processor.reload_vocabulary();
+                }
+            },
+            SessionCommand::Rewrite(style) => {
+                if take.is_some() {
+                    warn!("Ignoring the rewrite while recording");
+                    continue;
+                }
+                let selection = read_selection();
+                if transcription_tx
+                    .send(TranscriptionResult::Rewrite { style, selection })
+                    .is_err()
+                {
+                    warn!("Channel send failed - receiver dropped");
                 }
             },
             SessionCommand::ChooseLanguage(choice) => {
@@ -1726,18 +1771,32 @@ fn run_command_mode(
     let Some(rewritten) = after_hook(hook, runtime, rewritten, hook_env) else {
         return;
     };
+    let last = replaces_last.then_some(text.as_str());
+    put_rewrite(rewritten, last, inserter, history, shared, feedback);
+}
+
+/// Type `rewritten` over the selection. With `last`, the text of the last
+/// transcript, Hush first removes that transcript and types in its place.
+fn put_rewrite(
+    rewritten: String,
+    last: Option<&str>,
+    inserter: Option<&Arc<Mutex<TextInserter>>>,
+    history: &Arc<Mutex<InsertionHistory>>,
+    shared: &crate::ipc::SharedState,
+    feedback: AudioFeedback,
+) {
     let Some(inserter) = inserter else {
         info!("Rewritten text ({} chars)", rewritten.chars().count());
         debug!("Rewritten text: {}", rewritten);
         return;
     };
     let mut inserter = inserter.lock();
-    if replaces_last {
+    if let Some(last) = last {
         let chars = history
             .lock()
             .pop_last()
             .map(|entry| entry.char_count)
-            .unwrap_or_else(|| text.chars().count());
+            .unwrap_or_else(|| last.chars().count());
         if let Err(e) = inserter.undo_last_insertion(chars) {
             error!("Could not remove the last transcript: {}", e);
         }
@@ -1749,7 +1808,7 @@ fn run_command_mode(
             let _ = feedback.play_success();
         },
         Err(e) => {
-            error!("Command Mode insertion failed: {}", e);
+            error!("Rewrite insertion failed: {}", e);
             let _ = feedback.play_error();
             let _ = inserter.copy_to_clipboard(&rewritten);
             notify(
@@ -1758,5 +1817,62 @@ fn run_command_mode(
                 "The result is on the clipboard.",
             );
         },
+    }
+}
+
+/// Rewrite the selection with the prompt of `style`, and replace it in
+/// place. Without a selection, no LLM call is made. When the LLM fails,
+/// the selection stays as it is.
+#[allow(clippy::too_many_arguments)]
+fn run_style_rewrite(
+    style: &TakeStyle,
+    selection: Option<String>,
+    processor: Option<&TextProcessor>,
+    runtime: &tokio::runtime::Runtime,
+    inserter: Option<&Arc<Mutex<TextInserter>>>,
+    history: &Arc<Mutex<InsertionHistory>>,
+    shared: &crate::ipc::SharedState,
+    feedback: AudioFeedback,
+) {
+    info!(
+        "Rewrite in the {} style on {} chars",
+        style.name,
+        selection.as_deref().map_or(0, |text| text.chars().count())
+    );
+    let outcome = runtime.block_on(rewrite_with_style(processor, style, selection.as_deref()));
+    match outcome {
+        RewriteOutcome::Replace(rewritten) => {
+            put_rewrite(rewritten, None, inserter, history, shared, feedback)
+        },
+        RewriteOutcome::NothingSelected => {
+            let _ = feedback.play_error();
+            notify(
+                NoticeKind::Status,
+                "Nothing to rewrite",
+                "Select some text, then press the key again.",
+            );
+        },
+        RewriteOutcome::NoLlm => {
+            let _ = feedback.play_error();
+            notify(
+                NoticeKind::Problem,
+                "Rewrite needs an LLM",
+                "Run Ollama, or set ANTHROPIC_API_KEY in ~/.config/hush/.env, then restart the daemon.",
+            );
+        },
+        RewriteOutcome::Failed(reason) => {
+            error!("The rewrite in the {} style failed: {}", style.name, reason);
+            let _ = feedback.play_error();
+            notify(
+                NoticeKind::Problem,
+                "Rewrite failed",
+                &format!("The selection did not change. {}", reason),
+            );
+        },
+        RewriteOutcome::Unchanged => notify(
+            NoticeKind::Status,
+            "Nothing changed",
+            "The style left the text as it was.",
+        ),
     }
 }

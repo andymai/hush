@@ -159,6 +159,13 @@ pub enum Commands {
         type_text: bool,
     },
 
+    /// Rewrite the selected text with a style's prompt (talks to the daemon)
+    Rewrite {
+        /// A style under [styles] with polish = true and a prompt
+        #[arg(value_name = "STYLE", value_parser = style_name)]
+        style: String,
+    },
+
     /// Setup and configuration commands
     Setup {
         #[command(subcommand)]
@@ -587,6 +594,26 @@ mod tests {
             Ok(Commands::Start { style, .. } | Commands::Toggle { style, .. }) => style,
             Ok(_) => panic!("{args:?} is not start or toggle"),
             Err(e) => panic!("{args:?}: {e}"),
+        }
+    }
+
+    #[test]
+    fn rewrite_takes_one_style_name() {
+        match Cli::try_parse_from(["hush", "rewrite", "formal"]).map(|cli| cli.command) {
+            Ok(Commands::Rewrite { style }) => assert_eq!(style, "formal"),
+            Ok(_) => panic!("not rewrite"),
+            Err(e) => panic!("{e}"),
+        }
+        for args in [
+            &["hush", "rewrite"][..],
+            &["hush", "rewrite", "Formal"],
+            &["hush", "rewrite", "formal", "casual"],
+        ] {
+            let error = match Cli::try_parse_from(args) {
+                Ok(_) => panic!("{args:?} must fail"),
+                Err(error) => error,
+            };
+            assert_eq!(error.exit_code(), 2, "{args:?} is a usage error");
         }
     }
 

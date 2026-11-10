@@ -2,7 +2,8 @@
 //! switch that turns the LLM polish on or off for its take. `verbatim` is
 //! built in and turns polish off. A take gets its style from a style chord
 //! or `--style`, then from `profiles.app_styles`; without either, only the
-//! tone profile shapes the text.
+//! tone profile shapes the text. A style with polish on and a prompt can
+//! also rewrite the selected text.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -95,12 +96,26 @@ impl Default for StyleConfig {
     }
 }
 
+impl StyleConfig {
+    /// The style can rewrite the selection: polish is on, and its prompt is
+    /// the instruction.
+    pub fn can_rewrite(&self) -> bool {
+        self.polish && !self.prompt.trim().is_empty()
+    }
+}
+
 /// The style of one take, resolved from its name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TakeStyle {
     pub name: StyleName,
     pub prompt: String,
     pub polish: bool,
+}
+
+impl TakeStyle {
+    pub fn can_rewrite(&self) -> bool {
+        self.polish && !self.prompt.is_empty()
+    }
 }
 
 /// The style that `name` names: `verbatim`, or a table under `[styles]`.
@@ -177,6 +192,42 @@ pub fn known(
                 name.trim()
             )
         })
+}
+
+/// The styles that can rewrite the selection.
+pub fn rewriters(styles: &BTreeMap<String, StyleConfig>) -> Vec<StyleName> {
+    styles
+        .iter()
+        .filter(|(_, style)| style.can_rewrite())
+        .filter_map(|(name, _)| StyleName::parse(name))
+        .filter(|name| *name != VERBATIM)
+        .collect()
+}
+
+/// The style that `name` names, when it can rewrite the selection, or an
+/// error that says where the name is and why it cannot.
+pub fn rewriter(
+    styles: &BTreeMap<String, StyleConfig>,
+    name: &str,
+    place: &str,
+) -> anyhow::Result<TakeStyle> {
+    let style = known(styles, name, place)?;
+    if !style.polish {
+        return Err(anyhow::anyhow!(
+            "The style {} {} turns polish off, so it cannot rewrite text: use a style with \
+             polish = true and a prompt",
+            style.name,
+            place
+        ));
+    }
+    if style.prompt.is_empty() {
+        return Err(anyhow::anyhow!(
+            "The style {} {} has no prompt, so it cannot rewrite text: give it a prompt",
+            style.name,
+            place
+        ));
+    }
+    Ok(style)
 }
 
 #[cfg(test)]
@@ -268,5 +319,40 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("'nosuch' for F13 in hotkey.styles"), "{err}");
+    }
+
+    #[test]
+    fn only_a_polished_style_with_a_prompt_can_rewrite() {
+        let styles = user(&[
+            ("formal", "Formal English.", true),
+            ("raw", "Formal English.", false),
+            ("empty", "  ", true),
+        ]);
+        assert!(styles["formal"].can_rewrite());
+        assert!(!styles["raw"].can_rewrite());
+        assert!(!styles["empty"].can_rewrite());
+        assert_eq!(
+            rewriters(&styles),
+            vec![StyleName::parse("formal").unwrap()]
+        );
+
+        let formal = rewriter(&styles, "formal", "for hush rewrite").unwrap();
+        assert_eq!(formal.prompt, "Formal English.");
+        assert!(formal.can_rewrite());
+        for (name, needle) in [
+            ("verbatim", "turns polish off"),
+            ("raw", "turns polish off"),
+            ("empty", "has no prompt"),
+            ("nosuch", "Unknown style 'nosuch'"),
+        ] {
+            let err = rewriter(&styles, name, "for Super+F in hotkey.rewrite")
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(needle), "{name}: {err}");
+            assert!(
+                err.contains("for Super+F in hotkey.rewrite"),
+                "{name}: {err}"
+            );
+        }
     }
 }

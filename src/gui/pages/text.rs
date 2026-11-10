@@ -264,24 +264,42 @@ pub fn save_style(config: &mut Config, draft: &StyleDraft) -> Result<(), String>
             name
         ));
     }
+    let style = StyleConfig {
+        prompt: draft.prompt.trim().to_string(),
+        polish: draft.polish,
+    };
+    let rewrite_keys: Vec<&String> = draft
+        .original
+        .as_deref()
+        .map(|old| {
+            config
+                .hotkey
+                .rewrite
+                .iter()
+                .filter(|(_, value)| value.as_str() == old)
+                .map(|(chord, _)| chord)
+                .collect()
+        })
+        .unwrap_or_default();
+    if let (false, Some(chord)) = (style.can_rewrite(), rewrite_keys.first()) {
+        return Err(format!(
+            "The rewrite key {} uses this style, so it needs polish on and a prompt.",
+            chord
+        ));
+    }
     if let Some(old) = renamed {
         config.styles.remove(old);
         let uses = config
             .hotkey
             .styles
             .values_mut()
+            .chain(config.hotkey.rewrite.values_mut())
             .chain(config.profiles.app_styles.values_mut());
         for value in uses.filter(|value| value.as_str() == old) {
             *value = name.to_string();
         }
     }
-    config.styles.insert(
-        name.to_string(),
-        StyleConfig {
-            prompt: draft.prompt.trim().to_string(),
-            polish: draft.polish,
-        },
-    );
+    config.styles.insert(name.to_string(), style);
     Ok(())
 }
 
@@ -293,13 +311,19 @@ fn style_users(config: &Config, name: &str) -> Vec<String> {
         .iter()
         .filter(|(_, style)| style.as_str() == name)
         .map(|(chord, _)| format!("the style key {}", chord));
+    let rewrites = config
+        .hotkey
+        .rewrite
+        .iter()
+        .filter(|(_, style)| style.as_str() == name)
+        .map(|(chord, _)| format!("the rewrite key {}", chord));
     let apps = config
         .profiles
         .app_styles
         .iter()
         .filter(|(_, style)| style.as_str() == name)
         .map(|(app, _)| format!("profiles.app_styles for {}", app));
-    keys.chain(apps).collect()
+    keys.chain(rewrites).chain(apps).collect()
 }
 
 /// Remove a style that nothing uses.
@@ -623,6 +647,33 @@ mod tests {
         assert_eq!(config.hotkey.styles["F15"], "verbatim");
         assert_eq!(config.profiles.app_styles["slack"], "chat");
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn a_rewrite_key_keeps_its_style_able_to_rewrite() {
+        let mut config = Config::defaults().unwrap();
+        save_style(&mut config, &draft(None, "formal", "Formal.", true)).unwrap();
+        config
+            .hotkey
+            .rewrite
+            .insert("Super+F".into(), "formal".into());
+        for (prompt, polish) in [("Formal.", false), (" ", true)] {
+            let err = save_style(
+                &mut config,
+                &draft(Some("formal"), "formal", prompt, polish),
+            )
+            .unwrap_err();
+            assert!(err.contains("rewrite key Super+F"), "{err}");
+        }
+        save_style(
+            &mut config,
+            &draft(Some("formal"), "proper", "Proper.", true),
+        )
+        .unwrap();
+        assert_eq!(config.hotkey.rewrite["Super+F"], "proper");
+        assert!(config.validate().is_ok());
+        let err = remove_style(&mut config, "proper").unwrap_err();
+        assert!(err.contains("the rewrite key Super+F"), "{err}");
     }
 
     #[test]
