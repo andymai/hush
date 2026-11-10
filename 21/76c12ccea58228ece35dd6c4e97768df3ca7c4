@@ -1,0 +1,21 @@
+src/gui/mod.rs
+  s_115995023cd6f3::t_a4bc89395701c5 66-67,420,427-428
+src/gui/pages/speech.rs
+  s_115995023cd6f3::t_499c1f1081487f 569,573,640-651,703-716
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2176c12ccea58228ece35dd6c4e97768df3ca7c4",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
