@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.2](https://github.com/andymai/hush/compare/v0.30.1...v0.30.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* **text:** type the right case with Caps Lock on ([#316](https://github.com/andymai/hush/issues/316)) ([2ad276e](https://github.com/andymai/hush/commit/2ad276e50e349ceba07d9e0abb7d291529d0846e))
+
 ## [0.30.1](https://github.com/andymai/hush/compare/v0.30.0...v0.30.1) (2026-11-10)
 
 
