@@ -234,6 +234,20 @@ impl Files {
         }
     }
 
+    /// Read the configuration file again, as when it loads again after it
+    /// did not, and drop the load error.
+    pub fn reload_config(&mut self) -> Result<Config> {
+        let read_from = stamp(&self.config_path);
+        let config = if self.config_path.exists() {
+            Config::load_from_file(&self.config_path)?
+        } else {
+            Config::defaults()?
+        };
+        self.config_stamp = read_from;
+        self.config_error = None;
+        Ok(config)
+    }
+
     /// Read the vocabulary file again, as after a word was learned outside
     /// the window's own writes.
     pub fn reload_vocabulary(&mut self) -> Result<DomainVocabulary> {
@@ -428,6 +442,25 @@ pub struct Pending {
     pub provider: Option<LlmSetting>,
 }
 
+/// A close asks for an owed restart at once, unless a broken file or a
+/// silent daemon holds it: a held restart keeps its own pace, so a close
+/// does not start a try each frame.
+pub fn hurry_on_close(held_by_file: bool, held_tries: u32) -> bool {
+    !held_by_file && held_tries == 0
+}
+
+/// The window owes the daemon a restart that can happen: a change waits and
+/// no broken file holds it back, or a try is under way.
+pub fn restart_owed(pending: bool, file_broken: bool, attempting: bool) -> bool {
+    (pending && !file_broken) || attempting
+}
+
+/// A daemon in safe mode needs a restart once the configuration file loads
+/// again, unless one is on its way.
+pub fn leave_safe_mode(safe_mode: bool, config_loads: bool, restart_on_its_way: bool) -> bool {
+    safe_mode && config_loads && !restart_on_its_way
+}
+
 /// After this many tries that the file or a silent daemon holds back, the
 /// restart tries at the normal poll rate.
 pub const BACKOFF_AFTER: u32 = 3;
@@ -439,6 +472,25 @@ pub fn retry_delay(held_tries: u32, fast: Duration, normal: Duration) -> Duratio
         normal
     } else {
         fast
+    }
+}
+
+/// How often the window reads the machine: quickly during a take, a
+/// restart, or a key capture, also while a held restart backs off; at the
+/// pace of the held restart while one waits; else at the normal rate.
+pub fn poll_rate(
+    active: bool,
+    restart_pending: bool,
+    held_tries: u32,
+    fast: Duration,
+    normal: Duration,
+) -> Duration {
+    if active {
+        fast
+    } else if restart_pending {
+        retry_delay(held_tries, fast, normal)
+    } else {
+        normal
     }
 }
 
@@ -814,6 +866,70 @@ mod tests {
         let mut words: Vec<_> = merged.technical_terms.values().cloned().collect();
         words.sort();
         assert_eq!(words, ["Kubernetes", "PostgreSQL"]);
+    }
+
+    #[test]
+    fn a_close_does_not_wait_for_a_restart_that_a_broken_file_holds() {
+        assert!(hurry_on_close(false, 0));
+        assert!(!hurry_on_close(true, 1), "a broken file holds it");
+        assert!(!hurry_on_close(false, 2), "a silent daemon holds it");
+        assert!(restart_owed(true, false, false));
+        assert!(!restart_owed(true, true, false), "so the first close goes");
+        assert!(
+            restart_owed(false, true, true),
+            "a try under way still counts"
+        );
+        let close = CloseState {
+            unsaved: false,
+            restart_owed: restart_owed(true, true, false),
+            ..CloseState::default()
+        };
+        assert_eq!(close_step(close), CloseStep::Close);
+    }
+
+    #[test]
+    fn a_daemon_in_safe_mode_restarts_once_the_file_loads() {
+        assert!(leave_safe_mode(true, true, false));
+        assert!(
+            !leave_safe_mode(true, false, false),
+            "the file is still broken"
+        );
+        assert!(!leave_safe_mode(false, true, false), "not in safe mode");
+        assert!(
+            !leave_safe_mode(true, true, true),
+            "a restart is on its way"
+        );
+    }
+
+    #[test]
+    fn a_file_that_loads_again_drops_its_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut files = files(&dir);
+        files.config_error = Some("Invalid config file".into());
+        let mut fixed = Config::defaults().unwrap();
+        fixed.tray.enabled = false;
+        std::fs::write(files.config_path(), fixed.to_toml().unwrap()).unwrap();
+        assert_eq!(files.reload_config().unwrap(), fixed);
+        assert_eq!(files.config_error, None);
+        let mut ours = fixed.clone();
+        ours.llm.ollama_model = "qwen3".into();
+        let (base, _) = files.write_config(&fixed, &ours).unwrap();
+        assert_eq!(base, fixed, "no merge after the reload");
+    }
+
+    #[test]
+    fn a_take_keeps_the_fast_poll_while_a_held_restart_backs_off() {
+        let fast = Duration::from_millis(150);
+        let normal = Duration::from_millis(700);
+        let held = BACKOFF_AFTER + 2;
+        assert_eq!(
+            poll_rate(true, true, held, fast, normal),
+            fast,
+            "a take runs"
+        );
+        assert_eq!(poll_rate(false, true, held, fast, normal), normal);
+        assert_eq!(poll_rate(false, true, 0, fast, normal), fast);
+        assert_eq!(poll_rate(false, false, 0, fast, normal), normal);
     }
 
     #[test]

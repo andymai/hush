@@ -8,6 +8,7 @@ pub mod overview;
 pub mod speech;
 pub mod text;
 
+use super::autosave;
 use super::icons;
 use super::widgets::{row, section, Button, Row, Variant};
 use super::Gui;
@@ -91,7 +92,7 @@ fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
     }
     section(ui, "Files");
     if let Some(error) = gui.files.config_error.clone() {
-        let loses_audio = replace_loses_audio(gui);
+        let loses_audio = replace_loses_audio(gui, ui.ctx());
         let mut description = format!(
             "The window shows the built-in defaults and saves nothing to the file until \
              you replace it. {}",
@@ -163,13 +164,31 @@ fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
 
 /// A replacement would write settings that keep no audio while Hush keeps
 /// some: the bad file has no history settings to keep, and the user did not
-/// turn on Keep the audio in the window.
-fn replace_loses_audio(gui: &Gui) -> bool {
-    gui.config.history.keep_audio_days == 0
-        && gui.files.history_in_file().is_none()
-        && crate::audio::store::list(&crate::audio::store::takes_dir())
-            .is_ok_and(|kept| !kept.is_empty())
+/// turn on Keep the audio in the window. The file and the audio folder are
+/// read again only when their stamps change.
+fn replace_loses_audio(gui: &Gui, ctx: &egui::Context) -> bool {
+    if gui.config.history.keep_audio_days > 0 {
+        return false;
+    }
+    let takes = crate::audio::store::takes_dir();
+    let stamps = (
+        autosave::stamp(gui.files.config_path()),
+        autosave::stamp(&takes),
+    );
+    let id = egui::Id::new("hush-replace-loses-audio");
+    let cached: Option<(Stamps, bool)> = ctx.data(|data| data.get_temp(id));
+    if let Some((cached_stamps, loses)) = cached {
+        if cached_stamps == stamps {
+            return loses;
+        }
+    }
+    let loses = gui.files.history_in_file().is_none()
+        && crate::audio::store::list(&takes).is_ok_and(|kept| !kept.is_empty());
+    ctx.data_mut(|data| data.insert_temp(id, (stamps, loses)));
+    loses
 }
+
+type Stamps = (autosave::Stamp, autosave::Stamp);
 
 /// A row with a field for the text setting that `slot` reaches. A commit
 /// saves, or the row shows why it cannot.

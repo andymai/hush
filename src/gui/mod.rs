@@ -85,6 +85,10 @@ pub struct Machine {
     /// The status answer the state came from: a daemon that gave none in
     /// time shows as not running, but may be busy
     pub probe: Probe,
+    /// Why the daemon runs in safe mode, when it does
+    pub safe_mode: Option<String>,
+    /// The configuration file loads now
+    pub config_loads: bool,
     pub installed_models: Vec<ModelSize>,
     /// The Silero voice activity detection model is downloaded.
     pub vad_installed: bool,
@@ -109,7 +113,7 @@ impl Machine {
                     .collect()
             })
             .unwrap_or_default();
-        let probe = client::probe_blocking(STATUS_TIMEOUT);
+        let (probe, reply) = client::reply_blocking(STATUS_TIMEOUT);
         Self {
             permissions: crate::permissions::status(),
             daemon: match probe {
@@ -117,6 +121,8 @@ impl Machine {
                 Probe::NotRunning | Probe::NoAnswer => None,
             },
             probe,
+            safe_mode: reply.and_then(|reply| reply.safe_mode),
+            config_loads: Config::load().is_ok(),
             installed_models,
             vad_installed,
             autostart: crate::desktop::autostart_installed(),
@@ -712,7 +718,9 @@ impl Gui {
                 Attempt::Failed(e) => self.say(format!("Could not restart Hush: {}", e)),
             }
         }
-        if self.close.closing {
+        if self.close.closing
+            && autosave::hurry_on_close(self.held_by_file.is_some(), self.held_tries)
+        {
             self.debounce.hurry(now);
         }
         let daemon = Daemon::of(
@@ -747,7 +755,11 @@ impl Gui {
     /// A change that the daemon reads is saved, but the daemon does not run
     /// with it yet.
     fn restart_owed(&self) -> bool {
-        (self.debounce.pending() && self.files.config_error.is_none()) || self.attempting
+        autosave::restart_owed(
+            self.debounce.pending(),
+            self.files.config_error.is_some() || self.held_by_file.is_some(),
+            self.attempting,
+        )
     }
 
     /// A change waits for a restart that the broken configuration file holds
@@ -839,6 +851,7 @@ impl Gui {
             return;
         };
         self.machine = machine;
+        self.follow_file_and_safe_mode();
         if self.debounce.pending() {
             match self.machine.probe {
                 Probe::NoAnswer => self.held_tries = self.held_tries.saturating_add(1),
@@ -860,6 +873,36 @@ impl Gui {
         } else if restart.since.elapsed() > RESTART_TIMEOUT {
             self.restart = None;
             self.say("Saved, but Hush did not come back. Run hush doctor.");
+        }
+    }
+
+    /// After each poll: a configuration file that loads again replaces the
+    /// defaults the window showed, when the user changed nothing, and a
+    /// daemon in safe mode gets a restart.
+    fn follow_file_and_safe_mode(&mut self) {
+        if !self.machine.config_loads {
+            return;
+        }
+        if self.files.config_error.is_some() && self.config == self.saved {
+            match self.files.reload_config() {
+                Ok(config) => {
+                    self.config = config.clone();
+                    self.saved = config;
+                    self.rejected = None;
+                    self.config_feedback = None;
+                    self.say("The configuration file loads again.");
+                },
+                Err(e) => warn!("Could not read the configuration again: {:#}", e),
+            }
+        }
+        self.held_by_file = None;
+        let on_its_way = self.debounce.pending() || self.attempting || self.restart.is_some();
+        if autosave::leave_safe_mode(
+            self.machine.safe_mode.is_some(),
+            self.machine.config_loads,
+            on_its_way,
+        ) {
+            self.debounce.change(Instant::now());
         }
     }
 
@@ -933,14 +976,13 @@ impl Gui {
     }
 
     fn poll_interval(&self) -> Duration {
-        if self.debounce.pending() {
-            return self.restart_poll();
-        }
-        if self.applying() || self.capture.is_some() || self.machine.busy() {
-            FAST_POLL
-        } else {
-            POLL_INTERVAL
-        }
+        autosave::poll_rate(
+            self.applying() || self.capture.is_some() || self.machine.busy(),
+            self.debounce.pending(),
+            self.held_tries,
+            FAST_POLL,
+            POLL_INTERVAL,
+        )
     }
 }
 
@@ -1162,6 +1204,8 @@ mod tests {
             },
             daemon: Some(DaemonState::Idle),
             probe: Probe::State(DaemonState::Idle),
+            safe_mode: None,
+            config_loads: true,
             installed_models: vec![ModelSize::Base],
             vad_installed: true,
             autostart: false,

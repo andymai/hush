@@ -388,6 +388,15 @@ pub fn footer(gui: &mut Gui, ui: &mut Ui) {
                 small(),
                 colours.muted,
             );
+        } else if let Some(reason) = gui
+            .machine
+            .safe_mode
+            .clone()
+            .filter(|_| gui.machine.running())
+        {
+            widgets::icon(ui, icons::CIRCLE_ALERT, colours.warn);
+            widgets::text(ui, "Hush runs in safe mode", small(), colours.muted)
+                .on_hover_text(super::pages::overview::safe_mode_text(&reason));
         } else if gui.machine.running() {
             widgets::icon(ui, icons::CIRCLE_CHECK, colours.good);
             widgets::text(ui, "Hush is running", small(), colours.muted);
