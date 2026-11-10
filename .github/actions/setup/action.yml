@@ -8,7 +8,10 @@ runs:
     # feature, compiles its shaders with glslc against the Vulkan and SPIR-V
     # headers; cpal needs ALSA headers; the overlay's GLFW build and x11rb need
     # the X11 and GL files. The keymap tests load libxkbcommon and read the
-    # xkb-data layouts. TRANSCRIBE_CMAKE_ARGS keeps OpenBLAS out of the link.
+    # xkb-data layouts. TRANSCRIBE_CMAKE_ARGS keeps OpenBLAS out of the link
+    # and builds ggml for the x86-64-v3 floor, as the release job does. With
+    # -march=native, the shared cache can carry AVX-512 code from one runner
+    # to another runner without it, and the tests stop with SIGILL.
     - name: Install system dependencies
       shell: bash
       run: |
@@ -35,7 +38,10 @@ runs:
         fi
         glslc --version | head -n 1
         pkg-config --modversion vulkan
-        echo "TRANSCRIBE_CMAKE_ARGS=-DTRANSCRIBE_USE_SYSTEM_BLAS=OFF" >> "$GITHUB_ENV"
+        echo "TRANSCRIBE_CMAKE_ARGS=-DTRANSCRIBE_USE_SYSTEM_BLAS=OFF -DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DGGML_AVX512=OFF" >> "$GITHUB_ENV"
+    # The cache key includes TRANSCRIBE_CMAKE_ARGS, so a cache built with other
+    # ggml flags is never reused.
     - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       with:
+        env-vars: CARGO CC CFLAGS CXX CMAKE RUST TRANSCRIBE
         save-if: ${{ github.ref == 'refs/heads/main' }}
