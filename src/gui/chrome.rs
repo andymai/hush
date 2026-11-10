@@ -256,7 +256,7 @@ pub fn sidebar(gui: &mut Gui, ui: &mut Ui) {
                 for page in *pages {
                     let alert = *page == Page::Overview && !ready;
                     if nav_item(ui, page.icon(), page.title(), gui.page == *page, alert).clicked() {
-                        gui.page = *page;
+                        gui.go_to(*page);
                     }
                 }
             }
