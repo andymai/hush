@@ -247,6 +247,7 @@ impl CloudTranscriber {
                 text: String::new(),
                 confidence: 0.0,
                 processing_time: start.elapsed(),
+                detected: None,
             });
         }
 
@@ -317,6 +318,7 @@ impl CloudTranscriber {
             confidence: if text.is_empty() { 0.0 } else { 0.9 },
             text,
             processing_time,
+            detected: None,
         })
     }
 }

@@ -2,8 +2,10 @@
 //! records, and each part goes to a background task that transcribes the
 //! parts in order on the model of the take. A part waits for the model when
 //! it loads, as a whole take does. The prompt of each part carries the end
-//! of the text before it. At the stop only the last part is left, and the
-//! texts join with single spaces.
+//! of the text before it. Every part is in the language of the take. When
+//! the take detects among `transcription.detect_languages`, the first part
+//! with speech detects, and the other parts keep that language. At the stop
+//! only the last part is left, and the texts join with single spaces.
 //!
 //! Each part stays on disk as FLAC until Hush delivers the joined text. A
 //! part that fails moves to the recovery folder for `hush recover`.
@@ -12,6 +14,7 @@ use crate::audio::parts::{pad, PartCutter};
 use crate::audio::{store, TakeLevel};
 use crate::text::WindowInfo;
 use crate::text_processing::prompt;
+use crate::transcription::language::Language;
 use crate::transcription::{SpeechToText, WHISPER_SAMPLE_RATE};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -21,11 +24,24 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
+/// The text of a part.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Transcribed {
+    pub text: String,
+    /// The language that limited detection chose for the part, if it ran
+    pub detected: Option<Language>,
+}
+
 /// What transcribes a part.
 #[async_trait]
 pub trait PartModel: Send + Sync + 'static {
     fn prompt_fits(&self, prompt: &str) -> bool;
-    async fn transcribe_part(&self, audio: &[f32], prompt: Option<&str>) -> Result<String>;
+    async fn transcribe_part(
+        &self,
+        audio: &[f32],
+        prompt: Option<&str>,
+        language: Language,
+    ) -> Result<Transcribed>;
 }
 
 #[async_trait]
@@ -34,11 +50,19 @@ impl PartModel for SpeechToText {
         SpeechToText::prompt_fits(self, prompt)
     }
 
-    async fn transcribe_part(&self, audio: &[f32], prompt: Option<&str>) -> Result<String> {
-        Ok(self
-            .transcribe_with_prompt(audio, WHISPER_SAMPLE_RATE, prompt)
-            .await?
-            .text)
+    async fn transcribe_part(
+        &self,
+        audio: &[f32],
+        prompt: Option<&str>,
+        language: Language,
+    ) -> Result<Transcribed> {
+        let result = self
+            .transcribe_in(audio, WHISPER_SAMPLE_RATE, prompt, Some(language))
+            .await?;
+        Ok(Transcribed {
+            text: result.text,
+            detected: result.detected.and_then(Language::parse),
+        })
     }
 }
 
@@ -73,14 +97,14 @@ struct PartWorker<M> {
 }
 
 impl<M: PartModel> PartWorker<M> {
-    fn spawn(context: Option<PromptContext>) -> Self {
+    fn spawn(context: Option<PromptContext>, language: Language) -> Self {
         let (jobs, jobs_rx) = mpsc::unbounded_channel();
         let (model, model_rx) = watch::channel(None);
         Self {
             jobs: Some(jobs),
             model: Some(model),
             provided: false,
-            task: Some(tokio::spawn(work(jobs_rx, model_rx, context))),
+            task: Some(tokio::spawn(work(jobs_rx, model_rx, context, language))),
         }
     }
 
@@ -125,6 +149,7 @@ async fn work<M: PartModel>(
     mut jobs: mpsc::UnboundedReceiver<Part>,
     mut model: watch::Receiver<Option<Arc<M>>>,
     context: Option<PromptContext>,
+    mut language: Language,
 ) -> Vec<PartOutcome> {
     let mut outcomes = Vec::new();
     let mut ready: Option<(Arc<M>, Option<String>)> = None;
@@ -160,8 +185,12 @@ async fn work<M: PartModel>(
                 let prompt =
                     prompt::with_previous(base.as_deref(), &carried, |p| loaded.prompt_fits(p));
                 loaded
-                    .transcribe_part(&pad(&part.audio), prompt.as_deref())
+                    .transcribe_part(&pad(&part.audio), prompt.as_deref(), language)
                     .await
+                    .map(|transcribed| {
+                        language = keep_language(language, transcribed.detected);
+                        transcribed.text
+                    })
             },
         };
         match &text {
@@ -184,6 +213,21 @@ async fn work<M: PartModel>(
     outcomes
 }
 
+/// The language of the next part. A take in `auto` keeps the language that
+/// detection chose for a part, so that detection runs once.
+fn keep_language(take: Language, detected: Option<Language>) -> Language {
+    match detected {
+        Some(found) if take.is_auto() && !found.is_auto() => {
+            info!(
+                "The other parts of the take are in {}, as detected",
+                found.name()
+            );
+            found
+        },
+        _ => take,
+    }
+}
+
 /// The parts of one hands-free take. Make it on a Tokio runtime.
 pub struct TakeParts<M> {
     cutter: PartCutter,
@@ -195,15 +239,21 @@ pub struct TakeParts<M> {
 }
 
 impl<M: PartModel> TakeParts<M> {
-    /// Parts go to `dir` as `<stem>-partNN.flac`.
-    pub fn new(dir: PathBuf, stem: String, context: Option<PromptContext>) -> Self {
+    /// Parts go to `dir` as `<stem>-partNN.flac`, and each is in
+    /// `language`, the language of the take.
+    pub fn new(
+        dir: PathBuf,
+        stem: String,
+        context: Option<PromptContext>,
+        language: Language,
+    ) -> Self {
         Self {
             cutter: PartCutter::new(),
             read: 0,
             dir,
             stem,
             sent: Vec::new(),
-            worker: PartWorker::spawn(context),
+            worker: PartWorker::spawn(context, language),
         }
     }
 
@@ -404,24 +454,41 @@ mod tests {
         take
     }
 
-    /// Answers each call with the next text; "FAIL" is an error.
+    fn lang(code: &str) -> Language {
+        Language::parse(code).unwrap()
+    }
+
+    /// Answers each call with the next text; "FAIL" is an error. A call in
+    /// `auto` reports `detects`, as limited detection does.
     struct Fake {
         answers: Mutex<Vec<&'static str>>,
         prompts: Mutex<Vec<Option<String>>>,
+        languages: Mutex<Vec<&'static str>>,
+        detects: Option<Language>,
     }
 
     impl Fake {
         fn new(answers: &[&'static str]) -> Arc<Self> {
+            Self::detecting(answers, None)
+        }
+
+        fn detecting(answers: &[&'static str], detects: Option<Language>) -> Arc<Self> {
             let mut answers = answers.to_vec();
             answers.reverse();
             Arc::new(Self {
                 answers: Mutex::new(answers),
                 prompts: Mutex::new(Vec::new()),
+                languages: Mutex::new(Vec::new()),
+                detects,
             })
         }
 
         fn prompts(&self) -> Vec<Option<String>> {
             self.prompts.lock().unwrap().clone()
+        }
+
+        fn languages(&self) -> Vec<&'static str> {
+            self.languages.lock().unwrap().clone()
         }
     }
 
@@ -431,7 +498,12 @@ mod tests {
             prompt.chars().count() <= 200
         }
 
-        async fn transcribe_part(&self, audio: &[f32], prompt: Option<&str>) -> Result<String> {
+        async fn transcribe_part(
+            &self,
+            audio: &[f32],
+            prompt: Option<&str>,
+            language: Language,
+        ) -> Result<Transcribed> {
             assert!(
                 audio[..3_200].iter().all(|s| *s == 0.0),
                 "the part is padded"
@@ -440,10 +512,18 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(prompt.map(str::to_string));
+            self.languages.lock().unwrap().push(language.code());
+            let detected = self.detects.filter(|_| language.is_auto());
             match self.answers.lock().unwrap().pop() {
                 Some("FAIL") => Err(anyhow!("the GPU stopped")),
-                Some(text) => Ok(text.to_string()),
-                None => Ok(String::new()),
+                Some(text) => Ok(Transcribed {
+                    text: text.to_string(),
+                    detected,
+                }),
+                None => Ok(Transcribed {
+                    text: String::new(),
+                    detected,
+                }),
             }
         }
     }
@@ -472,7 +552,8 @@ mod tests {
             window: None,
             terms: vec!["Kubernetes".to_string()],
         };
-        let mut parts = TakeParts::<Fake>::new(parts_dir.clone(), "take".into(), Some(context));
+        let mut parts =
+            TakeParts::<Fake>::new(parts_dir.clone(), "take".into(), Some(context), lang("en"));
         let take = three_sentences();
         for piece in take.chunks(341) {
             parts.feed(piece);
@@ -519,7 +600,7 @@ mod tests {
         let parts_dir = dir.path().join("parts");
         let recovery = dir.path().join("recover");
         let model = Fake::new(&["First part.", "FAIL", "Third part."]);
-        let mut parts = TakeParts::<Fake>::new(parts_dir.clone(), "take".into(), None);
+        let mut parts = TakeParts::<Fake>::new(parts_dir.clone(), "take".into(), None, lang("en"));
         let take = three_sentences();
         parts.feed(&take);
         parts.provide(&model);
@@ -544,7 +625,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let parts_dir = dir.path().join("parts");
         let recovery = dir.path().join("recover");
-        let mut parts = TakeParts::<Fake>::new(parts_dir.clone(), "take".into(), None);
+        let mut parts = TakeParts::<Fake>::new(parts_dir.clone(), "take".into(), None, lang("en"));
         let take = three_sentences();
         parts.feed(&take);
         let settled = settle(parts.finish(&take, None).await, &recovery);
@@ -559,7 +640,8 @@ mod tests {
     async fn a_silent_part_needs_no_model_call() {
         let dir = tempfile::tempdir().unwrap();
         let model = Fake::new(&["Hello."]);
-        let mut parts = TakeParts::<Fake>::new(dir.path().join("parts"), "t".into(), None);
+        let mut parts =
+            TakeParts::<Fake>::new(dir.path().join("parts"), "t".into(), None, lang("en"));
         let mut take = vec![0.0f32; 30 * RATE];
         take.extend(speech(2.0));
         parts.feed(&take);
@@ -574,17 +656,61 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let parts_dir = dir.path().join("parts");
         let recovery = dir.path().join("recover");
-        let mut parts = TakeParts::<Fake>::new(parts_dir.clone(), "a".into(), None);
+        let mut parts = TakeParts::<Fake>::new(parts_dir.clone(), "a".into(), None, lang("en"));
         parts.feed(&three_sentences());
         assert_eq!(files_in(&parts_dir).len(), 2);
         parts.discard();
         assert!(files_in(&parts_dir).is_empty());
 
-        let mut parts = TakeParts::<Fake>::new(parts_dir.clone(), "b".into(), None);
+        let mut parts = TakeParts::<Fake>::new(parts_dir.clone(), "b".into(), None, lang("en"));
         parts.feed(&three_sentences());
         parts.keep(&recovery);
         assert!(files_in(&parts_dir).is_empty());
         assert_eq!(files_in(&recovery).len(), 2);
+    }
+
+    /// The language of each model call for a take of a silent stretch and
+    /// three sentences.
+    async fn languages_of(take: Language, detects: Option<Language>) -> Vec<&'static str> {
+        let dir = tempfile::tempdir().unwrap();
+        let model = Fake::detecting(&["Eins.", "Zwei.", "Drei."], detects);
+        let mut parts = TakeParts::<Fake>::new(dir.path().join("parts"), "t".into(), None, take);
+        let mut audio = vec![0.0f32; 30 * RATE];
+        audio.extend(three_sentences());
+        parts.feed(&audio);
+        let settled = settle(parts.finish(&audio, Some(&model)).await, dir.path());
+        assert_eq!(settled.text, "Eins. Zwei. Drei.");
+        model.languages()
+    }
+
+    #[tokio::test]
+    async fn every_part_is_in_the_take_language_and_detection_runs_once() {
+        assert_eq!(
+            languages_of(lang("de"), Some(lang("en"))).await,
+            ["de", "de", "de"],
+            "a chosen language never detects"
+        );
+        assert_eq!(
+            languages_of(Language::AUTO, Some(lang("de"))).await,
+            ["auto", "de", "de"],
+            "the first part with speech detects, and the rest keep its choice"
+        );
+        assert_eq!(
+            languages_of(Language::AUTO, None).await,
+            ["auto", "auto", "auto"],
+            "without a detection list, each part detects on its own"
+        );
+    }
+
+    #[test]
+    fn a_detected_language_sticks_only_to_an_auto_take() {
+        assert_eq!(keep_language(Language::AUTO, Some(lang("de"))), lang("de"));
+        assert_eq!(keep_language(lang("en"), Some(lang("de"))), lang("en"));
+        assert_eq!(keep_language(Language::AUTO, None), Language::AUTO);
+        assert_eq!(
+            keep_language(Language::AUTO, Some(Language::AUTO)),
+            Language::AUTO
+        );
     }
 
     #[test]

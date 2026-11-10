@@ -129,8 +129,9 @@ impl SpeechToText {
 
         if let Some(prompt) = prompt.filter(|p| guard::is_prompt_echo(&result.text, p)) {
             info!("The transcript looks like an echo of the prompt, transcribing again without it");
+            let detected = result.detected.and_then(Language::parse);
             let retry = self
-                .transcribe_once(audio, sample_rate, None, language)
+                .transcribe_once(audio, sample_rate, None, detected.or(language))
                 .await?;
             result.processing_time += retry.processing_time;
             match guard::after_echo(&result.text, &retry.text, prompt) {

@@ -881,6 +881,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         store::parts_dir(),
                         store::stem(Utc::now()),
                         context,
+                        current_language,
                     ));
                 }
                 if let Some(parts) = take_parts.as_mut() {
