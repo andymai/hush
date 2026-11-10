@@ -70,6 +70,7 @@ src/cli/commands/mod.rs
   s_115995023cd6f3::t_425a625656cdad 12,52
 src/cli/dispatcher.rs
   s_115995023cd6f3::t_e6202fb74cb41b 5-6,44-45,150-155
+  s_115995023cd6f3::t_d79793468a48f8 4
 src/ipc/server.rs
   s_115995023cd6f3::t_ffe39844c7fb1f 7,13,43-44,78-83,92,110,142-162,351-353,416-439,498-500,748-797
 ---
