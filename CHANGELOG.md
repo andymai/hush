@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/andymai/hush/compare/v0.24.0...v0.24.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **gui:** scroll the vocabulary with the page, and filter long lists ([#296](https://github.com/andymai/hush/issues/296)) ([6435548](https://github.com/andymai/hush/commit/6435548b0e7afeb0cb341eafcd31ba29545dffd1))
+
 ## [0.24.0](https://github.com/andymai/hush/compare/v0.23.0...v0.24.0) (2026-11-10)
 
 
