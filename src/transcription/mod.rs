@@ -11,7 +11,7 @@
 //! downloads and verifies models from the ggerganov/whisper.cpp catalogue,
 //! the Silero voice activity detection model that trims silence before local
 //! transcription, and the VoxLingua107 language-ID model that
-//! `transcription.detect_languages` uses. [`GpuAvailability`] reports what
+//! `transcription.detect_languages` uses through [`langid`]. [`GpuAvailability`] reports what
 //! the device registry of transcribe.cpp found. [`gpu_fallback`] waits for
 //! the GPU at login, and keeps a GPU that failed a take on the CPU until its
 //! driver changes. [`cpu`] refuses to call ggml on a CPU below the floor of a
@@ -25,6 +25,7 @@ pub mod device;
 pub mod engine;
 pub mod gpu_fallback;
 pub mod guard;
+pub mod langid;
 pub mod language;
 pub mod models;
 pub mod parts;

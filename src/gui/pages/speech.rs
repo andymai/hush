@@ -413,8 +413,8 @@ fn detection(gui: &mut Gui, ui: &mut egui::Ui) {
         "Only Whisper on this machine uses this list. The service detects the language on its own."
     } else {
         "With Detect it, a language-ID model picks the most likely of these languages, and \
-         Whisper writes in it. The daemon downloads the model (27 MB) once. With none, Whisper \
-         picks from every language."
+         Whisper writes in it. The daemon downloads the model (27 MB) when it needs it. With \
+         none, Whisper picks from every language."
     };
     let mut added = String::new();
     row("Detect only").describe(description).show(ui, |ui| {

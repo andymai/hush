@@ -197,7 +197,7 @@ Give each state a color in the Waybar style sheet, for example `#custom-hush.rec
 |---|---|---|
 | `transcription.model_size` | tiny, base, small, medium, large, large-v2, large-v3 | base |
 | `transcription.language` | A Whisper language code such as `en` or `de`, or `auto` to detect what you speak | en |
-| `transcription.detect_languages` | With `language = "auto"`, a small language-ID model picks the most likely of these languages, such as `["en", "de"]`, and local Whisper writes in it. Hush downloads the model (27 MB) the first time. `[]` allows every language, and Whisper detects it. Cloud and server backends detect the language on their own | `[]` |
+| `transcription.detect_languages` | With `language = "auto"`, a small language-ID model picks the most likely of these languages, such as `["en", "de"]`, and local Whisper writes in it. Hush downloads the model (27 MB) the first time, and tries again later when the download fails. Until the model is there, Whisper detects the language, and a take that it hears in another language runs again in the first language of the list. `[]` allows every language, and Whisper detects it. Cloud and server backends detect the language on their own | `[]` |
 | `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
 | `transcription.context_prompt` | Prime Whisper with the focused window's title and learned terms | true |
 | `transcription.vad` | Send local Whisper only the speech in each take, found by the Silero model that `hush models download` gets. Without the model, Whisper gets the whole take | true |
