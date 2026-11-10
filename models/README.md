@@ -1,4 +1,4 @@
-# Whisper models
+# Speech models
 
 Hush downloads models to `$XDG_DATA_HOME/hush/models` (usually
 `~/.local/share/hush/models`), not to this directory. `hush settings` offers
@@ -14,6 +14,7 @@ from a terminal.
 | `large` | 3.1 GB | The original large model |
 | `large-v2` | 3.1 GB | |
 | `large-v3` | 3.1 GB | Most accurate |
+| `parakeet-v3` | 740 MB | Opt-in NVIDIA Parakeet TDT 0.6B v3 (CC BY 4.0, converted to GGUF and quantized to Q8_0): 25 European languages, no prompt |
 
 `hush doctor` names the one that suits your machine, and the setup pane marks
 it. Larger models are more accurate and slower; a GPU changes the trade-off

@@ -14,9 +14,10 @@ use crate::transcription::guard::{self, EchoChoice};
 use crate::transcription::langid;
 use crate::transcription::language::Language;
 use crate::transcription::models::{self, ModelManager, ModelSize};
-use crate::transcription::whisper::{TranscriptionResult, WhisperTranscriber};
+use crate::transcription::whisper::{Family, TranscriptionResult, WhisperTranscriber};
 use crate::Result;
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 use tracing::{debug, info, warn};
 
 /// A prompt longer than this is cut when no tokenizer can count it. Whisper
@@ -67,9 +68,19 @@ impl SpeechToText {
         if config.vad {
             load_vad(&mut whisper, models_dir, &config.model_size);
         }
-        if !config.detect_languages.is_empty() && whisper.is_multilingual() {
-            whisper = whisper.with_langid(models_dir);
-            prepare_langid(models_dir, whisper.detect_languages()).await;
+        if !config.detect_languages.is_empty() {
+            if whisper.family() == Family::Parakeet {
+                static SAID: Once = Once::new();
+                SAID.call_once(|| {
+                    info!(
+                        "Parakeet tells its own languages apart, so detect_languages and the \
+                         language-ID model are not used"
+                    );
+                });
+            } else if whisper.is_multilingual() {
+                whisper = whisper.with_langid(models_dir);
+                prepare_langid(models_dir, whisper.detect_languages()).await;
+            }
         }
         Ok(Self {
             backend: Backend::Local(whisper),
@@ -81,14 +92,28 @@ impl SpeechToText {
         matches!(self.backend, Backend::Cloud(_))
     }
 
+    /// Whether the model reads a prompt. Parakeet does not, and the hosted
+    /// services and servers do.
+    pub fn takes_prompt(&self) -> bool {
+        match &self.backend {
+            Backend::Local(whisper) => whisper.family().takes_prompt(),
+            Backend::Cloud(_) => true,
+        }
+    }
+
     /// Where the audio goes, for logs and status lines.
     pub fn describe(&self) -> String {
         match &self.backend {
             Backend::Local(whisper) if whisper.has_vad() => format!(
-                "Whisper on {}, speech found by Silero VAD",
+                "{} on {}, speech found by Silero VAD",
+                whisper.family().name(),
                 whisper.get_device_info()
             ),
-            Backend::Local(whisper) => format!("Whisper on {}", whisper.get_device_info()),
+            Backend::Local(whisper) => format!(
+                "{} on {}",
+                whisper.family().name(),
+                whisper.get_device_info()
+            ),
             Backend::Cloud(cloud) => cloud.describe(),
         }
     }
@@ -136,6 +161,8 @@ impl SpeechToText {
     /// `prompt`, which starts with `terms` (the window title and the learned
     /// terms) and ends with the text before the part. Speech can repeat that
     /// text, so the echo check counts it only when one of its words loops.
+    /// A model that reads no prompt, such as Parakeet, gets none, and its
+    /// text gets no echo check.
     pub async fn transcribe_part(
         &self,
         audio: &[f32],
@@ -144,8 +171,13 @@ impl SpeechToText {
         terms: Option<&str>,
         language: Option<Language>,
     ) -> Result<TranscriptionResult> {
-        let prompt = prompt.map(str::trim).filter(|p| !p.is_empty());
-        let terms = terms.map(str::trim).filter(|t| !t.is_empty());
+        let takes_prompt = self.takes_prompt();
+        let prompt = prompt
+            .map(str::trim)
+            .filter(|p| takes_prompt && !p.is_empty());
+        let terms = terms
+            .map(str::trim)
+            .filter(|t| takes_prompt && !t.is_empty());
         let mut result = self
             .transcribe_once(audio, sample_rate, prompt, language)
             .await?;
@@ -251,7 +283,7 @@ async fn prepare_langid(models_dir: &Path, languages: &[String]) {
 
 /// The configured model file, or the catalogue's copy of `model_size` when
 /// that file is absent.
-fn local_model_path(config: &TranscriptionConfig, models_dir: &Path) -> PathBuf {
+pub(crate) fn local_model_path(config: &TranscriptionConfig, models_dir: &Path) -> PathBuf {
     let configured = config.model_path_in(models_dir);
     if configured.exists() {
         return configured;

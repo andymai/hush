@@ -409,7 +409,8 @@ pub struct TranscriptionConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub model_path: Option<PathBuf>,
-    /// Model size identifier (tiny, base, small, medium, large, large-v2, large-v3)
+    /// Model identifier: a Whisper size (tiny, base, small, medium, large,
+    /// large-v2, large-v3) or the opt-in parakeet-v3
     pub model_size: String,
     /// Whisper language code, such as "en", or "auto" to detect the language
     pub language: String,
@@ -515,6 +516,13 @@ impl TranscriptionConfig {
                 models_dir.join(filename)
             },
         }
+    }
+
+    /// Make the catalogue model `size` the speech model. A `model_path` set
+    /// by hand loads in place of `model_size`, so it goes.
+    pub fn select_model(&mut self, size: ModelSize) {
+        self.model_size = size.to_string();
+        self.model_path = None;
     }
 }
 
@@ -842,7 +850,14 @@ impl Config {
 
         // Validate transcription configuration
         let valid_models = [
-            "tiny", "base", "small", "medium", "large", "large-v2", "large-v3",
+            "tiny",
+            "base",
+            "small",
+            "medium",
+            "large",
+            "large-v2",
+            "large-v3",
+            "parakeet-v3",
         ];
         if !valid_models.contains(&self.transcription.model_size.as_str()) {
             return Err(anyhow::anyhow!(
@@ -970,6 +985,26 @@ mod tests {
         assert_eq!(config.hotkey.combination, "RightAlt");
         assert!(config.transcription.model_path.is_none());
         assert!(config.audio.device.is_none());
+    }
+
+    #[test]
+    fn a_catalogue_model_replaces_a_model_path_set_by_hand() {
+        let models = Path::new("/models");
+        let mut transcription = Config::defaults().unwrap().transcription;
+        transcription.model_path = Some("/elsewhere/ggml-base.bin".into());
+        assert_eq!(
+            transcription.model_path_in(models),
+            Path::new("/elsewhere/ggml-base.bin"),
+            "a path set by hand wins over model_size"
+        );
+
+        transcription.select_model(ModelSize::ParakeetV3);
+        assert_eq!(transcription.model_size, "parakeet-v3");
+        assert_eq!(transcription.model_path, None);
+        assert_eq!(
+            transcription.model_path_in(models),
+            models.join("parakeet-tdt-0.6b-v3-Q8_0.gguf")
+        );
     }
 
     #[test]

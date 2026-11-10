@@ -197,7 +197,7 @@ Hotkey chords name keys in two ways. Ctrl, Shift, Alt, and Super in a chord mean
 
 | Key | Meaning | Default |
 |---|---|---|
-| `transcription.model_size` | tiny, base, small, medium, large, large-v2, large-v3 | base |
+| `transcription.model_size` | tiny, base, small, medium, large, large-v2, large-v3, or the opt-in parakeet-v3 | base |
 | `transcription.language` | A Whisper language code such as `en` or `de`, or `auto` to detect what you speak | en |
 | `transcription.detect_languages` | With `language = "auto"`, a small language-ID model picks the most likely of these languages, such as `["en", "de"]`, and local Whisper writes in it. Hush downloads the model (27 MB) the first time, and tries again later when the download fails. Until the model is there, Whisper detects the language, and a take that it hears in another language runs again in the last language detected within the list, else in the first one. `[]` allows every language, and Whisper detects it. Cloud and server backends detect the language on their own | `[]` |
 | `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
@@ -303,8 +303,11 @@ The daemon runs with the PATH of your login session, so use absolute paths. `hus
 | small | 488 MB |
 | medium | 1.5 GB |
 | large, large-v2, large-v3 | 3.1 GB each |
+| parakeet-v3 (opt-in) | 740 MB |
 
 Larger models are more accurate and slower. `hush setup init` picks one for your hardware: medium on a GPU with 16 GB or more of RAM, small on a smaller-RAM GPU, base on a CPU. Manage them with `hush models list`, `hush models download <size>`, and `hush models set <size>`. Downloads come from the whisper.cpp catalogue and are checksum-verified.
+
+`parakeet-v3` is NVIDIA's Parakeet TDT 0.6B v3, an opt-in model for 25 European languages: Bulgarian, Croatian, Czech, Danish, Dutch, English, Estonian, Finnish, French, German, Greek, Hungarian, Italian, Latvian, Lithuanian, Maltese, Polish, Portuguese, Romanian, Russian, Slovak, Slovenian, Spanish, Swedish, and Ukrainian. Turn it on with `hush models set parakeet-v3`. It tells these languages apart on its own, so `transcription.language` and `detect_languages` do not apply to it, and `hush doctor` warns when `language` names a language it lacks. It reads no prompt: the window title, the learned terms, and the text before a part of a hands-free recording do not prime it. Your vocabulary replacements, styles, Command Mode, and the silence guards still apply to its text. It hears a take of more than 30 seconds in pieces, cut in the pauses between speech. On a GPU, its decoder still runs on about 8 CPU threads.
 
 Hush also downloads two small helper models. The voice activity model comes with `hush models download`. The language-ID model comes only when `transcription.detect_languages` is set.
 
@@ -312,6 +315,7 @@ Hush also downloads two small helper models. The voice activity model comes with
 |---|---|---|
 | Whisper (OpenAI) | ggml files from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) | MIT |
 | Silero VAD v6.2 | [ggml-org/whisper-vad](https://huggingface.co/ggml-org/whisper-vad), from [snakers4/silero-vad](https://github.com/snakers4/silero-vad) | MIT |
+| Parakeet TDT 0.6B v3 (NVIDIA, opt-in) | [collectivecontext/hush-models](https://huggingface.co/collectivecontext/hush-models), converted to GGUF and quantized to Q8_0 with transcribe.cpp from [nvidia/parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) | CC BY 4.0 |
 | VoxLingua107 ECAPA-TDNN language ID | [collectivecontext/hush-models](https://huggingface.co/collectivecontext/hush-models), converted with transcribe.cpp from [speechbrain/lang-id-voxlingua107-ecapa](https://huggingface.co/speechbrain/lang-id-voxlingua107-ecapa) | Apache-2.0 |
 
 ## Troubleshooting
@@ -331,7 +335,7 @@ If a notification says that the microphone stopped, the audio stopped for two se
 
 If `hush setup permissions` cannot run where you are (a container, an SSH session), `hush setup permissions --print` prints the udev rule to apply as root.
 
-In the first three minutes after boot, Hush waits up to five seconds for the graphics driver. If the driver is not ready then, Whisper runs on the CPU until you run `hush daemon restart`. When a take fails on the GPU, Hush runs it again on the CPU. Hush then keeps the CPU for that GPU until the driver version changes. `hush doctor` shows a `GPU failure` line with the command that tries the GPU again.
+In the first three minutes after boot, Hush waits up to five seconds for the graphics driver. If the driver is not ready then, the speech model runs on the CPU until you run `hush daemon restart`. When a take fails on the GPU, Hush runs it again on the CPU. Hush then keeps that model family (Whisper or Parakeet) on the CPU for that GPU until the driver version changes. When the GPU runs out of memory for a take, only that take runs again on the CPU, and the next take uses the GPU. `hush doctor` shows a `GPU failure` line with the command that tries the GPU again.
 
 The prebuilt packages need an x86-64-v3 CPU: Intel Haswell (2013) and newer, or AMD Excavator, Zen, and newer. On an older CPU, `hush doctor` shows a failed `CPU` line. Build from source with `make release`, or use a cloud backend. See [INSTALL.md](INSTALL.md#cpu-requirement).
 

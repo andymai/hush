@@ -3,7 +3,7 @@
 //! may pick, the GPU, the microphone, and how long a recording may run.
 
 use crate::config::server;
-use crate::config::settings::TranscriptionBackend;
+use crate::config::settings::{TranscriptionBackend, TranscriptionConfig};
 use crate::gui::icons;
 use crate::gui::meter::{self, Meter};
 use crate::gui::theme::{palette, FIELD_WIDTH};
@@ -226,11 +226,9 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
             format!("{} ({}, not downloaded)", size_key(size), bytes)
         }
     };
-    let description = format!(
-        "Runs on your machine. Larger models are more accurate and slower; {} suits this machine.",
-        size_key(recommended)
-    );
-    row("speech.model", "Whisper model")
+    let description = model_description(selected, recommended);
+    let before = gui.config.transcription.model_size.clone();
+    row("speech.model", "Speech model")
         .describe(&description)
         .reserve(240.0)
         .show(ui, |ui| {
@@ -244,6 +242,7 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
                 }
             });
         });
+    model_picked(&mut gui.config.transcription, &before);
 
     let downloading = gui.download.lock().size;
     if let Some(size) = downloading {
@@ -567,16 +566,17 @@ fn language_name(code: &str) -> String {
 }
 
 fn start_download(gui: &mut Gui, size: ModelSize) {
+    let fetch_model = !gui.machine.installed_models.contains(&size);
     {
         let mut download = gui.download.lock();
         download.size = Some(size);
+        download.fetches_model = fetch_model;
         download.done = 0;
         download.total = 0;
         download.finished = None;
     }
     let shared = Arc::clone(&gui.download);
     let models_dir = crate::config::paths::models_dir();
-    let fetch_model = !gui.machine.installed_models.contains(&size);
     let fetch_vad = gui.config.transcription.vad && !gui.machine.vad_installed;
     gui.runtime.spawn(async move {
         let result = match ModelManager::new(&models_dir) {
@@ -622,7 +622,49 @@ pub fn size_key(size: ModelSize) -> &'static str {
         ModelSize::Large => "large",
         ModelSize::LargeV2 => "large-v2",
         ModelSize::LargeV3 => "large-v3",
+        ModelSize::ParakeetV3 => "parakeet-v3",
     }
+}
+
+/// A model picked from the list, unlike the model that was `before`, replaces
+/// a `model_path` set by hand, which would load in its place.
+fn model_picked(transcription: &mut TranscriptionConfig, before: &str) {
+    if transcription.model_size == before {
+        return;
+    }
+    if let Ok(size) = transcription.model_size.parse() {
+        transcription.select_model(size);
+    }
+}
+
+/// After a download, the model it `fetched`, if any, becomes the model when
+/// another model is set now. A download of voice detection alone, or of the
+/// model that is set, leaves a `model_path` set by hand in place.
+pub fn model_downloaded(transcription: &mut TranscriptionConfig, fetched: Option<ModelSize>) {
+    let Some(size) = fetched else {
+        return;
+    };
+    if transcription.model_size.parse::<ModelSize>().ok() != Some(size) {
+        transcription.select_model(size);
+    }
+}
+
+/// What the model row says about the chosen model. Parakeet's licence asks
+/// for the credit.
+fn model_description(selected: Option<ModelSize>, recommended: ModelSize) -> String {
+    if selected.is_some_and(|size| size.is_parakeet()) {
+        return "NVIDIA Parakeet TDT 0.6B v3 (CC BY 4.0), converted to GGUF and quantized to \
+                Q8_0. It knows 25 European languages and picks among them on its own, so the \
+                language setting does not apply. It reads no prompt: the window title, learned \
+                terms, and the text before a part do not prime it."
+            .to_string();
+    }
+    format!(
+        "Runs on your machine. Larger Whisper models are more accurate and slower; {} suits \
+         this machine. parakeet-v3 is NVIDIA's Parakeet: fast and accurate in 25 European \
+         languages, without priming.",
+        size_key(recommended)
+    )
 }
 
 #[cfg(test)]
@@ -640,6 +682,51 @@ mod tests {
                 "{key} round trips"
             );
         }
+    }
+
+    #[test]
+    fn only_a_new_pick_clears_a_model_path_set_by_hand() {
+        let mut transcription = crate::Config::defaults().unwrap().transcription;
+        transcription.model_path = Some("/elsewhere/ggml-base.bin".into());
+        model_picked(&mut transcription, "base");
+        assert!(
+            transcription.model_path.is_some(),
+            "the same model keeps the path"
+        );
+
+        transcription.model_size = "parakeet-v3".to_string();
+        model_picked(&mut transcription, "base");
+        assert_eq!(transcription.model_size, "parakeet-v3");
+        assert_eq!(transcription.model_path, None);
+    }
+
+    #[test]
+    fn only_a_download_of_another_model_clears_a_model_path_set_by_hand() {
+        let mut transcription = crate::Config::defaults().unwrap().transcription;
+        transcription.model_path = Some("/elsewhere/ggml-base.bin".into());
+        model_downloaded(&mut transcription, None);
+        assert!(transcription.model_path.is_some(), "voice detection alone");
+        model_downloaded(&mut transcription, Some(ModelSize::Base));
+        assert!(transcription.model_path.is_some(), "the model that is set");
+
+        model_downloaded(&mut transcription, Some(ModelSize::ParakeetV3));
+        assert_eq!(transcription.model_size, "parakeet-v3");
+        assert_eq!(transcription.model_path, None);
+    }
+
+    #[test]
+    fn the_parakeet_row_credits_nvidia_and_names_its_limits() {
+        let parakeet = model_description(Some(ModelSize::ParakeetV3), ModelSize::Base);
+        for words in [
+            "NVIDIA",
+            "CC BY 4.0",
+            "converted to GGUF and quantized to Q8_0",
+            "no prompt",
+        ] {
+            assert!(parakeet.contains(words), "{words}: {parakeet}");
+        }
+        let whisper = model_description(Some(ModelSize::Base), ModelSize::Small);
+        assert!(whisper.contains("small suits this machine"), "{whisper}");
     }
 
     #[test]

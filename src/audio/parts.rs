@@ -9,6 +9,7 @@
 use crate::audio::capture::calculate_rms_amplitude;
 use crate::audio::SilenceDetector;
 use crate::transcription::WHISPER_SAMPLE_RATE;
+use std::ops::Range;
 use std::time::{Duration, Instant};
 
 const RATE: usize = WHISPER_SAMPLE_RATE as usize;
@@ -22,7 +23,7 @@ pub const MIN_PART: Duration = Duration::from_secs(3);
 /// part keeps it under 30 seconds.
 pub const HARD_CUT: Duration = Duration::from_secs(29);
 /// A hard cut looks for the quietest block in this last stretch of the part.
-const HARD_CUT_SEARCH: Duration = Duration::from_secs(5);
+pub const HARD_CUT_SEARCH: Duration = Duration::from_secs(5);
 /// Silence before and after each part, so Whisper hears its first and last
 /// sounds in full.
 pub const PAD: Duration = Duration::from_millis(200);
@@ -99,12 +100,13 @@ impl PartCutter {
     /// The middle of the quietest block in the last stretch of the part.
     fn quietest(&self) -> usize {
         let from = samples(HARD_CUT - HARD_CUT_SEARCH);
-        self.levels
-            .iter()
-            .filter(|(start, _)| *start >= from)
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(start, _)| start + BLOCK / 2)
-            .unwrap_or(self.scanned)
+        quietest_of(
+            self.levels
+                .iter()
+                .copied()
+                .filter(|(start, _)| *start >= from),
+        )
+        .unwrap_or(self.scanned)
     }
 
     fn cut(&mut self, at: usize) -> Vec<f32> {
@@ -121,6 +123,26 @@ impl PartCutter {
         self.detector.rearm();
         part
     }
+}
+
+/// The middle of the quietest of `blocks`, each a start and a level. Of
+/// blocks equally quiet, the first wins.
+fn quietest_of(blocks: impl IntoIterator<Item = (usize, f32)>) -> Option<usize> {
+    blocks
+        .into_iter()
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(start, _)| start + BLOCK / 2)
+}
+
+/// Where a hard cut falls in `take[range]`: the middle of its quietest block,
+/// as an index into `take`. `None` when the range holds no whole block.
+pub fn quietest_in(take: &[f32], range: Range<usize>) -> Option<usize> {
+    let end = range.end.min(take.len());
+    quietest_of(
+        (range.start..end.saturating_sub(BLOCK - 1))
+            .step_by(BLOCK)
+            .map(|start| (start, calculate_rms_amplitude(&take[start..start + BLOCK]))),
+    )
 }
 
 /// `part` with [`PAD`] of silence before and after it.
@@ -240,6 +262,27 @@ mod tests {
         }
         let parts = feed_all(&mut PartCutter::new(), &take);
         assert_eq!(parts.len(), 3);
+    }
+
+    #[test]
+    fn the_quietest_whole_block_in_the_range_wins() {
+        let mut take = vec![0.3; samples(secs(3.0))];
+        take[20 * BLOCK..21 * BLOCK].fill(0.0);
+        take[30 * BLOCK..31 * BLOCK].fill(0.0);
+        assert_eq!(
+            quietest_in(&take, 0..40_000),
+            Some(20 * BLOCK + BLOCK / 2),
+            "the first of two silent blocks"
+        );
+        let start = 25_000;
+        take[start + 5 * BLOCK..start + 6 * BLOCK].fill(0.01);
+        assert_eq!(
+            quietest_in(&take, start..40_000),
+            Some(start + 5 * BLOCK + BLOCK / 2),
+            "the blocks start at the range"
+        );
+        assert_eq!(quietest_in(&take, 0..BLOCK - 1), None, "no whole block");
+        assert_eq!(quietest_in(&take, 47_500..60_000), None, "past the take");
     }
 
     #[test]

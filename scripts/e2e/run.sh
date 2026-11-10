@@ -9,6 +9,7 @@
 #   HUSH_BIN                 the binary to test (default target/debug/hush, built when missing)
 #   HUSH_E2E_MODEL           a ggml model file (default: tiny, downloaded once into the cache)
 #   HUSH_E2E_LANGID_MODEL    a language-ID GGUF file (default: the daemon downloads it when a case needs it)
+#   HUSH_E2E_PARAKEET_MODEL  a Parakeet GGUF file (default: parakeet-v3, downloaded once into the cache)
 #   HUSH_E2E_KEEP=1          keep the temporary folder with the daemon logs
 #   HUSH_E2E_ALLOW_UINPUT=1  run without the /dev/uinput guard (only on a machine without a desktop)
 
@@ -328,6 +329,25 @@ ensure_model() {
   [ -s "$MODEL" ] || die "the download gave no $MODEL"
 }
 
+# The Parakeet model for the parakeet case: the override, or the catalogue
+# file, downloaded once into the cache through `hush models download`.
+ensure_parakeet() {
+  if [ -n "${HUSH_E2E_PARAKEET_MODEL:-}" ]; then
+    [ -f "$HUSH_E2E_PARAKEET_MODEL" ] || fail "HUSH_E2E_PARAKEET_MODEL=$HUSH_E2E_PARAKEET_MODEL is not a file"
+    PARAKEET=$(realpath "$HUSH_E2E_PARAKEET_MODEL")
+    return
+  fi
+  PARAKEET=$MODEL_CACHE/parakeet-tdt-0.6b-v3-Q8_0.gguf
+  [ -s "$PARAKEET" ] && return
+  log "Downloading the Parakeet model (740 MB) once into $MODEL_CACHE"
+  local home=$CASE_DIR/download
+  make_home "$home"
+  in_home "$home" "$HUSH_BIN" models download parakeet-v3 >&2
+  mkdir -p "$MODEL_CACHE"
+  cp "$home/.local/share/hush/models/parakeet-tdt-0.6b-v3-Q8_0.gguf" "$PARAKEET.part"
+  mv "$PARAKEET.part" "$PARAKEET"
+}
+
 # --- Test home and daemon ---------------------------------------------------
 
 make_home() {
@@ -529,6 +549,26 @@ case_silence_without_vad() {
   assert_exit 4 "$TAKE_EXIT" "hush stop --print --json"
   assert_eq no_speech "$(take_field status)" "the status"
   assert_eq null "$(take_field text)" "the text"
+}
+
+# Parakeet hears both clips with no language set: it tells English and German
+# apart on its own, and it does not use detect_languages.
+case_parakeet() {
+  ensure_parakeet
+  start_daemon "transcription.model_size = \"parakeet-v3\"
+transcription.model_path = \"$PARAKEET\"
+transcription.language = \"auto\"
+transcription.detect_languages = [\"en\", \"de\"]"
+  wait_for_log "Parakeet model loaded on"
+  wait_for_log "Parakeet tells its own languages apart"
+  record_clip "$SAMPLES/jfk.wav"
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  assert_words "$TAKE_TEXT" fellow americans ask country
+  record_clip "$SAMPLES/verwandlung_de.wav"
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  assert_words "$TAKE_TEXT" gregor samsa morgens bett verwandelt
 }
 
 case_german_lang() {

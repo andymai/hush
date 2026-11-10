@@ -84,7 +84,7 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
     use crate::transcription::models::{ModelManager, ModelSize};
     use crate::Config;
 
-    println!("📋 Available Whisper Models:");
+    println!("📋 Available Models:");
     println!();
 
     // Load config to show which model is active
@@ -93,7 +93,14 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
         .map(|config| config.transcription.model_size);
 
     let models = [
-        "tiny", "base", "small", "medium", "large", "large-v2", "large-v3",
+        "tiny",
+        "base",
+        "small",
+        "medium",
+        "large",
+        "large-v2",
+        "large-v3",
+        "parakeet-v3",
     ];
     let cache_dir = crate::config::paths::models_dir();
 
@@ -131,6 +138,7 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
                 "large" => "~3.1 GB",
                 "large-v2" => "~3.1 GB",
                 "large-v3" => "~3.1 GB",
+                "parakeet-v3" => "~740 MB, NVIDIA Parakeet, 25 European languages, no prompt",
                 _ => "Unknown",
             };
             print!(" ({})", size);
@@ -142,9 +150,9 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
     Ok(())
 }
 
-/// Download a Whisper model, the voice activity detection model when it is
-/// missing, and the language-ID model when `detect_languages` is set and it
-/// is missing.
+/// Download a speech model, the voice activity detection model when it is
+/// missing, and the language-ID model when a Whisper model limits detection
+/// with `detect_languages` and it is missing.
 ///
 /// Returns the path to the downloaded model file.
 pub async fn download_model(model_size: &str, force: bool) -> Result<std::path::PathBuf> {
@@ -190,8 +198,9 @@ pub async fn download_model(model_size: &str, force: bool) -> Result<std::path::
         }
     }
 
-    let limits_detection =
-        crate::Config::load().is_ok_and(|config| !config.transcription.detect_languages.is_empty());
+    let limits_detection = !size.is_parakeet()
+        && crate::Config::load()
+            .is_ok_and(|config| !config.transcription.detect_languages.is_empty());
     if limits_detection && manager.langid_model_path().is_none() {
         println!("📥 Downloading the language-ID model for detect_languages");
         match manager.ensure_langid_downloaded().await {
@@ -214,7 +223,8 @@ pub async fn download_model(model_size: &str, force: bool) -> Result<std::path::
 ///
 /// # Arguments
 ///
-/// * `model_size` - Model size to set as active (tiny, base, small, medium, large, large-v2, large-v3)
+/// * `model_size` - Model to set as active (tiny, base, small, medium, large, large-v2, large-v3,
+///   parakeet-v3)
 ///
 /// # Examples
 ///
@@ -229,20 +239,14 @@ pub async fn set_model(model_size: &str) -> Result<()> {
     println!("🔧 Setting active model to: {}", model_size);
 
     // Parse and validate model size first
-    let _size: ModelSize = model_size
+    let size: ModelSize = model_size
         .parse()
         .context(format!("Invalid model size: {}", model_size))?;
 
-    // Always download to ensure the cached file matches the requested model
-    // (since all models share the same filename, we need to re-download when switching)
-    let model_path = download_model(model_size, true).await?;
+    download_model(model_size, true).await?;
 
-    // Load current config
     let mut config = Config::load()?;
-
-    // Update config with actual path from download
-    config.transcription.model_size = model_size.to_string();
-    config.transcription.model_path = Some(model_path);
+    config.transcription.select_model(size);
 
     // Validate updated config
     config

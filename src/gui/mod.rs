@@ -48,7 +48,7 @@ const STATUS_TIMEOUT: Duration = Duration::from_millis(300);
 /// How long a restarted daemon gets to load its model and answer again.
 const RESTART_TIMEOUT: Duration = Duration::from_secs(40);
 
-pub const MODEL_ORDER: [ModelSize; 7] = [
+pub const MODEL_ORDER: [ModelSize; 8] = [
     ModelSize::Tiny,
     ModelSize::Base,
     ModelSize::Small,
@@ -56,12 +56,15 @@ pub const MODEL_ORDER: [ModelSize; 7] = [
     ModelSize::Large,
     ModelSize::LargeV2,
     ModelSize::LargeV3,
+    ModelSize::ParakeetV3,
 ];
 
 /// A model download in flight, shared with the task doing the work.
 #[derive(Default)]
 pub struct Download {
     pub size: Option<ModelSize>,
+    /// The download fetches the speech model `size`, not only voice detection
+    pub fetches_model: bool,
     pub done: u64,
     pub total: u64,
     pub finished: Option<Result<(), String>>,
@@ -414,17 +417,15 @@ impl Gui {
         let finished = {
             let mut download = self.download.lock();
             let finished = download.finished.take();
-            let size = download.size;
+            let size = download.size.filter(|_| download.fetches_model);
             if finished.is_some() {
                 download.size = None;
             }
             finished.map(|result| (result, size))
         };
         match finished {
-            Some((Ok(()), size)) => {
-                if let Some(size) = size {
-                    self.config.transcription.model_size = size_key(size).to_string();
-                }
+            Some((Ok(()), fetched)) => {
+                pages::speech::model_downloaded(&mut self.config.transcription, fetched);
                 self.say("Model ready. Save to use it.");
                 self.request_refresh(ctx);
             },

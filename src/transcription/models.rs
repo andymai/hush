@@ -3,6 +3,7 @@ use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, OnceLock};
 use std::time::SystemTime;
@@ -56,6 +57,19 @@ pub fn langid_model() -> ModelInfo {
         expected_size: 26_693_632,
         sha256: Some(
             "60176ea5a4d3a33d3ec2d9608d984a43d57307daf5bf22f6cd724b696989b8fa".to_string(),
+        ),
+    }
+}
+
+/// The catalogue entry for Parakeet TDT 0.6B v3.
+pub fn parakeet_v3_model() -> ModelInfo {
+    ModelInfo {
+        name: "parakeet-tdt-0.6b-v3".to_string(),
+        repo_id: "collectivecontext/hush-models".to_string(),
+        filename: PARAKEET_V3_FILENAME.to_string(),
+        expected_size: 739_508_576,
+        sha256: Some(
+            "5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7".to_string(),
         ),
     }
 }
@@ -120,10 +134,18 @@ pub enum ModelSize {
     Large,
     LargeV2,
     LargeV3,
+    /// NVIDIA Parakeet TDT 0.6B v3, opt-in: 25 European languages, no prompt
+    ParakeetV3,
 }
 
+/// The languages of Parakeet TDT 0.6B v3, which it tells apart on its own.
+pub const PARAKEET_V3_LANGUAGES: [&str; 25] = [
+    "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt",
+    "pl", "pt", "ro", "ru", "sk", "sl", "es", "sv", "uk",
+];
+
 impl ModelSize {
-    /// File name of this model in the ggerganov/whisper.cpp catalogue.
+    /// File name of this model in its catalogue.
     pub fn filename(&self) -> String {
         match self {
             ModelSize::Tiny => "ggml-tiny.bin",
@@ -133,10 +155,19 @@ impl ModelSize {
             ModelSize::Large => "ggml-large-v1.bin",
             ModelSize::LargeV2 => "ggml-large-v2.bin",
             ModelSize::LargeV3 => "ggml-large-v3.bin",
+            ModelSize::ParakeetV3 => PARAKEET_V3_FILENAME,
         }
         .to_string()
     }
+
+    pub fn is_parakeet(&self) -> bool {
+        matches!(self, ModelSize::ParakeetV3)
+    }
 }
+
+/// NVIDIA's Parakeet TDT 0.6B v3 (CC BY 4.0), converted to GGUF with
+/// transcribe.cpp and quantized to Q8_0.
+pub const PARAKEET_V3_FILENAME: &str = "parakeet-tdt-0.6b-v3-Q8_0.gguf";
 
 impl std::str::FromStr for ModelSize {
     type Err = anyhow::Error;
@@ -150,6 +181,7 @@ impl std::str::FromStr for ModelSize {
             "large" => Ok(ModelSize::Large),
             "large-v2" => Ok(ModelSize::LargeV2),
             "large-v3" => Ok(ModelSize::LargeV3),
+            "parakeet-v3" => Ok(ModelSize::ParakeetV3),
             _ => Err(anyhow::anyhow!("Unknown model size: {}", s)),
         }
     }
@@ -165,6 +197,7 @@ impl std::fmt::Display for ModelSize {
             ModelSize::Large => write!(f, "large"),
             ModelSize::LargeV2 => write!(f, "large-v2"),
             ModelSize::LargeV3 => write!(f, "large-v3"),
+            ModelSize::ParakeetV3 => write!(f, "parakeet-v3"),
         }
     }
 }
@@ -186,6 +219,114 @@ pub fn recommended_model() -> ModelSize {
             (false, _) => ModelSize::Tiny,
         }
     })
+}
+
+/// The most header bytes [`file_architecture`] reads.
+const HEADER_LIMIT: u64 = 16 << 20;
+
+/// The longest GGUF key or architecture name that [`file_architecture`] reads.
+const NAME_LIMIT: u64 = 256;
+
+const GGUF_STRING: u32 = 8;
+const GGUF_ARRAY: u32 = 9;
+
+/// The architecture of a model file without a model load: the
+/// `general.architecture` of a GGUF file, or `whisper` for the ggml `.bin`
+/// format of whisper.cpp. `None` when the file is missing or is neither.
+pub fn file_architecture(path: &Path) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    architecture_in(&mut std::io::BufReader::new(file).take(HEADER_LIMIT))
+}
+
+fn architecture_in(reader: &mut impl Read) -> Option<String> {
+    let mut magic = [0; 4];
+    reader.read_exact(&mut magic).ok()?;
+    match &magic {
+        b"lmgg" => return Some("whisper".to_string()),
+        b"GGUF" => {},
+        _ => return None,
+    }
+    // Version 1 used 32-bit counts.
+    if read_u32(reader)? < 2 {
+        return None;
+    }
+    let _tensors = read_u64(reader)?;
+    let pairs = read_u64(reader)?;
+    for _ in 0..pairs {
+        let key = read_name(reader)?;
+        let kind = read_u32(reader)?;
+        if key == "general.architecture" {
+            return if kind == GGUF_STRING {
+                read_name(reader)
+            } else {
+                None
+            };
+        }
+        skip_value(reader, kind)?;
+    }
+    None
+}
+
+fn read_u32(reader: &mut impl Read) -> Option<u32> {
+    let mut bytes = [0; 4];
+    reader.read_exact(&mut bytes).ok()?;
+    Some(u32::from_le_bytes(bytes))
+}
+
+fn read_u64(reader: &mut impl Read) -> Option<u64> {
+    let mut bytes = [0; 8];
+    reader.read_exact(&mut bytes).ok()?;
+    Some(u64::from_le_bytes(bytes))
+}
+
+fn read_name(reader: &mut impl Read) -> Option<String> {
+    let len = read_u64(reader)?;
+    if len > NAME_LIMIT {
+        return None;
+    }
+    let mut bytes = vec![0; len as usize];
+    reader.read_exact(&mut bytes).ok()?;
+    String::from_utf8(bytes).ok()
+}
+
+fn skip(reader: &mut impl Read, bytes: u64) -> Option<()> {
+    let skipped = std::io::copy(&mut reader.by_ref().take(bytes), &mut std::io::sink()).ok()?;
+    (skipped == bytes).then_some(())
+}
+
+/// The bytes of one GGUF value of a fixed-size type.
+fn scalar_size(kind: u32) -> Option<u64> {
+    match kind {
+        0 | 1 | 7 => Some(1),
+        2 | 3 => Some(2),
+        4..=6 => Some(4),
+        10..=12 => Some(8),
+        _ => None,
+    }
+}
+
+fn skip_value(reader: &mut impl Read, kind: u32) -> Option<()> {
+    match kind {
+        GGUF_STRING => {
+            let len = read_u64(reader)?;
+            skip(reader, len)
+        },
+        GGUF_ARRAY => {
+            let element = read_u32(reader)?;
+            let count = read_u64(reader)?;
+            if let Some(size) = scalar_size(element) {
+                return skip(reader, size.checked_mul(count)?);
+            }
+            if element != GGUF_STRING {
+                return None;
+            }
+            for _ in 0..count {
+                skip_value(reader, GGUF_STRING)?;
+            }
+            Some(())
+        },
+        kind => skip(reader, scalar_size(kind)?),
+    }
 }
 
 pub struct ModelManager {
@@ -300,6 +441,8 @@ impl ModelManager {
                 ),
             },
         );
+
+        models.insert(ModelSize::ParakeetV3, parakeet_v3_model());
 
         models
     }
@@ -555,7 +698,6 @@ impl ModelManager {
     /// Computes the SHA256 checksum of a file
     fn compute_sha256(path: &Path) -> Result<String> {
         use std::fmt::Write;
-        use std::io::Read;
 
         let mut file =
             std::fs::File::open(path).context("Failed to open file for checksum computation")?;
@@ -882,6 +1024,32 @@ mod tests {
     }
 
     #[test]
+    fn parakeet_comes_from_the_hush_model_repo() {
+        let size: ModelSize = "parakeet-v3".parse().unwrap();
+        assert_eq!(size, ModelSize::ParakeetV3);
+        assert_eq!(size.to_string(), "parakeet-v3");
+        assert!(size.is_parakeet());
+        assert!(!ModelSize::Base.is_parakeet());
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        let info = manager.get_model_info(&size).unwrap();
+        assert_eq!(info.filename, size.filename());
+        assert_eq!(
+            ModelManager::download_url(info),
+            "https://huggingface.co/collectivecontext/hush-models/resolve/main/parakeet-tdt-0.6b-v3-Q8_0.gguf"
+        );
+        assert_eq!(info.expected_size, 739_508_576);
+        assert_eq!(
+            info.sha256.as_deref(),
+            Some("5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7")
+        );
+        assert_eq!(PARAKEET_V3_LANGUAGES.len(), 25);
+        assert!(PARAKEET_V3_LANGUAGES
+            .iter()
+            .all(|code| crate::transcription::Language::parse(code).is_some()));
+    }
+
+    #[test]
     fn download_url_points_at_the_whisper_cpp_catalogue() {
         let temp_dir = TempDir::new().unwrap();
         let manager = ModelManager::new(temp_dir.path()).unwrap();
@@ -940,5 +1108,91 @@ mod tests {
             large_v3_info.sha256.as_ref().unwrap(),
             "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2"
         );
+    }
+
+    fn gguf_string(bytes: &mut Vec<u8>, text: &str) {
+        bytes.extend((text.len() as u64).to_le_bytes());
+        bytes.extend(text.as_bytes());
+    }
+
+    /// A GGUF v3 header with no tensors, whose pairs come from `pairs`.
+    fn gguf(pairs: u64, write: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend(3u32.to_le_bytes());
+        bytes.extend(0u64.to_le_bytes());
+        bytes.extend(pairs.to_le_bytes());
+        write(&mut bytes);
+        bytes
+    }
+
+    #[test]
+    fn the_architecture_comes_from_the_gguf_header() {
+        let parakeet = gguf(1, |bytes| {
+            gguf_string(bytes, "general.architecture");
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            gguf_string(bytes, "parakeet");
+        });
+        assert_eq!(
+            architecture_in(&mut parakeet.as_slice()).as_deref(),
+            Some("parakeet")
+        );
+
+        let later = gguf(4, |bytes| {
+            gguf_string(bytes, "general.alignment");
+            bytes.extend(4u32.to_le_bytes());
+            bytes.extend(32u32.to_le_bytes());
+            gguf_string(bytes, "general.name");
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            gguf_string(bytes, "Whisper Base");
+            gguf_string(bytes, "tokenizer.tokens");
+            bytes.extend(GGUF_ARRAY.to_le_bytes());
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            bytes.extend(2u64.to_le_bytes());
+            gguf_string(bytes, "hello");
+            gguf_string(bytes, "world");
+            gguf_string(bytes, "general.architecture");
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            gguf_string(bytes, "whisper");
+        });
+        assert_eq!(
+            architecture_in(&mut later.as_slice()).as_deref(),
+            Some("whisper"),
+            "the pairs before it are skipped"
+        );
+    }
+
+    #[test]
+    fn a_ggml_bin_is_whisper_and_other_files_have_no_architecture() {
+        let mut bin = b"lmgg".to_vec();
+        bin.extend(51_865u32.to_le_bytes());
+        assert_eq!(
+            architecture_in(&mut bin.as_slice()).as_deref(),
+            Some("whisper")
+        );
+
+        assert_eq!(architecture_in(&mut &b"PK\x03\x04"[..]), None, "a zip");
+        assert_eq!(architecture_in(&mut &b"GG"[..]), None, "too short");
+        let no_name = gguf(1, |bytes| {
+            gguf_string(bytes, "general.name");
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            gguf_string(bytes, "Whisper Base");
+        });
+        assert_eq!(architecture_in(&mut no_name.as_slice()), None);
+        let cut = gguf(1, |bytes| gguf_string(bytes, "general.archi"));
+        assert_eq!(architecture_in(&mut cut.as_slice()), None, "a cut file");
+    }
+
+    #[test]
+    fn a_file_on_disk_names_its_architecture() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("model.gguf");
+        assert_eq!(file_architecture(&path), None, "a missing file");
+        let parakeet = gguf(1, |bytes| {
+            gguf_string(bytes, "general.architecture");
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            gguf_string(bytes, "parakeet");
+        });
+        std::fs::write(&path, parakeet).unwrap();
+        assert_eq!(file_architecture(&path).as_deref(), Some("parakeet"));
     }
 }

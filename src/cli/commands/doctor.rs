@@ -12,8 +12,12 @@ use crate::text::WindowProvider;
 use crate::text_processing::hook::{self, Program};
 use crate::transcription::cpu;
 use crate::transcription::device::GpuAvailability;
-use crate::transcription::gpu_fallback::GpuFailure;
-use crate::transcription::models::{recommended_model, ModelManager, ModelSize};
+use crate::transcription::engine::local_model_path;
+use crate::transcription::gpu_fallback::GpuFailures;
+use crate::transcription::models::{
+    recommended_model, ModelManager, ModelSize, PARAKEET_V3_LANGUAGES,
+};
+use crate::transcription::Family;
 use crate::AudioCapture;
 use anyhow::Result;
 use std::fmt;
@@ -128,9 +132,15 @@ pub async fn checks() -> Vec<Check> {
                 .and_then(ModelManager::vad_model_path)
                 .is_some(),
         ));
-        let limits_detection = !config.transcription.detect_languages.is_empty();
+        let parakeet = is_parakeet(
+            &config.transcription,
+            Family::of_file(&local_model_path(&config.transcription, &models_dir)),
+        );
+        checks.extend(parakeet_language_check(&config.transcription, parakeet));
+        let limits_detection = !config.transcription.detect_languages.is_empty() && !parakeet;
         checks.extend(langid_check(
             &config.transcription,
+            parakeet,
             limits_detection
                 && manager
                     .as_ref()
@@ -141,10 +151,10 @@ pub async fn checks() -> Vec<Check> {
         if cpu_supported {
             checks.push(gpu_check(&config));
         }
-        let failure = GpuFailure::path();
+        let failures = GpuFailures::path();
         checks.extend(gpu_failure_report(
-            GpuFailure::load_from(&failure).as_ref(),
-            &failure,
+            &GpuFailures::load_from(&failures),
+            &failures,
         ));
     }
     checks.push(microphone_check(&config));
@@ -262,12 +272,53 @@ fn download_command(config: &TranscriptionConfig) -> String {
     format!("hush models download {}", size)
 }
 
+/// Whether the model that loads is Parakeet: the `family` of its file, or
+/// `model_size` when the file is missing or unreadable. A `model_path` set by
+/// hand can name a file of another family than `model_size`.
+fn is_parakeet(config: &TranscriptionConfig, family: Option<Family>) -> bool {
+    match family {
+        Some(family) => family == Family::Parakeet,
+        None => config
+            .model_size
+            .parse::<ModelSize>()
+            .is_ok_and(|size| size.is_parakeet()),
+    }
+}
+
+/// A line only when Parakeet is the model and `language` names a language
+/// that Parakeet does not know: Parakeet ignores the setting and picks among
+/// its own languages.
+fn parakeet_language_check(config: &TranscriptionConfig, parakeet: bool) -> Option<Check> {
+    let language = config.language.trim();
+    if !parakeet || language == "auto" || PARAKEET_V3_LANGUAGES.contains(&language) {
+        return None;
+    }
+    Some(Check::warn(
+        "Language",
+        format!(
+            "Parakeet does not know {}; it picks among its 25 European languages",
+            language
+        ),
+        "choose a Whisper model for this language: hush models set base",
+    ))
+}
+
 /// A line only when `detect_languages` limits detection, which needs the
 /// language-ID model.
-fn langid_check(config: &TranscriptionConfig, model_present: bool) -> Option<Check> {
+fn langid_check(
+    config: &TranscriptionConfig,
+    parakeet: bool,
+    model_present: bool,
+) -> Option<Check> {
     const NAME: &str = "Language detection";
     if config.detect_languages.is_empty() {
         return None;
+    }
+    if parakeet {
+        return Some(Check::ok(
+            NAME,
+            "Parakeet tells its own languages apart, so detect_languages is not used",
+        ));
     }
     let languages = config.detect_languages.join(", ");
     if model_present {
@@ -367,20 +418,26 @@ fn gpu_check(config: &Config) -> Check {
     }
 }
 
-/// A line only when a GPU failed a take and Hush keeps it on the CPU.
-fn gpu_failure_report(record: Option<&GpuFailure>, path: &Path) -> Option<Check> {
-    let record = record?;
-    Some(Check::warn(
-        "GPU failure",
-        format!(
-            "{} via {} failed a take with driver {}, so Whisper uses the CPU until the driver changes",
-            record.gpu, record.backend, record.driver
-        ),
-        format!(
-            "rm {} && hush daemon restart (tries the GPU again)",
-            path.display()
-        ),
-    ))
+/// A line for each model family that failed a take on a GPU and that Hush
+/// keeps on the CPU.
+fn gpu_failure_report(records: &GpuFailures, path: &Path) -> Vec<Check> {
+    records
+        .iter()
+        .map(|record| {
+            Check::warn(
+                "GPU failure",
+                format!(
+                    "{} via {} failed a {} take with driver {}, so {} uses the CPU until the \
+                     driver changes",
+                    record.gpu, record.backend, record.family, record.driver, record.family
+                ),
+                format!(
+                    "rm {} && hush daemon restart (tries the GPU again)",
+                    path.display()
+                ),
+            )
+        })
+        .collect()
 }
 
 fn microphone_check(config: &Config) -> Check {
@@ -819,15 +876,60 @@ mod tests {
     #[test]
     fn the_language_line_shows_only_when_detection_is_limited() {
         let mut config = Config::defaults().unwrap().transcription;
-        assert!(langid_check(&config, false).is_none());
+        assert!(langid_check(&config, false, false).is_none());
         config.detect_languages = vec!["en".to_string(), "de".to_string()];
-        let missing = langid_check(&config, false).unwrap();
+        let missing = langid_check(&config, false, false).unwrap();
         assert_eq!(missing.level, Level::Warn);
         assert_eq!(missing.fix.as_deref(), Some("hush models download base"));
         assert!(missing.detail.contains("en, de"), "{}", missing.detail);
-        let present = langid_check(&config, true).unwrap();
+        let present = langid_check(&config, false, true).unwrap();
         assert_eq!(present.level, Level::Ok);
         assert!(present.detail.contains("en, de"), "{}", present.detail);
+    }
+
+    #[test]
+    fn parakeet_warns_about_a_language_it_lacks_and_skips_language_id() {
+        let mut config = Config::defaults().unwrap().transcription;
+        config.language = "de".to_string();
+        assert!(
+            parakeet_language_check(&config, true).is_none(),
+            "German is a Parakeet language"
+        );
+        config.language = "auto".to_string();
+        assert!(parakeet_language_check(&config, true).is_none());
+        config.language = "ja".to_string();
+        let check = parakeet_language_check(&config, true).unwrap();
+        assert_eq!(check.level, Level::Warn);
+        assert!(
+            check.detail.contains("does not know ja"),
+            "{}",
+            check.detail
+        );
+        assert!(
+            parakeet_language_check(&config, false).is_none(),
+            "Whisper knows Japanese"
+        );
+
+        config.detect_languages = vec!["en".to_string(), "de".to_string()];
+        let line = langid_check(&config, true, false).unwrap();
+        assert_eq!(line.level, Level::Ok, "no language-ID model is needed");
+        assert!(line.detail.contains("not used"), "{}", line.detail);
+    }
+
+    #[test]
+    fn the_model_file_decides_parakeet_over_the_model_name() {
+        let mut config = Config::defaults().unwrap().transcription;
+        assert!(!is_parakeet(&config, None));
+        assert!(
+            is_parakeet(&config, Some(Family::Parakeet)),
+            "a Parakeet file set by hand under the name base"
+        );
+        config.model_size = "parakeet-v3".to_string();
+        assert!(is_parakeet(&config, None), "the file is missing");
+        assert!(
+            !is_parakeet(&config, Some(Family::Whisper)),
+            "a Whisper file set by hand under the name parakeet-v3"
+        );
     }
 
     #[test]
@@ -918,19 +1020,37 @@ mod tests {
     #[test]
     fn a_remembered_gpu_failure_names_the_file_to_delete() {
         let path = Path::new("/home/me/.local/state/hush/gpu-failure.json");
-        assert!(gpu_failure_report(None, path).is_none());
+        let mut records = GpuFailures::default();
+        assert!(gpu_failure_report(&records, path).is_empty());
 
-        let record = GpuFailure {
+        let record = crate::transcription::gpu_fallback::GpuFailure {
             gpu: "NVIDIA GeForce RTX 4080".to_string(),
             backend: "Vulkan".to_string(),
             driver: "NVIDIA 580.95.05".to_string(),
+            family: "Parakeet".to_string(),
         };
-        let check = gpu_failure_report(Some(&record), path).unwrap();
+        records.insert(record.clone());
+        records.insert(crate::transcription::gpu_fallback::GpuFailure {
+            family: "Whisper".to_string(),
+            ..record
+        });
+        let lines = gpu_failure_report(&records, path);
+        assert_eq!(lines.len(), 2, "a line for each family");
+        let check = lines
+            .into_iter()
+            .find(|line| line.detail.contains("Parakeet"))
+            .unwrap();
         assert_eq!(check.level, Level::Warn);
         assert!(
             check.detail.starts_with(
-                "NVIDIA GeForce RTX 4080 via Vulkan failed a take with driver NVIDIA 580.95.05"
+                "NVIDIA GeForce RTX 4080 via Vulkan failed a Parakeet take with driver \
+                 NVIDIA 580.95.05"
             ),
+            "{}",
+            check.detail
+        );
+        assert!(
+            check.detail.contains("so Parakeet uses the CPU"),
             "{}",
             check.detail
         );
