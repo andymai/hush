@@ -76,7 +76,7 @@ src/
 ├── text/           # uinput typing, clipboard paste fallback, window detection (X11, Hyprland, Sway)
 ├── hotkey/         # Hotkey combination parser, evdev backend, X11 fallback
 ├── overlay/        # egui floating window UI
-├── gui/            # eframe window (`hush settings`): own title bar and sidebar (chrome.rs), controls (widgets.rs), palette, fonts, and sizes (theme.rs), pages in gui/pages, evdev key capture, mic level meter
+├── gui/            # eframe window (`hush settings`): own title bar and sidebar (chrome.rs), controls (widgets.rs), save on each change and one debounced daemon restart (autosave.rs), palette, fonts, and sizes (theme.rs), pages in gui/pages, evdev key capture, mic level meter
 ├── tray/           # StatusNotifierItem panel icon and the Hush mark
 ├── config/         # TOML settings
 └── logging.rs      # Structured tracing with request correlation

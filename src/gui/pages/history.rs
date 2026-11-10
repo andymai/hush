@@ -7,8 +7,8 @@ use crate::config::settings::MAX_KEEP_AUDIO_DAYS;
 use crate::gui::icons;
 use crate::gui::theme::{self, palette};
 use crate::gui::widgets::{
-    self, chip, empty, icon_button, intro, number, row, section, switch, switch_row, text_area,
-    Button, Field, Size, Variant,
+    self, chip, empty, icon_button, intro, parse_number, row, section, setting_field, switch,
+    switch_row, text_area, Button, Field, FieldKind, FieldOutcome, Size, Variant,
 };
 use crate::gui::Gui;
 use crate::ipc::{client, DaemonCommand};
@@ -75,6 +75,8 @@ pub struct HistoryView {
     filter: String,
     shown: usize,
     confirm_clear: bool,
+    /// Keep the audio was turned off, and waits for the deletion to be confirmed
+    confirm_audio_off: bool,
     /// The last number of days chosen, for the switch to restore
     days: u64,
     playback: Option<Playback>,
@@ -544,7 +546,8 @@ fn save_fix(gui: &mut Gui) {
 
 /// Learn the term as `hush learn` does: write it into the vocabulary file,
 /// then tell a running daemon, which reloads the file. The window's copy of
-/// the vocabulary gets the term too, so a later Save keeps it.
+/// the vocabulary and its saved copy get the term too, because the file has
+/// it already and the daemon needs no restart.
 fn learn_term(gui: &mut Gui, term: &str) {
     let term = match learn::learn_at(&DomainVocabulary::default_path(), term) {
         Ok(term) => term,
@@ -577,7 +580,8 @@ fn retention_row(gui: &mut Gui, ui: &mut egui::Ui) {
     let description = if days > 0 {
         format!(
             "Hush keeps the audio of each take for {} days, in files only you can read. \
-             Play it or transcribe it again below.",
+             Play it or transcribe it again below. A smaller number deletes the older \
+             audio at once.",
             days
         )
     } else {
@@ -587,29 +591,68 @@ fn retention_row(gui: &mut Gui, ui: &mut egui::Ui) {
             store::RECOVERY_DAYS
         )
     };
-    let caution = (days == 0 && gui.saved.history.keep_audio_days > 0)
-        .then_some("Saving deletes the audio that Hush kept.");
+    let confirming = gui.history.confirm_audio_off;
+    let caution = confirming.then_some("Turning this off deletes the audio that Hush kept.");
+    let key = "history.keep_audio";
+    let reserve = if confirming {
+        RETENTION_CONTROLS + 40.0
+    } else if days > 0 {
+        RETENTION_CONTROLS
+    } else {
+        36.0
+    };
     ui.add_enabled_ui(gui.config.history.enabled, |ui| {
-        row("history.keep_audio", "Keep the audio")
+        row(key, "Keep the audio")
             .describe(&description)
             .caution(caution)
-            .reserve(if days > 0 { RETENTION_CONTROLS } else { 36.0 })
+            .reserve(reserve)
             .show(ui, |ui| {
+                if confirming {
+                    let delete = Button::new("Delete the audio")
+                        .icon(icons::TRASH)
+                        .variant(Variant::Danger);
+                    if ui.add(delete).clicked() {
+                        gui.history.confirm_audio_off = false;
+                        gui.config.history.keep_audio_days = 0;
+                    }
+                    if ui.add(Button::new("Keep it")).clicked() {
+                        gui.history.confirm_audio_off = false;
+                    }
+                    return;
+                }
                 let mut on = days > 0;
                 if switch(ui, &mut on).changed() {
-                    gui.config.history.keep_audio_days = if on {
-                        Some(gui.history.days)
+                    if on {
+                        gui.config.history.keep_audio_days = Some(gui.history.days)
                             .filter(|days| *days > 0)
-                            .unwrap_or(DEFAULT_KEEP_DAYS)
+                            .unwrap_or(DEFAULT_KEEP_DAYS);
+                    } else if gui.history.audio.is_empty() {
+                        gui.config.history.keep_audio_days = 0;
                     } else {
-                        0
-                    };
+                        gui.history.confirm_audio_off = true;
+                    }
                 }
-                if on {
-                    ui.add_space(8.0);
-                    let mut chosen = gui.config.history.keep_audio_days;
-                    if number(ui, &mut chosen, 1..=MAX_KEEP_AUDIO_DAYS, "days").changed() {
-                        gui.config.history.keep_audio_days = chosen;
+                if !on {
+                    return;
+                }
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("days")
+                        .font(theme::mono(theme::MONO))
+                        .color(palette(ui.ctx()).muted),
+                );
+                let saved = days.to_string();
+                let outcome = setting_field(ui, key, &saved, "", FieldKind::Number, false);
+                if let FieldOutcome::Commit(commit) = outcome {
+                    match parse_number(&commit.text, &(1..=MAX_KEEP_AUDIO_DAYS)) {
+                        Ok(chosen) => {
+                            if let Err(problem) =
+                                gui.try_set(|config| config.history.keep_audio_days = chosen)
+                            {
+                                commit.reject(ui.ctx(), problem);
+                            }
+                        },
+                        Err(problem) => commit.reject(ui.ctx(), problem),
                     }
                 }
             });

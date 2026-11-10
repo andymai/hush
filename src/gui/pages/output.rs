@@ -3,10 +3,10 @@
 
 use crate::config::settings::MAX_TYPING_DELAY_MS;
 use crate::gui::icons;
+use crate::gui::pages::number_setting;
 use crate::gui::theme::FIELD_WIDTH;
 use crate::gui::widgets::{
-    dropdown, icon_button, intro, list, list_item, number, option, row, section, submitted, Button,
-    Field,
+    dropdown, icon_button, intro, list, list_item, option, row, section, submitted, Button, Field,
 };
 use crate::gui::Gui;
 use crate::text::InsertionMethod;
@@ -33,15 +33,16 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                 }
             });
         });
-    row("output.typing_delay", "Between keystrokes")
-        .describe("Raise it if an application drops letters.")
-        .reserve(110.0)
-        .show(ui, |ui| {
-            let mut delay = gui.config.insertion.typing_delay_ms;
-            if number(ui, &mut delay, 0..=MAX_TYPING_DELAY_MS, "ms").changed() {
-                gui.config.insertion.typing_delay_ms = delay;
-            }
-        });
+    number_setting(
+        gui,
+        ui,
+        row("output.typing_delay", "Between keystrokes")
+            .describe("Raise it if an application drops letters.")
+            .reserve(110.0),
+        0..=MAX_TYPING_DELAY_MS,
+        "ms",
+        |config| &mut config.insertion.typing_delay_ms,
+    );
     by_application(gui, ui);
 }
 

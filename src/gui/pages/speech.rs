@@ -2,14 +2,15 @@
 //! transcription runs, the model, the language and the languages detection
 //! may pick, the GPU, the microphone, and how long a recording may run.
 
-use crate::config::server;
 use crate::config::settings::{TranscriptionBackend, TranscriptionConfig};
+use crate::config::{server, Config};
 use crate::gui::icons;
 use crate::gui::meter::{self, Meter};
+use crate::gui::pages::text_setting;
 use crate::gui::theme::{palette, FIELD_WIDTH};
 use crate::gui::widgets::{
     dropdown, icon_button, list, list_item, meter as level_meter, option, row, section, stepper,
-    switch_row, value_field, Button,
+    switch_row, Button,
 };
 use crate::gui::{megabytes, Gui};
 use crate::transcription::device::GpuAvailability;
@@ -100,21 +101,25 @@ fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
         .reserve(0.0)
         .show(ui, |_| {});
 
-    let (model, placeholder) = match backend {
+    let (slot, placeholder): (fn(&mut Config) -> &mut String, &str) = match backend {
         TranscriptionBackend::Groq => (
-            &mut gui.config.transcription.groq_model,
+            |config| &mut config.transcription.groq_model,
             "whisper-large-v3-turbo",
         ),
         TranscriptionBackend::OpenAi => (
-            &mut gui.config.transcription.openai_model,
+            |config| &mut config.transcription.openai_model,
             "gpt-4o-mini-transcribe",
         ),
         TranscriptionBackend::Local | TranscriptionBackend::OpenAiCompatible => return,
     };
     let title = format!("{} model", service);
-    row("speech.cloud_model", &title).show(ui, |ui| {
-        value_field(ui, model, placeholder);
-    });
+    text_setting(
+        gui,
+        ui,
+        row("speech.cloud_model", &title),
+        placeholder,
+        slot,
+    );
 }
 
 fn server_settings(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -124,22 +129,21 @@ fn server_settings(gui: &mut Gui, ui: &mut egui::Ui) {
         .describe(&description)
         .reserve(0.0)
         .show(ui, |_| {});
-    row("speech.server_url", "Server address")
-        .describe("Hush adds /v1/audio/transcriptions when the address does not end with it.")
-        .show(ui, |ui| {
-            value_field(
-                ui,
-                &mut gui.config.transcription.server_url,
-                "http://localhost:8080/v1",
-            );
-        });
-    row("speech.server_model", "Server model").show(ui, |ui| {
-        value_field(
-            ui,
-            &mut gui.config.transcription.server_model,
-            "whisper-large-v3",
-        );
-    });
+    text_setting(
+        gui,
+        ui,
+        row("speech.server_url", "Server address")
+            .describe("Hush adds /v1/audio/transcriptions when the address does not end with it."),
+        "http://localhost:8080/v1",
+        |config| &mut config.transcription.server_url,
+    );
+    text_setting(
+        gui,
+        ui,
+        row("speech.server_model", "Server model"),
+        "whisper-large-v3",
+        |config| &mut config.transcription.server_model,
+    );
 }
 
 /// Whether the OpenAI-compatible server is set up, a title, and where the

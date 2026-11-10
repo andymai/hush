@@ -3,7 +3,7 @@
 
 use crate::config::settings::Appearance;
 use crate::gui::icons;
-use crate::gui::widgets::{row, section, segmented, switch_row, Button};
+use crate::gui::widgets::{row, section, segmented, switch_row, Button, Variant};
 use crate::gui::Gui;
 use std::path::Path;
 
@@ -80,21 +80,36 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                 }
             }
         });
+    let confirming = gui.confirm_reset;
     row("desktop.reset", "Reset everything")
-        .describe("Puts the built-in defaults back on every page. Save makes it permanent.")
-        .reserve(100.0)
+        .describe("Puts the built-in defaults back on every page.")
+        .caution(confirming.then_some("Every setting goes back to its default at once."))
+        .reserve(if confirming { 230.0 } else { 100.0 })
         .show(ui, |ui| {
-            if ui
-                .add(Button::new("Reset").icon(icons::ROTATE_CCW))
-                .clicked()
-            {
+            if !confirming {
+                if ui
+                    .add(Button::new("Reset").icon(icons::ROTATE_CCW))
+                    .clicked()
+                {
+                    gui.confirm_reset = true;
+                }
+                return;
+            }
+            let reset = Button::new("Reset everything")
+                .icon(icons::ROTATE_CCW)
+                .variant(Variant::Danger);
+            if ui.add(reset).clicked() {
+                gui.confirm_reset = false;
                 match crate::config::Config::defaults() {
                     Ok(defaults) => {
                         gui.config = defaults;
-                        gui.say("Reset. Save to keep it.");
+                        gui.say("Every setting is back to its default.");
                     },
                     Err(e) => gui.say(format!("Could not reset: {}", e)),
                 }
+            }
+            if ui.add(Button::new("Keep them")).clicked() {
+                gui.confirm_reset = false;
             }
         });
 }

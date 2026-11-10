@@ -9,7 +9,10 @@ pub mod speech;
 pub mod text;
 
 use super::icons;
+use super::widgets::Row;
 use super::Gui;
+use crate::config::Config;
+use std::ops::RangeInclusive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -76,6 +79,42 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         Page::Output => output::show(gui, ui),
         Page::Desktop => desktop::show(gui, ui),
         Page::History => history::show(gui, ui),
+    }
+}
+
+/// A row with a field for the text setting that `slot` reaches. A commit
+/// saves, or the row shows why it cannot.
+pub fn text_setting(
+    gui: &mut Gui,
+    ui: &mut egui::Ui,
+    row: Row<'_>,
+    placeholder: &str,
+    slot: fn(&mut Config) -> &mut String,
+) {
+    let saved = slot(&mut gui.config).clone();
+    if let Some(commit) = row.value_field(ui, &saved, placeholder) {
+        let text = commit.text.clone();
+        if let Err(problem) = gui.try_set(|config| *slot(config) = text) {
+            commit.reject(ui.ctx(), problem);
+        }
+    }
+}
+
+/// A row with a field for the whole number that `slot` reaches, from
+/// `range`, with `unit` after it.
+pub fn number_setting(
+    gui: &mut Gui,
+    ui: &mut egui::Ui,
+    row: Row<'_>,
+    range: RangeInclusive<u64>,
+    unit: &str,
+    slot: fn(&mut Config) -> &mut u64,
+) {
+    let saved = *slot(&mut gui.config);
+    if let Some((number, commit)) = row.number_field(ui, saved, range, unit) {
+        if let Err(problem) = gui.try_set(|config| *slot(config) = number) {
+            commit.reject(ui.ctx(), problem);
+        }
     }
 }
 

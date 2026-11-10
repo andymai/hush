@@ -4,6 +4,7 @@
 //! It runs in its own process (`hush settings`), which the tray and the
 //! desktop entry launch, so the daemon never has to own a window.
 
+mod autosave;
 mod capture;
 mod chrome;
 mod icons;
@@ -26,6 +27,7 @@ use crate::text::layout::Layout;
 use crate::text_processing::DomainVocabulary;
 use crate::transcription::models::{ModelManager, ModelSize};
 use anyhow::{Context, Result};
+use autosave::{Daemon, Debounce, Feedback, Saved};
 use capture::{Capture, Outcome};
 use meter::Meter;
 use pages::history::HistoryView;
@@ -47,6 +49,8 @@ const TOAST_DURATION: Duration = Duration::from_secs(4);
 const STATUS_TIMEOUT: Duration = Duration::from_millis(300);
 /// How long a restarted daemon gets to load its model and answer again.
 const RESTART_TIMEOUT: Duration = Duration::from_secs(40);
+/// How long the footer says Saved.
+const SAVED_DURATION: Duration = Duration::from_secs(2);
 
 pub const MODEL_ORDER: [ModelSize; 8] = [
     ModelSize::Tiny,
@@ -153,10 +157,22 @@ impl Machine {
     }
 }
 
-/// A daemon restart after Save, watched until the daemon answers again.
+/// A daemon restart after a change, watched until the daemon answers again.
 struct Restart {
     since: Instant,
     went_down: bool,
+}
+
+/// What a restart attempt found when it asked the daemon once more.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Attempt {
+    /// `hush daemon restart` runs
+    Issued,
+    /// A take began after the last poll, so the restart waits
+    Deferred,
+    /// The daemon stopped, so it reads the file when it starts
+    NotRunning,
+    Failed(String),
 }
 
 /// The machine is read on a thread of its own, because the read opens every
@@ -189,9 +205,8 @@ pub struct Gui {
     pub new_style: String,
     /// The style name for the next rewrite key; empty until one is picked.
     pub new_rewrite: String,
-    /// The hotkey field showing a text box instead of a capture button, and
-    /// its chord from before the edit.
-    pub editing_key: Option<(Role, String)>,
+    /// The hotkey field showing a text box instead of a capture button
+    pub editing_key: Option<Role>,
     pub focus_editor: bool,
     /// The keyboard layout when the window opened.
     pub layout: Option<Layout>,
@@ -222,6 +237,18 @@ pub struct Gui {
     /// screenshot
     appearance_override: Option<Appearance>,
     screenshot: Option<Screenshot>,
+    /// The last save, or why the window's settings cannot save
+    pub feedback: Option<Feedback>,
+    /// Settings that failed to save, so they are not tried again each frame
+    rejected: Option<Config>,
+    rejected_vocabulary: Option<DomainVocabulary>,
+    /// Reset everything waits for a second click
+    pub confirm_reset: bool,
+    debounce: Debounce,
+    attempt: Arc<Mutex<Option<Attempt>>>,
+    attempting: bool,
+    /// The window closes once the pending restart is under way
+    closing: bool,
     restart: Option<Restart>,
     poll: Poll,
     last_poll: Instant,
@@ -295,6 +322,14 @@ impl Gui {
                 .as_ref()
                 .and_then(|_| theme::appearance_from_env()),
             screenshot,
+            feedback: None,
+            rejected: None,
+            rejected_vocabulary: None,
+            confirm_reset: false,
+            debounce: Debounce::default(),
+            attempt: Arc::new(Mutex::new(None)),
+            attempting: false,
+            closing: false,
             restart: None,
             poll: Poll::default(),
             last_poll: Instant::now(),
@@ -305,20 +340,63 @@ impl Gui {
         self.toast = Some((message.into(), Instant::now()));
     }
 
-    pub fn unsaved(&self) -> bool {
-        self.config != self.saved || self.vocabulary != self.saved_vocabulary
+    /// Put a change into the window's settings, which save at the end of the
+    /// frame. A change that would stop settings that save from saving is
+    /// refused with the reason, and the settings keep their value.
+    pub fn try_set(&mut self, change: impl FnOnce(&mut Config)) -> Result<(), String> {
+        self.config = checked_change(&self.config, change)?;
+        Ok(())
     }
 
-    /// Write the configuration and the vocabulary, then restart a running
-    /// daemon when it reads something that changed.
-    pub fn save(&mut self) {
-        let daemon_unchanged = !daemon_reads_a_change(&self.saved, &self.config)
-            && self.vocabulary == self.saved_vocabulary;
-        let path = crate::config::paths::config_path();
-        if let Err(e) = self.config.save_to_file(&path) {
-            self.say(format!("Could not save: {}", e));
+    /// Write what changed: the configuration, the vocabulary, or both. A
+    /// change that the daemon reads restarts it after the changes stop.
+    fn persist(&mut self, now: Instant) {
+        if self.screenshot_mode() {
             return;
         }
+        if self.config == self.saved && self.vocabulary == self.saved_vocabulary {
+            if matches!(self.feedback, Some(Feedback::Failed(_))) {
+                self.feedback = None;
+            }
+            self.rejected = None;
+            self.rejected_vocabulary = None;
+        }
+        if self.config != self.saved && self.rejected.as_ref() != Some(&self.config) {
+            self.save_config(now);
+        }
+        if self.vocabulary != self.saved_vocabulary
+            && self.rejected_vocabulary.as_ref() != Some(&self.vocabulary)
+        {
+            match save_vocabulary(&self.vocabulary) {
+                Ok(()) => {
+                    self.saved_vocabulary = self.vocabulary.clone();
+                    self.rejected_vocabulary = None;
+                    self.feedback = Some(Feedback::Saved(now));
+                    self.debounce.change(now);
+                },
+                Err(e) => {
+                    self.rejected_vocabulary = Some(self.vocabulary.clone());
+                    self.feedback = Some(Feedback::Failed(format!(
+                        "Could not save the vocabulary: {:#}",
+                        e
+                    )));
+                },
+            }
+        }
+    }
+
+    fn save_config(&mut self, now: Instant) {
+        let path = crate::config::paths::config_path();
+        let restart = match autosave::save_config(&self.saved, &self.config, |config| {
+            config.save_to_file(&path)
+        }) {
+            Saved::Written { restart } => restart,
+            Saved::Refused(problem) => {
+                self.rejected = Some(self.config.clone());
+                self.feedback = Some(Feedback::Failed(problem));
+                return;
+            },
+        };
         let keep_days = self.config.history.keep_audio_days;
         if keep_days != self.saved.history.keep_audio_days {
             if let Err(e) = crate::audio::store::sweep_now(keep_days) {
@@ -326,31 +404,105 @@ impl Gui {
             }
             self.history.reload();
         }
-        self.saved = self.config.clone();
-        if self.vocabulary != self.saved_vocabulary {
-            if let Err(e) = save_vocabulary(&self.vocabulary) {
-                self.say(format!("Saved the settings, but not the vocabulary: {}", e));
-                return;
-            }
-            self.saved_vocabulary = self.vocabulary.clone();
+        if restart {
+            self.debounce.change(now);
         }
-        if self.machine.running() && !daemon_unchanged {
-            self.run_hush(&["daemon", "restart"], "Applying…");
-            self.restart = Some(Restart {
-                since: Instant::now(),
-                went_down: false,
-            });
-        } else {
-            self.say("Saved.");
+        self.saved = self.config.clone();
+        self.rejected = None;
+        self.feedback = Some(Feedback::Saved(now));
+    }
+
+    /// Restart the daemon once the changes stop and it is idle, and close
+    /// the window once a restart that it owes is under way.
+    fn drive_restart(&mut self, ctx: &egui::Context, now: Instant) {
+        let attempt = self.attempt.lock().take();
+        if let Some(attempt) = attempt {
+            self.attempting = false;
+            match attempt {
+                Attempt::Issued => {
+                    self.restart = Some(Restart {
+                        since: now,
+                        went_down: false,
+                    });
+                },
+                Attempt::Deferred => {
+                    self.debounce.change(now);
+                    self.request_refresh(ctx);
+                },
+                Attempt::NotRunning => {},
+                Attempt::Failed(e) => self.say(format!("Could not restart Hush: {}", e)),
+            }
+        }
+        // A second close while a take keeps the restart waiting closes at
+        // once; the daemon reads the change when it next starts.
+        if ctx.input(|input| input.viewport().close_requested())
+            && self.restart_owed()
+            && !self.closing
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.closing = true;
+        }
+        if self.closing {
+            self.debounce.hurry(now);
+        }
+        let daemon = Daemon::of(
+            self.machine.daemon,
+            self.restart.is_some() || self.attempting,
+        );
+        if self.debounce.fire(now, daemon) {
+            self.attempt_restart(ctx);
+        }
+        if self.closing && !self.restart_owed() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        if let Some(wait) = self.debounce.wait(now) {
+            ctx.request_repaint_after(wait.max(Duration::from_millis(20)));
         }
     }
 
-    pub fn revert(&mut self) {
-        self.config = self.saved.clone();
-        self.vocabulary = self.saved_vocabulary.clone();
-        self.capture = None;
-        self.editing_key = None;
-        self.editing_term = None;
+    /// A change that the daemon reads is saved, but the daemon does not run
+    /// with it yet.
+    fn restart_owed(&self) -> bool {
+        self.debounce.pending() || self.attempting
+    }
+
+    /// Ask the daemon once more on a thread, so a take that began after the
+    /// last poll is not cut, then restart it.
+    fn attempt_restart(&mut self, ctx: &egui::Context) {
+        self.attempting = true;
+        let slot = Arc::clone(&self.attempt);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let attempt = match client::status_blocking(STATUS_TIMEOUT) {
+                None => Attempt::NotRunning,
+                Some(DaemonState::Idle) => {
+                    let binary = std::env::current_exe().unwrap_or_else(|_| "hush".into());
+                    match std::process::Command::new(binary)
+                        .args(["daemon", "restart"])
+                        .spawn()
+                    {
+                        Ok(_) => Attempt::Issued,
+                        Err(e) => Attempt::Failed(e.to_string()),
+                    }
+                },
+                Some(_) => Attempt::Deferred,
+            };
+            *slot.lock() = Some(attempt);
+            ctx.request_repaint();
+        });
+    }
+
+    /// What the footer says about the daemon and a restart that waits.
+    pub fn restart_waits_for_take(&self) -> bool {
+        self.debounce.pending() && self.machine.busy()
+    }
+
+    /// The last save, while the footer shows it.
+    pub fn save_feedback(&self) -> Option<&Feedback> {
+        match &self.feedback {
+            Some(Feedback::Saved(at)) if at.elapsed() > SAVED_DURATION => None,
+            other => other.as_ref(),
+        }
     }
 
     /// Read the machine on a background thread; `take_refresh` picks up the
@@ -394,7 +546,7 @@ impl Gui {
     }
 
     pub fn applying(&self) -> bool {
-        self.restart.is_some()
+        self.restart.is_some() || self.attempting
     }
 
     /// The window draws one frame for a screenshot, so it leaves the
@@ -426,7 +578,7 @@ impl Gui {
         match finished {
             Some((Ok(()), fetched)) => {
                 pages::speech::model_downloaded(&mut self.config.transcription, fetched);
-                self.say("Model ready. Save to use it.");
+                self.say("Model ready.");
                 self.request_refresh(ctx);
             },
             Some((Err(e), _)) => self.say(format!("Download failed: {}", e)),
@@ -462,7 +614,11 @@ impl Gui {
     }
 
     fn poll_interval(&self) -> Duration {
-        if self.applying() || self.capture.is_some() || self.machine.busy() {
+        if self.applying()
+            || self.debounce.pending()
+            || self.capture.is_some()
+            || self.machine.busy()
+        {
             FAST_POLL
         } else {
             POLL_INTERVAL
@@ -470,12 +626,16 @@ impl Gui {
     }
 }
 
-/// Whether `config` differs from `saved` in more than the window's own
-/// settings, which the daemon never reads.
-fn daemon_reads_a_change(saved: &Config, config: &Config) -> bool {
-    let mut window_only = saved.clone();
-    window_only.gui = config.gui.clone();
-    window_only != *config
+/// `config` with `change`, unless the change would stop settings that save
+/// from saving. Settings that already fail to save, such as a server picked
+/// before its address, take any change, so the user can finish them.
+fn checked_change(config: &Config, change: impl FnOnce(&mut Config)) -> Result<Config, String> {
+    let mut changed = config.clone();
+    change(&mut changed);
+    if config.validate().is_ok() {
+        changed.validate().map_err(|e| e.to_string())?;
+    }
+    Ok(changed)
 }
 
 fn load_vocabulary() -> DomainVocabulary {
@@ -593,6 +753,13 @@ impl eframe::App for Gui {
             .show(ctx, |ui| self.page(ui));
         chrome::resize_edges(ctx);
         chrome::window_border(ctx);
+        let now = Instant::now();
+        let before = self.feedback.clone();
+        self.persist(now);
+        if self.feedback != before {
+            ctx.request_repaint();
+        }
+        self.drive_restart(ctx, now);
 
         if let Some(screenshot) = self.screenshot.as_mut() {
             screenshot.step(ctx);
@@ -727,17 +894,30 @@ mod tests {
     }
 
     #[test]
-    fn only_a_setting_the_daemon_reads_restarts_it() {
-        let saved = Config::defaults().unwrap();
-        let mut config = saved.clone();
-        assert!(!daemon_reads_a_change(&saved, &config));
-        config.gui.appearance = Appearance::Dark;
-        assert!(
-            !daemon_reads_a_change(&saved, &config),
-            "the appearance is the window's own"
-        );
-        config.tray.enabled = !config.tray.enabled;
-        assert!(daemon_reads_a_change(&saved, &config));
+    fn an_invalid_value_never_replaces_settings_that_save() {
+        let config = Config::defaults().unwrap();
+        let err =
+            checked_change(&config, |c| c.hotkey.combination = "Ctrl+Bogus".into()).unwrap_err();
+        assert!(err.contains("Bogus"), "{err}");
+        let changed = checked_change(&config, |c| c.hotkey.tap_ms = 0).unwrap();
+        assert_eq!(changed.hotkey.tap_ms, 0);
+    }
+
+    #[test]
+    fn settings_that_cannot_save_yet_take_the_changes_that_finish_them() {
+        let mut config = Config::defaults().unwrap();
+        config.transcription.backend = TranscriptionBackend::OpenAiCompatible;
+        assert!(config.validate().is_err(), "no server address yet");
+        let config = checked_change(&config, |c| {
+            c.transcription.server_url = "http://localhost:8080/v1".into()
+        })
+        .unwrap();
+        assert!(config.validate().is_err(), "no model yet");
+        let config = checked_change(&config, |c| {
+            c.transcription.server_model = "whisper-large-v3".into()
+        })
+        .unwrap();
+        assert!(config.validate().is_ok());
     }
 
     #[test]

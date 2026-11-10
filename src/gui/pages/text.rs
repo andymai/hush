@@ -5,6 +5,7 @@
 use crate::config::settings::LlmSetting;
 use crate::config::{server, transfer, Config};
 use crate::gui::icons;
+use crate::gui::pages::text_setting;
 use crate::gui::theme::{self, palette, FIELD_WIDTH};
 use crate::gui::widgets::{
     self, actions, divider, dropdown, empty, icon_button, intro, list, list_item, option, row,
@@ -123,27 +124,42 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
         });
 
     section(ui, "Language models");
-    row("text.ollama_url", "Ollama server").show(ui, |ui| {
-        value_field(ui, &mut gui.config.llm.ollama_url, "http://localhost:11434");
-    });
-    row("text.ollama_model", "Ollama model").show(ui, |ui| {
-        value_field(ui, &mut gui.config.llm.ollama_model, "llama3.2");
-    });
-    row("text.anthropic_model", "Anthropic model").show(ui, |ui| {
-        value_field(ui, &mut gui.config.llm.anthropic_model, "claude-haiku-4-5");
-    });
-    row("text.server_url", "OpenAI-compatible server")
-        .describe(&server_reach(&gui.config.llm.server_url))
-        .show(ui, |ui| {
-            value_field(
-                ui,
-                &mut gui.config.llm.server_url,
-                "http://localhost:8080/v1",
-            );
-        });
-    row("text.server_model", "OpenAI-compatible model").show(ui, |ui| {
-        value_field(ui, &mut gui.config.llm.server_model, "llama3.2");
-    });
+    text_setting(
+        gui,
+        ui,
+        row("text.ollama_url", "Ollama server"),
+        "http://localhost:11434",
+        |config| &mut config.llm.ollama_url,
+    );
+    text_setting(
+        gui,
+        ui,
+        row("text.ollama_model", "Ollama model"),
+        "llama3.2",
+        |config| &mut config.llm.ollama_model,
+    );
+    text_setting(
+        gui,
+        ui,
+        row("text.anthropic_model", "Anthropic model"),
+        "claude-haiku-4-5",
+        |config| &mut config.llm.anthropic_model,
+    );
+    let reach = server_reach(&gui.config.llm.server_url);
+    text_setting(
+        gui,
+        ui,
+        row("text.server_url", "OpenAI-compatible server").describe(&reach),
+        "http://localhost:8080/v1",
+        |config| &mut config.llm.server_url,
+    );
+    text_setting(
+        gui,
+        ui,
+        row("text.server_model", "OpenAI-compatible model"),
+        "llama3.2",
+        |config| &mut config.llm.server_model,
+    );
 }
 
 fn writing_styles(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -616,9 +632,6 @@ fn import_message(result: ListImport) -> String {
             learn::MAX_CHARS
         ));
     }
-    if result.added > 0 {
-        message.push_str(" Save to keep them.");
-    }
     message
 }
 
@@ -837,7 +850,7 @@ mod tests {
         assert_eq!(
             import_message(result),
             "Added 2 words. Skipped 1 duplicate. Ignored 3 lines longer than \
-             5 words or 64 characters. Save to keep them."
+             5 words or 64 characters."
         );
         assert_eq!(
             import_message(ListImport {

@@ -1,12 +1,14 @@
 //! The window around the pages. The window draws its own frame, so it looks
 //! the same on every desktop: a title bar with the page title and the
 //! minimize, maximize, and close buttons, a sidebar with the Hush mark and
-//! the pages, a footer with Save and Revert, and edges that resize it.
+//! the pages, a footer with what Hush does and how the last save went, and
+//! edges that resize it.
 
+use super::autosave::Feedback;
 use super::icons;
 use super::pages::Page;
 use super::theme::{self, palette};
-use super::widgets::{self, Button, Variant};
+use super::widgets;
 use super::Gui;
 use egui::epaint::{Mesh, RectShape, TessellationOptions, Tessellator};
 use egui::{
@@ -346,58 +348,59 @@ fn nav_item(ui: &mut Ui, icon: char, label: &str, current: bool, alert: bool) ->
     }
 }
 
-/// What Hush is doing, or the last message, at the left; Save and Revert at
-/// the right.
+/// What Hush is doing, or the last message, at the left; how the last save
+/// went at the right.
 pub fn footer(gui: &mut Gui, ui: &mut Ui) {
     let colours = palette(ui.ctx());
+    let small = || theme::sans(theme::SMALL);
     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         if let Some((message, _)) = &gui.toast {
             widgets::icon(ui, icons::INFO, colours.muted);
             let message = message.clone();
-            widgets::text(ui, &message, theme::sans(theme::SMALL), colours.ink);
+            widgets::text(ui, &message, small(), colours.ink);
         } else if gui.applying() {
             ui.add(egui::Spinner::new().size(14.0).color(colours.muted));
-            widgets::text(ui, "Applying…", theme::sans(theme::SMALL), colours.muted);
+            widgets::text(ui, "Applying…", small(), colours.muted);
+        } else if gui.restart_waits_for_take() {
+            widgets::icon(ui, icons::MIC, colours.muted);
+            widgets::text(
+                ui,
+                "Hush applies the change when the take ends",
+                small(),
+                colours.muted,
+            );
         } else if gui.machine.running() {
             widgets::icon(ui, icons::CIRCLE_CHECK, colours.good);
-            widgets::text(
-                ui,
-                "Hush is running",
-                theme::sans(theme::SMALL),
-                colours.muted,
-            );
+            widgets::text(ui, "Hush is running", small(), colours.muted);
         } else {
             widgets::icon(ui, icons::CIRCLE_ALERT, colours.warn);
-            widgets::text(
-                ui,
-                "Hush is not running",
-                theme::sans(theme::SMALL),
-                colours.muted,
-            );
+            widgets::text(ui, "Hush is not running", small(), colours.muted);
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let can_save = gui.unsaved() && !gui.applying();
-            let save = Button::new("Save")
-                .variant(Variant::Primary)
-                .enabled(can_save);
-            if ui
-                .add(save)
-                .on_hover_text("Writes the file, and restarts Hush when a change needs it")
-                .clicked()
-            {
-                gui.save();
-            }
-            if ui.add(Button::new("Revert").enabled(can_save)).clicked() {
-                gui.revert();
-            }
-            if can_save {
-                widgets::text(
-                    ui,
-                    "Unsaved changes",
-                    theme::sans(theme::SMALL),
-                    colours.muted,
-                );
+            match gui.save_feedback() {
+                Some(Feedback::Saved(_)) => {
+                    widgets::text(ui, "Saved", small(), colours.muted);
+                    widgets::icon(ui, icons::CHECK, colours.good);
+                },
+                Some(Feedback::Failed(problem)) => {
+                    let problem = problem.clone();
+                    let room = (ui.available_width() - theme::ICON - 24.0).max(0.0);
+                    ui.scope(|ui| {
+                        ui.set_max_width(room);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&problem)
+                                    .font(small())
+                                    .color(colours.bad),
+                            )
+                            .truncate(),
+                        )
+                        .on_hover_text(&problem);
+                    });
+                    widgets::icon(ui, icons::CIRCLE_X, colours.bad);
+                },
+                None => {},
             }
         });
     });
