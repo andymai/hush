@@ -131,7 +131,10 @@ fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
                     if ui.add(replace).clicked() {
                         gui.replace_config();
                     }
-                    if ui.add(Button::new("Keep the file")).clicked() {
+                    if ui
+                        .add(Button::new("Keep the file").focus_on_jump())
+                        .clicked()
+                    {
                         gui.confirm_replace = false;
                     }
                     return;

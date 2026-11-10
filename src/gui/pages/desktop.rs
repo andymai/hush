@@ -113,7 +113,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                     Err(e) => gui.say(format!("Could not reset: {}", e)),
                 }
             }
-            if ui.add(Button::new("Keep them")).clicked() {
+            if ui.add(Button::new("Keep them").focus_on_jump()).clicked() {
                 gui.confirm_reset = false;
             }
         });

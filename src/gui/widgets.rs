@@ -500,6 +500,7 @@ pub struct Button<'a> {
     variant: Variant,
     size: Size,
     enabled: bool,
+    focus_on_jump: bool,
 }
 
 impl<'a> Button<'a> {
@@ -510,6 +511,7 @@ impl<'a> Button<'a> {
             variant: Variant::Secondary,
             size: Size::Medium,
             enabled: true,
+            focus_on_jump: false,
         }
     }
 
@@ -522,7 +524,16 @@ impl<'a> Button<'a> {
             variant: Variant::Quiet,
             size: Size::Icon,
             enabled: true,
+            focus_on_jump: false,
         }
+    }
+
+    /// A jump from the command palette to the row gives this button the
+    /// focus. Only the safe answer to a question takes it. A jump gives no
+    /// other button the focus, so Enter after a jump never acts.
+    pub fn focus_on_jump(mut self) -> Self {
+        self.focus_on_jump = true;
+        self
     }
 
     pub fn icon(mut self, icon: char) -> Self {
@@ -594,7 +605,9 @@ impl Widget for Button<'_> {
         };
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), sense);
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, self.enabled, self.label));
-        jump::offer(ui, &response);
+        if self.focus_on_jump {
+            jump::offer(ui, &response);
+        }
         if !ui.is_rect_visible(rect) {
             return response;
         }

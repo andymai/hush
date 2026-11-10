@@ -60,6 +60,15 @@ impl Capture {
         Ok(Self { outcome, stop })
     }
 
+    /// A capture that listens with no reader, for tests.
+    #[cfg(test)]
+    pub fn stand_in() -> Self {
+        Self {
+            outcome: Arc::new(Mutex::new(Outcome::Listening)),
+            stop: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     /// The result so far; a chord is handed over once.
     pub fn outcome(&self) -> Outcome {
         let mut outcome = self.outcome.lock();

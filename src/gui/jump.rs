@@ -1,6 +1,11 @@
 //! A jump to a settings row, as the command palette starts one: when the
 //! row next draws, the page scrolls it into view, its first control takes
 //! the keyboard focus, and the row glows for a moment.
+//!
+//! Fields, switches, segmented controls, drop-downs, and key fields offer
+//! themselves for the focus. Buttons do not, because Enter on a focused
+//! button acts, such as Stop. Only the safe answer to a question offers
+//! itself, so a row with only buttons gets no focus.
 
 use super::theme::{palette, RADIUS_SM};
 use egui::{Align, Context, Id, Rect, Response, Ui};
@@ -171,9 +176,20 @@ mod tests {
 
     const ROWS: usize = 40;
 
-    /// A page of rows with a switch each, in a scroll area.
+    /// The controls of row 30: a switch like every other row, two buttons,
+    /// or a question with a danger button and its safe answer.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Controls {
+        Switch,
+        Buttons,
+        Question,
+    }
+
+    /// A page of rows with a switch each, in a scroll area. `ids` holds the
+    /// control of each row that a jump focuses, when one does.
     struct Page {
         ctx: Context,
+        controls: Controls,
         switches: Vec<bool>,
         ids: Vec<Option<Id>>,
         rects: Vec<Rect>,
@@ -181,12 +197,29 @@ mod tests {
         time: f64,
     }
 
+    /// Two buttons in the row `key`, drawn right to left: Stop, then Restart
+    /// or the safe answer. Returns their area and the safe answer.
+    fn buttons_row(ui: &mut Ui, key: &str, controls: Controls) -> (Rect, Option<Id>) {
+        widgets::row(key, "Title").show(ui, |ui| {
+            let stop = ui.add(widgets::Button::new("Stop").variant(widgets::Variant::Danger));
+            let other = if controls == Controls::Question {
+                widgets::Button::new("Keep them").focus_on_jump()
+            } else {
+                widgets::Button::new("Restart")
+            };
+            let other = ui.add(other);
+            let safe = (controls == Controls::Question).then_some(other.id);
+            (stop.rect.union(other.rect), safe)
+        })
+    }
+
     impl Page {
-        fn new() -> Self {
+        fn new(controls: Controls) -> Self {
             let ctx = Context::default();
             theme::install(&ctx);
             Self {
                 ctx,
+                controls,
                 switches: vec![false; ROWS],
                 ids: vec![None; ROWS],
                 rects: vec![Rect::NOTHING; ROWS],
@@ -211,6 +244,12 @@ mod tests {
                     let shown = egui::ScrollArea::vertical().show(ui, |ui| {
                         for index in 0..ROWS {
                             let key = format!("test.{index}");
+                            if index == 30 && self.controls != Controls::Switch {
+                                let (rect, safe) = buttons_row(ui, &key, self.controls);
+                                self.ids[index] = safe;
+                                self.rects[index] = rect;
+                                continue;
+                            }
                             let response = widgets::switch_row(
                                 ui,
                                 &key,
@@ -228,9 +267,44 @@ mod tests {
         }
     }
 
+    /// Jump to row 30, and give the scroll time to end.
+    fn jump_to_row_30(page: &mut Page) {
+        page.frame();
+        assert!(
+            !page.viewport.intersects(page.rects[30]),
+            "row 30 starts out of view"
+        );
+        start(&page.ctx, "test.30");
+        for _ in 0..12 {
+            page.frame();
+        }
+        assert!(
+            page.viewport.contains_rect(page.rects[30]),
+            "{:?} in {:?}",
+            page.rects[30],
+            page.viewport
+        );
+    }
+
+    #[test]
+    fn a_row_with_only_buttons_scrolls_and_glows_with_no_focus() {
+        let mut page = Page::new(Controls::Buttons);
+        jump_to_row_30(&mut page);
+        assert_eq!(page.ctx.memory(|memory| memory.focused()), None);
+        assert_eq!(target(&page.ctx).as_deref(), Some("test.30"), "it glows");
+    }
+
+    #[test]
+    fn a_question_gives_the_focus_to_its_safe_answer() {
+        let mut page = Page::new(Controls::Question);
+        jump_to_row_30(&mut page);
+        assert!(page.ids[30].is_some());
+        assert_eq!(page.ctx.memory(|memory| memory.focused()), page.ids[30]);
+    }
+
     #[test]
     fn a_jump_scrolls_its_row_into_view_and_focuses_its_control() {
-        let mut page = Page::new();
+        let mut page = Page::new(Controls::Switch);
         page.frame();
         assert!(
             !page.viewport.intersects(page.rects[30]),
@@ -256,7 +330,7 @@ mod tests {
 
     #[test]
     fn a_jump_to_a_row_that_never_draws_ends_with_its_glow() {
-        let mut page = Page::new();
+        let mut page = Page::new(Controls::Switch);
         page.frame();
         start(&page.ctx, "test.missing");
         page.frame();

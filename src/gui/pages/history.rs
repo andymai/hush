@@ -311,7 +311,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                 {
                     action = Some(Action::Clear);
                 }
-                if ui.add(Button::new("Keep them")).clicked() {
+                if ui.add(Button::new("Keep them").focus_on_jump()).clicked() {
                     view.confirm_clear = false;
                 }
             } else {

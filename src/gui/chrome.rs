@@ -266,7 +266,7 @@ pub fn sidebar(gui: &mut Gui, ui: &mut Ui) {
             .inner_margin(egui::Margin::same(8.0))
             .show(ui, |ui| {
                 if commands_item(ui).clicked() {
-                    gui.palette.open(ui.ctx());
+                    gui.open_palette(ui.ctx());
                 }
             });
     });
