@@ -4,6 +4,7 @@
 
 use super::combination::KeyCombination;
 use super::{HotkeyAction, HotkeyBindings, HotkeyEvent};
+use crate::text_processing::StyleName;
 use crate::transcription::Language;
 use anyhow::{anyhow, Result};
 use evdev::uinput::VirtualDevice;
@@ -116,6 +117,7 @@ impl HotkeyMatcher {
 pub struct Matchers {
     primary: HotkeyMatcher,
     languages: Vec<(Language, HotkeyMatcher)>,
+    styles: Vec<(StyleName, HotkeyMatcher)>,
     cancel: Option<HotkeyMatcher>,
     actions: Vec<(HotkeyAction, HotkeyMatcher)>,
     command: Option<HotkeyMatcher>,
@@ -130,6 +132,11 @@ impl Matchers {
                 .iter()
                 .map(|(language, combination)| (*language, HotkeyMatcher::new(combination.clone())))
                 .collect(),
+            styles: bindings
+                .styles
+                .iter()
+                .map(|(style, combination)| (*style, HotkeyMatcher::new(combination.clone())))
+                .collect(),
             cancel: bindings.cancel.clone().map(HotkeyMatcher::new),
             actions: bindings
                 .actions
@@ -140,21 +147,22 @@ impl Matchers {
         }
     }
 
-    /// Language chords report their press and release and are swallowed
-    /// like the hotkey. The cancel key and action chords only report their
-    /// press, and are never swallowed.
+    /// Language and style chords report their press and release and are
+    /// swallowed like the hotkey. The cancel key and action chords only
+    /// report their press, and are never swallowed.
     pub fn process(&mut self, code: KeyCode, value: i32) -> Processed {
         let mut processed = self.primary.process(code, value);
         for (language, matcher) in self.languages.iter_mut() {
             let own = matcher.process(code, value);
-            processed.swallow |= own.swallow;
-            if processed.event.is_none() {
-                processed.event = match own.event {
-                    Some(HotkeyEvent::Pressed) => Some(HotkeyEvent::Language(*language, true)),
-                    Some(HotkeyEvent::Released) => Some(HotkeyEvent::Language(*language, false)),
-                    _ => None,
-                };
-            }
+            merge_dictation_key(&mut processed, own, |pressed| {
+                HotkeyEvent::Language(*language, pressed)
+            });
+        }
+        for (style, matcher) in self.styles.iter_mut() {
+            let own = matcher.process(code, value);
+            merge_dictation_key(&mut processed, own, |pressed| {
+                HotkeyEvent::Style(*style, pressed)
+            });
         }
         if let Some(cancel) = self.cancel.as_mut() {
             if cancel.feed(code, value) == Some(HotkeyEvent::Pressed) && processed.event.is_none() {
@@ -182,6 +190,23 @@ impl Matchers {
             }
         }
         processed
+    }
+}
+
+/// Add what a dictation chord's matcher found: it swallows like the
+/// hotkey, and reports its press or release unless an earlier key did.
+fn merge_dictation_key(
+    processed: &mut Processed,
+    own: Processed,
+    event: impl Fn(bool) -> HotkeyEvent,
+) {
+    processed.swallow |= own.swallow;
+    if processed.event.is_none() {
+        processed.event = match own.event {
+            Some(HotkeyEvent::Pressed) => Some(event(true)),
+            Some(HotkeyEvent::Released) => Some(event(false)),
+            _ => None,
+        };
     }
 }
 
@@ -232,6 +257,10 @@ fn bindings_match(keys: &AttributeSetRef<KeyCode>, bindings: &HotkeyBindings) ->
             .languages
             .iter()
             .any(|(_, combination)| device_matches(keys, combination))
+        || bindings
+            .styles
+            .iter()
+            .any(|(_, combination)| device_matches(keys, combination))
 }
 
 /// Whether the device carries the main key of a chord that starts a
@@ -244,6 +273,7 @@ fn carries_dictation_key(device: &Device, bindings: &HotkeyBindings) -> bool {
                 .iter()
                 .map(|(_, combination)| combination),
         )
+        .chain(bindings.styles.iter().map(|(_, combination)| combination))
         .any(|combination| carries_key(device, combination.evdev_key()))
 }
 
@@ -813,6 +843,31 @@ mod tests {
             m.process(KeyCode::KEY_LEFTSHIFT, 0).event,
             Some(HotkeyEvent::Language(german, false)),
             "letting go of the modifier ends the hold"
+        );
+    }
+
+    #[test]
+    fn a_style_chord_works_like_the_hotkey_beside_it() {
+        let verbatim = crate::text_processing::styles::VERBATIM;
+        let bindings = HotkeyBindings::parse("RightAlt", Some("Escape"))
+            .unwrap()
+            .with_language(Language::parse("de").unwrap(), "Shift+RightAlt")
+            .unwrap()
+            .with_style(verbatim, "Super+RightAlt")
+            .unwrap();
+        let mut m = Matchers::new(&bindings);
+        m.process(KeyCode::KEY_LEFTMETA, 1);
+        let press = m.process(KeyCode::KEY_RIGHTALT, 1);
+        assert_eq!(press.event, Some(HotkeyEvent::Style(verbatim, true)));
+        assert!(press.swallow);
+        let release = m.process(KeyCode::KEY_RIGHTALT, 0);
+        assert_eq!(release.event, Some(HotkeyEvent::Style(verbatim, false)));
+        assert!(release.swallow);
+        m.process(KeyCode::KEY_LEFTMETA, 0);
+        assert_eq!(
+            m.process(KeyCode::KEY_RIGHTALT, 1).event,
+            Some(HotkeyEvent::Pressed),
+            "the bare key is still the dictation hotkey"
         );
     }
 

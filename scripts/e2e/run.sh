@@ -505,6 +505,32 @@ case_german_lang() {
   assert_words "$TAKE_TEXT" samsa morgens bett verwandelt
 }
 
+# With llm.provider = "none", a style does not change the text, so the case
+# checks the path of the style: the flag, the socket, and the take. A take
+# through `hush start` is in parts, and the style must reach the joined text.
+# Two copies of the JFK clip with a pause last about 24 s.
+case_style_flag() {
+  local clip=$CASE_DIR/long.wav pause=$CASE_DIR/pause.wav code=0 out parts
+  command -v sox >/dev/null || fail "sox is missing; this case joins clips with it"
+  make_silence_wav 2 "$pause"
+  sox "$SAMPLES/jfk.wav" "$pause" "$SAMPLES/jfk.wav" "$clip"
+  start_daemon
+  out=$(hush_cli start --style nosuch 2>&1) || code=$?
+  log "start --style nosuch: exit $code, $out"
+  assert_exit 2 "$code" "hush start --style nosuch"
+  case "$(hush_cli daemon status)" in
+    *": idle"*) ;;
+    *) fail "hush start --style nosuch started a take" ;;
+  esac
+  record_clip "$clip" --style verbatim
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  assert_words "$TAKE_TEXT" ask country
+  parts=$(grep -o 'ends with [0-9]* parts' "$(hush_log_file)" | grep -o '[0-9]*' | tail -n 1)
+  [ "${parts:-0}" -ge 2 ] || fail "the take was not cut into parts (parts: ${parts:-none})"
+  assert_file "$(hush_log_file)" "The take uses the style verbatim"
+}
+
 case_detect_limited() {
   start_daemon 'transcription.language = "auto"
 transcription.detect_languages = ["en", "de"]'

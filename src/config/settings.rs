@@ -1,6 +1,7 @@
 use crate::config::{paths, server};
 use crate::hotkey::{warnings, HotkeyBackend, HotkeyMode, KeyCombination, Role};
 use crate::text::{InsertionMethod, PasteChord};
+use crate::text_processing::styles::{self, StyleConfig, StyleName};
 use crate::transcription::models::ModelSize;
 use crate::transcription::Language;
 use crate::Result;
@@ -31,6 +32,9 @@ pub struct Config {
     /// LLM polishing and Command Mode
     #[serde(default)]
     pub llm: LlmConfig,
+    /// Writing styles by name, beside the built-in `verbatim`
+    #[serde(default)]
+    pub styles: BTreeMap<String, StyleConfig>,
     /// User commands that change the text
     #[serde(default)]
     pub hooks: HooksConfig,
@@ -511,6 +515,9 @@ pub struct HotkeyConfig {
     /// Dictation chords for one language each, such as `"Shift+RightAlt" = "de"`
     #[serde(default)]
     pub languages: BTreeMap<String, String>,
+    /// Dictation chords for one style each, such as `"Super+RightAlt" = "verbatim"`
+    #[serde(default)]
+    pub styles: BTreeMap<String, String>,
 }
 
 impl HotkeyConfig {
@@ -523,11 +530,12 @@ impl HotkeyConfig {
             Role::Command => &self.command,
             Role::PasteLast => &self.paste_last,
             Role::Learn => &self.learn,
-            Role::Language(_) => "",
+            Role::Language(_) | Role::Style(_) => "",
         }
     }
 
-    /// The chord text of an action in [`Role::ALL`]; `None` for a language.
+    /// The chord text of an action in [`Role::ALL`]; `None` for a language
+    /// or a style.
     pub fn chord_mut(&mut self, role: Role) -> Option<&mut String> {
         match role {
             Role::Dictate => Some(&mut self.combination),
@@ -535,7 +543,7 @@ impl HotkeyConfig {
             Role::Command => Some(&mut self.command),
             Role::PasteLast => Some(&mut self.paste_last),
             Role::Learn => Some(&mut self.learn),
-            Role::Language(_) => None,
+            Role::Language(_) | Role::Style(_) => None,
         }
     }
 
@@ -553,14 +561,28 @@ impl HotkeyConfig {
             .collect()
     }
 
-    /// Every action and every language chord with its chord text: what the
-    /// conflict, AltGr, and typing checks look at.
+    /// Each style chord with its style. An unknown style gets its own error
+    /// from [`Config::validate`].
+    pub fn style_keys(&self) -> Vec<(StyleName, &str)> {
+        self.styles
+            .iter()
+            .filter_map(|(chord, name)| Some((StyleName::parse(name)?, chord.as_str())))
+            .collect()
+    }
+
+    /// Every action, language chord, and style chord with its chord text:
+    /// what the conflict, AltGr, and typing checks look at.
     pub fn bound(&self) -> Vec<(Role, &str)> {
         let mut bound = self.chords().to_vec();
         bound.extend(
             self.language_keys()
                 .into_iter()
                 .map(|(language, chord)| (Role::Language(language), chord)),
+        );
+        bound.extend(
+            self.style_keys()
+                .into_iter()
+                .map(|(style, chord)| (Role::Style(style), chord)),
         );
         bound
     }
@@ -711,6 +733,23 @@ impl Config {
                     chord
                 ));
             }
+        }
+        styles::validate(&self.styles)?;
+        for (chord, name) in &self.hotkey.styles {
+            KeyCombination::parse(chord)
+                .map_err(|e| anyhow::anyhow!("Invalid chord in hotkey.styles: {}", e))?;
+            styles::known(
+                &self.styles,
+                name,
+                &format!("for {} in hotkey.styles", chord),
+            )?;
+        }
+        for (app, name) in &self.profiles.app_styles {
+            styles::known(
+                &self.styles,
+                name,
+                &format!("for {} in profiles.app_styles", app),
+            )?;
         }
         if self.hotkey.tap_ms > 2000 {
             return Err(anyhow::anyhow!(
@@ -1405,6 +1444,96 @@ model_size = "small"
             found[0].to_string(),
             "Type last again and Dictate in German use F13"
         );
+    }
+
+    #[test]
+    fn styles_their_chords_and_the_app_map_are_checked_at_load() {
+        let defaults = Config::defaults().unwrap();
+        assert!(defaults.styles.is_empty());
+        assert!(defaults.hotkey.styles.is_empty());
+        assert!(defaults.profiles.app_styles.is_empty());
+
+        let config = Config::parse_over_defaults(
+            "[styles.casual]\nprompt = \"Brief.\"\n\
+             [styles.raw]\nprompt = \"\"\npolish = false\n\
+             [hotkey]\nstyles = { \"Super+RightAlt\" = \"verbatim\", F14 = \"casual\" }\n\
+             [profiles]\napp_styles = { slack = \"casual\", kitty = \"verbatim\" }\n",
+        )
+        .unwrap();
+        assert_eq!(config.styles["casual"].prompt, "Brief.");
+        assert!(config.styles["casual"].polish, "polish defaults to on");
+        assert!(!config.styles["raw"].polish);
+        let casual = StyleName::parse("casual").unwrap();
+        assert_eq!(
+            config.hotkey.style_keys(),
+            vec![(casual, "F14"), (styles::VERBATIM, "Super+RightAlt")]
+        );
+        let bound = config.hotkey.bound();
+        assert_eq!(bound.len(), 7);
+        assert!(bound.contains(&(Role::Style(styles::VERBATIM), "Super+RightAlt")));
+        assert_eq!(config.profiles.app_style("com.slack.Slack"), Some(casual));
+
+        for (user, needle) in [
+            ("[styles.verbatim]\nprompt = \"x\"\n", "built-in"),
+            ("[styles.Casual]\nprompt = \"x\"\n", "'Casual'"),
+            (
+                "[hotkey]\nstyles = { F14 = \"nosuch\" }\n",
+                "'nosuch' for F14 in hotkey.styles",
+            ),
+            (
+                "[hotkey]\nstyles = { \"Ctrl+Nope\" = \"verbatim\" }\n",
+                "hotkey.styles",
+            ),
+            (
+                "[profiles]\napp_styles = { slack = \"casual\" }\n",
+                "'casual' for slack in profiles.app_styles",
+            ),
+        ] {
+            let err = format!("{:#}", Config::parse_over_defaults(user).unwrap_err());
+            assert!(err.contains(needle), "{user:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_style_chord_conflict_is_no_load_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[hotkey]\ncommand = \"Super+RightAlt\"\nstyles = { \"super+rightalt\" = \"verbatim\" }\n",
+        )
+        .unwrap();
+        let config = Config::load_from(Some(&path)).unwrap();
+        let found = warnings::conflicts(config.hotkey.bound());
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].to_string(),
+            "Command and Dictate in the verbatim style use Super+RightAlt"
+        );
+    }
+
+    #[test]
+    fn styles_survive_a_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut config = Config::defaults().unwrap();
+        config.styles.insert(
+            "formal".to_string(),
+            StyleConfig {
+                prompt: "Formal English.".to_string(),
+                polish: true,
+            },
+        );
+        config
+            .hotkey
+            .styles
+            .insert("Super+RightAlt".to_string(), "formal".to_string());
+        config
+            .profiles
+            .app_styles
+            .insert("slack".to_string(), "verbatim".to_string());
+        config.save_to_file(&path).unwrap();
+        assert_eq!(Config::load_from(Some(&path)).unwrap(), config);
     }
 
     #[test]

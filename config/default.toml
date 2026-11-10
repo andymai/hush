@@ -59,6 +59,9 @@ command = "Ctrl+RightAlt" # Command Mode: hold, speak an instruction, release; t
 # toggle mode, and cancel as the hotkey. The tray menu sets the language of
 # the hotkey until you change it again.
 languages = {} # e.g. { "Shift+RightAlt" = "de", "F13" = "auto" }
+# A dictation key for each writing style (see [styles]), with the same hold,
+# double-tap lock, toggle mode, and cancel as the hotkey.
+styles = {} # e.g. { "Super+RightAlt" = "verbatim" }
 
 [feedback]
 audio_enabled = true # start, stop, cancel, and warning tones
@@ -115,6 +118,11 @@ chat = []
 mail = []
 docs = []
 browser = []
+# A default writing style by window class (see [styles]). A rule names the
+# whole class or its last part after a dot, as in insertion.paste_keys. A
+# style key or `hush start --style` comes first. Hush ignores app_styles when
+# enabled is false.
+app_styles = {} # e.g. { slack = "casual", "org.kde.konsole" = "verbatim" }
 
 [llm]
 # Polishing and Command Mode. auto: a local Ollama server when reachable,
@@ -133,6 +141,19 @@ server_key_env = ""                   # openai-compatible: the variable that hol
 polish = true                         # rewrite every transcript with the LLM; Command Mode works either way
 max_tokens = 400
 temperature = 0.3
+
+[styles]
+# Writing styles for one recording. A style key (hotkey.styles), `hush start
+# --style NAME`, or profiles.app_styles picks one. prompt is one line that
+# Hush adds to the polish prompt next to the tone of the application. polish
+# turns the LLM polish on or off for the recording, whatever llm.polish says
+# (default true). The rule-based cleanup always runs. A name uses lowercase
+# letters, digits, - and _. "verbatim" is built in: it turns polish off, so
+# you cannot use that name.
+# [styles.casual]
+# prompt = "Casual and brief, like a chat message to a friend."
+# [styles.formal]
+# prompt = "Formal English with complete sentences and no contractions."
 
 [hooks]
 # A command that changes each transcript. Hush runs it with sh -c after

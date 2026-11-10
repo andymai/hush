@@ -1,9 +1,12 @@
 //! Per-application tone. The focused window's class (and, inside a browser,
 //! its title) picks an [`AppKind`]; each kind carries a [`TextProfile`] that
 //! shapes the offline cleanup and, when polishing is on, the LLM prompt.
+//! `app_styles` gives an application a default writing style.
 
+use super::styles::StyleName;
 use crate::text::WindowInfo;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -42,6 +45,8 @@ pub struct ProfilesConfig {
     pub mail: Vec<String>,
     pub docs: Vec<String>,
     pub browser: Vec<String>,
+    /// A default style by window class, such as `slack = "casual"`
+    pub app_styles: BTreeMap<String, String>,
 }
 
 impl ProfilesConfig {
@@ -50,6 +55,20 @@ impl ProfilesConfig {
             enabled: true,
             ..Self::default()
         }
+    }
+
+    /// The `app_styles` style for a window class, when profiles are on. A
+    /// rule names the whole class or its last dot-separated part, as in
+    /// `insertion.paste_keys`, and the longer of two matching rules wins.
+    pub fn app_style(&self, class: &str) -> Option<StyleName> {
+        if !self.enabled {
+            return None;
+        }
+        self.app_styles
+            .iter()
+            .filter(|(rule, _)| crate::text::class_matches(rule, class))
+            .max_by_key(|(rule, _)| rule.trim().len())
+            .and_then(|(_, style)| StyleName::parse(style))
     }
 
     fn patterns(&self, kind: AppKind) -> &[String] {
@@ -374,6 +393,32 @@ mod tests {
             assert_eq!(key.as_str(), Some(kind.name()));
         }
         assert_eq!(AppKind::Other.name(), "other");
+    }
+
+    #[test]
+    fn app_styles_name_whole_window_classes() {
+        let mut cfg = ProfilesConfig::defaults();
+        cfg.app_styles = [
+            ("slack", "casual"),
+            ("org.kde.konsole", "verbatim"),
+            ("konsole", "formal"),
+            ("st", "formal"),
+        ]
+        .into_iter()
+        .map(|(rule, style)| (rule.to_string(), style.to_string()))
+        .collect();
+        let name = |s: &str| StyleName::parse(s);
+        assert_eq!(cfg.app_style("com.slack.Slack"), name("casual"));
+        assert_eq!(cfg.app_style("slack\0Slack"), name("casual"));
+        assert_eq!(
+            cfg.app_style("org.kde.konsole"),
+            name("verbatim"),
+            "the longer rule wins"
+        );
+        assert_eq!(cfg.app_style("steam"), None, "st is not steam");
+        assert_eq!(cfg.app_style("firefox"), None);
+        cfg.enabled = false;
+        assert_eq!(cfg.app_style("com.slack.Slack"), None, "profiles are off");
     }
 
     #[test]

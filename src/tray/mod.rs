@@ -151,7 +151,7 @@ impl Tray for HushTray {
         if self.in_take() {
             self.send(SessionCommand::StopRecording);
         } else {
-            self.send(SessionCommand::StartRecording(Trigger::Tray, None));
+            self.send(SessionCommand::StartRecording(Trigger::Tray, None, None));
         }
     }
 
@@ -461,7 +461,7 @@ mod tests {
         idle.activate(0, 0);
         assert_eq!(
             rx.try_recv(),
-            Ok(SessionCommand::StartRecording(Trigger::Tray, None))
+            Ok(SessionCommand::StartRecording(Trigger::Tray, None, None))
         );
 
         let (mut recording, rx) = tray(DaemonState::Recording { elapsed_ms: 0 });

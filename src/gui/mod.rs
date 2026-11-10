@@ -24,7 +24,7 @@ use capture::{Capture, Outcome};
 use meter::Meter;
 use pages::history::HistoryView;
 use pages::hotkeys::KeyTarget;
-use pages::text::TermEdit;
+use pages::text::{StyleDraft, TermEdit};
 use pages::Page;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -175,6 +175,8 @@ pub struct Gui {
     pub capture: Option<(KeyTarget, Capture)>,
     /// The language code for the next language key; empty until one is picked.
     pub new_language: String,
+    /// The style name for the next style key; empty until one is picked.
+    pub new_style: String,
     /// The hotkey field showing a text box instead of a capture button, and
     /// its chord from before the edit.
     pub editing_key: Option<(Role, String)>,
@@ -190,6 +192,8 @@ pub struct Gui {
     pub level_shown: f32,
     pub new_term: String,
     pub editing_term: Option<TermEdit>,
+    /// The form on the Text page that adds or changes a style
+    pub style_draft: StyleDraft,
     /// The plain-text word list that the Text page imports and exports
     pub word_list: String,
     pub new_uinput_app: String,
@@ -239,6 +243,7 @@ impl Gui {
             toast: None,
             capture: None,
             new_language: String::new(),
+            new_style: String::new(),
             editing_key: None,
             focus_editor: false,
             layout: crate::text::layout::current(),
@@ -249,6 +254,7 @@ impl Gui {
             level_shown: 0.0,
             new_term: String::new(),
             editing_term: None,
+            style_draft: StyleDraft::default(),
             word_list: pages::text::DEFAULT_WORD_LIST.to_string(),
             new_uinput_app: String::new(),
             new_clipboard_app: String::new(),
@@ -407,7 +413,7 @@ impl Gui {
                             },
                         }
                     },
-                    KeyTarget::Language(own) => pages::hotkeys::bind_language(self, own, chord),
+                    KeyTarget::Chord(map, own) => pages::hotkeys::bind_chord(self, map, own, chord),
                 }
             },
             Outcome::Ended => self.capture = None,

@@ -3,13 +3,16 @@
 
 use super::utils::print_line;
 use crate::cli::exit::{Exit, ExitStatus};
+use crate::config::Config;
 use crate::ipc::protocol::PRINT_TIMEOUT;
 use crate::ipc::{
     self, client, lock, paths, DaemonCommand, DaemonResponse, DaemonState, TakeResult,
 };
+use crate::text_processing::styles::{self, StyleConfig, StyleName};
 use crate::transcription::Language;
 use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -142,14 +145,29 @@ pub async fn handle_client_command(command: DaemonCommand) -> Result<()> {
     Ok(())
 }
 
-/// `hush start [--lang CODE]` and `hush toggle [--lang CODE]`.
-pub async fn handle_start(toggle: bool, lang: Option<&str>) -> Result<()> {
+/// `hush start [--lang CODE] [--style NAME]` and `hush toggle [--lang CODE]
+/// [--style NAME]`.
+pub async fn handle_start(toggle: bool, lang: Option<&str>, style: Option<&str>) -> Result<()> {
     let language = lang.map(Language::from_code).transpose()?;
     let code = language.map(|language| language.code().to_string());
+    let style = match style {
+        Some(name) => {
+            let user = Config::load().ok().map(|config| config.styles);
+            Some(style_for_start(name, user.as_ref())?)
+        },
+        None => None,
+    };
+    let style_name = style.map(|name| name.to_string());
     let command = if toggle {
-        DaemonCommand::Toggle { language: code }
+        DaemonCommand::Toggle {
+            language: code,
+            style: style_name,
+        }
     } else {
-        DaemonCommand::Start { language: code }
+        DaemonCommand::Start {
+            language: code,
+            style: style_name,
+        }
     };
     let response = client::send(command).await?;
     if !response.ok {
@@ -158,14 +176,36 @@ pub async fn handle_start(toggle: bool, lang: Option<&str>) -> Result<()> {
     if ignored_language(language, &response) {
         return Err(anyhow!(OLD_DAEMON_LANGUAGE));
     }
+    if ignored_style(style, &response) {
+        return Err(anyhow!(OLD_DAEMON_STYLE));
+    }
     println!("{}", state_line(response.state));
     Ok(())
+}
+
+/// The style that `--style` names. A name that the config does not know is
+/// a usage error. Without a readable config, the daemon decides.
+fn style_for_start(name: &str, user: Option<&BTreeMap<String, StyleConfig>>) -> Result<StyleName> {
+    let parsed =
+        StyleName::from_name(name).map_err(|e| Exit::new(ExitStatus::Usage, e.to_string()))?;
+    match user {
+        Some(user) => styles::known(user, name, "for --style")
+            .map(|style| style.name)
+            .map_err(|e| Exit::new(ExitStatus::Usage, e.to_string()).into()),
+        None => Ok(parsed),
+    }
 }
 
 /// A daemon from before `--lang` starts the take in its own language, and
 /// its reply names no language.
 fn ignored_language(asked: Option<Language>, response: &DaemonResponse) -> bool {
     asked.is_some() && response.state == Some(DaemonState::Starting) && response.language.is_none()
+}
+
+/// A daemon from before `--style` starts the take without the style, and
+/// its reply names no style.
+fn ignored_style(asked: Option<StyleName>, response: &DaemonResponse) -> bool {
+    asked.is_some() && response.state == Some(DaemonState::Starting) && response.style.is_none()
 }
 
 fn rejection(response: DaemonResponse) -> String {
@@ -190,6 +230,8 @@ const OLD_DAEMON: &str =
     "The running daemon is older than this client and typed the text. Restart it with: hush daemon restart";
 const OLD_DAEMON_LANGUAGE: &str =
     "The running daemon is older than this client and records in its own language. Restart it with: hush daemon restart";
+const OLD_DAEMON_STYLE: &str =
+    "The running daemon is older than this client and records without the style. Restart it with: hush daemon restart";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -391,6 +433,45 @@ mod tests {
         let stopped = DaemonResponse::ok(DaemonState::Transcribing);
         assert!(
             !ignored_language(german, &stopped),
+            "a toggle that stops a take starts none"
+        );
+    }
+
+    #[test]
+    fn an_unknown_style_is_a_usage_error() {
+        let user: BTreeMap<String, StyleConfig> =
+            [("casual".to_string(), StyleConfig::default())].into();
+        assert_eq!(
+            style_for_start("verbatim", Some(&user)).unwrap(),
+            styles::VERBATIM
+        );
+        assert_eq!(
+            style_for_start("casual", Some(&user)).unwrap().as_str(),
+            "casual"
+        );
+        let error = style_for_start("nosuch", Some(&user)).unwrap_err();
+        assert_eq!(ExitStatus::of_error(&error), ExitStatus::Usage);
+        assert!(error.to_string().contains("'nosuch'"), "{error}");
+        assert_eq!(
+            style_for_start("nosuch", None).unwrap().as_str(),
+            "nosuch",
+            "without a config, the daemon decides"
+        );
+        let error = style_for_start("No Such", None).unwrap_err();
+        assert_eq!(ExitStatus::of_error(&error), ExitStatus::Usage);
+    }
+
+    #[test]
+    fn an_older_daemon_that_ignores_the_style_is_found() {
+        let verbatim = Some(styles::VERBATIM);
+        let old = DaemonResponse::ok(DaemonState::Starting).with_language(Some("en".into()));
+        assert!(ignored_style(verbatim, &old));
+        assert!(!ignored_style(None, &old), "no style was asked for");
+        let new = DaemonResponse::ok(DaemonState::Starting).with_style(Some("verbatim".into()));
+        assert!(!ignored_style(verbatim, &new));
+        let stopped = DaemonResponse::ok(DaemonState::Transcribing);
+        assert!(
+            !ignored_style(verbatim, &stopped),
             "a toggle that stops a take starts none"
         );
     }

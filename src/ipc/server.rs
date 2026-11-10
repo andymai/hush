@@ -6,6 +6,7 @@
 use super::protocol::{
     DaemonCommand, DaemonResponse, DaemonState, ModelState, TakeResult, FILE_TIMEOUT, PRINT_TIMEOUT,
 };
+use crate::text_processing::styles::{self, StyleName};
 use crate::text_processing::{learn, Trigger};
 use crate::transcription::language::{self, Language};
 use anyhow::{Context, Result};
@@ -25,9 +26,9 @@ use tracing::{debug, warn};
 /// What the session loop consumes, from the hotkey thread and from IPC alike.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionCommand {
-    /// Start a take; the language, when set, comes from `--lang` or a
-    /// language chord and applies to this take only
-    StartRecording(Trigger, Option<Language>),
+    /// Start a take. The language and the style, when set, come from
+    /// `--lang` and `--style` or from a chord, and apply to this take only
+    StartRecording(Trigger, Option<Language>, Option<StyleName>),
     /// Record a spoken instruction for Command Mode
     StartCommand,
     StopRecording,
@@ -81,12 +82,13 @@ pub struct FileJob {
     pub reply: TakeWaiter,
 }
 
-/// Current phase, model state, languages, and the last transcript, written
-/// by the session and read by IPC.
+/// Current phase, model state, languages, styles, and the last transcript,
+/// written by the session and read by IPC.
 pub struct SharedState {
     phase: Mutex<Phase>,
     model: Mutex<Option<ModelState>>,
     languages: Mutex<Languages>,
+    styles: Mutex<Vec<StyleName>>,
     last_text: Mutex<Option<String>>,
     waiter: Mutex<Option<oneshot::Sender<TakeResult>>>,
     files: Mutex<VecDeque<FileJob>>,
@@ -105,6 +107,7 @@ impl SharedState {
             phase: Mutex::new(Phase::Idle),
             model: Mutex::new(None),
             languages: Mutex::new(Languages::default()),
+            styles: Mutex::new(vec![styles::VERBATIM]),
             last_text: Mutex::new(None),
             waiter: Mutex::new(None),
             files: Mutex::new(VecDeque::new()),
@@ -216,6 +219,15 @@ impl SharedState {
 
     pub fn model_state(&self) -> Option<ModelState> {
         *self.model.lock()
+    }
+
+    /// The styles that a start can name: `verbatim` and the config's styles.
+    pub fn set_styles(&self, names: Vec<StyleName>) {
+        *self.styles.lock() = names;
+    }
+
+    pub fn knows_style(&self, name: StyleName) -> bool {
+        self.styles.lock().contains(&name)
     }
 
     pub fn set_config_language(&self, language: Language) {
@@ -437,6 +449,16 @@ pub async fn transcribe_file(
     }
 }
 
+/// The daemon knows no style of that name: the client's config can have a
+/// style that the daemon did not load.
+pub fn unknown_style(name: StyleName) -> String {
+    format!(
+        "The daemon knows no style '{}'. Add [styles.{}] to the config, then restart it with: \
+         hush daemon restart",
+        name, name
+    )
+}
+
 /// Map a command onto the session and describe the state it leads to.
 pub fn respond(
     command: DaemonCommand,
@@ -447,22 +469,31 @@ pub fn respond(
         Ok(()) => DaemonResponse::ok(next),
         Err(_) => DaemonResponse::error("The daemon session is no longer running"),
     };
-    // The reply names the take's language, so a client can tell this
-    // daemon from an older one that ignores `language`.
-    let start = |language: Option<String>| {
+    // The reply names the take's language and style, so a client can tell
+    // this daemon from an older one that ignores `language` or `style`.
+    let start = |language: Option<String>, style: Option<String>| {
         let once = match language.as_deref().map(Language::from_code).transpose() {
             Ok(once) => once,
             Err(e) => return DaemonResponse::error(e.to_string()),
         };
+        let style = match style.as_deref().map(StyleName::from_name).transpose() {
+            Ok(Some(name)) if !shared.knows_style(name) => {
+                return DaemonResponse::error(unknown_style(name))
+            },
+            Ok(style) => style,
+            Err(e) => return DaemonResponse::error(e.to_string()),
+        };
         let reply = forward(
-            SessionCommand::StartRecording(Trigger::Ipc, once),
+            SessionCommand::StartRecording(Trigger::Ipc, once, style),
             DaemonState::Starting,
         );
         if !reply.ok {
             return reply;
         }
         let language = shared.language_for(once).or(once);
-        reply.with_language(language.map(|l| l.code().to_string()))
+        reply
+            .with_language(language.map(|l| l.code().to_string()))
+            .with_style(style.map(|name| name.to_string()))
     };
     // A stop before the first audio frame discards the take.
     let after_stop = match shared.snapshot() {
@@ -472,14 +503,14 @@ pub fn respond(
     };
     match command {
         DaemonCommand::Status | DaemonCommand::Watch => shared.status(),
-        DaemonCommand::Toggle { language } => {
+        DaemonCommand::Toggle { language, style } => {
             if shared.in_take() {
                 forward(SessionCommand::StopRecording, after_stop)
             } else {
-                start(language)
+                start(language, style)
             }
         },
-        DaemonCommand::Start { language } => start(language),
+        DaemonCommand::Start { language, style } => start(language, style),
         DaemonCommand::Stop { .. } => forward(SessionCommand::StopRecording, after_stop),
         DaemonCommand::Cancel => forward(SessionCommand::CancelRecording, DaemonState::Idle),
         DaemonCommand::Quit => forward(SessionCommand::Quit, DaemonState::Stopping),
@@ -510,14 +541,17 @@ mod tests {
     fn toggle_follows_the_take() {
         let shared = SharedState::new();
         let (tx, rx) = mpsc::channel();
-        let toggle = || DaemonCommand::Toggle { language: None };
+        let toggle = || DaemonCommand::Toggle {
+            language: None,
+            style: None,
+        };
         assert_eq!(
             respond(toggle(), &shared, &tx).state,
             Some(DaemonState::Starting)
         );
         assert_eq!(
             rx.try_recv(),
-            Ok(SessionCommand::StartRecording(Trigger::Ipc, None))
+            Ok(SessionCommand::StartRecording(Trigger::Ipc, None, None))
         );
 
         shared.set_starting();
@@ -588,7 +622,14 @@ mod tests {
         let shared = SharedState::new();
         let (tx, rx) = mpsc::channel::<SessionCommand>();
         drop(rx);
-        let response = respond(DaemonCommand::Start { language: None }, &shared, &tx);
+        let response = respond(
+            DaemonCommand::Start {
+                language: None,
+                style: None,
+            },
+            &shared,
+            &tx,
+        );
         assert!(!response.ok);
         assert!(response.error.unwrap().contains("no longer running"));
     }
@@ -604,6 +645,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let start = |code: &str| DaemonCommand::Start {
             language: Some(code.to_string()),
+            style: None,
         };
 
         let reply = respond(start("de"), &shared, &tx);
@@ -613,14 +655,29 @@ mod tests {
             rx.try_recv(),
             Ok(SessionCommand::StartRecording(
                 Trigger::Ipc,
-                Some(lang("de"))
+                Some(lang("de")),
+                None
             ))
         );
 
-        let reply = respond(DaemonCommand::Start { language: None }, &shared, &tx);
+        let reply = respond(
+            DaemonCommand::Start {
+                language: None,
+                style: None,
+            },
+            &shared,
+            &tx,
+        );
         assert_eq!(reply.language.as_deref(), Some("en"), "the config language");
         shared.set_chosen_language(Some(lang("fr")));
-        let reply = respond(DaemonCommand::Toggle { language: None }, &shared, &tx);
+        let reply = respond(
+            DaemonCommand::Toggle {
+                language: None,
+                style: None,
+            },
+            &shared,
+            &tx,
+        );
         assert_eq!(reply.language.as_deref(), Some("fr"), "the tray choice");
         while rx.try_recv().is_ok() {}
 
@@ -633,6 +690,7 @@ mod tests {
         let reply = respond(
             DaemonCommand::Toggle {
                 language: Some("de".to_string()),
+                style: None,
             },
             &shared,
             &tx,
@@ -640,6 +698,69 @@ mod tests {
         assert_eq!(reply.state, Some(DaemonState::Transcribing));
         assert_eq!(reply.language, None, "a toggle that stops starts no take");
         assert_eq!(rx.try_recv(), Ok(SessionCommand::StopRecording));
+    }
+
+    #[test]
+    fn a_start_in_a_style_reaches_the_session_and_names_it() {
+        let shared = SharedState::new();
+        shared.set_config_language(lang("en"));
+        let (tx, rx) = mpsc::channel();
+        let start = |style: &str| DaemonCommand::Start {
+            language: None,
+            style: Some(style.to_string()),
+        };
+        let verbatim = styles::VERBATIM;
+        let casual = StyleName::parse("casual").unwrap();
+
+        let reply = respond(start("verbatim"), &shared, &tx);
+        assert_eq!(reply.state, Some(DaemonState::Starting));
+        assert_eq!(reply.style.as_deref(), Some("verbatim"));
+        assert_eq!(
+            rx.try_recv(),
+            Ok(SessionCommand::StartRecording(
+                Trigger::Ipc,
+                None,
+                Some(verbatim)
+            ))
+        );
+
+        let reply = respond(start("casual"), &shared, &tx);
+        assert!(!reply.ok, "the daemon has no casual style yet");
+        assert!(reply.error.unwrap().contains("'casual'"));
+        assert!(rx.try_recv().is_err(), "nothing starts");
+        let reply = respond(start("Not A Name"), &shared, &tx);
+        assert!(!reply.ok);
+        assert!(rx.try_recv().is_err());
+
+        shared.set_styles(vec![verbatim, casual]);
+        let reply = respond(
+            DaemonCommand::Toggle {
+                language: Some("de".to_string()),
+                style: Some("casual".to_string()),
+            },
+            &shared,
+            &tx,
+        );
+        assert_eq!(reply.style.as_deref(), Some("casual"));
+        assert_eq!(reply.language.as_deref(), Some("de"));
+        assert_eq!(
+            rx.try_recv(),
+            Ok(SessionCommand::StartRecording(
+                Trigger::Ipc,
+                Some(lang("de")),
+                Some(casual)
+            ))
+        );
+
+        let reply = respond(
+            DaemonCommand::Start {
+                language: None,
+                style: None,
+            },
+            &shared,
+            &tx,
+        );
+        assert_eq!(reply.style, None, "a start without a style names none");
     }
 
     #[test]
@@ -824,13 +945,19 @@ mod tests {
         let status = client::send_to(&path, DaemonCommand::Status).await.unwrap();
         assert_eq!(status.state, Some(DaemonState::Idle));
 
-        let started = client::send_to(&path, DaemonCommand::Start { language: None })
-            .await
-            .unwrap();
+        let started = client::send_to(
+            &path,
+            DaemonCommand::Start {
+                language: None,
+                style: None,
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(started.state, Some(DaemonState::Starting));
         assert_eq!(
             rx.recv().unwrap(),
-            SessionCommand::StartRecording(Trigger::Ipc, None)
+            SessionCommand::StartRecording(Trigger::Ipc, None, None)
         );
 
         drop(guard);

@@ -27,10 +27,11 @@ impl X11Hotkey {
             || !bindings.actions.is_empty()
             || bindings.command.is_some()
             || !bindings.languages.is_empty()
+            || !bindings.styles.is_empty()
         {
             info!(
-                "The cancel key, action chords, language chords, and Command Mode are not \
-                 available on the X11 backend"
+                "The cancel key, action chords, language chords, style chords, and Command \
+                 Mode are not available on the X11 backend"
             );
         }
         let code = combination.x11_code().ok_or_else(|| {

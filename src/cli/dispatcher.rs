@@ -134,8 +134,12 @@ impl CommandDispatcher {
                 },
                 DaemonCommands::Status => handle_daemon_status().await,
             },
-            Commands::Toggle { lang } => handle_start(true, lang.as_deref()).await,
-            Commands::Start { lang } => handle_start(false, lang.as_deref()).await,
+            Commands::Toggle { lang, style } => {
+                handle_start(true, lang.as_deref(), style.as_deref()).await
+            },
+            Commands::Start { lang, style } => {
+                handle_start(false, lang.as_deref(), style.as_deref()).await
+            },
             Commands::Stop { print, json } => handle_stop(print, json).await,
             Commands::Cancel => handle_client_command(DaemonCommand::Cancel).await,
             Commands::Doctor => handle_doctor().await,
@@ -529,6 +533,13 @@ pub async fn test_hotkey_system(combination: Option<String>, duration: u64) -> R
                             crate::hotkey::HotkeyEvent::Command(pressed) => {
                                 println!(
                                     "🎯 Command chord {}!",
+                                    if pressed { "pressed" } else { "released" }
+                                );
+                            },
+                            crate::hotkey::HotkeyEvent::Style(style, pressed) => {
+                                println!(
+                                    "🎯 {} style chord {}!",
+                                    style,
                                     if pressed { "pressed" } else { "released" }
                                 );
                             },

@@ -1,7 +1,7 @@
 //! The keys that start, stop, cancel, and command a dictation, and a key
-//! for each language. Each one is a button that captures the next key
-//! pressed; the action keys have a text box behind it for keys the capture
-//! cannot see.
+//! for each language and each writing style. Each one is a button that
+//! captures the next key pressed; the action keys have a text box behind it
+//! for keys the capture cannot see.
 
 use crate::config::settings::HotkeyConfig;
 use crate::gui::capture::Capture;
@@ -13,15 +13,72 @@ use crate::gui::theme::{
 use crate::gui::Gui;
 use crate::hotkey::warnings;
 use crate::hotkey::{HotkeyBackend, HotkeyMode, KeyCombination, Role};
+use crate::text_processing::styles::{self, StyleName};
 use crate::transcription::Language;
+use std::collections::BTreeMap;
+
+/// A table under `[hotkey]` that gives each chord a value: a language code
+/// or a style name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChordMap {
+    Languages,
+    Styles,
+}
+
+impl ChordMap {
+    fn entries(self, hotkey: &HotkeyConfig) -> &BTreeMap<String, String> {
+        match self {
+            ChordMap::Languages => &hotkey.languages,
+            ChordMap::Styles => &hotkey.styles,
+        }
+    }
+
+    fn entries_mut(self, hotkey: &mut HotkeyConfig) -> &mut BTreeMap<String, String> {
+        match self {
+            ChordMap::Languages => &mut hotkey.languages,
+            ChordMap::Styles => &mut hotkey.styles,
+        }
+    }
+
+    /// The role of a chord with this value, when the value is valid.
+    fn role(self, value: &str) -> Option<Role> {
+        match self {
+            ChordMap::Languages => Language::parse(value).map(Role::Language),
+            ChordMap::Styles => StyleName::parse(value).map(Role::Style),
+        }
+    }
+
+    fn owns(self, role: Role) -> bool {
+        match self {
+            ChordMap::Languages => matches!(role, Role::Language(_)),
+            ChordMap::Styles => matches!(role, Role::Style(_)),
+        }
+    }
+
+    fn title(self, value: &str) -> String {
+        match (self.role(value), self) {
+            (Some(role), _) => role.label(),
+            (None, ChordMap::Languages) => format!("Dictate in {}", value),
+            (None, ChordMap::Styles) => format!("Dictate in the {} style", value),
+        }
+    }
+
+    /// The value for the next chord, picked before the key is captured.
+    fn new_value(self, gui: &mut Gui) -> &mut String {
+        match self {
+            ChordMap::Languages => &mut gui.new_language,
+            ChordMap::Styles => &mut gui.new_style,
+        }
+    }
+}
 
 /// What a captured key goes to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyTarget {
     Action(Role),
-    /// A language chord, by the chord it has now; `None` adds a chord for
-    /// the language in [`Gui::new_language`].
-    Language(Option<String>),
+    /// A chord in a [`ChordMap`], by the chord it has now; `None` adds a
+    /// chord for the value that [`ChordMap::new_value`] holds.
+    Chord(ChordMap, Option<String>),
 }
 
 /// Dictation cannot be unbound; every other key can.
@@ -32,10 +89,10 @@ fn required(role: Role) -> bool {
 /// Width of the key button plus its Type and Clear actions.
 const KEY_COLUMN: f32 = 320.0;
 
-/// Width of the key button, the language picker, and Remove.
-const LANGUAGE_COLUMN: f32 = 420.0;
+/// Width of the key button, the language or style picker, and Remove.
+const CHORD_COLUMN: f32 = 420.0;
 
-/// Width of the language picker beside a key.
+/// Width of the language or style picker beside a key.
 const PICKER_WIDTH: f32 = 130.0;
 
 /// Red text under a hotkey field that does not parse.
@@ -51,13 +108,18 @@ pub fn taken(hotkey: &HotkeyConfig, role: Role, chord: &str) -> Option<String> {
     sentence(warnings::holders(hotkey.bound(), role, chord), chord)
 }
 
-/// The actions and language chords, other than the language chord `own`,
-/// that already use `chord`, as a sentence.
-pub fn language_taken(hotkey: &HotkeyConfig, own: Option<&str>, chord: &str) -> Option<String> {
+/// The actions and chords, other than the chord `own` in `map`, that
+/// already use `chord`, as a sentence.
+pub fn map_taken(
+    hotkey: &HotkeyConfig,
+    map: ChordMap,
+    own: Option<&str>,
+    chord: &str,
+) -> Option<String> {
     let others = hotkey
         .bound()
         .into_iter()
-        .filter(|(role, text)| !(matches!(role, Role::Language(_)) && Some(*text) == own));
+        .filter(|(role, text)| !(map.owns(*role) && Some(*text) == own));
     sentence(warnings::users(others, chord), chord)
 }
 
@@ -91,13 +153,13 @@ fn printable_caution(hotkey: &HotkeyConfig, role: Role) -> Option<String> {
         .map(|(_, chord)| reaches_the_app(&chord))
 }
 
-/// [`printable_caution`] for the language chord `chord`.
-fn language_caution(hotkey: &HotkeyConfig, chord: &str) -> Option<String> {
-    let own = hotkey
-        .language_keys()
-        .into_iter()
-        .filter(|(_, text)| *text == chord)
-        .map(|(language, text)| (Role::Language(language), text));
+/// [`printable_caution`] for the chord `chord` in `map`.
+fn map_caution(hotkey: &HotkeyConfig, map: ChordMap, chord: &str) -> Option<String> {
+    let own = map
+        .entries(hotkey)
+        .iter()
+        .filter(|(text, _)| text.as_str() == chord)
+        .filter_map(|(text, value)| Some((map.role(value)?, text.as_str())));
     warnings::printable(own, hotkey.hides_keys())
         .first()
         .map(|(_, chord)| reaches_the_app(chord))
@@ -211,7 +273,22 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
          browsers otherwise treat as Back.",
         &mut gui.config.hotkey.exclusive,
     );
-    language_keys(gui, ui);
+    chord_keys(
+        gui,
+        ui,
+        ChordMap::Languages,
+        "Language keys",
+        "Each key dictates in its own language, with the same hold, double-tap, and \
+         cancel as the dictation key. The tray menu sets the language of the dictation key.",
+    );
+    chord_keys(
+        gui,
+        ui,
+        ChordMap::Styles,
+        "Style keys",
+        "Each key dictates in its own writing style, with the same hold, double-tap, and \
+         cancel as the dictation key. Verbatim turns polish off. Add styles on the Text page.",
+    );
 }
 
 fn mode_name(mode: HotkeyMode) -> &'static str {
@@ -229,41 +306,67 @@ fn backend_name(backend: HotkeyBackend) -> &'static str {
     }
 }
 
-fn language_keys(gui: &mut Gui, ui: &mut egui::Ui) {
-    section(ui, "Language keys");
-    hint(
-        ui,
-        "Each key dictates in its own language, with the same hold, double-tap, and \
-         cancel as the dictation key. The tray menu sets the language of the dictation key.",
-    );
-    let chords: Vec<String> = gui.config.hotkey.languages.keys().cloned().collect();
+fn chord_keys(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap, title: &str, about: &str) {
+    section(ui, title);
+    hint(ui, about);
+    let chords: Vec<String> = map.entries(&gui.config.hotkey).keys().cloned().collect();
     for chord in chords {
-        language_row(gui, ui, &chord);
+        chord_row(gui, ui, map, &chord);
     }
-    new_language_row(gui, ui);
+    new_chord_row(gui, ui, map);
 }
 
-fn language_row(gui: &mut Gui, ui: &mut egui::Ui, chord: &str) {
-    let target = KeyTarget::Language(Some(chord.to_string()));
+/// The dropdown that picks the value of a chord in `map`.
+fn picker(
+    ui: &mut egui::Ui,
+    map: ChordMap,
+    id_salt: impl std::hash::Hash,
+    value: &mut String,
+    style_names: &[StyleName],
+    placeholder: &str,
+) {
+    match map {
+        ChordMap::Languages => {
+            language_picker(ui, id_salt, value, true, PICKER_WIDTH, placeholder);
+        },
+        ChordMap::Styles => {
+            let current = value.clone();
+            let shown = if current.is_empty() {
+                placeholder.to_string()
+            } else {
+                current.clone()
+            };
+            egui::ComboBox::from_id_salt(id_salt)
+                .width(PICKER_WIDTH)
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    if !current.is_empty() && !style_names.iter().any(|n| n.as_str() == current) {
+                        ui.selectable_value(value, current.clone(), &current);
+                    }
+                    for name in style_names {
+                        ui.selectable_value(value, name.to_string(), name.as_str());
+                    }
+                });
+        },
+    }
+}
+
+fn chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap, chord: &str) {
+    let target = KeyTarget::Chord(map, Some(chord.to_string()));
     let capturing = gui.capture.as_ref().is_some_and(|(t, _)| *t == target);
-    let code = gui
-        .config
-        .hotkey
-        .languages
+    let value = map
+        .entries(&gui.config.hotkey)
         .get(chord)
         .cloned()
         .unwrap_or_default();
-    let title = match Language::parse(&code) {
-        Some(language) => Role::Language(language).label(),
-        None => format!("Dictate in {}", code),
-    };
     let error = combination_error(chord, true)
-        .or_else(|| language_taken(&gui.config.hotkey, Some(chord), chord));
-    let notice = language_caution(&gui.config.hotkey, chord);
-    row(&title)
+        .or_else(|| map_taken(&gui.config.hotkey, map, Some(chord), chord));
+    let notice = map_caution(&gui.config.hotkey, map, chord);
+    let style_names = styles::names(&gui.config.styles);
+    row(&map.title(&value))
         .problem(error.as_deref())
         .caution(notice.as_deref())
-        .reserve(LANGUAGE_COLUMN)
+        .reserve(CHORD_COLUMN)
         .show(ui, |ui| {
             let button = capture_button(capturing, egui::RichText::new(chord).strong());
             if ui
@@ -273,35 +376,48 @@ fn language_row(gui: &mut Gui, ui: &mut egui::Ui, chord: &str) {
             {
                 toggle_capture(gui, target);
             }
-            if let Some(code) = gui.config.hotkey.languages.get_mut(chord) {
-                language_picker(ui, ("language_key", chord), code, true, PICKER_WIDTH, "");
+            if let Some(value) = map.entries_mut(&mut gui.config.hotkey).get_mut(chord) {
+                picker(ui, map, (map, chord), value, &style_names, "");
             }
             if quiet_button(ui, "Remove").clicked() {
                 gui.capture = None;
-                gui.config.hotkey.languages.remove(chord);
+                map.entries_mut(&mut gui.config.hotkey).remove(chord);
             }
         });
 }
 
-fn new_language_row(gui: &mut Gui, ui: &mut egui::Ui) {
-    let target = KeyTarget::Language(None);
+fn new_chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap) {
+    let target = KeyTarget::Chord(map, None);
     let capturing = gui.capture.as_ref().is_some_and(|(t, _)| *t == target);
-    row("Add a language key")
-        .describe("Pick a language, then click the button and press the key.")
-        .reserve(LANGUAGE_COLUMN)
+    let (title, about, placeholder) = match map {
+        ChordMap::Languages => (
+            "Add a language key",
+            "Pick a language, then click the button and press the key.",
+            "Language",
+        ),
+        ChordMap::Styles => (
+            "Add a style key",
+            "Pick a style, then click the button and press the key.",
+            "Style",
+        ),
+    };
+    let style_names = styles::names(&gui.config.styles);
+    row(title)
+        .describe(about)
+        .reserve(CHORD_COLUMN)
         .show(ui, |ui| {
             let button = capture_button(capturing, egui::RichText::new("Choose the key"));
-            let ready = !gui.new_language.is_empty();
+            let ready = !map.new_value(gui).is_empty();
             if ui.add_enabled(ready, button).clicked() {
                 toggle_capture(gui, target);
             }
-            language_picker(
+            picker(
                 ui,
-                "new_language_key",
-                &mut gui.new_language,
-                true,
-                PICKER_WIDTH,
-                "Language",
+                map,
+                ("new_chord", map),
+                map.new_value(gui),
+                &style_names,
+                placeholder,
             );
         });
 }
@@ -336,21 +452,20 @@ fn toggle_capture(gui: &mut Gui, target: KeyTarget) {
     }
 }
 
-/// Give the captured `chord` to a language: move the language chord `own`
-/// to it, or add a chord for [`Gui::new_language`]. Another action's chord
-/// is refused.
-pub fn bind_language(gui: &mut Gui, own: Option<String>, chord: String) {
-    if let Some(message) = language_taken(&gui.config.hotkey, own.as_deref(), &chord) {
+/// Give the captured `chord` to `map`: move the chord `own` to it, or add a
+/// chord for the value that [`ChordMap::new_value`] holds. Another action's
+/// chord is refused.
+pub fn bind_chord(gui: &mut Gui, map: ChordMap, own: Option<String>, chord: String) {
+    if let Some(message) = map_taken(&gui.config.hotkey, map, own.as_deref(), &chord) {
         gui.say(format!("{} Pick another key.", message));
         return;
     }
-    let languages = &mut gui.config.hotkey.languages;
-    let code = match own {
-        Some(own) => languages.remove(&own),
-        None => Some(std::mem::take(&mut gui.new_language)).filter(|code| !code.is_empty()),
+    let value = match own {
+        Some(own) => map.entries_mut(&mut gui.config.hotkey).remove(&own),
+        None => Some(std::mem::take(map.new_value(gui))).filter(|value| !value.is_empty()),
     };
-    if let Some(code) = code {
-        languages.insert(chord, code);
+    if let Some(value) = value {
+        map.entries_mut(&mut gui.config.hotkey).insert(chord, value);
     }
 }
 
@@ -513,20 +628,62 @@ mod tests {
             refusal(&hotkey, Role::PasteLast, "shift+rightalt").as_deref(),
             Some("Dictate in German already uses Shift+RightAlt. Pick another key.")
         );
+        let languages = ChordMap::Languages;
         assert_eq!(
-            language_taken(&hotkey, Some("Shift+RightAlt"), "Shift+RightAlt"),
+            map_taken(&hotkey, languages, Some("Shift+RightAlt"), "Shift+RightAlt"),
             None,
             "a language chord never conflicts with itself"
         );
         assert_eq!(
-            language_taken(&hotkey, None, "Shift+RightAlt").as_deref(),
+            map_taken(&hotkey, languages, None, "Shift+RightAlt").as_deref(),
             Some("Dictate in German already uses Shift+RightAlt.")
         );
         assert_eq!(
-            language_taken(&hotkey, Some("Shift+RightAlt"), "Ctrl+RightAlt").as_deref(),
+            map_taken(&hotkey, languages, Some("Shift+RightAlt"), "Ctrl+RightAlt").as_deref(),
             Some("Command already uses Ctrl+RightAlt.")
         );
-        assert_eq!(language_taken(&hotkey, None, "F13"), None);
+        assert_eq!(map_taken(&hotkey, languages, None, "F13"), None);
+    }
+
+    #[test]
+    fn style_chords_are_taken_keys_but_not_their_own() {
+        let mut hotkey = Config::defaults().unwrap().hotkey;
+        hotkey
+            .languages
+            .insert("Shift+RightAlt".into(), "de".into());
+        hotkey
+            .styles
+            .insert("Super+RightAlt".into(), "verbatim".into());
+        let style_map = ChordMap::Styles;
+        assert_eq!(
+            refusal(&hotkey, Role::Learn, "super+rightalt").as_deref(),
+            Some("Dictate in the verbatim style already uses Super+RightAlt. Pick another key.")
+        );
+        assert_eq!(
+            map_taken(&hotkey, style_map, Some("Super+RightAlt"), "Super+RightAlt"),
+            None,
+            "a style chord never conflicts with itself"
+        );
+        assert_eq!(
+            map_taken(&hotkey, style_map, Some("Super+RightAlt"), "Shift+RightAlt").as_deref(),
+            Some("Dictate in German already uses Shift+RightAlt.")
+        );
+        assert_eq!(
+            map_taken(
+                &hotkey,
+                ChordMap::Languages,
+                Some("Super+RightAlt"),
+                "Super+RightAlt"
+            )
+            .as_deref(),
+            Some("Dictate in the verbatim style already uses Super+RightAlt."),
+            "only a chord of the same table is its own"
+        );
+        assert_eq!(style_map.title("verbatim"), "Dictate in the verbatim style");
+        assert_eq!(style_map.title("Bad"), "Dictate in the Bad style");
+        hotkey.styles.insert("Ctrl+G".into(), "verbatim".into());
+        assert!(map_caution(&hotkey, style_map, "Ctrl+G").is_some());
+        assert_eq!(map_caution(&hotkey, style_map, "Super+RightAlt"), None);
     }
 
     #[test]
@@ -534,11 +691,11 @@ mod tests {
         let mut hotkey = Config::defaults().unwrap().hotkey;
         hotkey.languages.insert("Ctrl+G".into(), "de".into());
         hotkey.languages.insert("F13".into(), "fr".into());
-        let caution = language_caution(&hotkey, "Ctrl+G").unwrap();
+        let caution = map_caution(&hotkey, ChordMap::Languages, "Ctrl+G").unwrap();
         assert!(caution.starts_with("Ctrl+G also reaches"), "{caution}");
-        assert_eq!(language_caution(&hotkey, "F13"), None);
+        assert_eq!(map_caution(&hotkey, ChordMap::Languages, "F13"), None);
         hotkey.exclusive = true;
-        assert_eq!(language_caution(&hotkey, "Ctrl+G"), None);
+        assert_eq!(map_caution(&hotkey, ChordMap::Languages, "Ctrl+G"), None);
     }
 
     #[test]

@@ -37,21 +37,25 @@ pub mod corrections;
 pub mod learn;
 pub mod profiles;
 pub mod prompt;
+pub mod styles;
 pub mod transcripts;
 pub use llm::LlmProcessor;
 pub use profiles::{AppKind, ProfilesConfig, TextProfile};
 pub use session::{SessionEntry, SessionMemory};
+pub use styles::{StyleConfig, StyleName, TakeStyle};
 pub use vocabulary::{DomainVocabularies, DomainVocabulary, VocabularyManager};
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
-/// Where the text is going: the focused window and the kind of app it is.
+/// Where the text is going: the focused window, the kind of app it is, and
+/// the style of the take.
 #[derive(Debug, Clone, Default)]
 pub struct ProcessingContext {
     pub window: Option<crate::text::WindowInfo>,
     pub kind: AppKind,
+    pub style: Option<TakeStyle>,
 }
 
 impl ProcessingContext {
@@ -60,7 +64,22 @@ impl ProcessingContext {
             Some(info) if profiles.enabled => AppKind::classify(info, profiles),
             _ => AppKind::Other,
         };
-        Self { window, kind }
+        Self {
+            window,
+            kind,
+            style: None,
+        }
+    }
+
+    pub fn with_style(mut self, style: Option<TakeStyle>) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// The style decides whether the LLM polishes the take; without a
+    /// style, `llm.polish` decides.
+    fn polishes(&self, configured: bool) -> bool {
+        self.style.as_ref().map_or(configured, |style| style.polish)
     }
 }
 
@@ -207,8 +226,8 @@ impl TextProcessor {
         debug!("After entity capitalization: '{}'", capitalized);
 
         // Stage 4: Context-aware LLM polishing (optional)
-        let polished = if let Some(llm) = self.llm_processor.as_ref().filter(|_| self.config.polish)
-        {
+        let polish = context.polishes(self.config.polish);
+        let polished = if let Some(llm) = self.llm_processor.as_ref().filter(|_| polish) {
             debug!("Applying context-aware LLM polishing...");
 
             // Build context from session memory
@@ -229,11 +248,17 @@ impl TextProcessor {
                     w.title.chars().take(80).collect::<String>()
                 )
             });
+            let style = context
+                .style
+                .as_ref()
+                .map(|style| style.prompt.as_str())
+                .filter(|prompt| !prompt.is_empty());
             match llm
                 .polish_with_context(
                     &enhanced_text,
                     self.config.mode,
                     Some(profile.tone),
+                    style,
                     place.as_deref(),
                 )
                 .await
@@ -448,10 +473,15 @@ mod tests {
     }
 
     async fn fake_ollama(reply: &'static str) -> String {
+        fake_ollama_request(reply).await.0
+    }
+
+    /// The server's URL, and the request it gets, as text.
+    async fn fake_ollama_request(reply: &'static str) -> (String, tokio::task::JoinHandle<String>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        tokio::spawn(async move {
+        let request = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut request = Vec::new();
             let mut chunk = [0u8; 4096];
@@ -480,8 +510,9 @@ mod tests {
                 body
             );
             socket.write_all(response.as_bytes()).await.unwrap();
+            String::from_utf8_lossy(&request).into_owned()
         });
-        url
+        (url, request)
     }
 
     #[tokio::test]
@@ -515,5 +546,83 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, "We shouldn't ship it!");
+    }
+
+    fn style(name: &str, prompt: &str, polish: bool) -> Option<TakeStyle> {
+        Some(TakeStyle {
+            name: StyleName::parse(name).unwrap(),
+            prompt: prompt.to_string(),
+            polish,
+        })
+    }
+
+    #[tokio::test]
+    async fn a_verbatim_take_skips_the_llm_but_not_the_rules() {
+        let raw = "um we should ship it today";
+        let unpolished = processor_with(LlmProvider::None)
+            .process(raw)
+            .await
+            .unwrap();
+        let url = fake_ollama("A different text.").await;
+        let verbatim = ProcessingContext::default().with_style(styles::resolve(
+            &std::collections::BTreeMap::new(),
+            styles::VERBATIM,
+        ));
+        let result = processor_with(ollama_at(url))
+            .process_for(raw, &verbatim)
+            .await
+            .unwrap();
+        assert_eq!(result, unpolished);
+        assert!(!result.contains("um"), "the filler removal still runs");
+    }
+
+    #[tokio::test]
+    async fn a_style_prompt_reaches_the_polish_prompt() {
+        let (url, request) = fake_ollama_request("We shall ship it today.").await;
+        let context = ProcessingContext::default().with_style(style(
+            "formal",
+            "Formal English, no contractions.",
+            true,
+        ));
+        let result = processor_with(ollama_at(url))
+            .process_for("we should ship it today", &context)
+            .await
+            .unwrap();
+        assert_eq!(result, "We shall ship it today.");
+        let request = request.await.unwrap();
+        let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
+        let json: serde_json::Value = serde_json::from_str(body).unwrap();
+        let system = json["messages"][0]["content"].as_str().unwrap();
+        assert!(
+            system.contains("\n- Style: Formal English, no contractions.\n"),
+            "{system}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_style_decides_polish_and_the_guard_still_applies() {
+        let mut processor = processor_with(ollama_at(fake_ollama("We must go now.").await));
+        processor.config.polish = false;
+        let formal = ProcessingContext::default().with_style(style("formal", "Formal.", true));
+        assert_eq!(
+            processor
+                .process_for("we should go now", &formal)
+                .await
+                .unwrap(),
+            "We must go now.",
+            "a style with polish on polishes when llm.polish is off"
+        );
+
+        let raw = "we should not ship it";
+        let unpolished = processor_with(LlmProvider::None)
+            .process(raw)
+            .await
+            .unwrap();
+        let url = fake_ollama("We should ship it.").await;
+        let result = processor_with(ollama_at(url))
+            .process_for(raw, &formal)
+            .await
+            .unwrap();
+        assert_eq!(result, unpolished, "a lost negation discards the polish");
     }
 }
