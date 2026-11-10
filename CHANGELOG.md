@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1](https://github.com/andymai/hush/compare/v0.30.0...v0.30.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* write the GPU failure record atomically, and check more CPU modules for AVX-512 ([#314](https://github.com/andymai/hush/issues/314)) ([b7974c3](https://github.com/andymai/hush/commit/b7974c3178b8f281dd92bd1181a5d4bc4110af5b))
+
 ## [0.30.0](https://github.com/andymai/hush/compare/v0.29.0...v0.30.0) (2026-11-10)
 
 
