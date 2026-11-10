@@ -52,7 +52,7 @@ impl SpeechToText {
                 drop_phrases,
             });
         }
-        device::init_backends()?;
+        device::load_backends(config.use_gpu).await?;
         let model = local_model_path(config, models_dir);
         let mut whisper = WhisperTranscriber::new(&model, config.use_gpu)
             .await

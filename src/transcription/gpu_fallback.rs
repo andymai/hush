@@ -8,7 +8,7 @@
 //! GPU until the driver changes.
 
 use crate::config::paths;
-use crate::transcription::device::GpuAvailability;
+use crate::transcription::device::{self, GpuAvailability};
 use crate::transcription::whisper::Family;
 use crate::Result;
 use anyhow::Context;
@@ -45,19 +45,20 @@ fn failed_this_session(family: Family) -> &'static AtomicBool {
 }
 
 /// Whether the model load waits for a render node. ggml looks for the GPU
-/// only once, so a wait after that look cannot help. A machine that booted
-/// a while ago, or with an unknown uptime, does not wait: a VM or server
-/// without a render node would wait at each start.
+/// only once, when the backend modules load, so a wait after that load
+/// cannot help. A machine that booted a while ago, or with an unknown uptime,
+/// does not wait: a VM or server without a render node would wait at each
+/// start.
 pub fn should_wait(
     gpu_build: bool,
     use_gpu: bool,
-    detected: bool,
+    loaded: bool,
     render_node: bool,
     uptime: Option<Duration>,
 ) -> bool {
     gpu_build
         && use_gpu
-        && !detected
+        && !loaded
         && !render_node
         && uptime.is_some_and(|uptime| uptime < BOOT_WINDOW)
 }
@@ -73,13 +74,13 @@ fn uptime() -> Option<Duration> {
 }
 
 /// Wait up to 5 seconds for a render node, when [`should_wait`] says so.
-/// Call this before the first [`GpuAvailability::detect`].
+/// [`device::load_backends`] calls this before the backend modules load.
 pub async fn wait_for_gpu(use_gpu: bool) {
     let dir = Path::new(RENDER_NODES);
     if !should_wait(
         GPU_BUILD,
         use_gpu,
-        GpuAvailability::is_detected(),
+        device::backends_loaded(),
         has_render_node(dir),
         uptime(),
     ) {
@@ -370,7 +371,7 @@ mod tests {
         );
         assert!(
             !should_wait(true, true, true, false, JUST_BOOTED),
-            "ggml looked already"
+            "the backend modules loaded already"
         );
         assert!(
             !should_wait(true, false, false, false, JUST_BOOTED),

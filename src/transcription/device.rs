@@ -5,6 +5,7 @@
 //! build (CUDA or Vulkan). The devices that the modules find sit in a registry,
 //! so the devices that a model will use can be listed without a model load.
 
+use crate::transcription::gpu_fallback;
 use crate::Result;
 use std::path::{Path, PathBuf};
 use std::sync::{Once, OnceLock};
@@ -15,9 +16,31 @@ static GPU_AVAILABILITY: OnceLock<GpuAvailability> = OnceLock::new();
 
 static BACKENDS: OnceLock<std::result::Result<(), String>> = OnceLock::new();
 
+/// Wait for the GPU when [`gpu_fallback::wait_for_gpu`] says so, then load the
+/// backend modules. Each module lists its devices when it loads, once in each
+/// process, so a model load calls this, not [`init_backends`]: a render node
+/// that comes up after the first load stays unseen until a restart.
+pub async fn load_backends(use_gpu: bool) -> Result<()> {
+    load_after(gpu_fallback::wait_for_gpu(use_gpu)).await
+}
+
+/// Run `wait` and then [`init_backends`], or only [`init_backends`] when the
+/// modules loaded already.
+async fn load_after(wait: impl std::future::Future<Output = ()>) -> Result<()> {
+    if !backends_loaded() {
+        wait.await;
+    }
+    init_backends()
+}
+
+/// Whether [`init_backends`] ran in this process.
+pub fn backends_loaded() -> bool {
+    BACKENDS.get().is_some()
+}
+
 /// Load the backend modules from the folder of libtranscribe, once in each
-/// process. Call before any device query or model load: without the modules,
-/// ggml has no device, not even the CPU.
+/// process. Call before any device query: without the modules, ggml has no
+/// device, not even the CPU.
 pub fn init_backends() -> Result<()> {
     BACKENDS
         .get_or_init(|| {
@@ -192,12 +215,6 @@ impl GpuAvailability {
         })
     }
 
-    /// Whether [`GpuAvailability::detect`] ran in this process. ggml looks
-    /// for devices only once, so a GPU that comes up later stays unseen.
-    pub fn is_detected() -> bool {
-        GPU_AVAILABILITY.get().is_some()
-    }
-
     /// Check if any GPU is available
     pub fn is_gpu_available() -> bool {
         Self::detect().available
@@ -349,6 +366,33 @@ mod tests {
         assert!(info.starts_with("transcribe.cpp "), "{info}");
         assert!(info.contains("\nModules: CPU code "), "{info}");
         assert!(info.contains("\nCPU: "), "{info}");
+    }
+
+    #[tokio::test]
+    async fn the_gpu_wait_runs_before_the_first_backend_load() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // nextest runs each test in its own process, so the modules are not
+        // loaded yet; `cargo test` can load them in another test first.
+        let loaded_before = backends_loaded();
+        let waited = AtomicBool::new(false);
+        load_after(async {
+            assert!(!backends_loaded(), "the wait comes before the load");
+            waited.store(true, Ordering::SeqCst);
+        })
+        .await
+        .unwrap();
+        assert_eq!(waited.load(Ordering::SeqCst), !loaded_before);
+        assert!(backends_loaded());
+
+        let again = AtomicBool::new(false);
+        load_after(async { again.store(true, Ordering::SeqCst) })
+            .await
+            .unwrap();
+        assert!(
+            !again.load(Ordering::SeqCst),
+            "after the first load, a wait cannot help"
+        );
     }
 
     #[test]

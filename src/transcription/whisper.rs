@@ -181,7 +181,7 @@ impl WhisperTranscriber {
     /// Parakeet as a GGUF file. `use_gpu` is honored when a GPU backend
     /// exists, unless that GPU failed a take with the same driver before.
     pub async fn new(model_path: &Path, use_gpu: bool) -> Result<Self> {
-        device::init_backends()?;
+        device::load_backends(use_gpu).await?;
         let ctx = RequestContext::new("whisper_transcriber_init")
             .with_metadata("model_path", &model_path.display().to_string())
             .with_metadata("gpu_requested", &use_gpu.to_string());
@@ -194,9 +194,6 @@ impl WhisperTranscriber {
             ));
         }
 
-        device::route_engine_logs();
-
-        gpu_fallback::wait_for_gpu(use_gpu).await;
         let gpu = GpuAvailability::detect();
         if use_gpu && !gpu.available {
             if gpu_fallback::GPU_BUILD {
