@@ -104,6 +104,22 @@ pub fn delete(path: &Path, entry: &Transcript) -> Result<bool> {
     Ok(true)
 }
 
+/// Give one transcript new text, and keep its time, app, and audio. Returns
+/// the changed transcript, or `None` when the file does not hold it.
+pub fn set_text(path: &Path, entry: &Transcript, text: &str) -> Result<Option<Transcript>> {
+    let Some(mut file) = open_existing(path)? else {
+        return Ok(None);
+    };
+    let mut entries = parse(&mut file)?.entries;
+    let Some(kept) = entries.iter_mut().find(|kept| *kept == entry) else {
+        return Ok(None);
+    };
+    kept.text = text.to_string();
+    let changed = kept.clone();
+    rewrite(&mut file, &entries)?;
+    Ok(Some(changed))
+}
+
 /// Remove every transcript.
 pub fn clear(path: &Path) -> Result<()> {
     if let Some(file) = open_existing(path)? {
@@ -259,6 +275,33 @@ mod tests {
         assert_eq!(raw.matches("\"audio\"").count(), 1, "{raw}");
         assert!(delete(&path, &kept).unwrap());
         assert_eq!(texts(&path), ["from an older Hush", "without"]);
+    }
+
+    #[test]
+    fn a_fix_changes_only_the_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.jsonl");
+        assert!(set_text(&path, &Transcript::new("x", ""), "y")
+            .unwrap()
+            .is_none());
+        let first = Transcript::new("deploy to cube", "kitty").with_audio("a.flac");
+        let second = Transcript::new("second", "");
+        append(&path, &first, 10).unwrap();
+        append(&path, &second, 10).unwrap();
+
+        let fixed = set_text(&path, &first, "deploy to Kubernetes")
+            .unwrap()
+            .unwrap();
+        assert_eq!(fixed.text, "deploy to Kubernetes");
+        assert_eq!(
+            (fixed.at, fixed.app.as_str(), fixed.audio.as_deref()),
+            (first.at, "kitty", Some("a.flac"))
+        );
+        assert_eq!(read(&path).unwrap(), [fixed, second]);
+        assert!(
+            set_text(&path, &first, "again").unwrap().is_none(),
+            "the old text is gone"
+        );
     }
 
     #[test]

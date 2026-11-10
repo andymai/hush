@@ -33,6 +33,7 @@ pub use filler_words::FillerWordRemover;
 pub use history::{HistoryEntry, InsertionHistory};
 pub use hook::{HookEnv, TranscriptHook, Trigger};
 pub use intent::{CommunicationStyle, IntentDetector, UserIntent};
+pub mod corrections;
 pub mod learn;
 pub mod profiles;
 pub mod prompt;
