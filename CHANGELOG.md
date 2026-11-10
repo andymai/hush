@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/andymai/hush/compare/v0.20.0...v0.21.0) (2026-11-10)
+
+
+### Features
+
+* **history:** suggest terms from corrections ([#288](https://github.com/andymai/hush/issues/288)) ([506a2a0](https://github.com/andymai/hush/commit/506a2a01999372fe6203657931a75ad1c5e5e7e5))
+
 ## [0.20.0](https://github.com/andymai/hush/compare/v0.19.0...v0.20.0) (2026-11-10)
 
 
