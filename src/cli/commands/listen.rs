@@ -19,7 +19,7 @@ use crate::audio::{
     TakeLevel,
 };
 use crate::cli::commands::daemon::{self, SessionOptions};
-use crate::config::settings::TranscriptionConfig;
+use crate::config::settings::{TranscriptionConfig, MAX_HISTORY_ENTRIES};
 use crate::config::{keys, paths, Config};
 use crate::hotkey::{
     GestureAction, GestureDetector, HotkeyAction, HotkeyBindings, HotkeyEvent, HotkeyManager,
@@ -139,15 +139,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     info!("   Text processing: {}", !no_processing);
     info!("   Show button: {}", !no_button);
 
-    // Load configuration
-    let config = match Config::load() {
-        Ok(config) => config,
-        Err(e) => {
-            warn!("Failed to load config, using defaults: {}", e);
-            Config::defaults()?
-        },
-    };
-    sweep_kept_audio(config.history.keep_audio_days);
+    let Startup { config, sweep_days } = startup(Config::load())?;
+    if let Some(days) = sweep_days {
+        sweep_kept_audio(days);
+    }
     let hotkey_combination = config.hotkey.combination.clone();
     let hotkey_mode = config.hotkey.mode;
 
@@ -1583,6 +1578,38 @@ fn recover_leftover_parts() {
     }
 }
 
+/// The settings the daemon starts with, and the age at which it deletes
+/// kept audio at startup.
+struct Startup {
+    config: Config,
+    sweep_days: Option<u64>,
+}
+
+/// The loaded settings. A file that does not load leaves the daemon on the
+/// defaults, which keep no audio and 500 transcripts: so it deletes no kept
+/// audio and trims no history until the file loads again.
+fn startup(loaded: Result<Config>) -> Result<Startup> {
+    match loaded {
+        Ok(config) => Ok(Startup {
+            sweep_days: Some(config.history.keep_audio_days),
+            config,
+        }),
+        Err(e) => {
+            warn!(
+                "The configuration does not load ({:#}). Hush runs on the defaults and keeps \
+                 every transcript and all kept audio until the file loads again.",
+                e
+            );
+            let mut config = Config::defaults()?;
+            config.history.max_entries = MAX_HISTORY_ENTRIES;
+            Ok(Startup {
+                config,
+                sweep_days: None,
+            })
+        },
+    }
+}
+
 /// Delete the kept audio that is too old, then the oldest over the cap.
 fn sweep_kept_audio(keep_days: u64) {
     match store::sweep_now(keep_days) {
@@ -1915,5 +1942,31 @@ fn run_style_rewrite(
             "The style left the text as it was.",
         ),
         RewriteOutcome::Skipped => {},
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_config_that_loads_sweeps_by_its_own_days() {
+        let mut config = Config::defaults().unwrap();
+        config.history.keep_audio_days = 30;
+        let start = startup(Ok(config)).unwrap();
+        assert_eq!(start.sweep_days, Some(30));
+        assert_eq!(start.config.history.max_entries, 500);
+    }
+
+    #[test]
+    fn a_config_that_does_not_load_deletes_no_audio_and_trims_no_history() {
+        let start = startup(Err(anyhow::anyhow!("Invalid config file"))).unwrap();
+        assert_eq!(start.sweep_days, None, "no sweep with keep_audio_days = 0");
+        assert_eq!(start.config.history.max_entries, MAX_HISTORY_ENTRIES);
+        assert!(start.config.validate().is_ok());
+        assert!(
+            !start.config.history.keeps_audio(),
+            "and no new audio either"
+        );
     }
 }
