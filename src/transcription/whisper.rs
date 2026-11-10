@@ -548,6 +548,9 @@ fn take_language<'a>(language: &'a str, known: &[String]) -> Option<&'a str> {
     None
 }
 
+/// Within one take, each 30-second window after the first is conditioned on
+/// the prompt and the text before it, which slide out as the text grows, as
+/// whisper.cpp does. Nothing carries from one take to the next.
 fn run_options(language: Option<&str>, prompt: Option<&str>) -> RunOptions {
     RunOptions {
         task: Task::Transcribe,
@@ -555,7 +558,7 @@ fn run_options(language: Option<&str>, prompt: Option<&str>) -> RunOptions {
         language: language.map(str::to_string),
         family: Some(RunExtension::Whisper(WhisperRunOptions {
             initial_prompt: prompt.map(whisper_prompt),
-            condition_on_prev_tokens: Some(false),
+            condition_on_prev_tokens: Some(true),
             ..Default::default()
         })),
         ..Default::default()
@@ -1108,7 +1111,11 @@ mod tests {
         match options.family {
             Some(RunExtension::Whisper(whisper)) => {
                 assert_eq!(whisper.initial_prompt.as_deref(), Some("Gregor Samsa"));
-                assert_eq!(whisper.condition_on_prev_tokens, Some(false));
+                assert_eq!(
+                    whisper.condition_on_prev_tokens,
+                    Some(true),
+                    "later windows of a long take keep the prompt and the text before them"
+                );
             },
             other => panic!("expected the Whisper extension, got {other:?}"),
         }
