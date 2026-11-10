@@ -290,8 +290,9 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
          browsers otherwise treat as Back.",
         &mut gui.config.hotkey.exclusive,
     );
-    toggle_row(
+    switch_row(
         ui,
+        "hotkeys.mask_menu",
         "Keep menus closed",
         "With an Alt or Super key on its own, Hush taps Ctrl when the key goes down. \
          Applications then open no menu, and the desktop opens no launcher. On Sway, \
