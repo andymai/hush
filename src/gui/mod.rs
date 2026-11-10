@@ -48,7 +48,7 @@ const STATUS_TIMEOUT: Duration = Duration::from_millis(300);
 /// How long a restarted daemon gets to load its model and answer again.
 const RESTART_TIMEOUT: Duration = Duration::from_secs(40);
 
-pub const MODEL_ORDER: [ModelSize; 7] = [
+pub const MODEL_ORDER: [ModelSize; 8] = [
     ModelSize::Tiny,
     ModelSize::Base,
     ModelSize::Small,
@@ -56,6 +56,7 @@ pub const MODEL_ORDER: [ModelSize; 7] = [
     ModelSize::Large,
     ModelSize::LargeV2,
     ModelSize::LargeV3,
+    ModelSize::ParakeetV3,
 ];
 
 /// A model download in flight, shared with the task doing the work.

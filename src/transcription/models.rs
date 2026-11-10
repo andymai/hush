@@ -60,6 +60,19 @@ pub fn langid_model() -> ModelInfo {
     }
 }
 
+/// The catalogue entry for Parakeet TDT 0.6B v3.
+pub fn parakeet_v3_model() -> ModelInfo {
+    ModelInfo {
+        name: "parakeet-tdt-0.6b-v3".to_string(),
+        repo_id: "collectivecontext/hush-models".to_string(),
+        filename: PARAKEET_V3_FILENAME.to_string(),
+        expected_size: 739_508_576,
+        sha256: Some(
+            "5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7".to_string(),
+        ),
+    }
+}
+
 /// Where the language-ID model lives in `models_dir`, downloaded or not.
 pub fn langid_model_path(models_dir: &Path) -> PathBuf {
     models_dir.join(LANGID_FILENAME)
@@ -120,10 +133,18 @@ pub enum ModelSize {
     Large,
     LargeV2,
     LargeV3,
+    /// NVIDIA Parakeet TDT 0.6B v3, opt-in: 25 European languages, no prompt
+    ParakeetV3,
 }
 
+/// The languages of Parakeet TDT 0.6B v3, which it tells apart on its own.
+pub const PARAKEET_V3_LANGUAGES: [&str; 25] = [
+    "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt",
+    "pl", "pt", "ro", "ru", "sk", "sl", "es", "sv", "uk",
+];
+
 impl ModelSize {
-    /// File name of this model in the ggerganov/whisper.cpp catalogue.
+    /// File name of this model in its catalogue.
     pub fn filename(&self) -> String {
         match self {
             ModelSize::Tiny => "ggml-tiny.bin",
@@ -133,10 +154,19 @@ impl ModelSize {
             ModelSize::Large => "ggml-large-v1.bin",
             ModelSize::LargeV2 => "ggml-large-v2.bin",
             ModelSize::LargeV3 => "ggml-large-v3.bin",
+            ModelSize::ParakeetV3 => PARAKEET_V3_FILENAME,
         }
         .to_string()
     }
+
+    pub fn is_parakeet(&self) -> bool {
+        matches!(self, ModelSize::ParakeetV3)
+    }
 }
+
+/// NVIDIA's Parakeet TDT 0.6B v3 (CC BY 4.0), converted to GGUF with
+/// transcribe.cpp and quantized to Q8_0.
+pub const PARAKEET_V3_FILENAME: &str = "parakeet-tdt-0.6b-v3-Q8_0.gguf";
 
 impl std::str::FromStr for ModelSize {
     type Err = anyhow::Error;
@@ -150,6 +180,7 @@ impl std::str::FromStr for ModelSize {
             "large" => Ok(ModelSize::Large),
             "large-v2" => Ok(ModelSize::LargeV2),
             "large-v3" => Ok(ModelSize::LargeV3),
+            "parakeet-v3" => Ok(ModelSize::ParakeetV3),
             _ => Err(anyhow::anyhow!("Unknown model size: {}", s)),
         }
     }
@@ -165,6 +196,7 @@ impl std::fmt::Display for ModelSize {
             ModelSize::Large => write!(f, "large"),
             ModelSize::LargeV2 => write!(f, "large-v2"),
             ModelSize::LargeV3 => write!(f, "large-v3"),
+            ModelSize::ParakeetV3 => write!(f, "parakeet-v3"),
         }
     }
 }
@@ -300,6 +332,8 @@ impl ModelManager {
                 ),
             },
         );
+
+        models.insert(ModelSize::ParakeetV3, parakeet_v3_model());
 
         models
     }
@@ -879,6 +913,32 @@ mod tests {
         assert_eq!(manager.valid_path(&info), None, "a new time: hashed again");
         std::fs::remove_file(&path).unwrap();
         assert_eq!(manager.valid_path(&info), None, "a missing file");
+    }
+
+    #[test]
+    fn parakeet_comes_from_the_hush_model_repo() {
+        let size: ModelSize = "parakeet-v3".parse().unwrap();
+        assert_eq!(size, ModelSize::ParakeetV3);
+        assert_eq!(size.to_string(), "parakeet-v3");
+        assert!(size.is_parakeet());
+        assert!(!ModelSize::Base.is_parakeet());
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        let info = manager.get_model_info(&size).unwrap();
+        assert_eq!(info.filename, size.filename());
+        assert_eq!(
+            ModelManager::download_url(info),
+            "https://huggingface.co/collectivecontext/hush-models/resolve/main/parakeet-tdt-0.6b-v3-Q8_0.gguf"
+        );
+        assert_eq!(info.expected_size, 739_508_576);
+        assert_eq!(
+            info.sha256.as_deref(),
+            Some("5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7")
+        );
+        assert_eq!(PARAKEET_V3_LANGUAGES.len(), 25);
+        assert!(PARAKEET_V3_LANGUAGES
+            .iter()
+            .all(|code| crate::transcription::Language::parse(code).is_some()));
     }
 
     #[test]

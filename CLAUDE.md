@@ -71,7 +71,7 @@ src/
 ├── application/    # HushApp orchestrator with builder pattern
 ├── cli/            # Clap-based CLI, command handlers in cli/commands/
 ├── audio/          # CPAL-based audio capture
-├── transcription/  # Whisper via transcribe-cpp (whisper.rs), model catalogue and downloads (models.rs), GPU detection (device.rs)
+├── transcription/  # Whisper and opt-in Parakeet via transcribe-cpp (whisper.rs), model catalogue and downloads (models.rs), GPU detection (device.rs)
 ├── text_processing/# Pipeline: filler removal → vocabulary → entities → LLM polish
 ├── text/           # uinput typing, clipboard paste fallback, window detection (X11, Hyprland, Sway)
 ├── hotkey/         # Hotkey combination parser, evdev backend, X11 fallback

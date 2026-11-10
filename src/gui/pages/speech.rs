@@ -226,11 +226,8 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
             format!("{} ({}, not downloaded)", size_key(size), bytes)
         }
     };
-    let description = format!(
-        "Runs on your machine. Larger models are more accurate and slower; {} suits this machine.",
-        size_key(recommended)
-    );
-    row("speech.model", "Whisper model")
+    let description = model_description(selected, recommended);
+    row("speech.model", "Speech model")
         .describe(&description)
         .reserve(240.0)
         .show(ui, |ui| {
@@ -622,7 +619,26 @@ pub fn size_key(size: ModelSize) -> &'static str {
         ModelSize::Large => "large",
         ModelSize::LargeV2 => "large-v2",
         ModelSize::LargeV3 => "large-v3",
+        ModelSize::ParakeetV3 => "parakeet-v3",
     }
+}
+
+/// What the model row says about the chosen model. Parakeet's licence asks
+/// for the credit.
+fn model_description(selected: Option<ModelSize>, recommended: ModelSize) -> String {
+    if selected.is_some_and(|size| size.is_parakeet()) {
+        return "NVIDIA Parakeet TDT 0.6B v3 (CC BY 4.0), converted to GGUF and quantized to \
+                Q8_0. It knows 25 European languages and picks among them on its own, so the \
+                language setting does not apply. It reads no prompt: the window title, learned \
+                terms, and the text before a part do not prime it."
+            .to_string();
+    }
+    format!(
+        "Runs on your machine. Larger Whisper models are more accurate and slower; {} suits \
+         this machine. parakeet-v3 is NVIDIA's Parakeet: fast and accurate in 25 European \
+         languages, without priming.",
+        size_key(recommended)
+    )
 }
 
 #[cfg(test)]
@@ -640,6 +656,21 @@ mod tests {
                 "{key} round trips"
             );
         }
+    }
+
+    #[test]
+    fn the_parakeet_row_credits_nvidia_and_names_its_limits() {
+        let parakeet = model_description(Some(ModelSize::ParakeetV3), ModelSize::Base);
+        for words in [
+            "NVIDIA",
+            "CC BY 4.0",
+            "converted to GGUF and quantized to Q8_0",
+            "no prompt",
+        ] {
+            assert!(parakeet.contains(words), "{words}: {parakeet}");
+        }
+        let whisper = model_description(Some(ModelSize::Base), ModelSize::Small);
+        assert!(whisper.contains("small suits this machine"), "{whisper}");
     }
 
     #[test]

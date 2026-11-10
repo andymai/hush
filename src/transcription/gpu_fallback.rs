@@ -199,7 +199,7 @@ pub fn choose(record: Option<&GpuFailure>, current: &GpuFailure) -> Choice {
 /// GPU failed a take in this session or with this driver before.
 pub fn avoid_gpu(gpu: &GpuAvailability) -> bool {
     if FAILED_THIS_SESSION.load(Ordering::Acquire) {
-        info!("Whisper stays on the CPU, because the GPU failed a take in this session");
+        info!("The speech model stays on the CPU, because the GPU failed a take in this session");
         return true;
     }
     let path = GpuFailure::path();
@@ -208,7 +208,7 @@ pub fn avoid_gpu(gpu: &GpuAvailability) -> bool {
         Choice::Gpu => false,
         Choice::Cpu => {
             warn!(
-                "Whisper loads on the CPU, because {} failed a take with driver {}. \
+                "The speech model loads on the CPU, because {} failed a take with driver {}. \
                  To try the GPU again, delete {} and run `hush daemon restart`",
                 current.gpu,
                 current.driver,

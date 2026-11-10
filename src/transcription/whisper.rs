@@ -66,6 +66,48 @@ impl Heard {
     }
 }
 
+/// The model families that Hush runs on transcribe.cpp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Family {
+    Whisper,
+    /// NVIDIA Parakeet TDT: it takes no prompt and no language hint, and it
+    /// tells its languages apart on its own. Its decoder runs on the CPU.
+    Parakeet,
+}
+
+impl Family {
+    fn from_arch(arch: &str) -> Option<Self> {
+        match arch {
+            "whisper" => Some(Family::Whisper),
+            "parakeet" => Some(Family::Parakeet),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Family::Whisper => "Whisper",
+            Family::Parakeet => "Parakeet",
+        }
+    }
+
+    /// Whether the model reads a prompt: the window title, the learned
+    /// terms, and the text before a part.
+    pub fn takes_prompt(self) -> bool {
+        self == Family::Whisper
+    }
+
+    /// The CPU threads of a session. Whisper on a GPU needs one; the TDT
+    /// decoder of Parakeet runs on the CPU, also when the encoder runs on a
+    /// GPU, and gets about a third slower with one thread.
+    fn threads(self, gpu: bool) -> i32 {
+        match (self, gpu) {
+            (Family::Whisper, true) => 1,
+            _ => cpu_threads(),
+        }
+    }
+}
+
 /// A run that the model refuses on any device, so a retry on the CPU cannot
 /// help.
 #[derive(Debug, thiserror::Error)]
@@ -76,6 +118,7 @@ struct Rejected(transcribe_cpp::Error);
 /// dictations instead of reallocated per call.
 struct Engine {
     model: Model,
+    family: Family,
     session: Mutex<Session>,
     /// The description of the device that holds the weights
     device: String,
@@ -101,9 +144,9 @@ pub struct WhisperTranscriber {
 }
 
 impl WhisperTranscriber {
-    /// Load a Whisper model, a ggml `.bin` or a GGUF file. `use_gpu` is
-    /// honored when a GPU backend exists, unless that GPU failed a take with
-    /// the same driver before.
+    /// Load a speech model: Whisper as a ggml `.bin` or a GGUF file, or
+    /// Parakeet as a GGUF file. `use_gpu` is honored when a GPU backend
+    /// exists, unless that GPU failed a take with the same driver before.
     pub async fn new(model_path: &Path, use_gpu: bool) -> Result<Self> {
         cpu::ensure_supported()?;
         let ctx = RequestContext::new("whisper_transcriber_init")
@@ -125,8 +168,8 @@ impl WhisperTranscriber {
         if use_gpu && !gpu.available {
             if gpu_fallback::GPU_BUILD {
                 warn!(
-                    "Whisper loads on the CPU, because ggml found no GPU. The graphics driver \
-                     was probably not ready when Hush started, for example at login. \
+                    "The speech model loads on the CPU, because ggml found no GPU. The graphics \
+                     driver was probably not ready when Hush started, for example at login. \
                      Run `hush daemon restart` to use the GPU"
                 );
             } else {
@@ -139,14 +182,14 @@ impl WhisperTranscriber {
             model_path = %model_path.display(),
             device = %gpu,
             using_gpu,
-            "Loading Whisper model"
+            "Loading the speech model"
         );
 
         let (engine, using_gpu) = match load_engine(model_path, using_gpu).await {
             Ok(engine) => (engine, using_gpu),
             Err(e) if using_gpu => {
                 warn!(
-                    "Whisper did not load on the GPU, so it loads on the CPU: {:#}",
+                    "The speech model did not load on the GPU, so it loads on the CPU: {:#}",
                     e
                 );
                 (load_engine(model_path, false).await?, false)
@@ -163,7 +206,11 @@ impl WhisperTranscriber {
             language: "en".to_string(),
             detect_languages: Arc::from([]),
         };
-        info!("Whisper model loaded on {}", transcriber.get_device_info());
+        info!(
+            "{} model loaded on {}",
+            transcriber.family().name(),
+            transcriber.get_device_info()
+        );
         Ok(transcriber)
     }
 
@@ -239,6 +286,10 @@ impl WhisperTranscriber {
     /// choose. An `.en` model knows only English.
     pub fn is_multilingual(&self) -> bool {
         self.engine().multilingual
+    }
+
+    pub fn family(&self) -> Family {
+        self.engine().family
     }
 
     /// How many tokens Whisper makes of `prompt`, or `None` when it cannot
@@ -385,8 +436,12 @@ impl WhisperTranscriber {
                 debug!("The take is too quiet to hold speech");
                 return Ok(Heard::nothing());
             };
-            let prompt = prompt.as_deref();
-            if language != "auto" || detect.is_empty() || !engine.multilingual {
+            let prompt = prompt.as_deref().filter(|_| engine.family.takes_prompt());
+            if engine.family == Family::Parakeet
+                || language != "auto"
+                || detect.is_empty()
+                || !engine.multilingual
+            {
                 let (text, _) = run_full(&engine, speech, &language, prompt)?;
                 return Ok(Heard {
                     text,
@@ -419,7 +474,7 @@ impl WhisperTranscriber {
         language: String,
     ) -> Result<Heard> {
         warn!(
-            "Whisper failed on the GPU, so the take runs again on the CPU, \
+            "The speech model failed on the GPU, so the take runs again on the CPU, \
              and the CPU stays in use for this session: {:#}",
             gpu_error
         );
@@ -436,7 +491,11 @@ impl WhisperTranscriber {
         self.using_gpu.store(false, Ordering::Release);
         // A failed GPU can be slow to free its memory.
         tokio::task::spawn_blocking(move || drop(failed));
-        info!("Whisper model loaded on {}", self.get_device_info());
+        info!(
+            "{} model loaded on {}",
+            self.family().name(),
+            self.get_device_info()
+        );
         self.run_take(samples, prompt, language).await
     }
 
@@ -463,40 +522,42 @@ pub(crate) fn cpu_options() -> ModelOptions {
     }
 }
 
-/// Load a Whisper model and make its session, on the GPU when `use_gpu` is
+/// Load a speech model and make its session, on the GPU when `use_gpu` is
 /// true.
 async fn load_engine(model_path: &Path, use_gpu: bool) -> Result<Engine> {
     let path = model_path.to_path_buf();
     // Loading a large model takes seconds, so keep it off the async runtime.
     tokio::task::spawn_blocking(move || {
-        let (options, threads) = if use_gpu {
+        let options = if use_gpu {
             let (backend, gpu) = device::gpu_device()
-                .ok_or_else(|| anyhow::anyhow!("ggml lists no GPU to load Whisper on"))?;
-            let options = ModelOptions {
+                .ok_or_else(|| anyhow::anyhow!("ggml lists no GPU to load the model on"))?;
+            ModelOptions {
                 backend,
                 device: Some(gpu),
                 ..Default::default()
-            };
-            (options, 1)
+            }
         } else {
-            (cpu_options(), cpu_threads())
+            cpu_options()
         };
         let model = Model::load_with(&path, &options).map_err(|e| {
-            anyhow::anyhow!("Failed to load Whisper model {}: {}", path.display(), e)
+            anyhow::anyhow!("Failed to load the speech model {}: {}", path.display(), e)
         })?;
-        if model.arch() != "whisper" {
-            return Err(anyhow::anyhow!(
-                "{} is a {} model, not a Whisper model",
+        let family = Family::from_arch(&model.arch()).ok_or_else(|| {
+            anyhow::anyhow!(
+                "{} is a {} model, and Hush runs only Whisper and Parakeet models",
                 path.display(),
                 model.arch()
-            ));
-        }
+            )
+        })?;
+        let threads = family.threads(use_gpu);
         let session = model
             .session_with(&SessionOptions {
                 n_threads: threads,
                 ..Default::default()
             })
-            .map_err(|e| anyhow::anyhow!("Failed to create the Whisper session: {}", e))?;
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to create the {} session: {}", family.name(), e)
+            })?;
         let device = model
             .device()
             .map(|device| device.description)
@@ -505,9 +566,16 @@ async fn load_engine(model_path: &Path, use_gpu: bool) -> Result<Engine> {
             .capabilities()
             .map(|caps| (caps.languages, caps.supports_language_detect))
             .unwrap_or_default();
-        debug!(backend = %model.backend(), threads, multilingual, "Whisper session ready");
+        debug!(
+            backend = %model.backend(),
+            threads,
+            multilingual,
+            "{} session ready",
+            family.name()
+        );
         Ok(Engine {
             model,
+            family,
             session: Mutex::new(session),
             device,
             languages,
@@ -562,6 +630,16 @@ fn run_options(language: Option<&str>, prompt: Option<&str>) -> RunOptions {
     }
 }
 
+/// A Parakeet run: no language hint, no prompt, and no timestamps, which Hush
+/// does not use.
+fn parakeet_options() -> RunOptions {
+    RunOptions {
+        task: Task::Transcribe,
+        timestamps: TimestampKind::None,
+        ..Default::default()
+    }
+}
+
 /// The text of a run, and the language Whisper detected when it got no hint.
 fn run_full(
     engine: &Engine,
@@ -571,7 +649,10 @@ fn run_full(
 ) -> Result<(String, Option<String>)> {
     use transcribe_cpp::Error;
 
-    let options = run_options(take_language(language, &engine.languages), prompt);
+    let options = match engine.family {
+        Family::Whisper => run_options(take_language(language, &engine.languages), prompt),
+        Family::Parakeet => parakeet_options(),
+    };
     let transcript = match engine.session.lock().run(samples, &options) {
         Ok(transcript) => transcript,
         Err(
@@ -584,7 +665,10 @@ fn run_full(
                 partial: Some(partial),
             },
         ) => {
-            warn!("Whisper stopped early, so the text ends there: {}", message);
+            warn!(
+                "The model stopped early, so the text ends there: {}",
+                message
+            );
             *partial
         },
         Err(e @ (Error::InvalidArgument(_) | Error::Unsupported(_))) => {
@@ -941,6 +1025,23 @@ mod tests {
             other => panic!("expected the Whisper extension, got {other:?}"),
         }
         assert_eq!(run_options(None, None).language, None);
+    }
+
+    #[test]
+    fn parakeet_gets_no_hint_no_prompt_and_its_own_threads() {
+        let options = parakeet_options();
+        assert_eq!(options.task, Task::Transcribe);
+        assert_eq!(options.language, None);
+        assert_eq!(options.prompt, None);
+        assert_eq!(options.family, None, "no Whisper extension");
+        assert_eq!(options.timestamps, TimestampKind::None);
+        assert!(!Family::Parakeet.takes_prompt());
+        assert!(Family::Whisper.takes_prompt());
+        assert_eq!(Family::Whisper.threads(true), 1);
+        assert_eq!(Family::Parakeet.threads(true), cpu_threads());
+        assert_eq!(Family::from_arch("parakeet"), Some(Family::Parakeet));
+        assert_eq!(Family::from_arch("whisper"), Some(Family::Whisper));
+        assert_eq!(Family::from_arch("canary"), None);
     }
 
     #[test]

@@ -51,7 +51,9 @@ scripts/e2e/run.sh english_clip    # one case
 ```
 
 The first run downloads the `tiny` model and the voice activity model into
-`~/.cache/hush-e2e/`. Later runs use that copy.
+`~/.cache/hush-e2e/`. Later runs use that copy. The `parakeet` case runs the
+opt-in Parakeet model on both clips; its first run downloads that model
+(740 MB) into the same folder, and the nightly job keeps it in its cache.
 
 Two cases use the language-ID model:
 
@@ -67,6 +69,7 @@ Two cases use the language-ID model:
 | --- | --- |
 | `HUSH_BIN` | The binary to test. The default is `target/debug/hush`, which the harness builds when it is missing. |
 | `HUSH_E2E_MODEL` | A ggml model file to use instead of `tiny`. |
+| `HUSH_E2E_PARAKEET_MODEL` | A copy of `parakeet-tdt-0.6b-v3-Q8_0.gguf` for the `parakeet` case. Without it, the harness downloads the model (740 MB) once into `~/.cache/hush-e2e/`. |
 | `HUSH_E2E_LANGID_MODEL` | A copy of `lang-id-voxlingua107-ecapa-Q8_0.gguf` for the language-ID cases. It must match the SHA-256 in `models.rs`. |
 | `HUSH_E2E_KEEP=1` | Keep the temporary folder with the daemon logs. |
 | `HUSH_E2E_TAIL_SECS` | The time from the end of the clip to the stop. The default is 1.5. |

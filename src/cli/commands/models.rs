@@ -84,7 +84,7 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
     use crate::transcription::models::{ModelManager, ModelSize};
     use crate::Config;
 
-    println!("📋 Available Whisper Models:");
+    println!("📋 Available Models:");
     println!();
 
     // Load config to show which model is active
@@ -93,7 +93,14 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
         .map(|config| config.transcription.model_size);
 
     let models = [
-        "tiny", "base", "small", "medium", "large", "large-v2", "large-v3",
+        "tiny",
+        "base",
+        "small",
+        "medium",
+        "large",
+        "large-v2",
+        "large-v3",
+        "parakeet-v3",
     ];
     let cache_dir = crate::config::paths::models_dir();
 
@@ -131,6 +138,7 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
                 "large" => "~3.1 GB",
                 "large-v2" => "~3.1 GB",
                 "large-v3" => "~3.1 GB",
+                "parakeet-v3" => "~740 MB, NVIDIA Parakeet, 25 European languages, no prompt",
                 _ => "Unknown",
             };
             print!(" ({})", size);
@@ -214,7 +222,8 @@ pub async fn download_model(model_size: &str, force: bool) -> Result<std::path::
 ///
 /// # Arguments
 ///
-/// * `model_size` - Model size to set as active (tiny, base, small, medium, large, large-v2, large-v3)
+/// * `model_size` - Model to set as active (tiny, base, small, medium, large, large-v2, large-v3,
+///   parakeet-v3)
 ///
 /// # Examples
 ///

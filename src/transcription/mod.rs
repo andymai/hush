@@ -38,4 +38,4 @@ pub use engine::SpeechToText;
 pub use language::Language;
 pub use models::{ModelInfo, ModelManager, ModelSize};
 pub use slot::{IdleTimer, ModelSlot, SlotState};
-pub use whisper::{TranscriptionResult, WhisperTranscriber, WHISPER_SAMPLE_RATE};
+pub use whisper::{Family, TranscriptionResult, WhisperTranscriber, WHISPER_SAMPLE_RATE};

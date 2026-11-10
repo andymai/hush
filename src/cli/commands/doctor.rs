@@ -13,7 +13,9 @@ use crate::text_processing::hook::{self, Program};
 use crate::transcription::cpu;
 use crate::transcription::device::GpuAvailability;
 use crate::transcription::gpu_fallback::GpuFailure;
-use crate::transcription::models::{recommended_model, ModelManager, ModelSize};
+use crate::transcription::models::{
+    recommended_model, ModelManager, ModelSize, PARAKEET_V3_LANGUAGES,
+};
 use crate::AudioCapture;
 use anyhow::Result;
 use std::fmt;
@@ -128,7 +130,9 @@ pub async fn checks() -> Vec<Check> {
                 .and_then(ModelManager::vad_model_path)
                 .is_some(),
         ));
-        let limits_detection = !config.transcription.detect_languages.is_empty();
+        checks.extend(parakeet_language_check(&config.transcription));
+        let limits_detection = !config.transcription.detect_languages.is_empty()
+            && !is_parakeet(&config.transcription);
         checks.extend(langid_check(
             &config.transcription,
             limits_detection
@@ -264,10 +268,41 @@ fn download_command(config: &TranscriptionConfig) -> String {
 
 /// A line only when `detect_languages` limits detection, which needs the
 /// language-ID model.
+fn is_parakeet(config: &TranscriptionConfig) -> bool {
+    config
+        .model_size
+        .parse::<ModelSize>()
+        .is_ok_and(|size| size.is_parakeet())
+}
+
+/// A line only when Parakeet is the model and `language` names a language
+/// that Parakeet does not know: Parakeet ignores the setting and picks among
+/// its own languages.
+fn parakeet_language_check(config: &TranscriptionConfig) -> Option<Check> {
+    let language = config.language.trim();
+    if !is_parakeet(config) || language == "auto" || PARAKEET_V3_LANGUAGES.contains(&language) {
+        return None;
+    }
+    Some(Check::warn(
+        "Language",
+        format!(
+            "Parakeet does not know {}; it picks among its 25 European languages",
+            language
+        ),
+        "choose a Whisper model for this language: hush models set base",
+    ))
+}
+
 fn langid_check(config: &TranscriptionConfig, model_present: bool) -> Option<Check> {
     const NAME: &str = "Language detection";
     if config.detect_languages.is_empty() {
         return None;
+    }
+    if is_parakeet(config) {
+        return Some(Check::ok(
+            NAME,
+            "Parakeet tells its own languages apart, so detect_languages is not used",
+        ));
     }
     let languages = config.detect_languages.join(", ");
     if model_present {
@@ -828,6 +863,38 @@ mod tests {
         let present = langid_check(&config, true).unwrap();
         assert_eq!(present.level, Level::Ok);
         assert!(present.detail.contains("en, de"), "{}", present.detail);
+    }
+
+    #[test]
+    fn parakeet_warns_about_a_language_it_lacks_and_skips_language_id() {
+        let mut config = Config::defaults().unwrap().transcription;
+        config.model_size = "parakeet-v3".to_string();
+        config.language = "de".to_string();
+        assert!(
+            parakeet_language_check(&config).is_none(),
+            "German is a Parakeet language"
+        );
+        config.language = "auto".to_string();
+        assert!(parakeet_language_check(&config).is_none());
+        config.language = "ja".to_string();
+        let check = parakeet_language_check(&config).unwrap();
+        assert_eq!(check.level, Level::Warn);
+        assert!(
+            check.detail.contains("does not know ja"),
+            "{}",
+            check.detail
+        );
+        config.model_size = "base".to_string();
+        assert!(
+            parakeet_language_check(&config).is_none(),
+            "Whisper knows Japanese"
+        );
+
+        config.model_size = "parakeet-v3".to_string();
+        config.detect_languages = vec!["en".to_string(), "de".to_string()];
+        let line = langid_check(&config, false).unwrap();
+        assert_eq!(line.level, Level::Ok, "no language-ID model is needed");
+        assert!(line.detail.contains("not used"), "{}", line.detail);
     }
 
     #[test]
