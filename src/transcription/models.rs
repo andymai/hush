@@ -363,10 +363,13 @@ impl ModelManager {
                 return valid.then_some(path);
             }
         }
-        let valid = Self::is_valid(&path, info).unwrap_or_else(|e| {
-            warn!("Could not check {}: {:#}", path.display(), e);
-            false
-        });
+        let valid = match Self::is_valid(&path, info) {
+            Ok(valid) => valid,
+            Err(e) => {
+                warn!("Could not check {}: {:#}", path.display(), e);
+                return None;
+            },
+        };
         CHECKED.lock().insert(path.clone(), (stamp, valid));
         valid.then_some(path)
     }
@@ -791,6 +794,28 @@ mod tests {
             manager.valid_path(&info),
             None,
             "a file damaged later fails"
+        );
+    }
+
+    #[test]
+    fn a_check_that_cannot_read_the_file_is_not_kept() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: geteuid has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let temp_dir = TempDir::new().unwrap();
+        let info = hello_model();
+        let path = temp_dir.path().join("hello.bin");
+        std::fs::write(&path, b"Hello, World!").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        assert_eq!(manager.valid_path(&info), None, "unreadable");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            manager.valid_path(&info),
+            Some(path),
+            "a read error is not remembered as a bad file"
         );
     }
 
