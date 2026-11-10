@@ -14,7 +14,8 @@ use crate::text_processing::learn::{self, ListImport};
 use crate::text_processing::styles::{self, StyleConfig, StyleName};
 use std::path::{Path, PathBuf};
 
-const VOCABULARY_HEIGHT: f32 = 220.0;
+/// Longer vocabularies get a field that narrows the list.
+const FILTER_FROM: usize = 10;
 const EDIT_COLUMN: f32 = 340.0;
 const LIST_COLUMN: f32 = FIELD_WIDTH + 140.0;
 const PROMPT_WIDTH: f32 = 320.0;
@@ -387,44 +388,54 @@ fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
         ui.label(egui::RichText::new("No words yet.").color(MUTED));
         return;
     }
+    if terms.len() > FILTER_FROM {
+        row("Find a word").show(ui, |ui| {
+            if !gui.term_filter.is_empty() && quiet_button(ui, "Clear").clicked() {
+                gui.term_filter.clear();
+            }
+            field(ui, &mut gui.term_filter, "Type part of a word");
+        });
+    } else {
+        gui.term_filter.clear();
+    }
+    let editing_original = gui.editing_term.as_ref().map(|edit| edit.original.as_str());
+    let shown: Vec<String> = shown_terms(&terms, &gui.term_filter, editing_original)
+        .into_iter()
+        .cloned()
+        .collect();
     let mut remove: Option<String> = None;
     let mut start: Option<String> = None;
     let mut commit = false;
     let mut cancel = false;
     let editing = &mut gui.editing_term;
-    egui::ScrollArea::vertical()
-        .max_height(VOCABULARY_HEIGHT)
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            for term in &terms {
-                match editing.as_mut().filter(|edit| edit.original == *term) {
-                    Some(edit) => {
-                        row(term).reserve(EDIT_COLUMN).show(ui, |ui| {
-                            cancel |= quiet_button(ui, "Cancel").clicked();
-                            commit |= ui.button("Done").clicked();
-                            let response = field(ui, &mut edit.draft, term);
-                            if std::mem::take(&mut edit.focus) {
-                                response.request_focus();
-                            }
-                            if response.lost_focus() {
-                                commit |= ui.input(|i| i.key_pressed(egui::Key::Enter));
-                                cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
-                            }
-                        });
-                    },
-                    None => {
-                        row(term).show(ui, |ui| {
-                            if quiet_button(ui, "Remove").clicked() {
-                                remove = Some(term.clone());
-                            }
-                            if quiet_button(ui, "Edit").clicked() {
-                                start = Some(term.clone());
-                            }
-                        });
-                    },
-                }
-            }
-        });
+    for term in &shown {
+        match editing.as_mut().filter(|edit| edit.original == *term) {
+            Some(edit) => {
+                row(term).reserve(EDIT_COLUMN).show(ui, |ui| {
+                    cancel |= quiet_button(ui, "Cancel").clicked();
+                    commit |= ui.button("Done").clicked();
+                    let response = field(ui, &mut edit.draft, term);
+                    if std::mem::take(&mut edit.focus) {
+                        response.request_focus();
+                    }
+                    if response.lost_focus() {
+                        commit |= ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
+                    }
+                });
+            },
+            None => {
+                row(term).show(ui, |ui| {
+                    if quiet_button(ui, "Remove").clicked() {
+                        remove = Some(term.clone());
+                    }
+                    if quiet_button(ui, "Edit").clicked() {
+                        start = Some(term.clone());
+                    }
+                });
+            },
+        }
+    }
     if cancel {
         gui.editing_term = None;
     } else if commit {
@@ -446,11 +457,35 @@ fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
         learn::forget_in(&mut gui.vocabulary, &term);
     }
     ui.add_space(4.0);
-    let count = terms.len();
-    if count == 1 {
-        hint(ui, "1 word.");
-    } else {
-        hint(ui, &format!("{} words.", count));
+    hint(ui, &count_hint(shown.len(), terms.len()));
+}
+
+/// The terms that contain `filter`, ignoring case, in their order. The term
+/// open for editing stays shown, so a filter change cannot hide the form.
+fn shown_terms<'a>(terms: &'a [String], filter: &str, editing: Option<&str>) -> Vec<&'a String> {
+    let filter = filter.trim().to_lowercase();
+    terms
+        .iter()
+        .filter(|term| {
+            filter.is_empty()
+                || term.to_lowercase().contains(&filter)
+                || editing == Some(term.as_str())
+        })
+        .collect()
+}
+
+fn count_hint(shown: usize, total: usize) -> String {
+    let words = |n: usize| {
+        if n == 1 {
+            "1 word".to_string()
+        } else {
+            format!("{} words", n)
+        }
+    };
+    match shown {
+        _ if shown == total => format!("{}.", words(total)),
+        0 => format!("No word matches. {} in all.", words(total)),
+        _ => format!("{} of {}.", shown, words(total)),
     }
 }
 
@@ -563,6 +598,36 @@ fn provider_name(provider: LlmSetting) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn terms(list: &[&str]) -> Vec<String> {
+        list.iter().map(|term| term.to_string()).collect()
+    }
+
+    #[test]
+    fn the_filter_keeps_terms_that_contain_it_ignoring_case() {
+        let all = terms(&["Kubernetes", "kubectl", "PostgreSQL", "Rust"]);
+        let shown = shown_terms(&all, " KUB ", None);
+        assert_eq!(shown, vec!["Kubernetes", "kubectl"]);
+        assert_eq!(shown_terms(&all, "", None).len(), 4);
+        assert!(shown_terms(&all, "zzz", None).is_empty());
+    }
+
+    #[test]
+    fn the_term_open_for_editing_stays_shown() {
+        let all = terms(&["Kubernetes", "PostgreSQL"]);
+        assert_eq!(
+            shown_terms(&all, "kube", Some("PostgreSQL")),
+            vec!["Kubernetes", "PostgreSQL"]
+        );
+    }
+
+    #[test]
+    fn the_count_says_how_many_words_the_filter_shows() {
+        assert_eq!(count_hint(1, 1), "1 word.");
+        assert_eq!(count_hint(12, 12), "12 words.");
+        assert_eq!(count_hint(3, 12), "3 of 12 words.");
+        assert_eq!(count_hint(0, 12), "No word matches. 12 words in all.");
+    }
 
     #[test]
     fn the_server_row_says_local_server_or_names_the_receiver() {
