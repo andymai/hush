@@ -1,0 +1,21 @@
+scripts/e2e/run.sh
+  s_115995023cd6f3::t_002824f523d49d 403
+tests/e2e/README.md
+  s_115995023cd6f3::t_5cd5d3543546fc 62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "515a2a1f1de28d3e0e6e75233459b2a28ffea7eb",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
