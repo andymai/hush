@@ -258,6 +258,23 @@ impl KeyTable {
         }
     }
 
+    /// The characters that both tables type with the same taps, for a
+    /// keyboard that can have either keymap.
+    pub fn common(&self, other: &KeyTable) -> KeyTable {
+        let chars = self
+            .chars
+            .iter()
+            .filter(|(ch, taps)| other.chars.get(ch) == Some(taps))
+            .map(|(&ch, taps)| (ch, taps.clone()))
+            .collect();
+        let shift = if self.shift == other.shift {
+            self.shift
+        } else {
+            Key::LeftShift
+        };
+        KeyTable::new(chars, shift)
+    }
+
     pub fn dead_key_chars(&self) -> usize {
         self.chars.values().filter(|taps| taps.len() > 1).count()
     }
@@ -391,6 +408,40 @@ mod tests {
         assert_eq!(table.dead_key_chars(), 1);
         assert!(table.covers("eé"));
         assert!(!table.covers("ë"));
+    }
+
+    #[test]
+    fn two_tables_share_only_the_same_taps() {
+        let altgr_q = Tap {
+            key: Key::Q,
+            shift: None,
+            level3: Some(Key::RightAlt),
+        };
+        let one = KeyTable::new(
+            HashMap::from([
+                ('a', vec![Tap::plain(Key::A)]),
+                ('<', vec![Tap::plain(Key::NonUsBackslashAndPipe)]),
+                ('@', vec![altgr_q]),
+                ('é', vec![Tap::plain(Key::Equal), Tap::plain(Key::E)]),
+            ]),
+            Key::LeftShift,
+        );
+        let other = KeyTable::new(
+            HashMap::from([
+                ('a', vec![Tap::plain(Key::A)]),
+                ('@', vec![altgr_q]),
+                ('é', vec![Tap::plain(Key::Grave), Tap::plain(Key::E)]),
+                ('z', vec![Tap::plain(Key::Z)]),
+            ]),
+            Key::LeftShift,
+        );
+        let common = one.common(&other);
+        assert_eq!(common.taps('a'), Some(&[Tap::plain(Key::A)][..]));
+        assert_eq!(common.taps('@'), Some(&[altgr_q][..]));
+        assert_eq!(common.taps('<'), None, "only one table has it");
+        assert_eq!(common.taps('z'), None, "only the other table has it");
+        assert_eq!(common.taps('é'), None, "the dead keys differ");
+        assert_eq!(common, other.common(&one));
     }
 
     #[test]

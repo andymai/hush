@@ -136,6 +136,10 @@ pub struct Session {
     pub model: String,
     /// `None` when the source does not say, as on Sway.
     pub options: Option<String>,
+    /// A second option list the keyboard can have instead, when Hush
+    /// cannot tell which one applies. Hush then types only the characters
+    /// whose keys are the same with both lists.
+    pub other_options: Option<String>,
     pub active: Active,
 }
 
@@ -146,6 +150,7 @@ impl Session {
             rules: String::new(),
             model: String::new(),
             options: Some(String::new()),
+            other_options: None,
             active: Active::Unknown,
         }
     }
@@ -488,8 +493,9 @@ fn apply_kwin(session: &mut Session, kwin: &[String], index: u32) {
 /// On X11, a keyboard that appears after login, as Hush's own does, gets the
 /// X server's default keymap, not a later `setxkbmap` change. The default is
 /// the X11 layout of `localectl`, or US when it names none. Hush types only
-/// when the session's layouts are that default, and leaves out AltGr when
-/// the options differ, because an option can move AltGr.
+/// when the session's layouts are that default. When the options differ,
+/// Hush's keyboard can have either list, because a desktop daemon can apply
+/// the session options to it, so both lists go to the key table.
 fn match_server_default(session: &mut Session, localectl: Option<&str>) {
     let Some(text) = localectl else {
         session.active = Active::Unclear {
@@ -515,9 +521,9 @@ fn match_server_default(session: &mut Session, localectl: Option<&str>) {
         };
         return;
     }
-    let default_options = option_set(field(text, "X11 Options:").unwrap_or_default());
-    if session.options.as_deref().map(option_set) != Some(default_options) {
-        session.options = None;
+    let default_options = field(text, "X11 Options:").unwrap_or_default();
+    if session.options.as_deref().map(option_set) != Some(option_set(default_options)) {
+        session.other_options = Some(default_options.to_string());
     }
 }
 
@@ -1119,10 +1125,21 @@ mod tests {
             "inline and listed variants agree"
         );
 
-        let mut session = setxkbmap("de", "lv3:caps_switch");
-        match_server_default(&mut session, Some(&localectl("de", "", "")));
+        let mut session = setxkbmap("de", "caps:escape,compose:102");
+        match_server_default(&mut session, Some(&localectl("de", "", "compose:102")));
         assert_eq!(session.active, Active::Unknown);
-        assert_eq!(session.options, None, "other options leave out AltGr");
+        assert_eq!(session.options.as_deref(), Some("caps:escape,compose:102"));
+        assert_eq!(
+            session.other_options.as_deref(),
+            Some("compose:102"),
+            "Hush's keyboard can have the default options instead"
+        );
+        let mut same = setxkbmap("de", "compose:102, caps:escape");
+        match_server_default(
+            &mut same,
+            Some(&localectl("de", "", "caps:escape,compose:102")),
+        );
+        assert_eq!(same.other_options, None, "the order does not matter");
 
         let mut session = setxkbmap("us", "");
         match_server_default(&mut session, None);

@@ -6,6 +6,8 @@
 //!   compiles the keymap and types through it.
 //! - With several layouts and no word on the active one, Hush pastes,
 //!   because a wrong guess types the wrong letters.
+//! - When the keyboard can have either of two option lists, as on X11, Hush
+//!   types only the characters whose keys are the same with both.
 //! - When libxkbcommon or the keymap is not available, Hush types with the
 //!   US table on plain US and pastes on every other layout.
 
@@ -68,6 +70,8 @@ impl fmt::Display for Typing {
 enum Plan {
     Compile {
         names: Names,
+        /// A second option list the keyboard can have instead.
+        other_options: Option<String>,
         group: u32,
         level3: bool,
         layout: String,
@@ -96,6 +100,7 @@ fn plan(session: Option<&Session>, library: bool) -> Plan {
                     layout: "us".into(),
                     ..Names::default()
                 },
+                other_options: None,
                 group: 0,
                 level3: false,
                 layout,
@@ -189,9 +194,13 @@ fn plan(session: Option<&Session>, library: bool) -> Plan {
             variant: list(|(_, variant)| variant),
             options: session.options.clone().unwrap_or_default(),
         },
+        other_options: session.other_options.clone(),
         group: group as u32,
         level3: session.options.is_some(),
-        layout: shown,
+        layout: match session.other_options {
+            Some(_) => format!("{} (only keys that two option lists agree on)", shown),
+            None => shown,
+        },
         plain_us,
     }
 }
@@ -201,7 +210,7 @@ fn plan(session: Option<&Session>, library: bool) -> Plan {
 #[derive(Default)]
 pub struct Resolver {
     reserved: Vec<u16>,
-    cached: Option<(Request, Arc<KeyTable>)>,
+    cached: Option<(Vec<Request>, Arc<KeyTable>)>,
 }
 
 impl Resolver {
@@ -227,6 +236,7 @@ impl Resolver {
             Plan::UsTable { layout, why } => Typing::UsTable { layout, why },
             Plan::Compile {
                 names,
+                other_options,
                 group,
                 level3,
                 layout,
@@ -239,18 +249,24 @@ impl Resolver {
                     reserved: self.reserved.clone(),
                     locale: xkb::session_locale(),
                 };
+                let mut requests = vec![request.clone()];
+                if let Some(options) = other_options {
+                    let mut other = request;
+                    other.names.options = options;
+                    requests.push(other);
+                }
                 if let Some((cached, table)) = &self.cached {
-                    if *cached == request {
+                    if *cached == requests {
                         return Typing::Keys {
                             table: Arc::clone(table),
                             layout,
                         };
                     }
                 }
-                match xkb::build(&request) {
+                match build_common(&requests) {
                     Ok(table) => {
                         let table = Arc::new(table);
-                        self.cached = Some((request, Arc::clone(&table)));
+                        self.cached = Some((requests, Arc::clone(&table)));
                         Typing::Keys { table, layout }
                     },
                     Err(e) if plain_us => Typing::UsTable {
@@ -265,6 +281,16 @@ impl Resolver {
             },
         }
     }
+}
+
+/// The keys that type the same characters with every request, for a
+/// keyboard that can have any of their keymaps.
+fn build_common(requests: &[Request]) -> anyhow::Result<KeyTable> {
+    let mut tables = requests.iter().map(xkb::build);
+    let first = tables
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("no keymap to build"))??;
+    tables.try_fold(first, |common, table| Ok(common.common(&table?)))
 }
 
 #[cfg(test)]
@@ -282,6 +308,7 @@ mod tests {
             rules: String::new(),
             model: "pc105".into(),
             options: Some("grp:alt_shift_toggle".into()),
+            other_options: None,
             active,
         }
     }
@@ -409,6 +436,76 @@ mod tests {
         assert!(typing
             .table()
             .is_some_and(|table| table.covers("Hello, world!")));
+    }
+
+    #[test]
+    fn a_second_option_list_goes_to_the_plan() {
+        let x11 = Session {
+            other_options: Some("compose:102".into()),
+            ..session("de", "", Active::Unknown)
+        };
+        let plan = plan(Some(&x11), true);
+        assert!(
+            matches!(
+                &plan,
+                Plan::Compile { other_options: Some(other), level3: true, layout, .. }
+                    if other == "compose:102" && layout.contains("two option lists")
+            ),
+            "{plan:?}"
+        );
+    }
+
+    #[test]
+    fn two_option_lists_type_only_the_keys_they_agree_on() {
+        if !xkb_ready() {
+            return;
+        }
+        let mut resolver = Resolver::new();
+        let x11 = Session {
+            options: Some("compose:102,caps:escape".into()),
+            other_options: Some("compose:102".into()),
+            ..session("de", "", Active::Unknown)
+        };
+        let both = resolver.resolve_for(Some(&x11), true);
+        let table = both.table().expect("German types");
+        assert!(table.covers("Größe: 3 € @ café"), "{both}");
+        assert!(!table.covers("<"), "the ISO key is Compose in both lists");
+
+        let escape = Session {
+            options: Some("caps:escape".into()),
+            ..x11.clone()
+        };
+        let table = resolver
+            .resolve_for(Some(&escape), true)
+            .table()
+            .cloned()
+            .expect("German types");
+        assert!(
+            !table.covers("a < b"),
+            "with the default options the ISO key is Compose, so < pastes"
+        );
+        assert!(table.covers("Größe @"));
+        let alone = Session {
+            other_options: None,
+            ..escape
+        };
+        assert!(resolver
+            .resolve_for(Some(&alone), true)
+            .table()
+            .is_some_and(|table| table.covers("a < b")));
+
+        let moved = Session {
+            options: Some("lv3:ralt_alt,lv3:caps_switch".into()),
+            other_options: Some(String::new()),
+            ..session("de", "", Active::Unknown)
+        };
+        let table = resolver
+            .resolve_for(Some(&moved), true)
+            .table()
+            .cloned()
+            .expect("German types");
+        assert!(!table.covers("@"), "AltGr is on another key in each list");
+        assert!(table.covers("Größe café"));
     }
 
     #[test]
