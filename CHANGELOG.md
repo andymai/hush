@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/andymai/hush/compare/v0.17.0...v0.18.0) (2026-11-10)
+
+
+### Features
+
+* **transcription:** choose the language for each hotkey and from the tray ([#282](https://github.com/andymai/hush/issues/282)) ([c582218](https://github.com/andymai/hush/commit/c582218238d6250df87284c0fa995d3c77cd3f78))
+
 ## [0.17.0](https://github.com/andymai/hush/compare/v0.16.0...v0.17.0) (2026-11-10)
 
 
