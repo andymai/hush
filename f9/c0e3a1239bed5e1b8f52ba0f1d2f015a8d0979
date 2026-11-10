@@ -1,0 +1,31 @@
+README.md
+  s_115995023cd6f3::t_f2f067d61ac6bb 214
+src/gui/pages/hotkeys.rs
+  s_115995023cd6f3::t_c642e2650a9489 297-298
+src/hotkey/evdev.rs
+  s_115995023cd6f3::t_f4da8f75b7d091 358-371,422-424,426-428
+src/hotkey/menu_mask.rs
+  s_115995023cd6f3::t_93e3df467caea6 8-9
+src/text/typing.rs
+  s_115995023cd6f3::t_63cf3bda321640 17,209-223,233,242,245-266,269-279,288,327,453-465,473,478-512
+src/text/uinput_keyboard.rs
+  s_115995023cd6f3::t_b8686d8ddb0765 460-464
+src/text/xkb.rs
+  s_115995023cd6f3::t_99f8e9fae76246 12,117-126,134-136,830-837,840,844-847,853,858-859,861
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f9c0e3a1239bed5e1b8f52ba0f1d2f015a8d0979",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
