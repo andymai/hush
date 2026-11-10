@@ -10,7 +10,7 @@
 //! an hour, so a daemon that starts before the network still gets the model.
 
 use crate::transcription::language::Language;
-use crate::transcription::models::ModelManager;
+use crate::transcription::models::{ChecksumMismatch, ModelManager};
 use crate::transcription::whisper::{cpu_options, cpu_threads};
 use crate::Result;
 use parking_lot::Mutex;
@@ -158,6 +158,9 @@ struct Store {
     failed_for: Option<Vec<String>>,
     downloading: bool,
     retry: Retry,
+    /// A download failed its SHA-256 check, so the published file differs
+    /// from the pinned one, and every new try would get the same bytes.
+    gave_up: bool,
     /// The language that the last take with limited detection confirmed
     confirmed: Option<&'static str>,
 }
@@ -168,6 +171,7 @@ static STORE: LazyLock<Mutex<Store>> = LazyLock::new(|| {
         failed_for: None,
         downloading: false,
         retry: Retry::new(),
+        gave_up: false,
         confirmed: None,
     })
 });
@@ -188,33 +192,44 @@ pub fn model(models_dir: &Path, languages: &[String]) -> Option<Arc<LanguageId>>
     }
     let manager = ModelManager::new(models_dir).ok()?;
     if let Some(path) = manager.langid_model_path() {
-        if store.failed_for.as_deref() == Some(languages) {
-            return None;
-        }
-        return match LanguageId::load(&path, languages) {
-            Ok(model) => {
-                let model = Arc::new(model);
-                store.loaded = Some((languages.to_vec(), Arc::clone(&model)));
-                info!("Language identification is ready");
-                Some(model)
-            },
-            Err(e) => {
-                warn!(
-                    "Whisper detects the language within detect_languages, because the \
-                     language-ID model did not load: {:#}",
-                    e
-                );
-                store.failed_for = Some(languages.to_vec());
-                None
-            },
-        };
+        return load_into(&mut store, &path, languages);
     }
     start_download(&mut store, manager);
     None
 }
 
+fn load_into(store: &mut Store, path: &Path, languages: &[String]) -> Option<Arc<LanguageId>> {
+    if store.failed_for.as_deref() == Some(languages) {
+        return None;
+    }
+    match LanguageId::load(path, languages) {
+        Ok(model) => {
+            let model = Arc::new(model);
+            store.loaded = Some((languages.to_vec(), Arc::clone(&model)));
+            info!("Language identification is ready");
+            Some(model)
+        },
+        Err(e) => {
+            warn!(
+                "Whisper detects the language within detect_languages, because the \
+                 language-ID model did not load: {:#}",
+                e
+            );
+            store.failed_for = Some(languages.to_vec());
+            None
+        },
+    }
+}
+
+/// Whether a failed download should stop all later tries in this process.
+fn gives_up(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<ChecksumMismatch>().is_some())
+}
+
 fn start_download(store: &mut Store, manager: ModelManager) {
-    if store.downloading || !store.retry.ready(Instant::now()) {
+    if store.gave_up || store.downloading || !store.retry.ready(Instant::now()) {
         return;
     }
     let Ok(runtime) = tokio::runtime::Handle::try_current() else {
@@ -232,11 +247,20 @@ fn start_download(store: &mut Store, manager: ModelManager) {
                 store.retry = Retry::new();
                 info!("The language-ID model is downloaded, and the next take uses it");
             },
+            Err(e) if gives_up(&e) => {
+                store.gave_up = true;
+                warn!(
+                    "The language-ID model did not download ({:#}). Hush does not try \
+                         again until it restarts, and Whisper detects the language within \
+                         detect_languages",
+                    e
+                );
+            },
             Err(e) => {
                 let wait = store.retry.failed(Instant::now());
                 warn!(
                     "The language-ID model did not download ({:#}). Whisper detects the \
-                     language within detect_languages, and Hush tries again in {} minutes",
+                         language within detect_languages, and Hush tries again in {} minutes",
                     e,
                     wait.as_secs() / 60
                 );
@@ -388,6 +412,18 @@ mod tests {
         let waits: Vec<u64> = (0..6).map(|_| retry.failed(start).as_secs() / 60).collect();
         assert_eq!(waits, [10, 20, 40, 60, 60, 60]);
         assert_eq!(Retry::new(), Retry::new(), "a success starts over");
+    }
+
+    #[test]
+    fn only_a_checksum_mismatch_stops_the_downloads() {
+        let mismatch = anyhow::Error::from(ChecksumMismatch {
+            name: "voxlingua107-langid".to_string(),
+        })
+        .context("download");
+        assert!(gives_up(&mismatch));
+        assert!(!gives_up(&anyhow::anyhow!(
+            "dns error: failed to lookup address"
+        )));
     }
 
     #[test]

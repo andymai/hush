@@ -89,6 +89,23 @@ impl FileStamp {
 static CHECKED: LazyLock<parking_lot::Mutex<HashMap<PathBuf, (FileStamp, bool)>>> =
     LazyLock::new(Default::default);
 
+/// What the size and SHA-256 check of a model file found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    Valid,
+    Missing,
+    WrongSize,
+    WrongHash,
+}
+
+/// A download with the expected size but another SHA-256: the published file
+/// differs from the pinned one, so a new try gets the same bytes.
+#[derive(Debug, thiserror::Error)]
+#[error("The download of {name} failed its SHA-256 check")]
+pub struct ChecksumMismatch {
+    pub name: String,
+}
+
 /// A download that cannot connect, or that gets no bytes for this long,
 /// fails instead of waiting without end.
 const DOWNLOAD_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
@@ -363,8 +380,8 @@ impl ModelManager {
                 return valid.then_some(path);
             }
         }
-        let valid = match Self::is_valid(&path, info) {
-            Ok(valid) => valid,
+        let valid = match Self::verify(&path, info) {
+            Ok(verdict) => verdict == Verdict::Valid,
             Err(e) => {
                 warn!("Could not check {}: {:#}", path.display(), e);
                 return None;
@@ -499,14 +516,18 @@ impl ModelManager {
     /// Move a finished download into place when it passes the size and
     /// SHA-256 check, and delete it when it does not.
     fn promote(partial: &Path, target: &Path, info: &ModelInfo) -> Result<()> {
-        if !Self::is_valid(partial, info)? {
+        let verdict = Self::verify(partial, info)?;
+        if verdict != Verdict::Valid {
             if let Err(e) = std::fs::remove_file(partial) {
                 warn!("Could not delete {}: {}", partial.display(), e);
             }
-            return Err(anyhow::anyhow!(
-                "The download of {} failed its size or SHA-256 check",
-                info.name
-            ));
+            return Err(match verdict {
+                Verdict::WrongHash => ChecksumMismatch {
+                    name: info.name.clone(),
+                }
+                .into(),
+                _ => anyhow::anyhow!("The download of {} has the wrong size", info.name),
+            });
         }
         std::fs::rename(partial, target)
             .context("Failed to move the downloaded model into place")?;
@@ -561,8 +582,12 @@ impl ModelManager {
     }
 
     fn is_valid(path: &Path, info: &ModelInfo) -> Result<bool> {
+        Ok(Self::verify(path, info)? == Verdict::Valid)
+    }
+
+    fn verify(path: &Path, info: &ModelInfo) -> Result<Verdict> {
         if !path.exists() {
-            return Ok(false);
+            return Ok(Verdict::Missing);
         }
 
         // Check file size
@@ -579,7 +604,7 @@ impl ModelManager {
                 "Model file size mismatch: expected ~{}, got {}",
                 info.expected_size, file_size
             );
-            return Ok(false);
+            return Ok(Verdict::WrongSize);
         }
 
         // Verify SHA256 checksum if available
@@ -593,7 +618,7 @@ impl ModelManager {
                     "Model checksum mismatch for {:?}: expected {}, got {}",
                     path, expected_sha256, actual_sha256
                 );
-                return Ok(false);
+                return Ok(Verdict::WrongHash);
             }
             debug!("SHA256 checksum validated successfully");
         } else {
@@ -601,7 +626,7 @@ impl ModelManager {
         }
 
         debug!("Model validation passed for {:?}", path);
-        Ok(true)
+        Ok(Verdict::Valid)
     }
 
     pub fn list_available_models(&self) -> Vec<&ModelInfo> {
@@ -763,6 +788,7 @@ mod tests {
         let target = temp_dir.path().join("hello.bin");
         std::fs::write(&partial, b"Hello, World?").unwrap();
         let err = ModelManager::promote(&partial, &target, &info).unwrap_err();
+        assert!(err.downcast_ref::<ChecksumMismatch>().is_some(), "{err}");
         assert!(err.to_string().contains("SHA-256"), "{err}");
         assert!(!partial.exists(), "the bad download is deleted");
         assert!(
@@ -795,6 +821,18 @@ mod tests {
             None,
             "a file damaged later fails"
         );
+    }
+
+    #[test]
+    fn a_short_download_is_no_checksum_mismatch() {
+        let temp_dir = TempDir::new().unwrap();
+        let partial = temp_dir.path().join("hello.bin.part");
+        std::fs::write(&partial, b"Hello").unwrap();
+        let err =
+            ModelManager::promote(&partial, &temp_dir.path().join("hello.bin"), &hello_model())
+                .unwrap_err();
+        assert!(err.downcast_ref::<ChecksumMismatch>().is_none(), "{err}");
+        assert!(!partial.exists());
     }
 
     #[test]
