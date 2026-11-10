@@ -1,0 +1,81 @@
+src/cli/commands/daemon.rs
+  s_115995023cd6f3::t_a248159b3e9fc7 132
+  s_b321718d129a1e::t_b2d27cf69d55f5 10,145-170,191-192,382-397
+src/transcription/language.rs
+  s_115995023cd6f3::t_882377766f6ffc 1-309
+  s_115995023cd6f3::t_a778a84ed7a3f3 310-317
+README.md
+  s_115995023cd6f3::t_c8cf7052b4e867 52-53,79,165,191-192,211
+config/default.toml
+  s_115995023cd6f3::t_d21b346cc6245d 30,37-40,58-61
+src/adapters/hotkey/hotkey_adapter.rs
+  s_115995023cd6f3::t_46e9cd21ea49c5 75-77
+src/cli/commands/doctor.rs
+  s_115995023cd6f3::t_bddcb774253f85 388-389,392,395,404,903-922
+src/cli/commands/listen.rs
+  s_115995023cd6f3::t_e4a311372aa2fe 37,39,165-167,205-212,267-276,453-456,761,971-984,1004,1008-1010,1039-1044,1239,1243
+src/cli/commands/mod.rs
+  s_115995023cd6f3::t_cd34b0cb3be917 40
+src/cli/commands/status.rs
+  s_115995023cd6f3::t_adfed7b01530aa 96-98,144-146,189-190,217,237,239-252,268
+src/cli/dispatcher.rs
+  s_115995023cd6f3::t_a223b5b5b1c020 4,35-36,134-135,524-530
+src/cli_main.rs
+  s_115995023cd6f3::t_6173fff1095a72 30-36,83-87,90-94,515-547
+src/config/settings.rs
+  s_115995023cd6f3::t_1b0a95fefb22f3 5,360,362-365,499-501,505-506,514,518-519,521-526,535-555,563,672,678,682-702,1114,1116-1118,1304,1307,1311,1317-1390
+src/gui/mod.rs
+  s_115995023cd6f3::t_e8a801c1ab4f98 26,175-177,241,384,390,392-403
+src/gui/pages/hotkeys.rs
+  s_115995023cd6f3::t_885bfa0c6a1dd7 1-4,8,16-25,35-40,51-64,91-111,120,214,232-356,358-361,367,374-377,387,392,406-408,434-436,450,506-543
+src/gui/pages/speech.rs
+  s_115995023cd6f3::t_51e4e1324002f2 2-3,12,311-318,320,405-480,561-564,664-665,667
+src/hotkey/evdev.rs
+  s_115995023cd6f3::t_1a8218f8907a4e 7,118,128-132,143-145,148-158,231-247,395,397,779-818
+src/hotkey/gesture.rs
+  s_115995023cd6f3::t_f559406cd496a7 8-11,14,24-26,30-32,52-63,75,81,97-100,102,104-118,121-123,125,129,133-159,280-369
+src/hotkey/mod.rs
+  s_115995023cd6f3::t_5215b75fb63627 21,34,54-56,67,74,98,143-159,165,331-352
+src/hotkey/warnings.rs
+  s_115995023cd6f3::t_0a4fe888a37545 1-4,8,20-21,25,35,37-42,54,57-61,86,131-138,144-145,185,367-423
+src/hotkey/x11.rs
+  s_115995023cd6f3::t_c75624b02c0280 26-34
+src/ipc/protocol.rs
+  s_115995023cd6f3::t_334d6ec7d0b017 15-26,166-169,181,193,197-201,225,269-334
+src/ipc/server.rs
+  s_115995023cd6f3::t_921b1d7f2f6ba4 10,27-29,40-41,64-76,80,97,139,141,189-224,227-229,391-407,416,420,423,451,453,458,463,471,529,534-609,715-717,721
+src/transcription/cloud.rs
+  s_115995023cd6f3::t_38f5b90d162fac 20,61-70,208-210,215-217,230-241,244,278,425-426,436-437,441-455
+src/transcription/engine.rs
+  s_115995023cd6f3::t_a16df40907eb05 13,63-64,112-123,126-128,132-134,176,178,182,187
+src/transcription/mod.rs
+  s_115995023cd6f3::t_ecda97bc015d7d 16-17,25,33
+src/transcription/whisper.rs
+  s_115995023cd6f3::t_a10a8384a5f36d 8,64-65,119,141-151,233-245,248,281-285,313-318,321,335-342,355,376,433,437-443,445,475-535
+src/tray/mod.rs
+  s_115995023cd6f3::t_9cf51f8e38afea 6,12,14,23-74,78,154,180,214-242,272,277,322-325,332-336,343-435,464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9962cb1352c22c45555fb46f8c32b3f6c53ceb61",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    },
+    "s_b321718d129a1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c62633eb-00e8-4221-9326-8801a74ef42d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
