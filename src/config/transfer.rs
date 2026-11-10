@@ -215,14 +215,29 @@ pub fn write_atomic(path: &Path, contents: &[u8], replace: bool) -> Result<()> {
 }
 
 /// Replace the file at `path`, or the file that a link at `path` names,
-/// through [`write_atomic`], so that the daemon never reads half of it.
+/// through [`write_atomic`], so that the daemon never reads half of it. In a
+/// folder that takes no new file, such as one a configuration manager made
+/// read-only around a writable file, it writes the file in place.
 pub fn replace_file(path: &Path, contents: &[u8]) -> Result<()> {
     let path = link_target(path);
     if let Some(parent) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create {}", parent.display()))?;
     }
-    write_atomic(&path, contents, true)
+    match write_atomic(&path, contents, true) {
+        Ok(()) => Ok(()),
+        Err(e) if denied(&e) && path.exists() => fs::write(&path, contents)
+            .with_context(|| format!("Failed to write {}", path.display())),
+        Err(e) => Err(e),
+    }
+}
+
+fn denied(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied)
+    })
 }
 
 /// Copy the file at `path` to the same name with `.bak` added, and return
@@ -275,11 +290,17 @@ impl Staged {
 
 // Dotfile managers often link config.toml into a repository. A rename onto
 // the link would put a plain file in its place, so write the file it names.
+// A link whose file does not exist yet names where to create it.
 fn link_target(path: &Path) -> PathBuf {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-        },
+        Ok(metadata) if metadata.file_type().is_symlink() => fs::canonicalize(path)
+            .or_else(|_| {
+                fs::read_link(path).map(|target| match path.parent() {
+                    Some(parent) if target.is_relative() => parent.join(target),
+                    _ => target,
+                })
+            })
+            .unwrap_or_else(|_| path.to_path_buf()),
         _ => path.to_path_buf(),
     }
 }
@@ -389,6 +410,36 @@ fn refuse_keys(text: &str, keys: &[(String, String)]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dangling_link_stays_a_link_and_its_file_is_created() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles").join("config.toml");
+        fs::create_dir_all(real.parent().unwrap()).unwrap();
+        let link = dir.path().join("config.toml");
+        std::os::unix::fs::symlink("dotfiles/config.toml", &link).unwrap();
+        replace_file(&link, b"new").unwrap();
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&real).unwrap(), "new");
+    }
+
+    #[test]
+    fn a_read_only_folder_still_takes_a_write_to_its_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("managed");
+        fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("config.toml");
+        fs::write(&file, "old").unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o555)).unwrap();
+        let written = replace_file(&file, b"new");
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        written.unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+    }
 
     #[test]
     fn a_replaced_file_keeps_its_link_and_a_backup_keeps_the_old_text() {

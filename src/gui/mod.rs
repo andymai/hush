@@ -82,6 +82,9 @@ pub struct Download {
 pub struct Machine {
     pub permissions: PermissionStatus,
     pub daemon: Option<DaemonState>,
+    /// The status answer the state came from: a daemon that gave none in
+    /// time shows as not running, but may be busy
+    pub probe: Probe,
     pub installed_models: Vec<ModelSize>,
     /// The Silero voice activity detection model is downloaded.
     pub vad_installed: bool,
@@ -106,9 +109,14 @@ impl Machine {
                     .collect()
             })
             .unwrap_or_default();
+        let probe = client::probe_blocking(STATUS_TIMEOUT);
         Self {
             permissions: crate::permissions::status(),
-            daemon: client::status_blocking(STATUS_TIMEOUT),
+            daemon: match probe {
+                Probe::State(state) => Some(state),
+                Probe::NotRunning | Probe::NoAnswer => None,
+            },
+            probe,
             installed_models,
             vad_installed,
             autostart: crate::desktop::autostart_installed(),
@@ -264,6 +272,9 @@ pub struct Gui {
     closing: bool,
     /// A close found something unsaved; the next close discards it
     close_warned: bool,
+    /// This frame commits the focused field for a close, so its save does
+    /// not stop the close
+    close_commit_frame: bool,
     restart: Option<Restart>,
     poll: Poll,
     last_poll: Instant,
@@ -271,6 +282,7 @@ pub struct Gui {
 
 impl Gui {
     fn new() -> Result<Self> {
+        let mut files = Files::before_reading();
         let (config, config_error) = match Config::load() {
             Ok(config) => (config, None),
             Err(e) => {
@@ -293,7 +305,8 @@ impl Gui {
                 (DomainVocabulary::default(), Some(format!("{:#}", e)))
             },
         };
-        let files = Files::read(config_error, vocabulary_error);
+        files.config_error = config_error;
+        files.vocabulary_error = vocabulary_error;
         let manager = ModelManager::new(crate::config::paths::models_dir()).ok();
         let catalogue = MODEL_ORDER
             .iter()
@@ -361,6 +374,7 @@ impl Gui {
             attempting: false,
             closing: false,
             close_warned: false,
+            close_commit_frame: false,
             restart: None,
             poll: Poll::default(),
             last_poll: Instant::now(),
@@ -389,9 +403,39 @@ impl Gui {
     }
 
     /// Put back what the last removal took.
+    /// Put back what the last removal took, on top of the settings as they
+    /// are now, so a change merged from outside since the removal stays. An
+    /// undo never lowers the kept audio days, because that deletes audio.
     pub fn undo(&mut self) {
-        if let Some(undo) = self.undo.take() {
-            (self.config, self.vocabulary) = undo.before;
+        let Some(undo) = self.undo.take() else {
+            return;
+        };
+        let now = (self.config.clone(), self.vocabulary.clone());
+        match undo.restore(&now) {
+            Ok((mut config, vocabulary)) => {
+                let days = self.config.history.keep_audio_days;
+                if config.history.keep_audio_days < days {
+                    config.history.keep_audio_days = days;
+                    self.say("Undo kept the audio days. Lower them on the History page.");
+                }
+                self.config = config;
+                self.vocabulary = vocabulary;
+            },
+            Err(e) => self.say(format!("Could not undo: {:#}", e)),
+        }
+    }
+
+    /// The vocabulary file changed outside the window's own writes: read it,
+    /// and keep the window's unsaved changes on top.
+    pub fn vocabulary_changed_on_disk(&mut self) {
+        match self.files.reload_vocabulary() {
+            Ok(theirs) => {
+                let merged = autosave::rebase(&self.saved_vocabulary, &self.vocabulary, &theirs)
+                    .unwrap_or_else(|_| theirs.clone());
+                self.saved_vocabulary = theirs;
+                self.vocabulary = merged;
+            },
+            Err(e) => warn!("Could not read the vocabulary again: {:#}", e),
         }
     }
 
@@ -474,7 +518,7 @@ impl Gui {
         self.config = merged.clone();
         self.saved = merged;
         self.rejected = None;
-        self.close_warned = false;
+        self.user_changed_something();
         self.config_feedback = Some(Feedback::Saved(now));
     }
 
@@ -487,7 +531,7 @@ impl Gui {
                 self.vocabulary = merged.clone();
                 self.saved_vocabulary = merged;
                 self.rejected_vocabulary = None;
-                self.close_warned = false;
+                self.user_changed_something();
                 self.vocabulary_feedback = Some(Feedback::Saved(now));
                 self.debounce.change(now);
             },
@@ -502,9 +546,14 @@ impl Gui {
     /// Keep a copy of the file that does not load, then write the window's
     /// settings over it.
     pub fn replace_config(&mut self) {
-        match self.files.replace_config(&self.config) {
+        let mut config = self.config.clone();
+        if let Some(history) = self.files.history_in_file() {
+            config.history = history;
+        }
+        match self.files.replace_config(&config) {
             Ok(backup) => {
-                self.saved = self.config.clone();
+                self.config = config.clone();
+                self.saved = config;
                 self.rejected = None;
                 self.config_feedback = Some(Feedback::Saved(Instant::now()));
                 match backup {
@@ -564,6 +613,7 @@ impl Gui {
                 }
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.closing = true;
+                self.close_commit_frame = true;
             },
             CloseStep::Warn => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -581,10 +631,19 @@ impl Gui {
         }
     }
 
+    /// A new change after a close request: the window stays open, and the
+    /// next close asks again when something would be lost.
+    fn user_changed_something(&mut self) {
+        self.close_warned = false;
+        if !self.close_commit_frame {
+            self.closing = false;
+        }
+    }
+
     /// After the pages drew: a close that committed the focused field stops
     /// when the field did not save, or when something else would be lost.
     fn closing_after_pages(&mut self, rejected: bool) {
-        if !self.closing {
+        if !std::mem::take(&mut self.close_commit_frame) || !self.closing {
             return;
         }
         if rejected {
@@ -630,8 +689,9 @@ impl Gui {
             self.debounce.hurry(now);
         }
         let daemon = Daemon::of(
-            self.machine.daemon,
+            self.machine.probe,
             self.restart.is_some() || self.attempting,
+            self.files.config_error.is_none(),
         );
         if self.debounce.fire(now, daemon) {
             self.attempt_restart(ctx);
@@ -647,7 +707,13 @@ impl Gui {
     /// A change that the daemon reads is saved, but the daemon does not run
     /// with it yet.
     fn restart_owed(&self) -> bool {
-        self.debounce.pending() || self.attempting
+        (self.debounce.pending() && self.files.config_error.is_none()) || self.attempting
+    }
+
+    /// A change waits for a restart that the broken configuration file holds
+    /// back.
+    pub fn restart_waits_for_file(&self) -> bool {
+        self.debounce.pending() && self.files.config_error.is_some()
     }
 
     /// Ask the daemon once more on a thread, so a take that began after the
@@ -1040,6 +1106,7 @@ mod tests {
                 in_input_group: true,
             },
             daemon: Some(DaemonState::Idle),
+            probe: Probe::State(DaemonState::Idle),
             installed_models: vec![ModelSize::Base],
             vad_installed: true,
             autostart: false,

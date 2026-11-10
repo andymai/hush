@@ -372,6 +372,14 @@ pub fn footer(gui: &mut Gui, ui: &mut Ui) {
         } else if gui.applying() {
             ui.add(egui::Spinner::new().size(14.0).color(colours.muted));
             widgets::text(ui, "Applying…", small(), colours.muted);
+        } else if gui.restart_waits_for_file() {
+            widgets::icon(ui, icons::CIRCLE_ALERT, colours.warn);
+            widgets::text(
+                ui,
+                "Hush applies the change when the configuration file loads again",
+                small(),
+                colours.muted,
+            );
         } else if gui.restart_waits_for_take() {
             widgets::icon(ui, icons::MIC, colours.muted);
             widgets::text(

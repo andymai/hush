@@ -2,8 +2,9 @@
 //! also restarts it, once, after the changes stop for a moment, and never
 //! while a take records, transcribes, or types.
 
-use crate::config::settings::{LlmSetting, TranscriptionBackend};
+use crate::config::settings::{HistoryConfig, LlmSetting, TranscriptionBackend};
 use crate::config::{paths, transfer, Config};
+use crate::ipc::client::Probe;
 use crate::ipc::DaemonState;
 use crate::text_processing::DomainVocabulary;
 use anyhow::{Context, Result};
@@ -36,14 +37,19 @@ pub enum Daemon {
 }
 
 impl Daemon {
-    /// A daemon in a restart is down for a moment, which is no reason to
-    /// drop the restart that a later change needs.
-    pub fn of(state: Option<DaemonState>, restarting: bool) -> Self {
-        match state {
+    /// A daemon in a restart is down for a moment, and a daemon that gives
+    /// no answer in time may be busy: neither is a reason to drop the
+    /// restart that a change needs. While the configuration file does not
+    /// load, a running daemon is held as busy: restarted, it would run on
+    /// the defaults.
+    pub fn of(probe: Probe, restarting: bool, file_loads: bool) -> Self {
+        match probe {
             _ if restarting => Daemon::Busy,
-            None => Daemon::Stopped,
-            Some(DaemonState::Idle) => Daemon::Idle,
-            Some(_) => Daemon::Busy,
+            Probe::NotRunning => Daemon::Stopped,
+            _ if !file_loads => Daemon::Busy,
+            Probe::NoAnswer => Daemon::Busy,
+            Probe::State(DaemonState::Idle) => Daemon::Idle,
+            Probe::State(_) => Daemon::Busy,
         }
     }
 }
@@ -122,6 +128,46 @@ pub fn rebase<T: Serialize + DeserializeOwned>(base: &T, ours: &T, theirs: &T) -
     serde_json::from_value(theirs).context("The changes do not fit the file")
 }
 
+/// The dotted keys whose values differ between `before` and `after`, such
+/// as `llm.ollama_model`, to name what changed outside the window.
+pub fn changed_keys<T: Serialize>(before: &T, after: &T) -> Vec<String> {
+    let (Ok(before), Ok(after)) = (serde_json::to_value(before), serde_json::to_value(after))
+    else {
+        return Vec::new();
+    };
+    let mut keys = Vec::new();
+    differences("", &before, &after, &mut keys);
+    keys
+}
+
+fn differences(prefix: &str, before: &Value, after: &Value, keys: &mut Vec<String>) {
+    if before == after {
+        return;
+    }
+    match (before, after) {
+        (Value::Object(before), Value::Object(after)) => {
+            let mut names: Vec<&String> = before.keys().chain(after.keys()).collect();
+            names.sort();
+            names.dedup();
+            for name in names {
+                let key = if prefix.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{}.{}", prefix, name)
+                };
+                let missing = Value::Null;
+                differences(
+                    &key,
+                    before.get(name).unwrap_or(&missing),
+                    after.get(name).unwrap_or(&missing),
+                    keys,
+                );
+            }
+        },
+        _ => keys.push(prefix.to_string()),
+    }
+}
+
 fn merge(base: &Value, ours: &Value, theirs: &mut Value) {
     if base == ours {
         return;
@@ -166,30 +212,48 @@ pub struct Files {
 }
 
 impl Files {
-    /// The default files, as the window just read them.
-    pub fn read(config_error: Option<String>, vocabulary_error: Option<String>) -> Self {
-        Self::at(
-            paths::config_path(),
-            DomainVocabulary::default_path(),
-            config_error,
-            vocabulary_error,
-        )
+    /// The default files, stamped before the window reads them, so a write
+    /// between the stamp and the read shows as a change on disk.
+    pub fn before_reading() -> Self {
+        Self::at(paths::config_path(), DomainVocabulary::default_path())
     }
 
-    fn at(
-        config_path: PathBuf,
-        vocabulary_path: PathBuf,
-        config_error: Option<String>,
-        vocabulary_error: Option<String>,
-    ) -> Self {
+    fn at(config_path: PathBuf, vocabulary_path: PathBuf) -> Self {
         Self {
             config_stamp: stamp(&config_path),
             vocabulary_stamp: stamp(&vocabulary_path),
             config_path,
             vocabulary_path,
-            config_error,
-            vocabulary_error,
+            config_error: None,
+            vocabulary_error: None,
         }
+    }
+
+    /// Read the vocabulary file again, as after a word was learned outside
+    /// the window's own writes.
+    pub fn reload_vocabulary(&mut self) -> Result<DomainVocabulary> {
+        let read_from = stamp(&self.vocabulary_path);
+        let vocabulary = if self.vocabulary_path.exists() {
+            DomainVocabulary::load_from_file(&self.vocabulary_path)?
+        } else {
+            DomainVocabulary::default()
+        };
+        self.vocabulary_stamp = read_from;
+        Ok(vocabulary)
+    }
+
+    /// The `[history]` table of a configuration file that does not load,
+    /// when that table still reads as history settings, so a replacement
+    /// deletes no kept audio and no transcripts.
+    pub fn history_in_file(&self) -> Option<HistoryConfig> {
+        let text = std::fs::read_to_string(&self.config_path).ok()?;
+        let table: toml::Table = toml::from_str(&text).ok()?;
+        let history = table.get("history")?.clone();
+        let history: HistoryConfig = history.try_into().ok()?;
+        let mut check = Config::defaults().ok()?;
+        check.history = history.clone();
+        check.validate().ok()?;
+        Some(history)
     }
 
     pub fn config_path(&self) -> &Path {
@@ -206,15 +270,30 @@ impl Files {
     /// the file held and the settings written.
     pub fn write_config(&mut self, saved: &Config, ours: &Config) -> Result<(Config, Config)> {
         let path = self.config_path.clone();
-        let (base, next) = if path.exists() && stamp(&path) != self.config_stamp {
+        let read_from = stamp(&path);
+        let (base, next, outside) = if path.exists() && read_from != self.config_stamp {
             let theirs = Config::load_from_file(&path)
                 .context("The file changed on disk and does not load")?;
             let merged = rebase(saved, ours, &theirs)?;
-            (theirs, merged)
+            let outside = changed_keys(saved, &theirs);
+            (theirs, merged, outside)
         } else {
-            (saved.clone(), ours.clone())
+            (saved.clone(), ours.clone(), Vec::new())
         };
-        transfer::replace_file(&path, next.to_toml()?.as_bytes())?;
+        let text = match next.to_toml() {
+            Ok(text) => text,
+            Err(e) if !outside.is_empty() => {
+                return Err(e).with_context(|| {
+                    format!(
+                        "The file changed outside the window ({}), and the window's change \
+                         does not fit it",
+                        outside.join(", ")
+                    )
+                })
+            },
+            Err(e) => return Err(e),
+        };
+        transfer::replace_file(&path, text.as_bytes())?;
         self.config_stamp = stamp(&path);
         Ok((base, next))
     }
@@ -261,12 +340,6 @@ impl Files {
         self.vocabulary_stamp = stamp(&self.vocabulary_path);
         self.vocabulary_error = None;
         Ok(backup)
-    }
-
-    /// The window had the vocabulary file written for it, as a word learned
-    /// from a fix is.
-    pub fn vocabulary_written(&mut self) {
-        self.vocabulary_stamp = stamp(&self.vocabulary_path);
     }
 }
 
@@ -337,6 +410,16 @@ impl Undo {
             at,
             after: None,
         }
+    }
+
+    /// The settings with the removal put back on top of `now`: what the
+    /// removal changed goes back, and everything else in `now` stays.
+    pub fn restore(&self, now: &(Config, DomainVocabulary)) -> Result<(Config, DomainVocabulary)> {
+        let after = self.after.as_ref().unwrap_or(now);
+        let config = rebase(&after.0, &self.before.0, &now.0)?;
+        config.validate()?;
+        let vocabulary = rebase(&after.1, &self.before.1, &now.1)?;
+        Ok((config, vocabulary))
     }
 
     /// Whether Undo still applies: within [`UNDO_DURATION`], and with no
@@ -414,8 +497,6 @@ mod tests {
         Files::at(
             dir.path().join("config.toml"),
             dir.path().join("vocabulary.json"),
-            None,
-            None,
         )
     }
 
@@ -487,12 +568,8 @@ mod tests {
     #[test]
     fn a_file_that_does_not_load_is_kept_before_it_is_replaced() {
         let dir = tempfile::tempdir().unwrap();
-        let mut files = Files::at(
-            dir.path().join("config.toml"),
-            dir.path().join("vocabulary.json"),
-            Some("Invalid config file".into()),
-            None,
-        );
+        let mut files = files(&dir);
+        files.config_error = Some("Invalid config file".into());
         std::fs::write(files.config_path(), "not = [toml").unwrap();
         let defaults = Config::defaults().unwrap();
         let backup = files.replace_config(&defaults).unwrap().unwrap();
@@ -503,6 +580,24 @@ mod tests {
             defaults
         );
         assert_eq!(files.config_error, None);
+    }
+
+    #[test]
+    fn undo_puts_back_the_removal_and_keeps_an_outside_change() {
+        let start = Instant::now();
+        let vocabulary = DomainVocabulary::default();
+        let mut before = Config::defaults().unwrap();
+        before.insertion.clipboard_apps = vec!["kitty".into(), "foot".into()];
+        let mut after = before.clone();
+        after.insertion.clipboard_apps.retain(|app| app != "kitty");
+        let mut undo = Undo::new("Removed kitty".into(), (before, vocabulary.clone()), start);
+        undo.still(&after, &vocabulary, start);
+
+        let mut merged = after.clone();
+        merged.llm.ollama_model = "qwen3".into();
+        let (config, _) = undo.restore(&(merged, vocabulary)).unwrap();
+        assert_eq!(config.insertion.clipboard_apps, ["kitty", "foot"]);
+        assert_eq!(config.llm.ollama_model, "qwen3", "the outside change stays");
     }
 
     #[test]
@@ -643,14 +738,26 @@ mod tests {
 
     #[test]
     fn the_daemon_state_says_whether_a_restart_cuts_something() {
-        assert_eq!(Daemon::of(None, false), Daemon::Stopped);
-        assert_eq!(Daemon::of(Some(DaemonState::Idle), false), Daemon::Idle);
-        assert_eq!(Daemon::of(Some(DaemonState::Idle), true), Daemon::Busy);
+        let idle = Probe::State(DaemonState::Idle);
+        assert_eq!(Daemon::of(Probe::NotRunning, false, true), Daemon::Stopped);
+        assert_eq!(Daemon::of(idle, false, true), Daemon::Idle);
+        assert_eq!(Daemon::of(idle, true, true), Daemon::Busy);
         assert_eq!(
-            Daemon::of(None, true),
+            Daemon::of(Probe::NotRunning, true, true),
             Daemon::Busy,
             "a restarting daemon is down for a moment, not stopped"
         );
+        assert_eq!(
+            Daemon::of(Probe::NoAnswer, false, true),
+            Daemon::Busy,
+            "a slow answer keeps the restart"
+        );
+        assert_eq!(
+            Daemon::of(idle, false, false),
+            Daemon::Busy,
+            "no restart onto a file that does not load"
+        );
+        assert_eq!(Daemon::of(Probe::NotRunning, false, false), Daemon::Stopped);
         for state in [
             DaemonState::Starting,
             DaemonState::Recording { elapsed_ms: 5 },
@@ -658,7 +765,84 @@ mod tests {
             DaemonState::Inserting,
             DaemonState::Stopping,
         ] {
-            assert_eq!(Daemon::of(Some(state), false), Daemon::Busy, "{state:?}");
+            assert_eq!(
+                Daemon::of(Probe::State(state), false, true),
+                Daemon::Busy,
+                "{state:?}"
+            );
         }
+    }
+
+    #[test]
+    fn an_outside_change_that_breaks_the_merge_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut files = files(&dir);
+        let saved = Config::defaults().unwrap();
+        files.write_config(&saved, &saved).unwrap();
+        let mut outside = saved.clone();
+        outside.llm.provider = LlmSetting::OpenAiCompatible;
+        outside.llm.server_url = "http://localhost:8080/v1".into();
+        outside.llm.server_model = "llama3.2".into();
+        std::fs::write(files.config_path(), outside.to_toml().unwrap()).unwrap();
+
+        let mut ours = saved.clone();
+        ours.llm.server_url = "localhost:8080".into();
+        ours.validate().unwrap();
+        let err = format!("{:#}", files.write_config(&saved, &ours).unwrap_err());
+        assert!(err.contains("llm.provider"), "{err}");
+        assert!(err.contains("changed outside the window"), "{err}");
+        let on_disk = Config::load_from_file(files.config_path()).unwrap();
+        assert_eq!(on_disk, outside, "nothing written");
+    }
+
+    #[test]
+    fn changed_keys_are_dotted_and_sorted() {
+        let before = Config::defaults().unwrap();
+        let mut after = before.clone();
+        after.llm.ollama_model = "qwen3".into();
+        after.hotkey.languages.insert("F13".into(), "de".into());
+        assert_eq!(
+            changed_keys(&before, &after),
+            ["hotkey.languages.F13", "llm.ollama_model"]
+        );
+        assert!(changed_keys(&before, &before).is_empty());
+    }
+
+    #[test]
+    fn a_bad_file_still_gives_its_history_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = files(&dir);
+        std::fs::write(
+            files.config_path(),
+            "[history]\nkeep_audio_days = 30\nmax_entries = 2000\n[hotkey]\ncombination = \"Ctrl+Bogus\"\n",
+        )
+        .unwrap();
+        let history = files.history_in_file().unwrap();
+        assert_eq!((history.keep_audio_days, history.max_entries), (30, 2000));
+        std::fs::write(files.config_path(), "[history\nkeep_audio_days = 30\n").unwrap();
+        assert_eq!(files.history_in_file(), None, "not TOML at all");
+        std::fs::write(files.config_path(), "[history]\nkeep_audio_days = 99999\n").unwrap();
+        assert_eq!(files.history_in_file(), None, "out of range");
+    }
+
+    #[test]
+    fn a_reload_reads_the_learned_word_and_stamps_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut files = files(&dir);
+        let saved = DomainVocabulary::default();
+        files.write_vocabulary(&saved, &saved).unwrap();
+        let mut outside = saved.clone();
+        outside.add_technical_term("kubernetes".into(), "Kubernetes".into());
+        std::fs::write(
+            files.vocabulary_path(),
+            serde_json::to_string_pretty(&outside).unwrap(),
+        )
+        .unwrap();
+        let reloaded = files.reload_vocabulary().unwrap();
+        assert_eq!(reloaded, outside);
+        let mut ours = reloaded.clone();
+        ours.add_technical_term("neovim".into(), "Neovim".into());
+        let written = files.write_vocabulary(&reloaded, &ours).unwrap();
+        assert_eq!(written, ours);
     }
 }

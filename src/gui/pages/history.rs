@@ -591,9 +591,9 @@ fn save_fix(gui: &mut Gui) {
 }
 
 /// Learn the term as `hush learn` does: write it into the vocabulary file,
-/// then tell a running daemon, which reloads the file. The window's copy of
-/// the vocabulary and its saved copy get the term too, because the file has
-/// it already and the daemon needs no restart.
+/// then tell a running daemon, which reloads the file. The window reads the
+/// file again, with the term and any word the Learn key added, and keeps its
+/// own unsaved changes on top; the daemon needs no restart.
 fn learn_term(gui: &mut Gui, term: &str) {
     let term = match learn::learn_at(&DomainVocabulary::default_path(), term) {
         Ok(term) => term,
@@ -602,9 +602,7 @@ fn learn_term(gui: &mut Gui, term: &str) {
             return;
         },
     };
-    learn::learn_into(&mut gui.vocabulary, &term);
-    learn::learn_into(&mut gui.saved_vocabulary, &term);
-    gui.files.vocabulary_written();
+    gui.vocabulary_changed_on_disk();
     let command = DaemonCommand::Learn {
         text: Some(term.clone()),
     };
