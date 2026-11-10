@@ -49,19 +49,18 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
-    # whisper-rs-sys passes GGML_* variables to ggml's CMake. Without them, ggml
-    # builds with -march=native for the runner CPU, and the binary can stop
-    # with SIGILL on an older CPU. HUSH_CPU_FLOOR turns on the runtime check
-    # that names the fix on a CPU below x86-64-v3.
+    # transcribe-cpp-sys passes TRANSCRIBE_CMAKE_ARGS to the CMake build of
+    # transcribe.cpp and ggml. Without the GGML flags, ggml builds with
+    # -march=native for the runner CPU, and the binary can stop with SIGILL on
+    # an older CPU. Without TRANSCRIBE_USE_SYSTEM_BLAS=OFF, the binary needs
+    # OpenBLAS when the runner has it. HUSH_CPU_FLOOR turns on the runtime check
+    # that names the fix on a CPU below x86-64-v3, and build.rs refuses a floor
+    # build without these flags or with a system BLAS.
     env:
-      GGML_NATIVE: "OFF"
-      GGML_SSE42: "ON"
-      GGML_AVX: "ON"
-      GGML_AVX2: "ON"
-      GGML_FMA: "ON"
-      GGML_F16C: "ON"
-      GGML_BMI2: "ON"
-      GGML_AVX512: "OFF"
+      TRANSCRIBE_CMAKE_ARGS: >-
+        -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF
+        -DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON
+        -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DGGML_AVX512=OFF
       HUSH_CPU_FLOOR: x86-64-v3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,7 +79,7 @@ jobs:
             libasound2-dev \
             libx11-dev libxi-dev libxtst-dev libxcursor-dev \
             libxrandr-dev libxinerama-dev libgl1-mesa-dev \
-            libvulkan-dev
+            libvulkan-dev spirv-headers
           # Ubuntu 22.04 has no glslc package; LunarG's Vulkan repository ships it as shaderc.
           if apt-cache show glslc >/dev/null 2>&1; then
             sudo apt-get install -y --no-install-recommends glslc
@@ -92,15 +91,15 @@ jobs:
               "https://packages.lunarg.com/vulkan/lunarg-vulkan-$codename.list"
             sudo apt-get update
             # ggml-vulkan needs headers newer than jammy's; LunarG's are current.
-            sudo apt-get install -y --no-install-recommends shaderc vulkan-headers libvulkan-dev
+            sudo apt-get install -y --no-install-recommends shaderc vulkan-headers libvulkan-dev spirv-headers
           fi
           glslc --version | head -n 1
           pkg-config --modversion vulkan
-      # Cargo does not rebuild whisper-rs-sys when a GGML_* variable changes, so
-      # the cache key includes them.
+      # The cache key includes TRANSCRIBE_CMAKE_ARGS, so a change to the ggml
+      # flags never reuses a build made with other flags.
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
-          env-vars: GGML HUSH
+          env-vars: TRANSCRIBE HUSH
       - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.62.30
         with:
           tool: cargo-deb@3.8.0
@@ -120,7 +119,7 @@ jobs:
       - run: cargo build --release --features vulkan
 
       # Inlined, like the dependencies step, so that a dispatch for an older tag
-      # also runs it. ggml and whisper.cpp take their instruction set from
+      # also runs it. ggml and transcribe.cpp take their instruction set from
       # compile flags, so AVX-512 in C or C++ code means ggml was built for the
       # runner CPU. Rust code targets baseline x86-64, so AVX-512 in a Rust
       # function is a #[target_feature] path that its crate selects after a
@@ -152,7 +151,7 @@ jobs:
                 }
               }
               if (bad > 0) {
-                printf "::error::%d C or C++ functions use AVX-512. Build ggml with GGML_NATIVE=OFF and the x86-64-v3 flags.\n", bad
+                printf "::error::%d C or C++ functions use AVX-512. Build ggml with -DGGML_NATIVE=OFF and the x86-64-v3 flags in TRANSCRIBE_CMAKE_ARGS.\n", bad
                 exit 1
               }
               print "ok: no C or C++ function uses AVX-512"

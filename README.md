@@ -50,7 +50,7 @@ Hold `Right Alt`, speak, release. Done.
 - **Speak at the tone.** Hush plays the start tone and shows the recording overlay when the first audio from the microphone arrives, not when you press the key. A microphone that sleeps between recordings can need a moment to wake, and the tone tells you that Hush hears you. If no audio arrives in five seconds, Hush discards the recording and shows a notification.
 - **Bind any key to it.** `hush toggle`, `hush start`, `hush stop`, and `hush cancel` talk to the daemon over a socket, so any compositor keybind can drive dictation. Hyprland: `bind = , F9, exec, hush toggle`. Sway: `bindsym F9 exec hush toggle`.
 - **Tone by application.** Text lands the way the focused app expects: lowercase and unpunctuated in terminals and editors, casual in chat, full sentences in mail and documents. In a terminal, each line break becomes a space, so dictated text cannot run a command. In chat, Hush types a line break as Shift+Enter, so a line break does not send the message. Add a window class to `insertion.submit_apps`, and Hush presses Enter after the text. The window title and your learned terms also prime Whisper, so names come out spelled your way. Works on X11, Hyprland, Sway, and KDE Plasma on Wayland.
-- **Any language Whisper knows.** Set `language = "auto"` under `[transcription]` to detect what you speak, or pick one in the settings window. With `detect_languages = ["en", "de"]`, local Whisper picks only from the languages you speak. On every keyboard layout, Hush types key by key through the XKB keymap of the layout. It types accents through dead keys when the layout has them. When a take has a character that no key types, such as an emoji, Hush pastes the full take. With more than one layout, Hush must know which layout is active. KDE Plasma, GNOME, Hyprland, Sway, and X11 report the active layout. If Hush cannot find the active layout, it pastes, because a wrong layout types wrong letters. On GNOME, Hush also pastes when each window keeps its own input source. On X11, Hush types only on the default layout of the X server, because its own keyboard gets that layout. `hush doctor` shows whether Hush types or pastes, and why.
+- **Any language Whisper knows.** Set `language = "auto"` under `[transcription]` to detect what you speak, or pick one in the settings window. With `detect_languages = ["en", "de"]`, a small language-ID model picks among only the languages you speak, and local Whisper writes in that language. On every keyboard layout, Hush types key by key through the XKB keymap of the layout. It types accents through dead keys when the layout has them. When a take has a character that no key types, such as an emoji, Hush pastes the full take. With more than one layout, Hush must know which layout is active. KDE Plasma, GNOME, Hyprland, Sway, and X11 report the active layout. If Hush cannot find the active layout, it pastes, because a wrong layout types wrong letters. On GNOME, Hush also pastes when each window keeps its own input source. On X11, Hush types only on the default layout of the X server, because its own keyboard gets that layout. `hush doctor` shows whether Hush types or pastes, and why.
 - **A key for each language.** `languages = { "Shift+RightAlt" = "de" }` under `[hotkey]` gives German its own key, with the same hold, double-tap lock, and cancel as the hotkey. The Language menu of the panel icon sets the language of the hotkey until you change it again, also after a restart. `hush start --lang de` and `hush toggle --lang de` set the language of one recording.
 - **Writing styles.** A style has a name, one line for the polish prompt, and a polish switch. Add styles under `[styles]` in the config or on the Text page of `hush settings`. The built-in `verbatim` style turns polish off for one recording. `styles = { "Super+RightAlt" = "verbatim" }` under `[hotkey]` gives a style its own dictation key, and `hush start --style casual` sets the style of one recording. `app_styles = { slack = "casual" }` under `[profiles]` sets a default style for an application. A style key or `--style` comes first, then the style of the application, then only the tone of the application.
 - **Rewrite with a style.** `rewrite = { "Super+F" = "formal" }` under `[hotkey]` rewrites the selected text with the prompt of the `formal` style, with no speech. `hush rewrite formal` does the same from a script or a compositor bind. With nothing selected, Hush shows a notice and sends nothing to the LLM. When the LLM fails, the selection does not change. The style needs polish on and a prompt, so `verbatim` cannot rewrite.
@@ -197,13 +197,13 @@ Give each state a color in the Waybar style sheet, for example `#custom-hush.rec
 |---|---|---|
 | `transcription.model_size` | tiny, base, small, medium, large, large-v2, large-v3 | base |
 | `transcription.language` | A Whisper language code such as `en` or `de`, or `auto` to detect what you speak | en |
-| `transcription.detect_languages` | With `language = "auto"`, local Whisper picks the most likely of these languages, such as `["en", "de"]`. `[]` allows every language. Cloud and server backends detect the language on their own | `[]` |
+| `transcription.detect_languages` | With `language = "auto"`, a small language-ID model picks the most likely of these languages, such as `["en", "de"]`, and local Whisper writes in it. Hush downloads the model (27 MB) the first time. `[]` allows every language, and Whisper detects it. Cloud and server backends detect the language on their own | `[]` |
 | `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
 | `transcription.context_prompt` | Prime Whisper with the focused window's title and learned terms | true |
 | `transcription.vad` | Send local Whisper only the speech in each take, found by the Silero model that `hush models download` gets. Without the model, Whisper gets the whole take | true |
 | `transcription.unload_after_mins` | Free the local model's RAM and GPU memory after this many minutes without a take. The next take records at once and loads the model while you speak; 0 never frees it. Cloud and server backends ignore it | 0 |
 | `transcription.drop_phrases` | Drop a transcript that is only one of these phrases, without case and punctuation. When set, it replaces the built-in list of text that Whisper invents for silence, such as "thanks for watching"; `[]` drops nothing | built-in list |
-| `transcription.backend` | `local` (whisper.cpp), or `groq` or `openai`, which send the audio of each dictation to that service. The key comes from `GROQ_API_KEY` or `OPENAI_API_KEY`. `openai-compatible` sends the audio of each dictation to the URL in `transcription.server_url` | local |
+| `transcription.backend` | `local` (Whisper through transcribe.cpp), or `groq` or `openai`, which send the audio of each dictation to that service. The key comes from `GROQ_API_KEY` or `OPENAI_API_KEY`. `openai-compatible` sends the audio of each dictation to the URL in `transcription.server_url` | local |
 | `transcription.groq_model`, `transcription.openai_model` | The model each service runs | whisper-large-v3-turbo, gpt-4o-mini-transcribe |
 | `transcription.server_url`, `transcription.server_model` | The OpenAI-compatible server and its model. Hush adds `/v1/audio/transcriptions` when the URL does not end with it. `hush doctor` shows whether the server is local | none |
 | `transcription.server_key_env` | The environment variable that holds the server's API key; `""` sends no key | none |
@@ -303,6 +303,14 @@ The daemon runs with the PATH of your login session, so use absolute paths. `hus
 
 Larger models are more accurate and slower. `hush setup init` picks one for your hardware: medium on a GPU with 16 GB or more of RAM, small on a smaller-RAM GPU, base on a CPU. Manage them with `hush models list`, `hush models download <size>`, and `hush models set <size>`. Downloads come from the whisper.cpp catalogue and are checksum-verified.
 
+Hush also downloads two small helper models. The voice activity model comes with `hush models download`. The language-ID model comes only when `transcription.detect_languages` is set.
+
+| Model | Source | License |
+|---|---|---|
+| Whisper (OpenAI) | ggml files from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) | MIT |
+| Silero VAD v6.2 | [ggml-org/whisper-vad](https://huggingface.co/ggml-org/whisper-vad), from [snakers4/silero-vad](https://github.com/snakers4/silero-vad) | MIT |
+| VoxLingua107 ECAPA-TDNN language ID | [collectivecontext/hush-models](https://huggingface.co/collectivecontext/hush-models), converted with transcribe.cpp from [speechbrain/lang-id-voxlingua107-ecapa](https://huggingface.co/speechbrain/lang-id-voxlingua107-ecapa) | Apache-2.0 |
+
 ## Troubleshooting
 
 ```bash
@@ -330,7 +338,7 @@ Everything runs locally by default. The only network traffic is the one-time mod
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Hush is MIT licensed and built on [whisper.cpp](https://github.com/ggerganov/whisper.cpp) through [whisper-rs](https://github.com/tazz4843/whisper-rs). Release notes live in [CHANGELOG.md](CHANGELOG.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Hush is MIT licensed and runs Whisper through [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) and its [transcribe-cpp](https://crates.io/crates/transcribe-cpp) bindings, on [ggml](https://github.com/ggml-org/ggml). Release notes live in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

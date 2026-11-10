@@ -8,6 +8,7 @@
 # Environment:
 #   HUSH_BIN                 the binary to test (default target/debug/hush, built when missing)
 #   HUSH_E2E_MODEL           a ggml model file (default: tiny, downloaded once into the cache)
+#   HUSH_E2E_LANGID_MODEL    a language-ID GGUF file (default: the daemon downloads it when a case needs it)
 #   HUSH_E2E_KEEP=1          keep the temporary folder with the daemon logs
 #   HUSH_E2E_ALLOW_UINPUT=1  run without the /dev/uinput guard (only on a machine without a desktop)
 
@@ -293,6 +294,10 @@ make_silence_wav() {
 }
 
 ensure_model() {
+  if [ -n "${HUSH_E2E_LANGID_MODEL:-}" ]; then
+    [ -f "$HUSH_E2E_LANGID_MODEL" ] || die "HUSH_E2E_LANGID_MODEL=$HUSH_E2E_LANGID_MODEL is not a file"
+    HUSH_E2E_LANGID_MODEL=$(realpath "$HUSH_E2E_LANGID_MODEL")
+  fi
   if [ -n "${HUSH_E2E_MODEL:-}" ]; then
     [ -f "$HUSH_E2E_MODEL" ] || die "HUSH_E2E_MODEL=$HUSH_E2E_MODEL is not a file"
     MODEL=$HUSH_E2E_MODEL
@@ -394,6 +399,9 @@ start_daemon() {
   for vad in "$MODEL_CACHE"/ggml-silero-*.bin; do
     [ -f "$vad" ] && ln -sf "$vad" "$CASE_HOME/.local/share/hush/models/"
   done
+  if [ -n "${HUSH_E2E_LANGID_MODEL:-}" ]; then
+    ln -sf "$HUSH_E2E_LANGID_MODEL" "$CASE_HOME/.local/share/hush/models/"
+  fi
   home_env "$CASE_HOME"
   "${SANDBOX[@]}" setpriv --pdeathsig TERM -- env -i "${HOME_ENV[@]}" \
     "$HUSH_BIN" -v daemon start --foreground >"$CASE_DIR/daemon.log" 2>&1 &
@@ -489,6 +497,18 @@ case_english_clip() {
 
 case_silence() {
   start_daemon
+  make_silence_wav 3 "$CASE_DIR/silence.wav"
+  record_clip "$CASE_DIR/silence.wav"
+  stop_print_json
+  assert_exit 4 "$TAKE_EXIT" "hush stop --print --json"
+  assert_eq no_speech "$(take_field status)" "the status"
+  assert_eq null "$(take_field text)" "the text"
+}
+
+# The daemon drops a silent take before Whisper, also without VAD, so Whisper
+# cannot invent a word such as "you" for it.
+case_silence_without_vad() {
+  start_daemon 'transcription.vad = false'
   make_silence_wav 3 "$CASE_DIR/silence.wav"
   record_clip "$CASE_DIR/silence.wav"
   stop_print_json

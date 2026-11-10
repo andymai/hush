@@ -1,5 +1,4 @@
-//! The languages Whisper knows, the language of each take, and the choice
-//! that limited detection makes.
+//! The languages Whisper knows and the language of each take.
 //!
 //! A take gets its language in this order: `hush start --lang` or a
 //! language chord, then the choice from the tray menu, then
@@ -181,21 +180,6 @@ pub fn for_take(once: Option<Language>, chosen: Option<Language>, config: Langua
     once.or(chosen).unwrap_or(config)
 }
 
-/// The language in `allowed` that Whisper finds most likely, from Whisper's
-/// probability for each language code. `None` when no allowed language has
-/// a probability.
-pub fn most_likely<'a>(
-    probabilities: impl IntoIterator<Item = (&'a str, f32)>,
-    allowed: &[String],
-) -> Option<(&'a str, f32)> {
-    probabilities
-        .into_iter()
-        .filter(|(code, probability)| {
-            probability.is_finite() && allowed.iter().any(|wanted| wanted.trim() == *code)
-        })
-        .max_by(|a, b| a.1.total_cmp(&b.1))
-}
-
 /// `$XDG_STATE_HOME/hush/language`: the language that the tray menu chose.
 pub fn choice_path() -> PathBuf {
     paths::state_dir().join("language")
@@ -273,30 +257,6 @@ mod tests {
             Language::AUTO,
             "the tray can choose detection"
         );
-    }
-
-    #[test]
-    fn limited_detection_picks_the_most_likely_allowed_language() {
-        let probabilities = [("en", 0.30), ("de", 0.25), ("nl", 0.40), ("fr", 0.05)];
-        let allowed = vec!["en".to_string(), "de".to_string()];
-        assert_eq!(
-            most_likely(probabilities, &allowed),
-            Some(("en", 0.30)),
-            "Dutch is more likely, but not allowed"
-        );
-        let allowed = vec!["de".to_string(), "fr".to_string()];
-        assert_eq!(most_likely(probabilities, &allowed), Some(("de", 0.25)));
-        assert_eq!(most_likely(probabilities, &["ja".to_string()]), None);
-        assert_eq!(most_likely(probabilities, &[]), None);
-        assert_eq!(
-            most_likely([("en", f32::NAN), ("de", 0.0)], &allowed_en_de()),
-            Some(("de", 0.0)),
-            "a probability that is not a number never wins"
-        );
-    }
-
-    fn allowed_en_de() -> Vec<String> {
-        vec!["en".to_string(), "de".to_string()]
     }
 
     #[test]

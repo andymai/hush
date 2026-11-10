@@ -7,11 +7,11 @@
 
    ```bash
    # Ubuntu / Debian
-   sudo apt install cmake pkg-config libasound2-dev libx11-dev libxi-dev libxtst-dev libxcursor-dev libxrandr-dev libxinerama-dev libgl1-mesa-dev glslc libvulkan-dev
+   sudo apt install cmake pkg-config libasound2-dev libx11-dev libxi-dev libxtst-dev libxcursor-dev libxrandr-dev libxinerama-dev libgl1-mesa-dev glslc libvulkan-dev spirv-headers
    # Fedora
-   sudo dnf install cmake pkgconf-pkg-config alsa-lib-devel libX11-devel libXi-devel libXtst-devel libXcursor-devel libXrandr-devel libXinerama-devel mesa-libGL-devel glslc vulkan-headers vulkan-loader-devel
+   sudo dnf install cmake pkgconf-pkg-config alsa-lib-devel libX11-devel libXi-devel libXtst-devel libXcursor-devel libXrandr-devel libXinerama-devel mesa-libGL-devel glslc vulkan-headers vulkan-loader-devel spirv-headers-devel
    # Arch
-   sudo pacman -S cmake pkgconf alsa-lib libx11 libxi libxtst libxcursor libxrandr libxinerama mesa shaderc vulkan-headers vulkan-icd-loader
+   sudo pacman -S cmake pkgconf alsa-lib libx11 libxi libxtst libxcursor libxrandr libxinerama mesa shaderc vulkan-headers vulkan-icd-loader spirv-headers
    ```
 
 3. Install Node.js 20+ and run `npm install` to enable the commit hooks.
@@ -40,7 +40,7 @@ perf: reuse the whisper state across dictations
 docs: describe the udev rule
 refactor: split the listen loop into a session type
 test: cover the hotkey combination parser
-chore: bump whisper-rs
+chore: bump transcribe-cpp
 ```
 
 `feat` and `fix` appear in the changelog and drive the version bump. Breaking changes carry a `!` after the type or a `BREAKING CHANGE:` footer.

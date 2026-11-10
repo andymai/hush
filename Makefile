@@ -1,5 +1,10 @@
 .PHONY: build check clean dev release release-cuda release-cpu production install link help vulkan-preflight cuda-preflight
 
+# transcribe-cpp-sys passes these to the CMake build of transcribe.cpp. Without
+# the flag, the build links OpenBLAS when it finds the library, and the binary
+# then needs it at runtime.
+export TRANSCRIBE_CMAKE_ARGS ?= -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF
+
 # CUDA builds need the toolkit's stub libcuda.so at link time; the real driver
 # library (libcuda.so.1) resolves at runtime. Pointing the linker at the stubs
 # directory avoids creating a system-wide symlink. CUDA_HOME is derived from
@@ -12,9 +17,12 @@ CUDA_STUBS := $(CUDA_HOME)/lib64/stubs
 # fan-out, so CUDA builds drop it from PATH entirely; unsetting RUSTC_WRAPPER
 # alone only covers rustc, not nvcc. mold cannot link the CUDA stub library,
 # so CUDA builds force the bfd linker regardless of any local .cargo/config.
+# NCCL serves several GPUs and would be one more runtime library, so it is off.
 CUDA_ENV = PATH="$$(dirname $$(rustup which cargo)):$$(echo $$PATH | tr ':' '\n' | grep -v '\.cargo/bin' | paste -sd:)" \
 	RUSTC_WRAPPER= \
-	RUSTFLAGS="-C link-arg=-fuse-ld=bfd -L $(CUDA_STUBS)"
+	RUSTFLAGS="-C link-arg=-fuse-ld=bfd -L $(CUDA_STUBS)" \
+	CUDA_HOME="$(CUDA_HOME)" \
+	TRANSCRIBE_CMAKE_ARGS="$(TRANSCRIBE_CMAKE_ARGS) -DGGML_CUDA_NCCL=OFF"
 
 # Default target
 help:
@@ -47,13 +55,17 @@ check:
 	@cargo check
 	@echo "✅ Check complete."
 
-# Verify the shader compiler and Vulkan headers ggml-vulkan needs at build time.
+# Verify the shader compiler, Vulkan headers, and SPIR-V headers ggml-vulkan
+# needs at build time.
+SPIRV_HEADERS := $(wildcard /usr/share/cmake/SPIRV-Headers /usr/lib/cmake/SPIRV-Headers \
+	/usr/lib64/cmake/SPIRV-Headers /usr/lib/*/cmake/SPIRV-Headers \
+	$(if $(VULKAN_SDK),$(VULKAN_SDK)/*/cmake/SPIRV-Headers))
 vulkan-preflight:
-	@command -v glslc >/dev/null 2>&1 && [ -e /usr/include/vulkan/vulkan.h ] || { \
-		echo "❌ Vulkan builds need glslc and the Vulkan headers."; \
-		echo "   Ubuntu/Debian: sudo apt install glslc libvulkan-dev"; \
-		echo "   Fedora:        sudo dnf install glslc vulkan-headers vulkan-loader-devel"; \
-		echo "   Arch:          sudo pacman -S shaderc vulkan-headers vulkan-icd-loader"; \
+	@command -v glslc >/dev/null 2>&1 && [ -e /usr/include/vulkan/vulkan.h ] && [ -n "$(SPIRV_HEADERS)" ] || { \
+		echo "❌ Vulkan builds need glslc, the Vulkan headers, and the SPIR-V headers."; \
+		echo "   Ubuntu/Debian: sudo apt install glslc libvulkan-dev spirv-headers"; \
+		echo "   Fedora:        sudo dnf install glslc vulkan-headers vulkan-loader-devel spirv-headers-devel"; \
+		echo "   Arch:          sudo pacman -S shaderc vulkan-headers vulkan-icd-loader spirv-headers"; \
 		echo "   For a CPU-only build instead, run: make release-cpu"; \
 		exit 1; \
 	}

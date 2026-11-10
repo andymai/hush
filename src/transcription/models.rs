@@ -42,6 +42,28 @@ pub fn vad_model_path(models_dir: &Path) -> PathBuf {
     models_dir.join(VAD_FILENAME)
 }
 
+/// SpeechBrain's VoxLingua107 ECAPA-TDNN language-ID model, converted to
+/// GGUF with transcribe.cpp. `transcription.detect_languages` uses it.
+pub const LANGID_FILENAME: &str = "lang-id-voxlingua107-ecapa-Q8_0.gguf";
+
+/// The catalogue entry for the language-ID model.
+pub fn langid_model() -> ModelInfo {
+    ModelInfo {
+        name: "voxlingua107-langid".to_string(),
+        repo_id: "collectivecontext/hush-models".to_string(),
+        filename: LANGID_FILENAME.to_string(),
+        expected_size: 26_693_632,
+        sha256: Some(
+            "60176ea5a4d3a33d3ec2d9608d984a43d57307daf5bf22f6cd724b696989b8fa".to_string(),
+        ),
+    }
+}
+
+/// Where the language-ID model lives in `models_dir`, downloaded or not.
+pub fn langid_model_path(models_dir: &Path) -> PathBuf {
+    models_dir.join(LANGID_FILENAME)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelSize {
     Tiny,
@@ -140,7 +162,7 @@ impl ModelManager {
     fn init_available_models() -> HashMap<ModelSize, ModelInfo> {
         let mut models = HashMap::new();
 
-        // Using ggml format from ggerganov/whisper.cpp - compatible with whisper-rs
+        // The ggml files of the whisper.cpp catalogue; transcribe.cpp loads them as they are.
         models.insert(
             ModelSize::Tiny,
             ModelInfo {
@@ -293,6 +315,27 @@ impl ModelManager {
         progress: &(dyn Fn(u64, u64) + Send + Sync),
     ) -> Result<PathBuf> {
         self.ensure_file(&vad_model(), progress).await
+    }
+
+    /// The language-ID model in this cache, when it is there.
+    pub fn langid_model_path(&self) -> Option<PathBuf> {
+        let path = self.cache_dir.join(LANGID_FILENAME);
+        path.is_file().then_some(path)
+    }
+
+    /// Download the language-ID model unless a valid copy is already in the
+    /// cache.
+    pub async fn ensure_langid_downloaded(&self) -> Result<PathBuf> {
+        let info = langid_model();
+        self.ensure_langid_downloaded_with(&Self::terminal_progress(info.name))
+            .await
+    }
+
+    pub async fn ensure_langid_downloaded_with(
+        &self,
+        progress: &(dyn Fn(u64, u64) + Send + Sync),
+    ) -> Result<PathBuf> {
+        self.ensure_file(&langid_model(), progress).await
     }
 
     fn terminal_progress(name: String) -> impl Fn(u64, u64) + Send + Sync {
@@ -606,6 +649,33 @@ mod tests {
         assert!(
             manager.list_cached_models().is_empty(),
             "the VAD model is not a Whisper model"
+        );
+    }
+
+    #[test]
+    fn the_language_id_model_comes_from_the_hush_model_repo() {
+        let info = langid_model();
+        assert_eq!(
+            ModelManager::download_url(&info),
+            "https://huggingface.co/collectivecontext/hush-models/resolve/main/lang-id-voxlingua107-ecapa-Q8_0.gguf"
+        );
+        assert_eq!(info.sha256.as_deref().map(str::len), Some(64));
+
+        let temp_dir = TempDir::new().unwrap();
+        assert_eq!(
+            langid_model_path(temp_dir.path()),
+            temp_dir.path().join(LANGID_FILENAME)
+        );
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        assert_eq!(manager.langid_model_path(), None);
+        std::fs::write(temp_dir.path().join(LANGID_FILENAME), b"x").unwrap();
+        assert_eq!(
+            manager.langid_model_path(),
+            Some(temp_dir.path().join(LANGID_FILENAME))
+        );
+        assert!(
+            manager.list_cached_models().is_empty(),
+            "the language-ID model is not a Whisper model"
         );
     }
 

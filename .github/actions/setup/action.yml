@@ -4,10 +4,11 @@ description: Install the system libraries hush links against and restore the car
 runs:
   using: composite
   steps:
-    # whisper-rs-sys builds whisper.cpp with cmake and, for the vulkan feature,
-    # compiles its shaders with glslc against the Vulkan headers; cpal needs ALSA
-    # headers; the overlay's GLFW build and x11rb need the X11 and GL files. The
-    # keymap tests load libxkbcommon and read the xkb-data layouts.
+    # transcribe-cpp-sys builds transcribe.cpp with cmake and, for the vulkan
+    # feature, compiles its shaders with glslc against the Vulkan and SPIR-V
+    # headers; cpal needs ALSA headers; the overlay's GLFW build and x11rb need
+    # the X11 and GL files. The keymap tests load libxkbcommon and read the
+    # xkb-data layouts. TRANSCRIBE_CMAKE_ARGS keeps OpenBLAS out of the link.
     - name: Install system dependencies
       shell: bash
       run: |
@@ -17,7 +18,7 @@ runs:
           libasound2-dev \
           libx11-dev libxi-dev libxtst-dev libxcursor-dev \
           libxrandr-dev libxinerama-dev libgl1-mesa-dev \
-          libvulkan-dev libxkbcommon0 xkb-data
+          libvulkan-dev libxkbcommon0 xkb-data spirv-headers
         # Ubuntu 22.04, which the release job uses for its glibc floor, has no
         # glslc package; LunarG's Vulkan repository ships it as shaderc.
         if apt-cache show glslc >/dev/null 2>&1; then
@@ -30,10 +31,11 @@ runs:
             "https://packages.lunarg.com/vulkan/lunarg-vulkan-$codename.list"
           sudo apt-get update
           # ggml-vulkan needs headers newer than jammy's; LunarG's are current.
-          sudo apt-get install -y --no-install-recommends shaderc vulkan-headers libvulkan-dev
+          sudo apt-get install -y --no-install-recommends shaderc vulkan-headers libvulkan-dev spirv-headers
         fi
         glslc --version | head -n 1
         pkg-config --modversion vulkan
+        echo "TRANSCRIBE_CMAKE_ARGS=-DTRANSCRIBE_USE_SYSTEM_BLAS=OFF" >> "$GITHUB_ENV"
     - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       with:
         save-if: ${{ github.ref == 'refs/heads/main' }}

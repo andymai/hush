@@ -51,12 +51,15 @@ scripts/e2e/run.sh english_clip    # one case
 ```
 
 The first run downloads the `tiny` model and the voice activity model into
-`~/.cache/hush-e2e/`. Later runs use that copy.
+`~/.cache/hush-e2e/`. Later runs use that copy. The `detect_limited` case
+needs the language-ID model, and its test daemon downloads the model each
+run unless `HUSH_E2E_LANGID_MODEL` names a copy.
 
 | Variable | Use |
 | --- | --- |
 | `HUSH_BIN` | The binary to test. The default is `target/debug/hush`, which the harness builds when it is missing. |
 | `HUSH_E2E_MODEL` | A ggml model file to use instead of `tiny`. |
+| `HUSH_E2E_LANGID_MODEL` | A language-ID GGUF file for the cases that set `detect_languages`. Without it, the test daemon downloads the model. |
 | `HUSH_E2E_KEEP=1` | Keep the temporary folder with the daemon logs. |
 | `HUSH_E2E_TAIL_SECS` | The time from the end of the clip to the stop. The default is 1.5. |
 

@@ -1,20 +1,23 @@
-//! Speech-to-text with whisper.cpp, or with a cloud service the user chose.
+//! Speech-to-text with Whisper on this machine, or with a cloud service the
+//! user chose.
 //!
-//! [`WhisperTranscriber`] runs ggml Whisper models through whisper-rs, on a
+//! [`WhisperTranscriber`] runs Whisper models through transcribe.cpp, on a
 //! GPU when the binary was built with the `cuda` or `vulkan` feature and one
-//! is present. [`CloudTranscriber`] sends the audio to Groq or OpenAI, only
-//! when `transcription.backend` names that service. [`SpeechToText`] builds
+//! is present. It loads the ggml files of the whisper.cpp catalogue as they
+//! are. [`CloudTranscriber`] sends the audio to Groq or OpenAI, only when
+//! `transcription.backend` names that service. [`SpeechToText`] builds
 //! whichever the config asks for, and [`guard`] drops a transcript that
 //! Whisper invents for silence or that echoes the prompt. [`ModelManager`]
 //! downloads and verifies models from the ggerganov/whisper.cpp catalogue,
-//! and the Silero voice activity detection model that trims silence before
-//! local transcription. [`GpuAvailability`] reports what ggml's backend
-//! registry found. [`gpu_fallback`] waits for the GPU at login, and keeps a
-//! GPU that failed a take on the CPU until its driver changes. [`cpu`]
-//! refuses to call ggml on a CPU below the floor of a prebuilt binary.
-//! [`ModelSlot`] frees the local model after idle minutes, and the next take
-//! loads it again. [`language`] lists Whisper's languages and picks the
-//! language of each take.
+//! the Silero voice activity detection model that trims silence before local
+//! transcription, and the VoxLingua107 language-ID model that
+//! `transcription.detect_languages` uses. [`GpuAvailability`] reports what
+//! the device registry of transcribe.cpp found. [`gpu_fallback`] waits for
+//! the GPU at login, and keeps a GPU that failed a take on the CPU until its
+//! driver changes. [`cpu`] refuses to call ggml on a CPU below the floor of a
+//! prebuilt binary. [`ModelSlot`] frees the local model after idle minutes,
+//! and the next take loads it again. [`language`] lists Whisper's languages
+//! and picks the language of each take.
 
 pub mod cloud;
 pub mod cpu;

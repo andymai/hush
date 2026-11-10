@@ -23,13 +23,18 @@ cargo fmt              # Format
 
 The Makefile creates a `./hush` symlink to the built binary.
 
-`make release` builds the Vulkan backend and needs `glslc` plus the Vulkan
-headers at build time; at runtime only the graphics driver is required, on any
+`make release` builds the Vulkan backend and needs `glslc`, the Vulkan headers,
+and `spirv-headers` at build time; at runtime only the graphics driver is required, on any
 vendor. `make release-cuda` needs the CUDA toolkit (`nvcc`), not just the NVIDIA
 driver. On a host that ships driver-only (Fedora Atomic and similar), run it
 inside a CUDA container; `cuda-preflight` fails early with instructions when
 `nvcc` is absent. CUDA targets also drop sccache from `PATH`, because ggml's
 CMake auto-detects it and deadlocks on the CUDA kernel fan-out.
+
+The Makefile and CI set `TRANSCRIBE_CMAKE_ARGS=-DTRANSCRIBE_USE_SYSTEM_BLAS=OFF`.
+Without it, transcribe-cpp-sys links OpenBLAS when the library is installed, and
+`build.rs` warns (and fails a `HUSH_CPU_FLOOR` build). Release ggml flags go in
+the same variable, not in `GGML_*` variables.
 
 ## Running
 
@@ -65,7 +70,7 @@ src/
 ├── application/    # HushApp orchestrator with builder pattern
 ├── cli/            # Clap-based CLI, command handlers in cli/commands/
 ├── audio/          # CPAL-based audio capture
-├── transcription/  # whisper.cpp via whisper-rs (whisper.rs), model catalogue and downloads (models.rs), GPU detection (device.rs)
+├── transcription/  # Whisper via transcribe-cpp (whisper.rs), model catalogue and downloads (models.rs), GPU detection (device.rs)
 ├── text_processing/# Pipeline: filler removal → vocabulary → entities → LLM polish
 ├── text/           # uinput typing, clipboard paste fallback, window detection (X11, Hyprland, Sway)
 ├── hotkey/         # Hotkey combination parser, evdev backend, X11 fallback

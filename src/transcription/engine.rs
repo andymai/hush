@@ -1,6 +1,7 @@
-//! The transcriber the config asks for: whisper.cpp on this machine, or the
-//! service or server the user chose. An HTTP backend never loads the model,
-//! and the local one never opens a connection.
+//! The transcriber the config asks for: Whisper through transcribe.cpp on
+//! this machine, or the service or server the user chose. An HTTP backend
+//! never loads the model, and the local one opens a connection only to fetch
+//! a missing language-ID model.
 //!
 //! Every transcript then goes through the checks in [`guard`]: a transcript
 //! that echoes the prompt is made again without the prompt, and text that
@@ -64,6 +65,9 @@ impl SpeechToText {
             .with_detect_languages(&config.detect_languages);
         if config.vad {
             load_vad(&mut whisper, models_dir, &config.model_size);
+        }
+        if !config.detect_languages.is_empty() {
+            load_langid(&mut whisper, models_dir, &config.model_size).await;
         }
         Ok(Self {
             backend: Backend::Local(whisper),
@@ -225,6 +229,34 @@ fn load_vad(whisper: &mut WhisperTranscriber, models_dir: &Path, model_size: &st
         warn!(
             "Voice activity detection is off: {:#}. Get the model again with: hush models download {}",
             e, model_size
+        );
+    }
+}
+
+/// Load the language-ID model for `transcription.detect_languages`, and
+/// download it first when it is missing. Without it, a take in `auto` lets
+/// Whisper pick from every language.
+async fn load_langid(whisper: &mut WhisperTranscriber, models_dir: &Path, model_size: &str) {
+    let path = models::langid_model_path(models_dir);
+    if !path.is_file() {
+        info!("Downloading the language-ID model that detect_languages needs");
+        let downloaded = match ModelManager::new(models_dir) {
+            Ok(manager) => manager.ensure_langid_downloaded_with(&|_, _| {}).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = downloaded {
+            warn!(
+                "Limited language detection is off: the language-ID model did not download \
+                 ({:#}). Whisper picks from every language. Get the model with: hush models download {}",
+                e, model_size
+            );
+            return;
+        }
+    }
+    if let Err(e) = whisper.load_langid(&path) {
+        warn!(
+            "Limited language detection is off: {:#}. Whisper picks from every language",
+            e
         );
     }
 }
