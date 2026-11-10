@@ -6,6 +6,7 @@ use crate::transcription::cpu;
 use crate::transcription::device::{self, GpuAvailability};
 use crate::transcription::gpu_fallback;
 use crate::transcription::langid;
+use crate::transcription::models;
 use crate::Result;
 use anyhow::Context;
 use parking_lot::Mutex;
@@ -82,6 +83,13 @@ impl Family {
             "parakeet" => Some(Family::Parakeet),
             _ => None,
         }
+    }
+
+    /// The family of the model in `path`, from its header, without a load.
+    pub fn of_file(path: &Path) -> Option<Self> {
+        models::file_architecture(path)
+            .as_deref()
+            .and_then(Self::from_arch)
     }
 
     pub fn name(self) -> &'static str {

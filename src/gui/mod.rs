@@ -424,7 +424,7 @@ impl Gui {
         match finished {
             Some((Ok(()), size)) => {
                 if let Some(size) = size {
-                    self.config.transcription.model_size = size_key(size).to_string();
+                    self.config.transcription.select_model(size);
                 }
                 self.say("Model ready. Save to use it.");
                 self.request_refresh(ctx);

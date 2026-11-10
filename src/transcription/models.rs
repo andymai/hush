@@ -3,6 +3,7 @@ use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, OnceLock};
 use std::time::SystemTime;
@@ -218,6 +219,114 @@ pub fn recommended_model() -> ModelSize {
             (false, _) => ModelSize::Tiny,
         }
     })
+}
+
+/// The most header bytes [`file_architecture`] reads.
+const HEADER_LIMIT: u64 = 16 << 20;
+
+/// The longest GGUF key or architecture name that [`file_architecture`] reads.
+const NAME_LIMIT: u64 = 256;
+
+const GGUF_STRING: u32 = 8;
+const GGUF_ARRAY: u32 = 9;
+
+/// The architecture of a model file without a model load: the
+/// `general.architecture` of a GGUF file, or `whisper` for the ggml `.bin`
+/// format of whisper.cpp. `None` when the file is missing or is neither.
+pub fn file_architecture(path: &Path) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    architecture_in(&mut std::io::BufReader::new(file).take(HEADER_LIMIT))
+}
+
+fn architecture_in(reader: &mut impl Read) -> Option<String> {
+    let mut magic = [0; 4];
+    reader.read_exact(&mut magic).ok()?;
+    match &magic {
+        b"lmgg" => return Some("whisper".to_string()),
+        b"GGUF" => {},
+        _ => return None,
+    }
+    // Version 1 used 32-bit counts.
+    if read_u32(reader)? < 2 {
+        return None;
+    }
+    let _tensors = read_u64(reader)?;
+    let pairs = read_u64(reader)?;
+    for _ in 0..pairs {
+        let key = read_name(reader)?;
+        let kind = read_u32(reader)?;
+        if key == "general.architecture" {
+            return if kind == GGUF_STRING {
+                read_name(reader)
+            } else {
+                None
+            };
+        }
+        skip_value(reader, kind)?;
+    }
+    None
+}
+
+fn read_u32(reader: &mut impl Read) -> Option<u32> {
+    let mut bytes = [0; 4];
+    reader.read_exact(&mut bytes).ok()?;
+    Some(u32::from_le_bytes(bytes))
+}
+
+fn read_u64(reader: &mut impl Read) -> Option<u64> {
+    let mut bytes = [0; 8];
+    reader.read_exact(&mut bytes).ok()?;
+    Some(u64::from_le_bytes(bytes))
+}
+
+fn read_name(reader: &mut impl Read) -> Option<String> {
+    let len = read_u64(reader)?;
+    if len > NAME_LIMIT {
+        return None;
+    }
+    let mut bytes = vec![0; len as usize];
+    reader.read_exact(&mut bytes).ok()?;
+    String::from_utf8(bytes).ok()
+}
+
+fn skip(reader: &mut impl Read, bytes: u64) -> Option<()> {
+    let skipped = std::io::copy(&mut reader.by_ref().take(bytes), &mut std::io::sink()).ok()?;
+    (skipped == bytes).then_some(())
+}
+
+/// The bytes of one GGUF value of a fixed-size type.
+fn scalar_size(kind: u32) -> Option<u64> {
+    match kind {
+        0 | 1 | 7 => Some(1),
+        2 | 3 => Some(2),
+        4..=6 => Some(4),
+        10..=12 => Some(8),
+        _ => None,
+    }
+}
+
+fn skip_value(reader: &mut impl Read, kind: u32) -> Option<()> {
+    match kind {
+        GGUF_STRING => {
+            let len = read_u64(reader)?;
+            skip(reader, len)
+        },
+        GGUF_ARRAY => {
+            let element = read_u32(reader)?;
+            let count = read_u64(reader)?;
+            if let Some(size) = scalar_size(element) {
+                return skip(reader, size.checked_mul(count)?);
+            }
+            if element != GGUF_STRING {
+                return None;
+            }
+            for _ in 0..count {
+                skip_value(reader, GGUF_STRING)?;
+            }
+            Some(())
+        },
+        kind => skip(reader, scalar_size(kind)?),
+    }
 }
 
 pub struct ModelManager {
@@ -589,7 +698,6 @@ impl ModelManager {
     /// Computes the SHA256 checksum of a file
     fn compute_sha256(path: &Path) -> Result<String> {
         use std::fmt::Write;
-        use std::io::Read;
 
         let mut file =
             std::fs::File::open(path).context("Failed to open file for checksum computation")?;
@@ -1000,5 +1108,91 @@ mod tests {
             large_v3_info.sha256.as_ref().unwrap(),
             "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2"
         );
+    }
+
+    fn gguf_string(bytes: &mut Vec<u8>, text: &str) {
+        bytes.extend((text.len() as u64).to_le_bytes());
+        bytes.extend(text.as_bytes());
+    }
+
+    /// A GGUF v3 header with no tensors, whose pairs come from `pairs`.
+    fn gguf(pairs: u64, write: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend(3u32.to_le_bytes());
+        bytes.extend(0u64.to_le_bytes());
+        bytes.extend(pairs.to_le_bytes());
+        write(&mut bytes);
+        bytes
+    }
+
+    #[test]
+    fn the_architecture_comes_from_the_gguf_header() {
+        let parakeet = gguf(1, |bytes| {
+            gguf_string(bytes, "general.architecture");
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            gguf_string(bytes, "parakeet");
+        });
+        assert_eq!(
+            architecture_in(&mut parakeet.as_slice()).as_deref(),
+            Some("parakeet")
+        );
+
+        let later = gguf(4, |bytes| {
+            gguf_string(bytes, "general.alignment");
+            bytes.extend(4u32.to_le_bytes());
+            bytes.extend(32u32.to_le_bytes());
+            gguf_string(bytes, "general.name");
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            gguf_string(bytes, "Whisper Base");
+            gguf_string(bytes, "tokenizer.tokens");
+            bytes.extend(GGUF_ARRAY.to_le_bytes());
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            bytes.extend(2u64.to_le_bytes());
+            gguf_string(bytes, "hello");
+            gguf_string(bytes, "world");
+            gguf_string(bytes, "general.architecture");
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            gguf_string(bytes, "whisper");
+        });
+        assert_eq!(
+            architecture_in(&mut later.as_slice()).as_deref(),
+            Some("whisper"),
+            "the pairs before it are skipped"
+        );
+    }
+
+    #[test]
+    fn a_ggml_bin_is_whisper_and_other_files_have_no_architecture() {
+        let mut bin = b"lmgg".to_vec();
+        bin.extend(51_865u32.to_le_bytes());
+        assert_eq!(
+            architecture_in(&mut bin.as_slice()).as_deref(),
+            Some("whisper")
+        );
+
+        assert_eq!(architecture_in(&mut &b"PK\x03\x04"[..]), None, "a zip");
+        assert_eq!(architecture_in(&mut &b"GG"[..]), None, "too short");
+        let no_name = gguf(1, |bytes| {
+            gguf_string(bytes, "general.name");
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            gguf_string(bytes, "Whisper Base");
+        });
+        assert_eq!(architecture_in(&mut no_name.as_slice()), None);
+        let cut = gguf(1, |bytes| gguf_string(bytes, "general.archi"));
+        assert_eq!(architecture_in(&mut cut.as_slice()), None, "a cut file");
+    }
+
+    #[test]
+    fn a_file_on_disk_names_its_architecture() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("model.gguf");
+        assert_eq!(file_architecture(&path), None, "a missing file");
+        let parakeet = gguf(1, |bytes| {
+            gguf_string(bytes, "general.architecture");
+            bytes.extend(GGUF_STRING.to_le_bytes());
+            gguf_string(bytes, "parakeet");
+        });
+        std::fs::write(&path, parakeet).unwrap();
+        assert_eq!(file_architecture(&path).as_deref(), Some("parakeet"));
     }
 }

@@ -517,6 +517,13 @@ impl TranscriptionConfig {
             },
         }
     }
+
+    /// Make the catalogue model `size` the speech model. A `model_path` set
+    /// by hand loads in place of `model_size`, so it goes.
+    pub fn select_model(&mut self, size: ModelSize) {
+        self.model_size = size.to_string();
+        self.model_path = None;
+    }
 }
 
 /// Global hotkey listener configuration
@@ -978,6 +985,26 @@ mod tests {
         assert_eq!(config.hotkey.combination, "RightAlt");
         assert!(config.transcription.model_path.is_none());
         assert!(config.audio.device.is_none());
+    }
+
+    #[test]
+    fn a_catalogue_model_replaces_a_model_path_set_by_hand() {
+        let models = Path::new("/models");
+        let mut transcription = Config::defaults().unwrap().transcription;
+        transcription.model_path = Some("/elsewhere/ggml-base.bin".into());
+        assert_eq!(
+            transcription.model_path_in(models),
+            Path::new("/elsewhere/ggml-base.bin"),
+            "a path set by hand wins over model_size"
+        );
+
+        transcription.select_model(ModelSize::ParakeetV3);
+        assert_eq!(transcription.model_size, "parakeet-v3");
+        assert_eq!(transcription.model_path, None);
+        assert_eq!(
+            transcription.model_path_in(models),
+            models.join("parakeet-tdt-0.6b-v3-Q8_0.gguf")
+        );
     }
 
     #[test]

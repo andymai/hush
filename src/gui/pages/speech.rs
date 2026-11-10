@@ -3,7 +3,7 @@
 //! may pick, the GPU, the microphone, and how long a recording may run.
 
 use crate::config::server;
-use crate::config::settings::TranscriptionBackend;
+use crate::config::settings::{TranscriptionBackend, TranscriptionConfig};
 use crate::gui::icons;
 use crate::gui::meter::{self, Meter};
 use crate::gui::theme::{palette, FIELD_WIDTH};
@@ -227,6 +227,7 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
         }
     };
     let description = model_description(selected, recommended);
+    let before = gui.config.transcription.model_size.clone();
     row("speech.model", "Speech model")
         .describe(&description)
         .reserve(240.0)
@@ -241,6 +242,7 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
                 }
             });
         });
+    model_picked(&mut gui.config.transcription, &before);
 
     let downloading = gui.download.lock().size;
     if let Some(size) = downloading {
@@ -623,6 +625,17 @@ pub fn size_key(size: ModelSize) -> &'static str {
     }
 }
 
+/// A model picked from the list, unlike the model that was `before`, replaces
+/// a `model_path` set by hand, which would load in its place.
+fn model_picked(transcription: &mut TranscriptionConfig, before: &str) {
+    if transcription.model_size == before {
+        return;
+    }
+    if let Ok(size) = transcription.model_size.parse() {
+        transcription.select_model(size);
+    }
+}
+
 /// What the model row says about the chosen model. Parakeet's licence asks
 /// for the credit.
 fn model_description(selected: Option<ModelSize>, recommended: ModelSize) -> String {
@@ -656,6 +669,22 @@ mod tests {
                 "{key} round trips"
             );
         }
+    }
+
+    #[test]
+    fn only_a_new_pick_clears_a_model_path_set_by_hand() {
+        let mut transcription = crate::Config::defaults().unwrap().transcription;
+        transcription.model_path = Some("/elsewhere/ggml-base.bin".into());
+        model_picked(&mut transcription, "base");
+        assert!(
+            transcription.model_path.is_some(),
+            "the same model keeps the path"
+        );
+
+        transcription.model_size = "parakeet-v3".to_string();
+        model_picked(&mut transcription, "base");
+        assert_eq!(transcription.model_size, "parakeet-v3");
+        assert_eq!(transcription.model_path, None);
     }
 
     #[test]

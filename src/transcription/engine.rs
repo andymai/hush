@@ -283,7 +283,7 @@ async fn prepare_langid(models_dir: &Path, languages: &[String]) {
 
 /// The configured model file, or the catalogue's copy of `model_size` when
 /// that file is absent.
-fn local_model_path(config: &TranscriptionConfig, models_dir: &Path) -> PathBuf {
+pub(crate) fn local_model_path(config: &TranscriptionConfig, models_dir: &Path) -> PathBuf {
     let configured = config.model_path_in(models_dir);
     if configured.exists() {
         return configured;
