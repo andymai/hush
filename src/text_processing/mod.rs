@@ -406,14 +406,28 @@ pub enum RewriteOutcome {
     Failed(String),
     /// The LLM gave back nothing or the same text
     Unchanged,
+    /// The transcript hook exited with 77, so the selection stays as it is
+    Skipped,
+}
+
+/// Where a style rewrite goes, for the transcript hook: `HUSH_APP` and
+/// `HUSH_PROFILE`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RewritePlace<'a> {
+    pub app: &'a str,
+    pub profile: &'a str,
 }
 
 /// Rewrite the selected text with the prompt of `style` as the instruction,
-/// through the Command Mode rewrite.
+/// through the Command Mode rewrite. The result goes through the transcript
+/// hook, as a Command Mode result does, with the selected text as
+/// `HUSH_RAW_TEXT`.
 pub async fn rewrite_with_style(
     processor: Option<&TextProcessor>,
     style: &TakeStyle,
     selection: Option<&str>,
+    hook: Option<&TranscriptHook>,
+    place: RewritePlace<'_>,
 ) -> RewriteOutcome {
     let Some(text) = selection.filter(|text| !text.trim().is_empty()) else {
         return RewriteOutcome::NothingSelected;
@@ -421,10 +435,25 @@ pub async fn rewrite_with_style(
     let Some(processor) = processor.filter(|processor| processor.is_llm_ready()) else {
         return RewriteOutcome::NoLlm;
     };
-    match processor.rewrite(&style.prompt, text).await {
-        Ok(result) if result.trim().is_empty() || result == text => RewriteOutcome::Unchanged,
-        Ok(result) => RewriteOutcome::Replace(result),
-        Err(e) => RewriteOutcome::Failed(format!("{:#}", e)),
+    let rewritten = match processor.rewrite(&style.prompt, text).await {
+        Ok(result) if result.trim().is_empty() || result == text => {
+            return RewriteOutcome::Unchanged
+        },
+        Ok(result) => result,
+        Err(e) => return RewriteOutcome::Failed(format!("{:#}", e)),
+    };
+    let Some(hook) = hook else {
+        return RewriteOutcome::Replace(rewritten);
+    };
+    let env = HookEnv {
+        app: place.app,
+        profile: place.profile,
+        raw_text: text,
+        trigger: Trigger::Rewrite,
+    };
+    match hook.apply(rewritten, &env).await {
+        Some(text) => RewriteOutcome::Replace(text),
+        None => RewriteOutcome::Skipped,
     }
 }
 
@@ -661,26 +690,80 @@ mod tests {
         assert_eq!(result, unpolished, "a lost negation discards the polish");
     }
 
+    const NOWHERE: RewritePlace<'static> = RewritePlace {
+        app: "",
+        profile: "",
+    };
+
+    #[tokio::test]
+    async fn a_style_rewrite_goes_through_the_transcript_hook() {
+        let formal = style("formal", "Formal English.", true).unwrap();
+        let place = RewritePlace {
+            app: "org.kde.kate",
+            profile: "editor",
+        };
+        let processor = processor_with(ollama_at(fake_ollama("Good day.").await));
+        let hook = TranscriptHook::new(
+            r#"printf '%s|%s|%s|%s|%s' "$(cat)" "$HUSH_APP" "$HUSH_PROFILE" "$HUSH_RAW_TEXT" "$HUSH_TRIGGER""#,
+        )
+        .unwrap();
+        assert_eq!(
+            rewrite_with_style(
+                Some(&processor),
+                &formal,
+                Some("hey there"),
+                Some(&hook),
+                place
+            )
+            .await,
+            RewriteOutcome::Replace("Good day.|org.kde.kate|editor|hey there|rewrite".to_string())
+        );
+
+        let processor = processor_with(ollama_at(fake_ollama("Good day.").await));
+        let skip = TranscriptHook::new("cat >/dev/null; exit 77").unwrap();
+        assert_eq!(
+            rewrite_with_style(
+                Some(&processor),
+                &formal,
+                Some("hey there"),
+                Some(&skip),
+                place
+            )
+            .await,
+            RewriteOutcome::Skipped,
+            "exit 77 leaves the selection as it is"
+        );
+
+        let unreachable = processor_with(ollama_at("http://127.0.0.1:1".into()));
+        assert_eq!(
+            rewrite_with_style(Some(&unreachable), &formal, None, Some(&skip), place).await,
+            RewriteOutcome::NothingSelected,
+            "no selection: no LLM call and no hook"
+        );
+    }
+
     #[tokio::test]
     async fn a_style_rewrite_needs_a_selection_before_it_calls_the_llm() {
         let formal = style("formal", "Formal English.", true).unwrap();
         let unreachable = processor_with(ollama_at("http://127.0.0.1:1".into()));
         for selection in [None, Some(""), Some(" \n ")] {
             assert_eq!(
-                rewrite_with_style(Some(&unreachable), &formal, selection).await,
+                rewrite_with_style(Some(&unreachable), &formal, selection, None, NOWHERE).await,
                 RewriteOutcome::NothingSelected,
                 "{selection:?}: a failed call would say Failed"
             );
         }
         assert_eq!(
-            rewrite_with_style(None, &formal, Some("hi")).await,
+            rewrite_with_style(None, &formal, Some("hi"), None, NOWHERE).await,
             RewriteOutcome::NoLlm
         );
         assert_eq!(
             rewrite_with_style(
                 Some(&processor_with(LlmProvider::None)),
                 &formal,
-                Some("hi")
+                Some("hi"),
+                None,
+                NOWHERE
             )
             .await,
             RewriteOutcome::NoLlm
@@ -691,7 +774,14 @@ mod tests {
     async fn a_failed_style_rewrite_replaces_nothing() {
         let formal = style("formal", "Formal English.", true).unwrap();
         let unreachable = processor_with(ollama_at("http://127.0.0.1:1".into()));
-        let outcome = rewrite_with_style(Some(&unreachable), &formal, Some("hey there")).await;
+        let outcome = rewrite_with_style(
+            Some(&unreachable),
+            &formal,
+            Some("hey there"),
+            None,
+            NOWHERE,
+        )
+        .await;
         assert!(
             matches!(&outcome, RewriteOutcome::Failed(reason) if reason.contains("127.0.0.1:1")),
             "{outcome:?}"
@@ -704,7 +794,7 @@ mod tests {
         let (url, request) = fake_ollama_request("Good day.").await;
         let processor = processor_with(ollama_at(url));
         assert_eq!(
-            rewrite_with_style(Some(&processor), &formal, Some("hey there")).await,
+            rewrite_with_style(Some(&processor), &formal, Some("hey there"), None, NOWHERE).await,
             RewriteOutcome::Replace("Good day.".to_string())
         );
         let request = request.await.unwrap();
@@ -718,7 +808,7 @@ mod tests {
 
         let same = processor_with(ollama_at(fake_ollama("hey there").await));
         assert_eq!(
-            rewrite_with_style(Some(&same), &formal, Some("hey there")).await,
+            rewrite_with_style(Some(&same), &formal, Some("hey there"), None, NOWHERE).await,
             RewriteOutcome::Unchanged
         );
     }

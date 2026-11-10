@@ -262,11 +262,11 @@ The Text page of `hush settings` also imports and exports the vocabulary as a pl
 
 ### Transcript hook
 
-Set `hooks.transcript` to a command, and Hush runs it with `sh -c` on each transcript after polishing and before it types the text. Command Mode results also go through it. The text goes to stdin, and Hush types what the command prints. Hush removes one trailing newline from the output.
+Set `hooks.transcript` to a command, and Hush runs it with `sh -c` on each transcript after polishing and before it types the text. Command Mode results and style rewrites also go through it. The text goes to stdin, and Hush types what the command prints. Hush removes one trailing newline from the output.
 
-- Exit code 77 types nothing, and the take gets no history entry.
+- Exit code 77 types nothing, and the take gets no history entry. After a style rewrite, exit code 77 leaves the selection as it is.
 - When the command exits with a code other than 0 or 77, cannot start, prints nothing, or runs longer than 5 seconds, Hush types the original text and logs the reason.
-- The command gets `HUSH_APP` (the window class, empty when unknown), `HUSH_PROFILE` (`terminal`, `editor`, `chat`, `mail`, `docs`, `browser`, or `other`), `HUSH_RAW_TEXT` (the text as Whisper returned it; in Command Mode, the spoken instruction), and `HUSH_TRIGGER` (`hotkey`, `ipc` for `hush toggle` and `hush start`, `tray`, or `command` for Command Mode).
+- The command gets `HUSH_APP` (the window class, empty when unknown), `HUSH_PROFILE` (`terminal`, `editor`, `chat`, `mail`, `docs`, `browser`, or `other`), `HUSH_RAW_TEXT` (the text as Whisper returned it; in Command Mode, the spoken instruction; in a style rewrite, the selected text), and `HUSH_TRIGGER` (`hotkey`, `ipc` for `hush toggle` and `hush start`, `tray`, `command` for Command Mode, or `rewrite` for a rewrite key and `hush rewrite`).
 - The command does not get the API keys that Hush reads from its .env files.
 
 Remove every exclamation mark:

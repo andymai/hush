@@ -33,7 +33,7 @@ use crate::text::WindowInfo;
 use crate::text_processing::styles::{self, StyleName, TakeStyle};
 use crate::text_processing::transcripts::{self, Transcript};
 use crate::text_processing::{
-    learn, llm, prompt, rewrite_with_style, ProcessingContext, RewriteOutcome,
+    learn, llm, prompt, rewrite_with_style, ProcessingContext, RewriteOutcome, RewritePlace,
 };
 use crate::text_processing::{
     CommandExecutor, CommandParser, DomainVocabulary, EditingMode, HookEnv, InsertionHistory,
@@ -215,6 +215,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         Rewrite {
             style: StyleName,
             selection: Option<String>,
+            window: Option<WindowInfo>,
         },
         Error(String),
     }
@@ -766,15 +767,29 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     *state_handle_clone2.lock() = OverlayState::idle();
                     shared_result.set_idle();
                 },
-                TranscriptionResult::Rewrite { style, selection } => {
+                TranscriptionResult::Rewrite {
+                    style,
+                    selection,
+                    window,
+                } => {
                     let Some(style) = styles::resolve(&user_styles, style) else {
                         continue;
                     };
                     shared_result.set_inserting();
+                    let kind = ProcessingContext::new(window.clone(), &profiles).kind;
+                    let place = RewritePlace {
+                        app: window
+                            .as_ref()
+                            .map(|w| w.class.as_str())
+                            .unwrap_or_default(),
+                        profile: kind.name(),
+                    };
                     run_style_rewrite(
                         &style,
                         selection,
+                        place,
                         text_processor_clone.as_deref(),
+                        transcript_hook.as_ref(),
                         &result_runtime,
                         text_inserter_clone.as_ref(),
                         &insertion_history_clone,
@@ -1082,8 +1097,18 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     continue;
                 }
                 let selection = read_selection();
+                #[cfg(target_os = "linux")]
+                let window = text_inserter
+                    .as_ref()
+                    .and_then(|inserter| inserter.lock().get_focused_window());
+                #[cfg(not(target_os = "linux"))]
+                let window = None;
                 if transcription_tx
-                    .send(TranscriptionResult::Rewrite { style, selection })
+                    .send(TranscriptionResult::Rewrite {
+                        style,
+                        selection,
+                        window,
+                    })
                     .is_err()
                 {
                     warn!("Channel send failed - receiver dropped");
@@ -1821,13 +1846,15 @@ fn put_rewrite(
 }
 
 /// Rewrite the selection with the prompt of `style`, and replace it in
-/// place. Without a selection, no LLM call is made. When the LLM fails,
-/// the selection stays as it is.
+/// place. Without a selection, no LLM call is made. When the LLM fails or
+/// the transcript hook exits with 77, the selection stays as it is.
 #[allow(clippy::too_many_arguments)]
 fn run_style_rewrite(
     style: &TakeStyle,
     selection: Option<String>,
+    place: RewritePlace<'_>,
     processor: Option<&TextProcessor>,
+    hook: Option<&TranscriptHook>,
     runtime: &tokio::runtime::Runtime,
     inserter: Option<&Arc<Mutex<TextInserter>>>,
     history: &Arc<Mutex<InsertionHistory>>,
@@ -1839,7 +1866,13 @@ fn run_style_rewrite(
         style.name,
         selection.as_deref().map_or(0, |text| text.chars().count())
     );
-    let outcome = runtime.block_on(rewrite_with_style(processor, style, selection.as_deref()));
+    let outcome = runtime.block_on(rewrite_with_style(
+        processor,
+        style,
+        selection.as_deref(),
+        hook,
+        place,
+    ));
     match outcome {
         RewriteOutcome::Replace(rewritten) => {
             put_rewrite(rewritten, None, inserter, history, shared, feedback)
@@ -1874,5 +1907,6 @@ fn run_style_rewrite(
             "Nothing changed",
             "The style left the text as it was.",
         ),
+        RewriteOutcome::Skipped => {},
     }
 }

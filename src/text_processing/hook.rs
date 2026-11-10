@@ -30,6 +30,8 @@ pub enum Trigger {
     Tray,
     /// The Command Mode chord
     Command,
+    /// A rewrite key or `hush rewrite`: a style rewrite of the selection
+    Rewrite,
 }
 
 impl Trigger {
@@ -39,6 +41,7 @@ impl Trigger {
             Trigger::Ipc => "ipc",
             Trigger::Tray => "tray",
             Trigger::Command => "command",
+            Trigger::Rewrite => "rewrite",
         }
     }
 }
@@ -533,10 +536,11 @@ mod tests {
             Trigger::Ipc,
             Trigger::Tray,
             Trigger::Command,
+            Trigger::Rewrite,
         ]
         .map(Trigger::as_str)
         .to_vec();
-        assert_eq!(names, ["hotkey", "ipc", "tray", "command"]);
+        assert_eq!(names, ["hotkey", "ipc", "tray", "command", "rewrite"]);
     }
 
     #[test]

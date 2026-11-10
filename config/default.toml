@@ -163,13 +163,15 @@ temperature = 0.3
 
 [hooks]
 # A command that changes each transcript. Hush runs it with sh -c after
-# polishing and before it types the text, also for Command Mode. The text
-# goes to stdin, and Hush types what the command prints, without one
-# trailing newline. Exit code 77 types nothing. When the command fails,
-# prints nothing, or runs longer than 5 seconds, Hush types the original text.
+# polishing and before it types the text, also for Command Mode and a style
+# rewrite. The text goes to stdin, and Hush types what the command prints,
+# without one trailing newline. Exit code 77 types nothing, so a style
+# rewrite leaves the selection as it is. When the command fails, prints
+# nothing, or runs longer than 5 seconds, Hush types the original text.
 # The command gets HUSH_APP (the window class), HUSH_PROFILE (terminal,
 # editor, chat, mail, docs, browser, or other), HUSH_RAW_TEXT (the text as
-# Whisper returned it), and HUSH_TRIGGER (hotkey, ipc, tray, or command).
+# Whisper returned it, or the selected text for a style rewrite), and
+# HUSH_TRIGGER (hotkey, ipc, tray, command, or rewrite).
 # Use an absolute path: the daemon gets the PATH of your login session.
 transcript = "" # e.g. "/usr/bin/tr -d '!'"; empty is off
 
