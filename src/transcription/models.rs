@@ -296,10 +296,10 @@ impl ModelManager {
         self.ensure_file(model_info, progress).await
     }
 
-    /// The voice activity detection model in this cache, when it is there.
+    /// The voice activity detection model in this cache, when a copy that
+    /// passes the size and SHA-256 check is there.
     pub fn vad_model_path(&self) -> Option<PathBuf> {
-        let path = self.cache_dir.join(VAD_FILENAME);
-        path.is_file().then_some(path)
+        self.valid_path(&vad_model())
     }
 
     /// Download the voice activity detection model unless a valid copy is
@@ -317,10 +317,24 @@ impl ModelManager {
         self.ensure_file(&vad_model(), progress).await
     }
 
-    /// The language-ID model in this cache, when it is there.
+    /// The language-ID model in this cache, when a copy that passes the size
+    /// and SHA-256 check is there.
     pub fn langid_model_path(&self) -> Option<PathBuf> {
-        let path = self.cache_dir.join(LANGID_FILENAME);
-        path.is_file().then_some(path)
+        self.valid_path(&langid_model())
+    }
+
+    /// The file of `info` in this cache, when it passes the size and SHA-256
+    /// check.
+    pub fn valid_path(&self, info: &ModelInfo) -> Option<PathBuf> {
+        let path = self.cache_dir.join(&info.filename);
+        match Self::is_valid(&path, info) {
+            Ok(true) => Some(path),
+            Ok(false) => None,
+            Err(e) => {
+                warn!("Could not check {}: {:#}", path.display(), e);
+                None
+            },
+        }
     }
 
     /// Download the language-ID model unless a valid copy is already in the
@@ -361,7 +375,7 @@ impl ModelManager {
         info!("Ensuring model {} is available", model_info.name);
         let model_path = self.cache_dir.join(&model_info.filename);
 
-        if self.is_model_valid(&model_path, model_info).await? {
+        if Self::is_valid(&model_path, model_info)? {
             info!(
                 "Model {} already cached at {:?}",
                 model_info.name, model_path
@@ -374,10 +388,6 @@ impl ModelManager {
             model_info.name, model_info.repo_id
         );
         self.download_model(model_info, progress).await?;
-
-        if !self.is_model_valid(&model_path, model_info).await? {
-            return Err(anyhow::anyhow!("Downloaded model failed validation"));
-        }
 
         info!(
             "Model {} successfully downloaded and validated",
@@ -442,12 +452,24 @@ impl ModelManager {
         drop(file);
         progress(total, total);
 
-        tokio::fs::rename(&partial, &target)
-            .await
-            .context("Failed to move the downloaded model into place")?;
-
+        Self::promote(&partial, &target, info)?;
         info!("Model downloaded to {}", target.display());
         Ok(())
+    }
+
+    /// Move a finished download into place when it passes the size and
+    /// SHA-256 check, and delete it when it does not.
+    fn promote(partial: &Path, target: &Path, info: &ModelInfo) -> Result<()> {
+        if !Self::is_valid(partial, info)? {
+            if let Err(e) = std::fs::remove_file(partial) {
+                warn!("Could not delete {}: {}", partial.display(), e);
+            }
+            return Err(anyhow::anyhow!(
+                "The download of {} failed its size or SHA-256 check",
+                info.name
+            ));
+        }
+        std::fs::rename(partial, target).context("Failed to move the downloaded model into place")
     }
 
     fn progress_bar(total: u64, name: &str) -> ProgressBar {
@@ -494,7 +516,7 @@ impl ModelManager {
         Ok(hex)
     }
 
-    async fn is_model_valid(&self, path: &Path, info: &ModelInfo) -> Result<bool> {
+    fn is_valid(path: &Path, info: &ModelInfo) -> Result<bool> {
         if !path.exists() {
             return Ok(false);
         }
@@ -642,10 +664,7 @@ mod tests {
         let manager = ModelManager::new(temp_dir.path()).unwrap();
         assert_eq!(manager.vad_model_path(), None);
         std::fs::write(temp_dir.path().join(VAD_FILENAME), b"x").unwrap();
-        assert_eq!(
-            manager.vad_model_path(),
-            Some(temp_dir.path().join(VAD_FILENAME))
-        );
+        assert_eq!(manager.vad_model_path(), None, "a damaged file is no model");
         assert!(
             manager.list_cached_models().is_empty(),
             "the VAD model is not a Whisper model"
@@ -671,11 +690,59 @@ mod tests {
         std::fs::write(temp_dir.path().join(LANGID_FILENAME), b"x").unwrap();
         assert_eq!(
             manager.langid_model_path(),
-            Some(temp_dir.path().join(LANGID_FILENAME))
+            None,
+            "a damaged file is no model"
         );
         assert!(
             manager.list_cached_models().is_empty(),
             "the language-ID model is not a Whisper model"
+        );
+    }
+
+    fn hello_model() -> ModelInfo {
+        ModelInfo {
+            name: "hello".to_string(),
+            repo_id: "test/test".to_string(),
+            filename: "hello.bin".to_string(),
+            expected_size: 13,
+            sha256: Some(
+                "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f".to_string(),
+            ),
+        }
+    }
+
+    #[test]
+    fn a_download_that_fails_its_checksum_is_deleted_and_never_used() {
+        let temp_dir = TempDir::new().unwrap();
+        let info = hello_model();
+        let partial = temp_dir.path().join("hello.bin.part");
+        let target = temp_dir.path().join("hello.bin");
+        std::fs::write(&partial, b"Hello, World?").unwrap();
+        let err = ModelManager::promote(&partial, &target, &info).unwrap_err();
+        assert!(err.to_string().contains("SHA-256"), "{err}");
+        assert!(!partial.exists(), "the bad download is deleted");
+        assert!(
+            !target.exists(),
+            "the bad download never takes the model's place"
+        );
+    }
+
+    #[test]
+    fn a_download_that_passes_its_checksum_takes_its_place() {
+        let temp_dir = TempDir::new().unwrap();
+        let info = hello_model();
+        let partial = temp_dir.path().join("hello.bin.part");
+        let target = temp_dir.path().join("hello.bin");
+        std::fs::write(&partial, b"Hello, World!").unwrap();
+        ModelManager::promote(&partial, &target, &info).unwrap();
+        assert!(!partial.exists());
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        assert_eq!(manager.valid_path(&info), Some(target.clone()));
+        std::fs::write(&target, b"Hello, World?").unwrap();
+        assert_eq!(
+            manager.valid_path(&info),
+            None,
+            "a file damaged later fails"
         );
     }
 

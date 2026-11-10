@@ -213,18 +213,21 @@ impl SpeechToText {
     }
 }
 
-/// Load the Silero model when it is downloaded. Without it, Whisper gets the
-/// whole take, and the log says once how to get the model.
+/// Load the Silero model when a copy that passes its checksum is there.
+/// Without it, Whisper gets the whole take, and the log says once how to get
+/// the model.
 fn load_vad(whisper: &mut WhisperTranscriber, models_dir: &Path, model_size: &str) {
-    let path = models::vad_model_path(models_dir);
-    if !path.is_file() {
+    let Some(path) = ModelManager::new(models_dir)
+        .ok()
+        .and_then(|manager| manager.vad_model_path())
+    else {
         warn!(
-            "Voice activity detection is off: {} is missing. Get it with: hush models download {}",
-            path.display(),
+            "Voice activity detection is off: {} is missing or damaged. Get it with: hush models download {}",
+            models::vad_model_path(models_dir).display(),
             model_size
         );
         return;
-    }
+    };
     if let Err(e) = whisper.load_vad(&path) {
         warn!(
             "Voice activity detection is off: {:#}. Get the model again with: hush models download {}",
