@@ -515,6 +515,30 @@ transcription.detect_languages = ["en", "de"]'
   assert_file "$(hush_log_file)" "Detected de among en, de"
 }
 
+case_keep_audio() {
+  start_daemon 'history.keep_audio_days = 1'
+  record_clip "$SAMPLES/jfk.wav"
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  assert_words "$TAKE_TEXT" ask country
+  local flac text code=0
+  flac=$(find "$CASE_HOME/.local/share/hush/audio" -name '*.flac' 2>/dev/null | head -n 1)
+  [ -n "$flac" ] || fail "the audio folder has no FLAC file"
+  text=$(hush_cli transcribe "$flac") || code=$?
+  log "transcribe: exit $code, $text"
+  assert_exit 0 "$code" "hush transcribe"
+  assert_words "$text" ask country
+}
+
+case_no_audio_by_default() {
+  start_daemon
+  record_clip "$SAMPLES/jfk.wav"
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  [ -z "$(find "$CASE_HOME/.local/share/hush/audio" -name '*.flac' 2>/dev/null)" ] ||
+    fail "Hush saved take audio with keep_audio_days = 0"
+}
+
 case_print_types_nothing() {
   start_daemon
   record_clip "$SAMPLES/jfk.wav"
