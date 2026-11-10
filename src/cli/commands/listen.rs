@@ -1,5 +1,7 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use chrono::Utc;
 use parking_lot::Mutex;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -7,11 +9,11 @@ use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 // Import Hush components
-use crate::audio::level;
 use crate::audio::media::MediaPause;
 use crate::audio::take::{
     is_slow_start, is_stalled, needs_new_stream, StreamOutcome, STALL_TIMEOUT, START_TIMEOUT,
 };
+use crate::audio::{file, level, store};
 use crate::audio::{
     AudioFeedback, CapCheck, LengthCap, SilenceDetector, StartEvent, StopAction, TakeClock,
     TakeLevel,
@@ -141,6 +143,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             Config::defaults()?
         },
     };
+    sweep_kept_audio(config.history.keep_audio_days);
     let hotkey_combination = config.hotkey.combination.clone();
     let hotkey_mode = config.hotkey.mode;
 
@@ -192,6 +195,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             command: Option<CommandTarget>,
             trigger: Trigger,
             printer: Option<TakeWaiter>,
+            /// The take at 16 kHz, when the history keeps its audio
+            audio: Option<Vec<f32>>,
         },
         Error(String),
     }
@@ -509,6 +514,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     command,
                     trigger,
                     printer,
+                    audio,
                 } => {
                     shared_result.set_inserting();
                     let context = ProcessingContext::new(window.clone(), &profiles);
@@ -686,7 +692,13 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
                     if history.enabled {
                         let app = window.as_ref().map(|w| w.class.clone()).unwrap_or_default();
-                        let entry = Transcript::new(processed_text.clone(), app);
+                        let mut entry = Transcript::new(processed_text.clone(), app);
+                        if let Some(name) = audio
+                            .as_deref()
+                            .and_then(|samples| keep_take_audio(samples, history.keep_audio_days))
+                        {
+                            entry = entry.with_audio(name);
+                        }
                         if let Err(e) = transcripts::append(
                             &transcripts::default_path(),
                             &entry,
@@ -756,6 +768,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let silence_heard = Arc::new(AtomicBool::new(false));
     let mut silence_sent = false;
     let context_prompt = config.transcription.context_prompt;
+    let keep_audio = config.history.keeps_audio();
+    let keep_audio_days = config.history.keep_audio_days;
     let mut current_window: Option<WindowInfo> = None;
     let mut current_trigger = Trigger::Hotkey;
     let mut current_language = config_language;
@@ -980,6 +994,28 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         "Could not keep the language for the next daemon start: {:#}",
                         e
                     );
+                }
+            },
+            SessionCommand::TranscribeFile => {
+                while let Some(job) = shared.next_file() {
+                    if take.is_some() {
+                        job.reply.finish(TakeResult::Error {
+                            message: "Hush is recording. Try again after the take.".to_string(),
+                        });
+                        continue;
+                    }
+                    let result = transcribe_file(&mut model, &job.path).await;
+                    publish_model(&model);
+                    idle.poll(true, Instant::now());
+                    job.reply.finish(match result {
+                        Ok(text) => TakeResult::from_text(text),
+                        Err(e) => {
+                            warn!("Could not transcribe {}: {:#}", job.path.display(), e);
+                            TakeResult::Error {
+                                message: format!("{:#}", e),
+                            }
+                        },
+                    });
                 }
             },
             SessionCommand::CancelRecording => {
@@ -1267,18 +1303,22 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             command,
                             trigger: current_trigger,
                             printer,
+                            audio: keep_audio.then_some(audio_data),
                         }
                     },
                     Err(e) => {
                         error!("Transcription failed: {:#}", e);
+                        let kept = keep_for_recovery(&audio_data, keep_audio_days);
                         // The overlay is too narrow for the service's reason,
                         // and a bad key or quota needs the user to act.
-                        if !local_model {
-                            notify(
-                                NoticeKind::Problem,
-                                "Transcription failed",
-                                &format!("{:#}", e),
-                            );
+                        let reason = (!local_model).then(|| format!("{:#}", e));
+                        let body = match (reason, kept) {
+                            (Some(reason), true) => Some(format!("{}\n{}", reason, RECOVER_HINT)),
+                            (None, true) => Some(RECOVER_HINT.to_string()),
+                            (reason, false) => reason,
+                        };
+                        if let Some(body) = body {
+                            notify(NoticeKind::Problem, "Transcription failed", &body);
                         }
                         finish(
                             printer,
@@ -1318,6 +1358,62 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     info!("Listen mode ended");
     Ok(())
+}
+
+const RECOVER_HINT: &str = "Hush kept the audio. Run `hush recover` to transcribe it again.";
+
+/// Delete the kept audio that is too old, then the oldest over the cap.
+fn sweep_kept_audio(keep_days: u64) {
+    match store::sweep_now(keep_days) {
+        Ok(swept) if swept.files > 0 => info!(
+            "Deleted {} kept audio files ({} bytes)",
+            swept.files, swept.bytes
+        ),
+        Ok(_) => {},
+        Err(e) => warn!("Could not sweep the kept audio: {:#}", e),
+    }
+}
+
+/// Save the audio of a delivered take for its history entry. Returns the
+/// file name.
+fn keep_take_audio(samples: &[f32], keep_days: u64) -> Option<String> {
+    let saved = store::save(&store::takes_dir(), samples, Utc::now());
+    sweep_kept_audio(keep_days);
+    match saved {
+        Ok(path) => path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned()),
+        Err(e) => {
+            warn!("Could not keep the audio of the take: {:#}", e);
+            None
+        },
+    }
+}
+
+/// Keep the audio of a take that did not transcribe, for `hush recover`.
+fn keep_for_recovery(samples: &[f32], keep_days: u64) -> bool {
+    let saved = store::save(&store::recovery_dir(), samples, Utc::now());
+    sweep_kept_audio(keep_days);
+    match saved {
+        Ok(path) => {
+            info!("Kept the audio for `hush recover`: {}", path.display());
+            true
+        },
+        Err(e) => {
+            warn!("Could not keep the audio of the failed take: {:#}", e);
+            false
+        },
+    }
+}
+
+/// The text of a WAV or FLAC file, from the daemon's model.
+async fn transcribe_file(model: &mut ModelSlot<SpeechToText>, path: &Path) -> Result<String> {
+    let samples = file::read_for_whisper(path)?;
+    let transcriber = model.ready().await.context("The model did not load")?;
+    Ok(transcriber
+        .transcribe_with_prompt(&samples, WHISPER_SAMPLE_RATE, None)
+        .await?
+        .text)
 }
 
 /// Builds the transcriber again after the idle timer freed it.

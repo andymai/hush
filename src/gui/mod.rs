@@ -276,6 +276,13 @@ impl Gui {
             self.say(format!("Could not save: {}", e));
             return;
         }
+        let keep_days = self.config.history.keep_audio_days;
+        if keep_days != self.saved.history.keep_audio_days {
+            if let Err(e) = crate::audio::store::sweep_now(keep_days) {
+                warn!("Could not sweep the kept audio: {:#}", e);
+            }
+            self.history.reload();
+        }
         self.saved = self.config.clone();
         if self.vocabulary != self.saved_vocabulary {
             if let Err(e) = save_vocabulary(&self.vocabulary) {

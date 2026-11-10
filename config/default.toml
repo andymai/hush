@@ -90,6 +90,13 @@ submit_apps = [] # e.g. ["Slack", "kitty"]
 # (readable only by you) for the History page in the settings window.
 enabled = true
 max_entries = 500 # when there are more, the oldest go
+# Keep the audio of each take as FLAC in $XDG_DATA_HOME/hush/audio, next to
+# its entry, for this many days. The History page plays it and transcribes it
+# again. 0 keeps no audio and deletes the audio that Hush kept. Whatever this
+# says, Hush keeps the audio of a take that it could not transcribe for 7 days
+# in $XDG_DATA_HOME/hush/recover, for `hush recover`. When the two folders
+# hold more than 500 MB, the oldest files go.
+keep_audio_days = 0
 
 [profiles]
 # Tone by application. The focused window's class picks a profile: terminal

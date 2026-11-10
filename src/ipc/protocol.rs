@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// How long `hush stop --print` waits for the final text.
 pub const PRINT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long the daemon gets to transcribe a file for `hush transcribe`.
+pub const FILE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// The reply to a print stop while no take records.
 pub const NO_TAKE: &str = "No recording is in progress. Start one with: hush start";
@@ -42,6 +46,11 @@ pub enum DaemonCommand {
     Learn {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
+    },
+    /// Transcribe a WAV or FLAC file with the daemon's model and reply with
+    /// the text; `path` is absolute
+    Transcribe {
+        path: PathBuf,
     },
 }
 
@@ -242,6 +251,15 @@ mod tests {
             DaemonCommand::Learn {
                 text: Some("Kubernetes".to_string())
             }
+        );
+        let transcribe = DaemonCommand::Transcribe {
+            path: PathBuf::from("/tmp/take.flac"),
+        };
+        let json = serde_json::to_string(&transcribe).unwrap();
+        assert_eq!(json, r#"{"command":"transcribe","path":"/tmp/take.flac"}"#);
+        assert_eq!(
+            serde_json::from_str::<DaemonCommand>(&json).unwrap(),
+            transcribe
         );
     }
 

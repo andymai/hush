@@ -70,6 +70,9 @@ pub struct HistoryConfig {
     pub enabled: bool,
     /// The oldest transcripts go when there are more than this
     pub max_entries: usize,
+    /// Keep the audio of each take as FLAC next to its entry for this many
+    /// days; 0 keeps none
+    pub keep_audio_days: u64,
 }
 
 impl Default for HistoryConfig {
@@ -77,11 +80,20 @@ impl Default for HistoryConfig {
         Self {
             enabled: true,
             max_entries: 500,
+            keep_audio_days: 0,
         }
     }
 }
 
+impl HistoryConfig {
+    /// Whether each new take saves its audio.
+    pub fn keeps_audio(&self) -> bool {
+        self.enabled && self.keep_audio_days > 0
+    }
+}
+
 pub const MAX_HISTORY_ENTRIES: usize = 100_000;
+pub const MAX_KEEP_AUDIO_DAYS: u64 = 3650;
 
 /// Status icon settings
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -761,6 +773,12 @@ impl Config {
                 MAX_HISTORY_ENTRIES
             ));
         }
+        if self.history.keep_audio_days > MAX_KEEP_AUDIO_DAYS {
+            return Err(anyhow::anyhow!(
+                "Invalid history.keep_audio_days: must be {} or less; 0 keeps no audio",
+                MAX_KEEP_AUDIO_DAYS
+            ));
+        }
 
         // Validate hotkey configuration
         if self.hotkey.enabled {
@@ -987,6 +1005,20 @@ model_size = "small"
         assert_eq!(config.history.max_entries, 500);
         assert!(Config::parse_over_defaults("[history]\nmax_entries = 0\n").is_err());
         assert!(Config::parse_over_defaults("[history]\nmax_entries = 100001\n").is_err());
+    }
+
+    #[test]
+    fn take_audio_is_off_by_default_and_needs_the_history() {
+        let config = Config::defaults().unwrap();
+        assert_eq!(config.history.keep_audio_days, 0);
+        assert!(!config.history.keeps_audio());
+        let config = Config::parse_over_defaults("[history]\nkeep_audio_days = 14\n").unwrap();
+        assert!(config.history.keeps_audio());
+        let config =
+            Config::parse_over_defaults("[history]\nkeep_audio_days = 14\nenabled = false\n")
+                .unwrap();
+        assert!(!config.history.keeps_audio(), "no entry, so no audio");
+        assert!(Config::parse_over_defaults("[history]\nkeep_audio_days = 3651\n").is_err());
     }
 
     #[test]

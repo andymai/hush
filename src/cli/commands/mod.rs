@@ -9,6 +9,7 @@ pub mod record;
 pub mod setup;
 pub mod status;
 pub mod test;
+pub mod transcribe;
 /// Modular command implementations
 ///
 /// This module contains individual command handlers, each in their own file
@@ -48,6 +49,7 @@ pub use record::handle_record;
 pub use setup::handle_setup;
 pub use status::{handle_status, handle_status_json};
 pub use test::handle_test;
+pub use transcribe::{handle_recover, handle_transcribe};
 
 // Re-export utilities for use by other commands
 pub use utils::*;
