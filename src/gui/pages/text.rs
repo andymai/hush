@@ -4,9 +4,11 @@
 
 use crate::config::settings::LlmSetting;
 use crate::config::{server, transfer, Config};
-use crate::gui::theme::{
-    field, hint, quiet_button, row, section, toggle, toggle_row, CONTROL_HEIGHT, FIELD_WIDTH,
-    MUTED, TOGGLE_COLUMN,
+use crate::gui::icons;
+use crate::gui::theme::{self, palette, FIELD_WIDTH};
+use crate::gui::widgets::{
+    self, actions, divider, dropdown, empty, icon_button, intro, list, list_item, option, row,
+    section, submitted, switch, switch_row, text_area, value_field, Button, Field, Size, Variant,
 };
 use crate::gui::Gui;
 use crate::hotkey::warnings;
@@ -16,10 +18,11 @@ use std::path::{Path, PathBuf};
 
 /// Longer vocabularies get a field that narrows the list.
 const FILTER_FROM: usize = 10;
-const EDIT_COLUMN: f32 = 340.0;
-const LIST_COLUMN: f32 = FIELD_WIDTH + 140.0;
+/// The field, Done, and Cancel of a word open for editing.
+const EDIT_COLUMN: f32 = FIELD_WIDTH + 140.0;
+const ADD_COLUMN: f32 = FIELD_WIDTH + 90.0;
+const LIST_COLUMN: f32 = FIELD_WIDTH + 200.0;
 const PROMPT_WIDTH: f32 = 320.0;
-const PROMPT_HEIGHT: f32 = 56.0;
 
 pub const DEFAULT_WORD_LIST: &str = "~/hush-vocabulary.txt";
 
@@ -72,8 +75,9 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn tone(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Tone");
-    toggle_row(
+    switch_row(
         ui,
+        "text.profiles",
         "Match the application you are typing into",
         "Lower case and no full stop in terminals and editors, casual in chat, \
          full sentences in mail and documents.",
@@ -83,17 +87,20 @@ fn tone(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Polish");
-    row("Polish with")
+    row("text.llm_provider", "Polish with")
         .describe(
             "Only the text is ever sent, never the audio. Anthropic needs \
              ANTHROPIC_API_KEY in ~/.config/hush/.env. An OpenAI-compatible server \
              receives the text at the address you set.",
         )
         .show(ui, |ui| {
-            egui::ComboBox::from_id_salt("llm_provider")
-                .width(FIELD_WIDTH)
-                .selected_text(provider_name(gui.config.llm.provider))
-                .show_ui(ui, |ui| {
+            let current = &mut gui.config.llm.provider;
+            dropdown(
+                ui,
+                "llm_provider",
+                FIELD_WIDTH,
+                provider_name(*current),
+                |ui| {
                     for provider in [
                         LlmSetting::Auto,
                         LlmSetting::Ollama,
@@ -101,71 +108,78 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
                         LlmSetting::OpenAiCompatible,
                         LlmSetting::None,
                     ] {
-                        ui.selectable_value(
-                            &mut gui.config.llm.provider,
-                            provider,
-                            provider_name(provider),
-                        );
+                        option(ui, current, provider, provider_name(provider));
                     }
-                });
+                },
+            );
         });
-    row("Tidy up every transcript")
+    row("text.polish", "Tidy up every transcript")
         .describe("Otherwise the model only handles spoken commands.")
-        .reserve(TOGGLE_COLUMN)
+        .reserve(36.0)
         .show(ui, |ui| {
             ui.add_enabled_ui(gui.config.llm.provider != LlmSetting::None, |ui| {
-                toggle(ui, &mut gui.config.llm.polish);
+                switch(ui, &mut gui.config.llm.polish);
             });
         });
 
     section(ui, "Language models");
-    row("Ollama server").show(ui, |ui| {
-        field(ui, &mut gui.config.llm.ollama_url, "http://localhost:11434");
+    row("text.ollama_url", "Ollama server").show(ui, |ui| {
+        value_field(ui, &mut gui.config.llm.ollama_url, "http://localhost:11434");
     });
-    row("Ollama model").show(ui, |ui| {
-        field(ui, &mut gui.config.llm.ollama_model, "llama3.2");
+    row("text.ollama_model", "Ollama model").show(ui, |ui| {
+        value_field(ui, &mut gui.config.llm.ollama_model, "llama3.2");
     });
-    row("Anthropic model").show(ui, |ui| {
-        field(ui, &mut gui.config.llm.anthropic_model, "claude-haiku-4-5");
+    row("text.anthropic_model", "Anthropic model").show(ui, |ui| {
+        value_field(ui, &mut gui.config.llm.anthropic_model, "claude-haiku-4-5");
     });
-    row("OpenAI-compatible server")
+    row("text.server_url", "OpenAI-compatible server")
         .describe(&server_reach(&gui.config.llm.server_url))
         .show(ui, |ui| {
-            field(
+            value_field(
                 ui,
                 &mut gui.config.llm.server_url,
                 "http://localhost:8080/v1",
             );
         });
-    row("OpenAI-compatible model").show(ui, |ui| {
-        field(ui, &mut gui.config.llm.server_model, "llama3.2");
+    row("text.server_model", "OpenAI-compatible model").show(ui, |ui| {
+        value_field(ui, &mut gui.config.llm.server_model, "llama3.2");
     });
 }
 
 fn writing_styles(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Styles");
-    hint(
+    intro(
         ui,
         "A style changes one recording. A style key on the Hotkeys page, \
          hush start --style NAME, or profiles.app_styles in config.toml picks it.",
     );
-    row(styles::VERBATIM.as_str())
-        .describe("Built in. No polish for the recording. The rule-based cleanup still runs.")
-        .show(ui, |_| {});
     let names: Vec<String> = gui.config.styles.keys().cloned().collect();
     let mut remove: Option<String> = None;
     let mut change: Option<String> = None;
-    for name in &names {
-        let about = style_summary(&gui.config.styles[name]);
-        row(name).describe(&about).show(ui, |ui| {
-            if quiet_button(ui, "Remove").clicked() {
-                remove = Some(name.clone());
-            }
-            if quiet_button(ui, "Edit").clicked() {
-                change = Some(name.clone());
-            }
-        });
-    }
+    divider(ui);
+    list(ui, |ui| {
+        list_item(
+            "text.styles.verbatim",
+            icons::PEN_LINE,
+            styles::VERBATIM.as_str(),
+        )
+        .detail("Built in. No polish for the recording. The rule-based cleanup still runs.")
+        .show(ui, 0.0, |_| {});
+        for name in &names {
+            let about = style_summary(&gui.config.styles[name]);
+            let key = format!("text.styles.{}", name);
+            list_item(&key, icons::PEN_LINE, name)
+                .detail(&about)
+                .show(ui, 52.0, |ui| {
+                    if icon_button(ui, icons::X, &format!("Remove {}", name)).clicked() {
+                        remove = Some(name.clone());
+                    }
+                    if icon_button(ui, icons::PENCIL, &format!("Change {}", name)).clicked() {
+                        change = Some(name.clone());
+                    }
+                });
+        }
+    });
     if let Some(name) = remove {
         match remove_style(&mut gui.config, &name) {
             Ok(()) => {
@@ -186,42 +200,55 @@ fn writing_styles(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn style_form(gui: &mut Gui, ui: &mut egui::Ui) {
     let editing = gui.style_draft.original.clone();
-    ui.add_space(6.0);
-    match &editing {
-        Some(name) => hint(ui, &format!("Change the style {}:", name)),
-        None => hint(ui, "Add a style:"),
-    }
-    row("Name")
+    let heading = match &editing {
+        Some(name) => format!("Change the style {}", name),
+        None => "Add a style".to_string(),
+    };
+    section(ui, &heading);
+    row("text.style_form.name", "Name")
         .describe("Lowercase letters, digits, - and _.")
         .show(ui, |ui| {
-            field(ui, &mut gui.style_draft.name, "casual");
+            value_field(ui, &mut gui.style_draft.name, "casual");
         });
-    row("Prompt")
+    row("text.style_form.prompt", "Prompt")
         .describe("One line that Hush adds to the polish prompt.")
-        .reserve(PROMPT_WIDTH + 10.0)
+        .reserve(PROMPT_WIDTH)
         .show(ui, |ui| {
-            ui.add_sized(
-                [PROMPT_WIDTH, PROMPT_HEIGHT],
-                egui::TextEdit::multiline(&mut gui.style_draft.prompt)
-                    .hint_text("Casual and brief, like a chat message to a friend."),
+            text_area(
+                ui,
+                &mut gui.style_draft.prompt,
+                "Casual and brief, like a chat message to a friend.",
+                2,
+                PROMPT_WIDTH,
             );
         });
-    toggle_row(
+    switch_row(
         ui,
+        "text.style_form.polish",
         "Polish",
         "The model polishes recordings in this style, whatever Tidy up every transcript says.",
         &mut gui.style_draft.polish,
     );
     let ready = !gui.style_draft.name.trim().is_empty();
-    let (done, cancel) = row("").reserve(FIELD_WIDTH).show(ui, |ui| {
+    let (done, cancel) = actions(ui, |ui| {
         let label = if editing.is_some() { "Done" } else { "Add" };
+        let icon = if editing.is_some() {
+            icons::CHECK
+        } else {
+            icons::PLUS
+        };
         let done = ui
-            .add_enabled(
-                ready,
-                egui::Button::new(label).min_size(egui::vec2(80.0, CONTROL_HEIGHT)),
+            .add(
+                Button::new(label)
+                    .icon(icon)
+                    .variant(Variant::Primary)
+                    .enabled(ready),
             )
             .clicked();
-        let cancel = editing.is_some() && quiet_button(ui, "Cancel").clicked();
+        let cancel = editing.is_some()
+            && ui
+                .add(Button::new("Cancel").variant(Variant::Ghost))
+                .clicked();
         (done, cancel)
     });
     if cancel {
@@ -355,17 +382,19 @@ fn server_reach(url: &str) -> String {
 fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Vocabulary");
     let mut add = false;
-    row("Add a word")
+    row("text.vocabulary.add", "Add a word")
         .describe(
             "Hush spells these exactly this way. The Learn key adds the selected \
              text; you can also type one here.",
         )
+        .reserve(ADD_COLUMN)
         .show(ui, |ui| {
-            add |= ui
-                .add_enabled(!gui.new_term.trim().is_empty(), egui::Button::new("Add"))
-                .clicked();
-            let response = field(ui, &mut gui.new_term, "Kubernetes");
-            add |= response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let button = Button::new("Add")
+                .icon(icons::PLUS)
+                .enabled(!gui.new_term.trim().is_empty());
+            add |= ui.add(button).clicked();
+            let response = widgets::field(ui, &mut gui.new_term, "Kubernetes");
+            add |= submitted(ui, &response);
             if add {
                 response.request_focus();
             }
@@ -384,17 +413,21 @@ fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
     let mut terms: Vec<String> = gui.vocabulary.technical_terms.values().cloned().collect();
     terms.sort_by_key(|term| term.to_lowercase());
     if terms.is_empty() {
-        ui.add_space(6.0);
-        ui.label(egui::RichText::new("No words yet.").color(MUTED));
+        divider(ui);
+        empty(ui, "No words yet.");
         return;
     }
     if terms.len() > FILTER_FROM {
-        row("Find a word").show(ui, |ui| {
-            if !gui.term_filter.is_empty() && quiet_button(ui, "Clear").clicked() {
-                gui.term_filter.clear();
-            }
-            field(ui, &mut gui.term_filter, "Type part of a word");
-        });
+        row("text.vocabulary.find", "Find a word")
+            .reserve(FIELD_WIDTH + 32.0)
+            .show(ui, |ui| {
+                if gui.term_filter.is_empty() {
+                    ui.add_space(32.0);
+                } else if icon_button(ui, icons::X, "Clear the search").clicked() {
+                    gui.term_filter.clear();
+                }
+                ui.add(Field::new(&mut gui.term_filter, "Type part of a word").icon(icons::SEARCH));
+            });
     } else {
         gui.term_filter.clear();
     }
@@ -408,34 +441,41 @@ fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
     let mut commit = false;
     let mut cancel = false;
     let editing = &mut gui.editing_term;
-    for term in &shown {
-        match editing.as_mut().filter(|edit| edit.original == *term) {
-            Some(edit) => {
-                row(term).reserve(EDIT_COLUMN).show(ui, |ui| {
-                    cancel |= quiet_button(ui, "Cancel").clicked();
-                    commit |= ui.button("Done").clicked();
-                    let response = field(ui, &mut edit.draft, term);
-                    if std::mem::take(&mut edit.focus) {
-                        response.request_focus();
-                    }
-                    if response.lost_focus() {
-                        commit |= ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
-                    }
-                });
-            },
-            None => {
-                row(term).show(ui, |ui| {
-                    if quiet_button(ui, "Remove").clicked() {
-                        remove = Some(term.clone());
-                    }
-                    if quiet_button(ui, "Edit").clicked() {
-                        start = Some(term.clone());
-                    }
-                });
-            },
+    divider(ui);
+    list(ui, |ui| {
+        for term in &shown {
+            let key = format!("text.vocabulary.{}", term);
+            match editing.as_mut().filter(|edit| edit.original == *term) {
+                Some(edit) => {
+                    list_item(&key, icons::WHOLE_WORD, term).show(ui, EDIT_COLUMN, |ui| {
+                        let small = |label| Button::new(label).size(Size::Small);
+                        cancel |= ui.add(small("Cancel").variant(Variant::Ghost)).clicked();
+                        commit |= ui
+                            .add(small("Done").icon(icons::CHECK).variant(Variant::Primary))
+                            .clicked();
+                        let response = widgets::field(ui, &mut edit.draft, term);
+                        if std::mem::take(&mut edit.focus) {
+                            response.request_focus();
+                        }
+                        if response.lost_focus() {
+                            commit |= ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
+                        }
+                    });
+                },
+                None => {
+                    list_item(&key, icons::WHOLE_WORD, term).show(ui, 52.0, |ui| {
+                        if icon_button(ui, icons::X, &format!("Remove {}", term)).clicked() {
+                            remove = Some(term.clone());
+                        }
+                        if icon_button(ui, icons::PENCIL, &format!("Change {}", term)).clicked() {
+                            start = Some(term.clone());
+                        }
+                    });
+                },
+            }
         }
-    }
+    });
     if cancel {
         gui.editing_term = None;
     } else if commit {
@@ -456,8 +496,13 @@ fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
     if let Some(term) = remove {
         learn::forget_in(&mut gui.vocabulary, &term);
     }
-    ui.add_space(4.0);
-    hint(ui, &count_hint(shown.len(), terms.len()));
+    let muted = palette(ui.ctx()).muted;
+    widgets::text(
+        ui,
+        &count_hint(shown.len(), terms.len()),
+        theme::sans(theme::SMALL),
+        muted,
+    );
 }
 
 /// The terms that contain `filter`, ignoring case, in their order. The term
@@ -492,7 +537,7 @@ fn count_hint(shown: usize, total: usize) -> String {
 fn word_list(gui: &mut Gui, ui: &mut egui::Ui) {
     let has_path = !gui.word_list.trim().is_empty();
     let has_terms = !gui.vocabulary.technical_terms.is_empty();
-    let (import, export) = row("Word list")
+    let (import, export) = row("text.vocabulary.word_list", "Word list")
         .describe(
             "A text file with one word on each line. Import adds each word that \
              the vocabulary does not have. Export writes every word to a new file.",
@@ -500,12 +545,20 @@ fn word_list(gui: &mut Gui, ui: &mut egui::Ui) {
         .reserve(LIST_COLUMN)
         .show(ui, |ui| {
             let export = ui
-                .add_enabled(has_path && has_terms, egui::Button::new("Export"))
+                .add(
+                    Button::new("Export")
+                        .icon(icons::FILE_OUTPUT)
+                        .enabled(has_path && has_terms),
+                )
                 .clicked();
             let import = ui
-                .add_enabled(has_path, egui::Button::new("Import"))
+                .add(
+                    Button::new("Import")
+                        .icon(icons::FILE_INPUT)
+                        .enabled(has_path),
+                )
                 .clicked();
-            field(ui, &mut gui.word_list, DEFAULT_WORD_LIST);
+            value_field(ui, &mut gui.word_list, DEFAULT_WORD_LIST);
             (import, export)
         });
     if !import && !export {

@@ -4,8 +4,13 @@
 
 use crate::config::server;
 use crate::config::settings::TranscriptionBackend;
+use crate::gui::icons;
 use crate::gui::meter::{self, Meter};
-use crate::gui::theme::{field, quiet_button, row, section, slider, toggle_row, FIELD_WIDTH, GOOD};
+use crate::gui::theme::{palette, FIELD_WIDTH};
+use crate::gui::widgets::{
+    dropdown, icon_button, list, list_item, meter as level_meter, option, row, section, stepper,
+    switch_row, value_field, Button,
+};
 use crate::gui::{megabytes, Gui};
 use crate::transcription::device::GpuAvailability;
 use crate::transcription::models::{vad_model, ModelManager, ModelSize};
@@ -44,25 +49,19 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Transcription");
-    row("Transcribe on")
+    row("speech.backend", "Transcribe on")
         .describe(
             "This machine keeps the audio here. Groq and OpenAI can be faster on a slow \
              computer, and they receive the audio of every dictation. An OpenAI-compatible \
              server receives the audio at the address you set.",
         )
         .show(ui, |ui| {
-            egui::ComboBox::from_id_salt("backend")
-                .width(FIELD_WIDTH)
-                .selected_text(backend_label(gui.config.transcription.backend))
-                .show_ui(ui, |ui| {
-                    for backend in TranscriptionBackend::ALL {
-                        ui.selectable_value(
-                            &mut gui.config.transcription.backend,
-                            backend,
-                            backend_label(backend),
-                        );
-                    }
-                });
+            let current = &mut gui.config.transcription.backend;
+            dropdown(ui, "backend", FIELD_WIDTH, backend_label(*current), |ui| {
+                for backend in TranscriptionBackend::ALL {
+                    option(ui, current, backend, backend_label(backend));
+                }
+            });
         });
 
     let backend = gui.config.transcription.backend;
@@ -95,9 +94,10 @@ fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
             ),
         )
     };
-    row(&title)
+    row("speech.key", &title)
         .status(has_key)
         .describe(&description)
+        .reserve(0.0)
         .show(ui, |_| {});
 
     let (model, placeholder) = match backend {
@@ -112,28 +112,29 @@ fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
         TranscriptionBackend::Local | TranscriptionBackend::OpenAiCompatible => return,
     };
     let title = format!("{} model", service);
-    row(&title).show(ui, |ui| {
-        field(ui, model, placeholder);
+    row("speech.cloud_model", &title).show(ui, |ui| {
+        value_field(ui, model, placeholder);
     });
 }
 
 fn server_settings(gui: &mut Gui, ui: &mut egui::Ui) {
     let (ok, title, description) = server_status(gui);
-    row(&title)
+    row("speech.server", &title)
         .status(ok)
         .describe(&description)
+        .reserve(0.0)
         .show(ui, |_| {});
-    row("Server address")
+    row("speech.server_url", "Server address")
         .describe("Hush adds /v1/audio/transcriptions when the address does not end with it.")
         .show(ui, |ui| {
-            field(
+            value_field(
                 ui,
                 &mut gui.config.transcription.server_url,
                 "http://localhost:8080/v1",
             );
         });
-    row("Server model").show(ui, |ui| {
-        field(
+    row("speech.server_model", "Server model").show(ui, |ui| {
+        value_field(
             ui,
             &mut gui.config.transcription.server_model,
             "whisper-large-v3",
@@ -200,8 +201,9 @@ fn backend_label(backend: TranscriptionBackend) -> &'static str {
 fn models(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Model");
     if gui.catalogue.is_empty() {
-        row("The models directory is not readable")
+        row("speech.models_dir", "The models directory is not readable")
             .status(false)
+            .reserve(0.0)
             .show(ui, |_| {});
         return;
     }
@@ -228,24 +230,20 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
         "Runs on your machine. Larger models are more accurate and slower; {} suits this machine.",
         size_key(recommended)
     );
-    row("Whisper model").describe(&description).show(ui, |ui| {
-        egui::ComboBox::from_id_salt("model")
-            .width(FIELD_WIDTH)
-            .selected_text(
-                selected
-                    .map(describe)
-                    .unwrap_or_else(|| gui.config.transcription.model_size.clone()),
-            )
-            .show_ui(ui, |ui| {
+    row("speech.model", "Whisper model")
+        .describe(&description)
+        .reserve(240.0)
+        .show(ui, |ui| {
+            let shown = selected
+                .map(describe)
+                .unwrap_or_else(|| gui.config.transcription.model_size.clone());
+            let current = &mut gui.config.transcription.model_size;
+            dropdown(ui, "model", 240.0, &shown, |ui| {
                 for size in sizes {
-                    ui.selectable_value(
-                        &mut gui.config.transcription.model_size,
-                        size_key(size).to_string(),
-                        describe(size),
-                    );
+                    option(ui, current, size_key(size).to_string(), &describe(size));
                 }
             });
-    });
+        });
 
     let downloading = gui.download.lock().size;
     if let Some(size) = downloading {
@@ -264,36 +262,49 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
             format!("Downloading {}", size_key(size))
         };
         let progress = format!("{} of {}", megabytes(done), megabytes(total));
-        row(&title).describe(&progress).show(ui, |ui| {
-            ui.add(
-                egui::ProgressBar::new(fraction)
-                    .desired_width(FIELD_WIDTH)
-                    .fill(GOOD),
-            );
-        });
+        row("speech.download", &title)
+            .describe(&progress)
+            .reserve(FIELD_WIDTH + 48.0)
+            .show(ui, |ui| {
+                let colours = palette(ui.ctx());
+                ui.label(
+                    egui::RichText::new(format!("{:.0}%", fraction * 100.0))
+                        .font(crate::gui::theme::mono(crate::gui::theme::MONO))
+                        .color(colours.muted),
+                );
+                level_meter(ui, fraction, FIELD_WIDTH);
+            });
         return;
     }
     if let Some(size) = selected {
         if !gui.machine.installed_models.contains(&size) {
             let title = format!("{} is not downloaded yet", size_key(size));
             let description = format!("{} from Hugging Face, once.", size_of(size));
-            row(&title)
+            row("speech.download", &title)
                 .status(false)
                 .describe(&description)
+                .reserve(120.0)
                 .show(ui, |ui| {
-                    if ui.button("Download").clicked() {
+                    if ui
+                        .add(Button::new("Download").icon(icons::DOWNLOAD))
+                        .clicked()
+                    {
                         start_download(gui, size);
                     }
                 });
         } else if gui.config.transcription.vad && !gui.machine.vad_installed {
-            row("Voice detection is not downloaded yet")
+            row("speech.download", "Voice detection is not downloaded yet")
                 .status(false)
                 .describe(&format!(
                     "{} from Hugging Face, once. Until then, Whisper gets the silence in each take too.",
                     megabytes(vad_model().expected_size)
                 ))
+                .reserve(120.0)
                 .show(ui, |ui| {
-                    if ui.button("Download").clicked() {
+                    if ui
+                        .add(Button::new("Download").icon(icons::DOWNLOAD))
+                        .clicked()
+                    {
                         start_download(gui, size);
                     }
                 });
@@ -303,7 +314,7 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Listening");
-    row("Language")
+    row("speech.language", "Language")
         .describe(
             "Detecting the language costs a little accuracy, so name it when you mostly speak one.",
         )
@@ -327,16 +338,18 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
         } else {
             "No GPU found, so transcription runs on the CPU.".to_string()
         };
-        toggle_row(
+        switch_row(
             ui,
+            "speech.gpu",
             "Use the GPU",
             &gpu_text,
             &mut gui.config.transcription.use_gpu,
         );
     }
     if !backend.is_cloud() {
-        toggle_row(
+        switch_row(
             ui,
+            "speech.vad",
             "Trim silence",
             "Sends Whisper only the speech in each take, so silence does not turn into invented text.",
             &mut gui.config.transcription.vad,
@@ -354,52 +367,47 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
     } else {
         "Primes Whisper with the focused window's title and your vocabulary.".to_string()
     };
-    toggle_row(
+    switch_row(
         ui,
+        "speech.context",
         "Spell names from context",
         &context_text,
         &mut gui.config.transcription.context_prompt,
     );
 
-    let mut minutes = (gui.config.audio.max_recording_secs / 60) as u32;
-    row("Stop recording after")
+    let mut minutes = (gui.config.audio.max_recording_secs / 60).min(MAX_MINUTES);
+    row("speech.max_recording", "Stop recording after")
         .describe("A warning sounds a minute before a hands-free recording stops.")
+        .reserve(130.0)
         .show(ui, |ui| {
-            if slider(
-                ui,
-                egui::Slider::new(&mut minutes, 0..=30).custom_formatter(|v, _| {
-                    if v == 0.0 {
-                        "Never".to_string()
-                    } else {
-                        format!("{} min", v)
-                    }
-                }),
-            )
-            .changed()
-            {
-                gui.config.audio.max_recording_secs = u64::from(minutes) * 60;
+            if stepper(ui, &mut minutes, 0..=MAX_MINUTES, |n| never_or(n, "min")).changed() {
+                gui.config.audio.max_recording_secs = minutes * 60;
             }
         });
 
-    let mut pause = gui.config.audio.silence_stop_secs.min(10) as u32;
-    row("Stop after a pause")
+    let mut pause = gui.config.audio.silence_stop_secs.min(MAX_PAUSE);
+    row("speech.silence_stop", "Stop after a pause")
         .describe("Ends a hands-free recording when you stop talking for this long.")
+        .reserve(130.0)
         .show(ui, |ui| {
-            if slider(
-                ui,
-                egui::Slider::new(&mut pause, 0..=10).custom_formatter(|v, _| {
-                    if v == 0.0 {
-                        "Never".to_string()
-                    } else {
-                        format!("{} s", v)
-                    }
-                }),
-            )
-            .changed()
-            {
-                gui.config.audio.silence_stop_secs = u64::from(pause);
+            if stepper(ui, &mut pause, 0..=MAX_PAUSE, |n| never_or(n, "s")).changed() {
+                gui.config.audio.silence_stop_secs = pause;
             }
         });
+}
+
+/// The longest cap the stepper sets, in minutes, and the longest pause, in
+/// seconds.
+const MAX_MINUTES: u64 = 30;
+const MAX_PAUSE: u64 = 10;
+
+/// `0` is Never; any other number gets its unit.
+fn never_or(value: u64, unit: &str) -> String {
+    if value == 0 {
+        "Never".to_string()
+    } else {
+        format!("{} {}", value, unit)
+    }
 }
 
 /// The languages that detection may pick. The row shows while the language
@@ -417,32 +425,36 @@ fn detection(gui: &mut Gui, ui: &mut egui::Ui) {
          none, Whisper picks from every language."
     };
     let mut added = String::new();
-    row("Detect only").describe(description).show(ui, |ui| {
-        language_picker(
-            ui,
-            "detect_add",
-            &mut added,
-            false,
-            FIELD_WIDTH,
-            "Add a language",
-        );
-    });
-    let list = &mut gui.config.transcription.detect_languages;
-    if !added.is_empty() && !list.contains(&added) {
-        list.push(added);
+    row("speech.detect_languages", "Detect only")
+        .describe(description)
+        .show(ui, |ui| {
+            language_picker(
+                ui,
+                "detect_add",
+                &mut added,
+                false,
+                FIELD_WIDTH,
+                "Add a language",
+            );
+        });
+    let languages = &mut gui.config.transcription.detect_languages;
+    if !added.is_empty() && !languages.contains(&added) {
+        languages.push(added);
     }
     let mut remove = None;
-    ui.indent("detect_languages", |ui| {
-        for (index, code) in list.iter().enumerate() {
-            row(&language_name(code)).show(ui, |ui| {
-                if quiet_button(ui, "Remove").clicked() {
+    list(ui, |ui| {
+        for (index, code) in languages.iter().enumerate() {
+            let name = language_name(code);
+            let key = format!("speech.detect_languages.{}", code);
+            list_item(&key, icons::LANGUAGES, &name).show(ui, 24.0, |ui| {
+                if icon_button(ui, icons::X, &format!("Remove {}", name)).clicked() {
                     remove = Some(index);
                 }
             });
         }
     });
     if let Some(index) = remove {
-        list.remove(index);
+        languages.remove(index);
     }
 }
 
@@ -463,73 +475,62 @@ pub fn language_picker(
     } else {
         language_name(&current)
     };
-    egui::ComboBox::from_id_salt(id_salt)
-        .width(width)
-        .selected_text(shown)
-        .show_ui(ui, |ui| {
-            if !current.is_empty() && !LANGUAGES.iter().any(|(code, _)| *code == current) {
-                ui.selectable_value(value, current.clone(), language_name(&current));
-            }
-            for (code, name) in LANGUAGES
-                .iter()
-                .filter(|(code, _)| with_auto || *code != "auto")
-            {
-                ui.selectable_value(value, code.to_string(), *name);
-            }
-        });
+    dropdown(ui, id_salt, width, &shown, |ui| {
+        if !current.is_empty() && !LANGUAGES.iter().any(|(code, _)| *code == current) {
+            option(ui, value, current.clone(), &language_name(&current));
+        }
+        for (code, name) in LANGUAGES
+            .iter()
+            .filter(|(code, _)| with_auto || *code != "auto")
+        {
+            option(ui, value, code.to_string(), name);
+        }
+    });
 }
 
 fn microphone(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Microphone");
-    ensure_meter(gui);
-    row("Input device")
+    if !gui.screenshot_mode() {
+        ensure_meter(gui);
+    }
+    row("speech.microphone", "Input device")
         .describe("The system default follows whatever your desktop picks.")
-        .reserve(FIELD_WIDTH + 90.0)
+        .reserve(FIELD_WIDTH + 32.0)
         .show(ui, |ui| {
-            let current = gui
+            if icon_button(ui, icons::REFRESH_CW, "Look for microphones again").clicked() {
+                gui.microphones = meter::input_devices();
+            }
+            let shown = gui
                 .config
                 .audio
                 .device
                 .clone()
                 .unwrap_or_else(|| meter::DEFAULT.to_string());
-            egui::ComboBox::from_id_salt("microphone")
-                .width(FIELD_WIDTH)
-                .selected_text(&current)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut gui.config.audio.device, None, meter::DEFAULT);
-                    if let Some(chosen) = gui.config.audio.device.clone() {
-                        if !gui.microphones.contains(&chosen) {
-                            ui.selectable_value(
-                                &mut gui.config.audio.device,
-                                Some(chosen.clone()),
-                                &chosen,
-                            );
-                        }
+            let device = &mut gui.config.audio.device;
+            let microphones = &gui.microphones;
+            dropdown(ui, "microphone", FIELD_WIDTH, &shown, |ui| {
+                option(ui, device, None, meter::DEFAULT);
+                if let Some(chosen) = device.clone() {
+                    if !microphones.contains(&chosen) {
+                        option(ui, device, Some(chosen.clone()), &chosen);
                     }
-                    for name in &gui.microphones {
-                        ui.selectable_value(&mut gui.config.audio.device, Some(name.clone()), name);
-                    }
-                });
-            if quiet_button(ui, "Refresh")
-                .on_hover_text("Look for microphones again")
-                .clicked()
-            {
-                gui.microphones = meter::input_devices();
-            }
+                }
+                for name in microphones {
+                    option(ui, device, Some(name.clone()), name);
+                }
+            });
         });
     let level_text = match &gui.meter_error {
         Some(error) => error.clone(),
         None => "Say something: the bar moves when Hush hears you.".to_string(),
     };
-    row("Level").describe(&level_text).show(ui, |ui| {
-        let level = gui.meter.as_ref().map(Meter::level).unwrap_or(0.0);
-        gui.level_shown = level.max(gui.level_shown * 0.85);
-        ui.add(
-            egui::ProgressBar::new(gui.level_shown)
-                .desired_width(FIELD_WIDTH)
-                .fill(GOOD),
-        );
-    });
+    row("speech.level", "Level")
+        .describe(&level_text)
+        .show(ui, |ui| {
+            let level = gui.meter.as_ref().map(Meter::level).unwrap_or(0.0);
+            gui.level_shown = level.max(gui.level_shown * 0.85);
+            level_meter(ui, gui.level_shown, FIELD_WIDTH);
+        });
 }
 
 /// Keep a meter open on the chosen microphone, reopening when the choice

@@ -8,6 +8,7 @@ pub mod overview;
 pub mod speech;
 pub mod text;
 
+use super::icons;
 use super::Gui;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +40,18 @@ impl Page {
         Self::ALL
             .into_iter()
             .find(|page| page.title().eq_ignore_ascii_case(wanted.trim()))
+    }
+
+    pub fn icon(self) -> char {
+        match self {
+            Page::Overview => icons::HOUSE,
+            Page::Hotkeys => icons::KEYBOARD,
+            Page::Speech => icons::MIC,
+            Page::Text => icons::TYPE,
+            Page::Output => icons::TEXT_CURSOR_INPUT,
+            Page::Desktop => icons::MONITOR,
+            Page::History => icons::HISTORY,
+        }
     }
 
     pub fn title(self) -> &'static str {

@@ -192,3 +192,9 @@ enabled = true
 # the Hush version. AppImage and tarball installs only: a package manager
 # updates its own installs, so those never check.
 check = false
+
+[gui]
+# The colors of the settings window (`hush settings`). system follows the
+# light or dark preference of the desktop, and changes when the desktop
+# changes. When the desktop has no preference, the window is light.
+appearance = "system" # system, light, dark

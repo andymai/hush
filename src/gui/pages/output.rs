@@ -1,51 +1,53 @@
 //! How the words reach the application: typed key by key, or pasted, with
 //! rules for applications that need one or the other.
 
-use crate::gui::theme::{field, hint, quiet_button, row, section, slider, FIELD_WIDTH};
+use crate::config::settings::MAX_TYPING_DELAY_MS;
+use crate::gui::icons;
+use crate::gui::theme::FIELD_WIDTH;
+use crate::gui::widgets::{
+    dropdown, icon_button, intro, list, list_item, number, option, row, section, submitted, Button,
+    Field,
+};
 use crate::gui::Gui;
 use crate::text::InsertionMethod;
 
-const ADD_COLUMN: f32 = FIELD_WIDTH + 80.0;
+const ADD_COLUMN: f32 = FIELD_WIDTH + 90.0;
 
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
-    ui.add_space(6.0);
-    row("Insert text by")
+    section(ui, "Typing");
+    row("output.method", "Insert text by")
         .describe(
             "Typing works everywhere, including password fields and games. \
              Pasting handles emoji, other alphabets, and very long text.",
         )
+        .reserve(240.0)
         .show(ui, |ui| {
-            egui::ComboBox::from_id_salt("insertion_method")
-                .width(FIELD_WIDTH)
-                .selected_text(method_name(gui.config.insertion.method))
-                .show_ui(ui, |ui| {
-                    for method in [
-                        InsertionMethod::Auto,
-                        InsertionMethod::Uinput,
-                        InsertionMethod::Clipboard,
-                    ] {
-                        ui.selectable_value(
-                            &mut gui.config.insertion.method,
-                            method,
-                            method_name(method),
-                        );
-                    }
-                });
+            let method = &mut gui.config.insertion.method;
+            dropdown(ui, "insertion_method", 240.0, method_name(*method), |ui| {
+                for choice in [
+                    InsertionMethod::Auto,
+                    InsertionMethod::Uinput,
+                    InsertionMethod::Clipboard,
+                ] {
+                    option(ui, method, choice, method_name(choice));
+                }
+            });
         });
-    row("Between keystrokes")
+    row("output.typing_delay", "Between keystrokes")
         .describe("Raise it if an application drops letters.")
+        .reserve(110.0)
         .show(ui, |ui| {
-            slider(
-                ui,
-                egui::Slider::new(&mut gui.config.insertion.typing_delay_ms, 0..=50).suffix(" ms"),
-            );
+            let mut delay = gui.config.insertion.typing_delay_ms;
+            if number(ui, &mut delay, 0..=MAX_TYPING_DELAY_MS, "ms").changed() {
+                gui.config.insertion.typing_delay_ms = delay;
+            }
         });
     by_application(gui, ui);
 }
 
 fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "By application");
-    hint(
+    intro(
         ui,
         "These rules come before the setting above. Part of a window class is \
          enough: konsole matches org.kde.konsole. The History page shows the \
@@ -53,6 +55,7 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
     );
     app_list(
         ui,
+        "output.uinput_apps",
         "Always type in",
         "For applications where a paste does nothing.",
         &mut gui.config.insertion.uinput_apps,
@@ -60,6 +63,7 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
     );
     app_list(
         ui,
+        "output.clipboard_apps",
         "Always paste in",
         "For applications that drop or reorder typed letters.",
         &mut gui.config.insertion.clipboard_apps,
@@ -69,21 +73,23 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn app_list(
     ui: &mut egui::Ui,
+    key: &str,
     title: &str,
     description: &str,
     apps: &mut Vec<String>,
     draft: &mut String,
 ) {
     let mut add = false;
-    row(title)
+    row(key, title)
         .describe(description)
         .reserve(ADD_COLUMN)
         .show(ui, |ui| {
-            add |= ui
-                .add_enabled(!draft.trim().is_empty(), egui::Button::new("Add"))
-                .clicked();
-            let response = field(ui, draft, "window class");
-            add |= response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let button = Button::new("Add")
+                .icon(icons::PLUS)
+                .enabled(!draft.trim().is_empty());
+            add |= ui.add(button).clicked();
+            let response = ui.add(Field::new(draft, "window class").mono());
+            add |= submitted(ui, &response);
             if add {
                 response.request_focus();
             }
@@ -93,13 +99,16 @@ fn app_list(
         draft.clear();
     }
     let mut remove = None;
-    ui.indent(title, |ui| {
+    list(ui, |ui| {
         for (index, app) in apps.iter().enumerate() {
-            row(app).show(ui, |ui| {
-                if quiet_button(ui, "Remove").clicked() {
-                    remove = Some(index);
-                }
-            });
+            let item_key = format!("{}.{}", key, app);
+            list_item(&item_key, icons::APP_WINDOW, app)
+                .mono()
+                .show(ui, 24.0, |ui| {
+                    if icon_button(ui, icons::X, &format!("Remove {}", app)).clicked() {
+                        remove = Some(index);
+                    }
+                });
         }
     });
     if let Some(index) = remove {

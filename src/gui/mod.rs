@@ -5,13 +5,18 @@
 //! desktop entry launch, so the daemon never has to own a window.
 
 mod capture;
+mod chrome;
+mod icons;
 mod meter;
 mod pages;
+mod scheme;
+mod screenshot;
 mod theme;
+mod widgets;
 
 pub use pages::speech::size_key;
 
-use crate::config::settings::{TranscriptionBackend, TranscriptionConfig};
+use crate::config::settings::{Appearance, TranscriptionBackend, TranscriptionConfig};
 use crate::config::Config;
 use crate::hotkey::keymap::ModifierKeys;
 use crate::hotkey::Role;
@@ -28,6 +33,8 @@ use pages::hotkeys::KeyTarget;
 use pages::text::{StyleDraft, TermEdit};
 use pages::Page;
 use parking_lot::Mutex;
+use scheme::DesktopScheme;
+use screenshot::Screenshot;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -40,7 +47,6 @@ const TOAST_DURATION: Duration = Duration::from_secs(4);
 const STATUS_TIMEOUT: Duration = Duration::from_millis(300);
 /// How long a restarted daemon gets to load its model and answer again.
 const RESTART_TIMEOUT: Duration = Duration::from_secs(40);
-const NAV_WIDTH: f32 = 150.0;
 
 pub const MODEL_ORDER: [ModelSize; 7] = [
     ModelSize::Tiny,
@@ -207,6 +213,12 @@ pub struct Gui {
     pub new_clipboard_app: String,
     pub history: HistoryView,
     pub try_text: String,
+    /// The desktop's light or dark preference, for the System appearance
+    desktop: DesktopScheme,
+    /// The appearance that `HUSH_SETTINGS_APPEARANCE` forces for a
+    /// screenshot
+    appearance_override: Option<Appearance>,
+    screenshot: Option<Screenshot>,
     restart: Option<Restart>,
     poll: Poll,
     last_poll: Instant,
@@ -236,6 +248,7 @@ impl Gui {
                 Some((*size, info.expected_size))
             })
             .collect();
+        let screenshot = Screenshot::from_env();
         Ok(Self {
             page: Page::from_env().unwrap_or(Page::Overview),
             saved: config.clone(),
@@ -259,7 +272,11 @@ impl Gui {
             meter: None,
             meter_error: None,
             meter_wanted: None,
-            microphones: meter::input_devices(),
+            microphones: if screenshot.is_some() {
+                Vec::new()
+            } else {
+                meter::input_devices()
+            },
             level_shown: 0.0,
             new_term: String::new(),
             editing_term: None,
@@ -270,6 +287,11 @@ impl Gui {
             new_clipboard_app: String::new(),
             history: HistoryView::default(),
             try_text: String::new(),
+            desktop: DesktopScheme::default(),
+            appearance_override: screenshot
+                .as_ref()
+                .and_then(|_| theme::appearance_from_env()),
+            screenshot,
             restart: None,
             poll: Poll::default(),
             last_poll: Instant::now(),
@@ -285,8 +307,10 @@ impl Gui {
     }
 
     /// Write the configuration and the vocabulary, then restart a running
-    /// daemon so the change is live.
+    /// daemon when it reads something that changed.
     pub fn save(&mut self) {
+        let daemon_unchanged = !daemon_reads_a_change(&self.saved, &self.config)
+            && self.vocabulary == self.saved_vocabulary;
         let path = crate::config::paths::config_path();
         if let Err(e) = self.config.save_to_file(&path) {
             self.say(format!("Could not save: {}", e));
@@ -307,7 +331,7 @@ impl Gui {
             }
             self.saved_vocabulary = self.vocabulary.clone();
         }
-        if self.machine.running() {
+        if self.machine.running() && !daemon_unchanged {
             self.run_hush(&["daemon", "restart"], "Applying…");
             self.restart = Some(Restart {
                 since: Instant::now(),
@@ -368,6 +392,12 @@ impl Gui {
 
     pub fn applying(&self) -> bool {
         self.restart.is_some()
+    }
+
+    /// The window draws one frame for a screenshot, so it leaves the
+    /// microphone closed.
+    pub fn screenshot_mode(&self) -> bool {
+        self.screenshot.is_some()
     }
 
     /// Run a `hush` subcommand in the background, so the window keeps drawing.
@@ -439,6 +469,14 @@ impl Gui {
     }
 }
 
+/// Whether `config` differs from `saved` in more than the window's own
+/// settings, which the daemon never reads.
+fn daemon_reads_a_change(saved: &Config, config: &Config) -> bool {
+    let mut window_only = saved.clone();
+    window_only.gui = config.gui.clone();
+    window_only != *config
+}
+
 fn load_vocabulary() -> DomainVocabulary {
     let path = DomainVocabulary::default_path();
     if !path.exists() {
@@ -459,9 +497,50 @@ fn save_vocabulary(vocabulary: &DomainVocabulary) -> Result<()> {
     vocabulary.save_to_file(&path)
 }
 
+impl Gui {
+    /// The scheme to draw now: the override, else the setting, which may
+    /// follow the desktop.
+    fn theme(&self) -> egui::Theme {
+        let appearance = self
+            .appearance_override
+            .unwrap_or(self.config.gui.appearance);
+        theme::resolve(appearance, self.desktop.get())
+    }
+
+    /// The page in the centred column, scrolled under the title bar.
+    fn page(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let origin = ui.cursor().min;
+                let (left, width) = theme::column(ui.available_width());
+                let max = egui::Rect::from_min_size(
+                    origin + egui::vec2(left, theme::PAGE_PADDING),
+                    egui::vec2(width, f32::INFINITY),
+                );
+                let mut column = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(max)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                column.set_width(width);
+                column.spacing_mut().item_spacing.y = 0.0;
+                pages::show(self, &mut column);
+                let bottom = column.min_rect().bottom() + theme::PAGE_PADDING;
+                ui.advance_cursor_after_rect(egui::Rect::from_min_max(
+                    origin,
+                    egui::pos2(origin.x + ui.available_width(), bottom),
+                ));
+            });
+    }
+}
+
 impl eframe::App for Gui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        theme::apply(ctx);
+        let theme = self.theme();
+        if ctx.theme() != theme {
+            ctx.set_theme(theme);
+        }
         if self.last_poll.elapsed() >= self.poll_interval() {
             self.last_poll = Instant::now();
             self.request_refresh(ctx);
@@ -481,95 +560,43 @@ impl eframe::App for Gui {
             self.toast = None;
         }
 
-        let nav_frame = egui::Frame::side_top_panel(&ctx.style())
-            .fill(theme::palette(ctx).nav)
-            .inner_margin(egui::Margin::symmetric(8.0, 4.0));
+        let colours = theme::palette(ctx);
         egui::SidePanel::left("nav")
             .resizable(false)
-            .exact_width(NAV_WIDTH)
-            .frame(nav_frame)
-            .show(ctx, |ui| {
-                ui.add_space(14.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(10.0);
-                    ui.label(egui::RichText::new("Hush").strong().size(20.0));
-                });
-                ui.add_space(14.0);
-                ui.spacing_mut().item_spacing.y = 2.0;
-                for page in Page::ALL {
-                    let response = theme::nav_item(ui, self.page == page, page.title());
-                    if response.clicked() {
-                        self.page = page;
-                    }
-                    if page == Page::Overview && !self.machine.ready(&self.config.transcription) {
-                        let centre =
-                            egui::pos2(response.rect.right() - 12.0, response.rect.center().y);
-                        ui.painter().circle_filled(centre, 4.0, theme::WARN);
-                    }
-                }
-            });
+            .exact_width(theme::SIDEBAR_WIDTH)
+            .frame(egui::Frame::none().fill(colours.bg))
+            .show(ctx, |ui| chrome::sidebar(self, ui));
+        egui::TopBottomPanel::top("title")
+            .exact_height(theme::BAR_HEIGHT)
+            .frame(
+                egui::Frame::none()
+                    .fill(colours.surface)
+                    .inner_margin(egui::Margin {
+                        left: 16.0,
+                        right: 8.0,
+                        top: 0.0,
+                        bottom: 0.0,
+                    }),
+            )
+            .show(ctx, |ui| chrome::title_bar(ui, self.page.title()));
+        egui::TopBottomPanel::bottom("footer")
+            .exact_height(theme::FOOTER_HEIGHT)
+            .frame(
+                egui::Frame::none()
+                    .fill(colours.surface)
+                    .inner_margin(egui::Margin::symmetric(16.0, 0.0)),
+            )
+            .show(ctx, |ui| chrome::footer(self, ui));
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(colours.surface))
+            .show(ctx, |ui| self.page(ui));
+        chrome::resize_edges(ctx);
+        chrome::window_border(ctx);
 
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                if let Some((message, _)) = &self.toast {
-                    ui.label(message.clone());
-                } else if self.applying() {
-                    ui.spinner();
-                    ui.label("Applying…");
-                } else if self.machine.running() {
-                    theme::state_line(ui, true, "Hush is running");
-                } else {
-                    theme::state_line(ui, false, "Hush is not running");
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let can_save = self.unsaved() && !self.applying();
-                    ui.add_enabled_ui(can_save, |ui| {
-                        let label = if can_save {
-                            egui::RichText::new("Save")
-                                .strong()
-                                .color(egui::Color32::WHITE)
-                        } else {
-                            egui::RichText::new("Save")
-                        };
-                        let size = egui::vec2(72.0, theme::CONTROL_HEIGHT);
-                        let save = egui::Button::new(label).min_size(size).fill(if can_save {
-                            theme::ACCENT
-                        } else {
-                            ui.visuals().widgets.inactive.weak_bg_fill
-                        });
-                        if ui
-                            .add(save)
-                            .on_hover_text("Writes the file and restarts Hush with it")
-                            .clicked()
-                        {
-                            self.save();
-                        }
-                        if ui.add(egui::Button::new("Revert").min_size(size)).clicked() {
-                            self.revert();
-                        }
-                    });
-                    if self.unsaved() && !self.applying() {
-                        theme::hint(ui, "Unsaved changes");
-                    }
-                });
-            });
-            ui.add_space(6.0);
-        });
-
-        let frame = egui::Frame::central_panel(&ctx.style())
-            .inner_margin(egui::Margin::symmetric(28.0, 18.0));
-        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.label(egui::RichText::new(self.page.title()).strong().size(20.0));
-                    ui.add_space(2.0);
-                    pages::show(self, ui);
-                    ui.add_space(16.0);
-                });
-        });
-
+        if let Some(screenshot) = self.screenshot.as_mut() {
+            screenshot.step(ctx);
+            return;
+        }
         let repaint = if self.download.lock().size.is_some() {
             Duration::from_millis(100)
         } else if self.meter.is_some() {
@@ -583,17 +610,31 @@ impl eframe::App for Gui {
 
 /// Open the window. Blocks until the user closes it.
 pub fn run() -> Result<()> {
-    let app = Gui::new()?;
+    let mut app = Gui::new()?;
+    let size = app
+        .screenshot
+        .as_ref()
+        .and_then(Screenshot::size)
+        .unwrap_or([1000.0, 720.0]);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([760.0, 720.0])
-            .with_min_inner_size([620.0, 460.0])
+            .with_inner_size(size)
+            .with_min_inner_size([720.0, 480.0])
+            .with_decorations(false)
             .with_app_id("io.github.andymai.hush")
             .with_title("Hush"),
         ..Default::default()
     };
-    eframe::run_native("Hush", options, Box::new(|_| Ok(Box::new(app))))
-        .map_err(|e| anyhow::anyhow!("Could not open the Hush window: {}", e))
+    eframe::run_native(
+        "Hush",
+        options,
+        Box::new(|creation| {
+            theme::install(&creation.egui_ctx);
+            app.desktop = DesktopScheme::watch(&creation.egui_ctx);
+            Ok(Box::new(app))
+        }),
+    )
+    .map_err(|e| anyhow::anyhow!("Could not open the Hush window: {}", e))
 }
 
 /// Bytes as a short human-readable string.
@@ -682,6 +723,20 @@ mod tests {
         assert!(machine.busy());
         machine.daemon = None;
         assert!(!machine.running() && !machine.busy());
+    }
+
+    #[test]
+    fn only_a_setting_the_daemon_reads_restarts_it() {
+        let saved = Config::defaults().unwrap();
+        let mut config = saved.clone();
+        assert!(!daemon_reads_a_change(&saved, &config));
+        config.gui.appearance = Appearance::Dark;
+        assert!(
+            !daemon_reads_a_change(&saved, &config),
+            "the appearance is the window's own"
+        );
+        config.tray.enabled = !config.tray.enabled;
+        assert!(daemon_reads_a_change(&saved, &config));
     }
 
     #[test]

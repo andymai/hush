@@ -47,6 +47,40 @@ pub struct Config {
     /// Opt-in check for a newer release
     #[serde(default)]
     pub updates: UpdatesConfig,
+    /// The settings window
+    #[serde(default)]
+    pub gui: GuiConfig,
+}
+
+/// Settings window settings
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct GuiConfig {
+    /// Light, dark, or the desktop's preference
+    pub appearance: Appearance,
+}
+
+/// The colours of the settings window
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Appearance {
+    /// The desktop's light or dark preference
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Appearance {
+    pub const ALL: [Appearance; 3] = [Appearance::System, Appearance::Light, Appearance::Dark];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Appearance::System => "System",
+            Appearance::Light => "Light",
+            Appearance::Dark => "Dark",
+        }
+    }
 }
 
 /// Update check settings
@@ -98,6 +132,10 @@ impl HistoryConfig {
 
 pub const MAX_HISTORY_ENTRIES: usize = 100_000;
 pub const MAX_KEEP_AUDIO_DAYS: u64 = 3650;
+/// The longest press that `hotkey.tap_ms` may call a tap.
+pub const MAX_TAP_MS: u64 = 2000;
+/// The longest pause between typed keys.
+pub const MAX_TYPING_DELAY_MS: u64 = 200;
 
 /// Status icon settings
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -781,9 +819,10 @@ impl Config {
                 &format!("for {} in profiles.app_styles", app),
             )?;
         }
-        if self.hotkey.tap_ms > 2000 {
+        if self.hotkey.tap_ms > MAX_TAP_MS {
             return Err(anyhow::anyhow!(
-                "Invalid hotkey.tap_ms: must be 2000 or less"
+                "Invalid hotkey.tap_ms: must be {} or less",
+                MAX_TAP_MS
             ));
         }
         // Validate audio configuration
@@ -831,9 +870,10 @@ impl Config {
             }
         }
 
-        if self.insertion.typing_delay_ms > 200 {
+        if self.insertion.typing_delay_ms > MAX_TYPING_DELAY_MS {
             return Err(anyhow::anyhow!(
-                "Invalid typing delay: must be at most 200 ms"
+                "Invalid typing delay: must be at most {} ms",
+                MAX_TYPING_DELAY_MS
             ));
         }
         if self.history.max_entries == 0 || self.history.max_entries > MAX_HISTORY_ENTRIES {
@@ -1099,6 +1139,62 @@ model_size = "small"
         assert_eq!(Config::defaults().unwrap().hooks.transcript, "");
         let config = Config::parse_over_defaults("[hooks]\ntranscript = \"tr a-z A-Z\"\n").unwrap();
         assert_eq!(config.hooks.transcript, "tr a-z A-Z");
+    }
+
+    #[test]
+    fn the_window_follows_the_desktop_unless_told_otherwise() {
+        assert_eq!(
+            Config::defaults().unwrap().gui.appearance,
+            Appearance::System
+        );
+        for (text, appearance) in [
+            ("system", Appearance::System),
+            ("light", Appearance::Light),
+            ("dark", Appearance::Dark),
+        ] {
+            let config =
+                Config::parse_over_defaults(&format!("[gui]\nappearance = \"{text}\"\n")).unwrap();
+            assert_eq!(config.gui.appearance, appearance);
+            let saved = toml::to_string_pretty(&config).unwrap();
+            assert!(
+                saved.contains(&format!("appearance = \"{text}\"")),
+                "{saved}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_appearance_is_rejected() {
+        for text in ["blue", "Dark", ""] {
+            let err = Config::parse_over_defaults(&format!("[gui]\nappearance = \"{text}\"\n"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("`system`, `light`, `dark`"), "{err}");
+        }
+        assert!(Config::parse_over_defaults("[gui]\nappearance = 1\n").is_err());
+    }
+
+    #[test]
+    fn the_window_fields_reach_both_ends_of_each_valid_range() {
+        let parse = |text: &str| Config::parse_over_defaults(text);
+        for tap_ms in [0, MAX_TAP_MS] {
+            let config = parse(&format!("[hotkey]\ntap_ms = {tap_ms}\n")).unwrap();
+            assert_eq!(config.hotkey.tap_ms, tap_ms);
+        }
+        assert!(parse(&format!("[hotkey]\ntap_ms = {}\n", MAX_TAP_MS + 1)).is_err());
+        for delay in [0, MAX_TYPING_DELAY_MS] {
+            let config = parse(&format!("[insertion]\ntyping_delay_ms = {delay}\n")).unwrap();
+            assert_eq!(config.insertion.typing_delay_ms, delay);
+        }
+        assert!(parse(&format!(
+            "[insertion]\ntyping_delay_ms = {}\n",
+            MAX_TYPING_DELAY_MS + 1
+        ))
+        .is_err());
+        assert!(parse(&format!(
+            "[history]\nkeep_audio_days = {MAX_KEEP_AUDIO_DAYS}\n"
+        ))
+        .is_ok());
     }
 
     #[test]

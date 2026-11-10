@@ -3,7 +3,9 @@
 use super::speech::server_status;
 use super::Page;
 use crate::config::settings::TranscriptionBackend;
-use crate::gui::theme::{dot, hint, row, section, state_line, toggle, GOOD, TOGGLE_COLUMN};
+use crate::gui::icons;
+use crate::gui::theme::{palette, CONTROL_HEIGHT};
+use crate::gui::widgets::{self, intro, row, section, switch, text_area, Button, Size, Variant};
 use crate::gui::Gui;
 use crate::ipc::DaemonState;
 use crate::transcription::models::ModelSize;
@@ -16,34 +18,48 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
 }
 
 fn running(gui: &mut Gui, ui: &mut egui::Ui) {
-    section(ui, "Hush");
+    section(ui, "Status");
     let running = gui.machine.running();
     let (title, description) = if running {
         ("Hush is running", "Listening for the hotkey.")
     } else {
         ("Hush is not running", "Start it to dictate.")
     };
-    row(title)
+    row("overview.daemon", title)
         .status(running)
         .describe(description)
+        .reserve(200.0)
         .show(ui, |ui| {
             if running {
-                if ui.button("Restart").clicked() {
+                if ui
+                    .add(Button::new("Restart").icon(icons::ROTATE_CW))
+                    .clicked()
+                {
                     gui.run_hush(&["daemon", "restart"], "Restarting…");
                 }
-                if ui.button("Stop").clicked() {
+                if ui
+                    .add(Button::new("Stop").icon(icons::CIRCLE_STOP))
+                    .clicked()
+                {
                     gui.run_hush(&["daemon", "stop"], "Stopping…");
                 }
-            } else if ui.button("Start Hush").clicked() {
+            } else if ui
+                .add(
+                    Button::new("Start Hush")
+                        .icon(icons::POWER)
+                        .variant(Variant::Primary),
+                )
+                .clicked()
+            {
                 gui.run_hush(&["daemon", "start"], "Starting…");
             }
         });
     let mut autostart = gui.machine.autostart;
-    row("Start Hush when I log in")
+    row("overview.autostart", "Start Hush when I log in")
         .describe("Adds Hush to your desktop session's autostart.")
-        .reserve(TOGGLE_COLUMN)
+        .reserve(36.0)
         .show(ui, |ui| {
-            if toggle(ui, &mut autostart).changed() {
+            if switch(ui, &mut autostart).changed() {
                 if autostart {
                     gui.run_hush(&["install", "--autostart"], "Added to your login.");
                 } else {
@@ -72,18 +88,24 @@ fn access(gui: &mut Gui, ui: &mut egui::Ui) {
         }
         text
     };
-    row(if ready {
+    let title = if ready {
         "Hush can read and type"
     } else {
         "Hush cannot read the keyboard yet"
-    })
-    .status(ready)
-    .describe(&description)
-    .show(ui, |ui| {
-        if !ready && ui.button("Grant access").clicked() {
-            gui.run_hush(&["setup", "permissions"], "Asking for permission…");
-        }
-    });
+    };
+    row("overview.access", title)
+        .status(ready)
+        .describe(&description)
+        .reserve(if ready { 0.0 } else { 150.0 })
+        .show(ui, |ui| {
+            if !ready
+                && ui
+                    .add(Button::new("Grant access").icon(icons::SHIELD_CHECK))
+                    .clicked()
+            {
+                gui.run_hush(&["setup", "permissions"], "Asking for permission…");
+            }
+        });
 }
 
 fn model(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -91,11 +113,12 @@ fn model(gui: &mut Gui, ui: &mut egui::Ui) {
     let backend = gui.config.transcription.backend;
     if backend == TranscriptionBackend::OpenAiCompatible {
         let (ok, title, description) = server_status(gui);
-        row(&title)
+        row("overview.model", &title)
             .status(ok)
             .describe(&description)
+            .reserve(100.0)
             .show(ui, |ui| {
-                if ui.button("Change").clicked() {
+                if widgets::button(ui, "Change").clicked() {
                     gui.page = Page::Speech;
                 }
             });
@@ -114,11 +137,12 @@ fn model(gui: &mut Gui, ui: &mut egui::Ui) {
                 format!("Put {} in ~/.config/hush/.env.", var),
             )
         };
-        row(&title)
+        row("overview.model", &title)
             .status(has_key)
             .describe(&description)
+            .reserve(100.0)
             .show(ui, |ui| {
-                if ui.button("Change").clicked() {
+                if widgets::button(ui, "Change").clicked() {
                     gui.page = Page::Speech;
                 }
             });
@@ -133,11 +157,12 @@ fn model(gui: &mut Gui, ui: &mut egui::Ui) {
     } else {
         format!("{} is not downloaded", gui.config.transcription.model_size)
     };
-    row(&title)
+    row("overview.model", &title)
         .status(installed)
         .describe("Runs on your machine. Larger models are more accurate and slower.")
+        .reserve(140.0)
         .show(ui, |ui| {
-            if ui.button("Choose a model").clicked() {
+            if widgets::button(ui, "Choose a model").clicked() {
                 gui.page = Page::Speech;
             }
         });
@@ -145,58 +170,57 @@ fn model(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn try_it(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Try it");
-    hint(
+    intro(
         ui,
         &format!(
             "Click in the box, hold {}, and speak. The words land here.",
             gui.saved.hotkey.combination
         ),
     );
+    let width = ui.available_width();
+    text_area(ui, &mut gui.try_text, "Nothing yet", 3, width);
     ui.add_space(4.0);
-    ui.add(
-        egui::TextEdit::multiline(&mut gui.try_text)
-            .desired_rows(3)
-            .desired_width(f32::INFINITY)
-            .margin(egui::vec2(8.0, 6.0))
-            .hint_text("Nothing yet"),
+    let colours = palette(ui.ctx());
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, CONTROL_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            match gui.machine.daemon {
+                None => widgets::status(ui, icons::CIRCLE_ALERT, colours.warn, "Start Hush first."),
+                Some(DaemonState::Starting) => widgets::busy(ui, "Starting the microphone…"),
+                Some(DaemonState::Recording { elapsed_ms }) => widgets::status(
+                    ui,
+                    icons::MIC,
+                    colours.accent,
+                    &format!("Listening… {:.1} s", elapsed_ms as f64 / 1000.0),
+                ),
+                Some(DaemonState::Transcribing) => widgets::busy(ui, "Transcribing…"),
+                Some(DaemonState::Inserting) => widgets::busy(ui, "Typing…"),
+                Some(DaemonState::Stopping) => widgets::busy(ui, "Stopping…"),
+                Some(DaemonState::Idle) => {
+                    if gui.machine.permissions.ready() {
+                        widgets::status(ui, icons::CIRCLE_CHECK, colours.good, "Ready.");
+                    } else {
+                        widgets::status(
+                            ui,
+                            icons::CIRCLE_ALERT,
+                            colours.warn,
+                            "Grant keyboard access first.",
+                        );
+                    }
+                },
+            }
+            if !gui.try_text.is_empty() {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let clear = Button::new("Clear")
+                        .icon(icons::X)
+                        .variant(Variant::Quiet)
+                        .size(Size::Small);
+                    if ui.add(clear).clicked() {
+                        gui.try_text.clear();
+                    }
+                });
+            }
+        },
     );
-    ui.horizontal(|ui| {
-        match gui.machine.daemon {
-            None => state_line(ui, false, "Start Hush first."),
-            Some(DaemonState::Starting) => {
-                ui.spinner();
-                ui.label("Starting the microphone…");
-            },
-            Some(DaemonState::Recording { elapsed_ms }) => {
-                dot(ui, GOOD);
-                ui.label(format!("Listening… {:.1} s", elapsed_ms as f64 / 1000.0));
-            },
-            Some(DaemonState::Transcribing) => {
-                ui.spinner();
-                ui.label("Transcribing…");
-            },
-            Some(DaemonState::Inserting) => {
-                ui.spinner();
-                ui.label("Typing…");
-            },
-            Some(DaemonState::Stopping) => {
-                ui.spinner();
-                ui.label("Stopping…");
-            },
-            Some(DaemonState::Idle) => {
-                if gui.machine.permissions.ready() {
-                    hint(ui, "Ready.");
-                } else {
-                    state_line(ui, false, "Grant keyboard access first.");
-                }
-            },
-        }
-        if !gui.try_text.is_empty() {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Clear").clicked() {
-                    gui.try_text.clear();
-                }
-            });
-        }
-    });
 }
