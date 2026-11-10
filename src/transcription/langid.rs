@@ -15,7 +15,7 @@ use crate::transcription::whisper::{cpu_options, cpu_threads};
 use crate::Result;
 use parking_lot::Mutex;
 use std::borrow::Cow;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -156,6 +156,9 @@ struct Store {
     /// Languages that the model failed to load for, so that each take does
     /// not try again
     failed_for: Option<Vec<String>>,
+    /// The languages of the last request, for the model that a download
+    /// brings
+    wanted: Option<Vec<String>>,
     downloading: bool,
     retry: Retry,
     /// A download failed its SHA-256 check, so the published file differs
@@ -169,6 +172,7 @@ static STORE: LazyLock<Mutex<Store>> = LazyLock::new(|| {
     Mutex::new(Store {
         loaded: None,
         failed_for: None,
+        wanted: None,
         downloading: false,
         retry: Retry::new(),
         gave_up: false,
@@ -190,6 +194,7 @@ pub fn model(models_dir: &Path, languages: &[String]) -> Option<Arc<LanguageId>>
     {
         return Some(Arc::clone(model));
     }
+    store.wanted = Some(languages.to_vec());
     let manager = ModelManager::new(models_dir).ok()?;
     if let Some(path) = manager.langid_model_path() {
         return load_into(&mut store, &path, languages);
@@ -221,6 +226,15 @@ fn load_into(store: &mut Store, path: &Path, languages: &[String]) -> Option<Arc
     }
 }
 
+/// Load the model that a download brought, for the languages of the last
+/// request, so that the next take does not wait for the load.
+fn load_downloaded(path: PathBuf) {
+    let mut store = STORE.lock();
+    if let Some(languages) = store.wanted.clone() {
+        load_into(&mut store, &path, &languages);
+    }
+}
+
 /// Whether a failed download should stop all later tries in this process.
 fn gives_up(error: &anyhow::Error) -> bool {
     error
@@ -240,31 +254,41 @@ fn start_download(store: &mut Store, manager: ModelManager) {
     runtime.spawn(async move {
         info!("Downloading the language-ID model that detect_languages needs");
         let result = manager.ensure_langid_downloaded_with(&|_, _| {}).await;
-        let mut store = STORE.lock();
-        store.downloading = false;
-        match result {
-            Ok(_) => {
-                store.retry = Retry::new();
-                info!("The language-ID model is downloaded, and the next take uses it");
-            },
-            Err(e) if gives_up(&e) => {
-                store.gave_up = true;
-                warn!(
-                    "The language-ID model did not download ({:#}). Hush does not try \
+        let downloaded = {
+            let mut store = STORE.lock();
+            store.downloading = false;
+            match result {
+                Ok(path) => {
+                    store.retry = Retry::new();
+                    info!("The language-ID model is downloaded");
+                    Some(path)
+                },
+                Err(e) if gives_up(&e) => {
+                    store.gave_up = true;
+                    warn!(
+                        "The language-ID model did not download ({:#}). Hush does not try \
                          again until it restarts, and Whisper detects the language within \
                          detect_languages",
-                    e
-                );
-            },
-            Err(e) => {
-                let wait = store.retry.failed(Instant::now());
-                warn!(
-                    "The language-ID model did not download ({:#}). Whisper detects the \
+                        e
+                    );
+                    None
+                },
+                Err(e) => {
+                    let wait = store.retry.failed(Instant::now());
+                    warn!(
+                        "The language-ID model did not download ({:#}). Whisper detects the \
                          language within detect_languages, and Hush tries again in {} minutes",
-                    e,
-                    wait.as_secs() / 60
-                );
-            },
+                        e,
+                        wait.as_secs() / 60
+                    );
+                    None
+                },
+            }
+        };
+        if let Some(path) = downloaded {
+            if let Err(e) = tokio::task::spawn_blocking(move || load_downloaded(path)).await {
+                warn!("The language-ID model load stopped: {}", e);
+            }
         }
     });
 }
