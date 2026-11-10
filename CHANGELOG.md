@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/andymai/hush/compare/v0.29.0...v0.30.0) (2026-11-10)
+
+
+### Features
+
+* **transcription:** load the ggml backends at run time from one package ([#312](https://github.com/andymai/hush/issues/312)) ([067a3ae](https://github.com/andymai/hush/commit/067a3aed95da7f91f13e8e8ae4467e2ca694d388))
+
 ## [0.29.0](https://github.com/andymai/hush/compare/v0.28.0...v0.29.0) (2026-11-10)
 
 
