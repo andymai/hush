@@ -9,7 +9,7 @@
 
 use crate::config::settings::TranscriptionConfig;
 use crate::transcription::cloud::CloudTranscriber;
-use crate::transcription::cpu;
+use crate::transcription::device;
 use crate::transcription::guard::{self, EchoChoice};
 use crate::transcription::langid;
 use crate::transcription::language::Language;
@@ -52,7 +52,7 @@ impl SpeechToText {
                 drop_phrases,
             });
         }
-        cpu::ensure_supported()?;
+        device::init_backends()?;
         let model = local_model_path(config, models_dir);
         let mut whisper = WhisperTranscriber::new(&model, config.use_gpu)
             .await

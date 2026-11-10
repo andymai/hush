@@ -11,16 +11,17 @@
 //! downloads and verifies models from the ggerganov/whisper.cpp catalogue,
 //! the Silero voice activity detection model that trims silence before local
 //! transcription, and the VoxLingua107 language-ID model that
-//! `transcription.detect_languages` uses through [`langid`]. [`GpuAvailability`] reports what
-//! the device registry of transcribe.cpp found. [`gpu_fallback`] waits for
-//! the GPU at login, and keeps a GPU that failed a take on the CPU until its
-//! driver changes. [`cpu`] refuses to call ggml on a CPU below the floor of a
-//! prebuilt binary. [`ModelSlot`] frees the local model after idle minutes,
+//! `transcription.detect_languages` uses through [`langid`].
+//! [`device::init_backends`] loads the ggml backend modules that sit next to
+//! libtranscribe: the CPU module that fits this CPU, and the GPU module.
+//! [`GpuAvailability`] reports what the device registry of transcribe.cpp
+//! found. [`gpu_fallback`] waits for the GPU at login, and keeps a GPU that
+//! failed a take on the CPU until its driver changes. [`ModelSlot`] frees the
+//! local model after idle minutes,
 //! and the next take loads it again. [`language`] lists Whisper's languages
 //! and picks the language of each take.
 
 pub mod cloud;
-pub mod cpu;
 pub mod device;
 pub mod engine;
 pub mod gpu_fallback;

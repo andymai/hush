@@ -23,6 +23,15 @@ cargo fmt              # Format
 
 The Makefile creates a `./hush` symlink to the built binary.
 
+transcribe-cpp uses its `dynamic-backends` feature in every build:
+`libtranscribe` is a shared library, and each ggml backend (a CPU module for
+each x86 level, plus the Vulkan or CUDA module) is a module that it loads at
+run time. `build.rs` copies them to `target/<profile>/lib/hush` and sets the
+RUNPATH `$ORIGIN/../lib/hush` (packages, tests) plus `$ORIGIN/lib/hush` (the
+binary in `target/<profile>`). `HUSH_PACKAGE=1` (release job, flake) leaves only
+the package path. `device::init_backends()` must run before any device query or
+model load.
+
 `make release` builds the Vulkan backend and needs `glslc`, the Vulkan headers,
 and `spirv-headers` at build time; at runtime only the graphics driver is required, on any
 vendor. `make release-cuda` needs the CUDA toolkit (`nvcc`), not just the NVIDIA
@@ -33,8 +42,8 @@ CMake auto-detects it and deadlocks on the CUDA kernel fan-out.
 
 The Makefile and CI set `TRANSCRIBE_CMAKE_ARGS=-DTRANSCRIBE_USE_SYSTEM_BLAS=OFF`.
 Without it, transcribe-cpp-sys links OpenBLAS when the library is installed, and
-`build.rs` warns (and fails a `HUSH_CPU_FLOOR` build). Release ggml flags go in
-the same variable, not in `GGML_*` variables.
+`build.rs` warns (and fails a `HUSH_PACKAGE` build). Extra ggml flags go in the
+same variable, not in `GGML_*` variables.
 
 ## Running
 
@@ -71,7 +80,7 @@ src/
 ├── application/    # HushApp orchestrator with builder pattern
 ├── cli/            # Clap-based CLI, command handlers in cli/commands/
 ├── audio/          # CPAL-based audio capture
-├── transcription/  # Whisper and opt-in Parakeet via transcribe-cpp (whisper.rs), model catalogue and downloads (models.rs), GPU detection (device.rs)
+├── transcription/  # Whisper and opt-in Parakeet via transcribe-cpp (whisper.rs), model catalogue and downloads (models.rs), backend modules and GPU detection (device.rs)
 ├── text_processing/# Pipeline: filler removal → vocabulary → entities → LLM polish
 ├── text/           # uinput typing, clipboard paste fallback, window detection (X11, Hyprland, Sway)
 ├── hotkey/         # Hotkey combination parser, evdev backend, X11 fallback

@@ -43,6 +43,7 @@ impl LanguageId {
                 e
             )
         };
+        crate::transcription::device::init_backends()?;
         let model = Model::load_with(model_path, &cpu_options()).map_err(load_error)?;
         if !model.roles().contains(Role::LangId) {
             return Err(anyhow::anyhow!(
