@@ -11,6 +11,7 @@ use crate::Result;
 use anyhow::Context;
 use parking_lot::Mutex;
 use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -42,6 +43,13 @@ const SPEECH_GAP: usize = WHISPER_SAMPLE_RATE as usize / 10;
 
 /// Audio kept after each stretch of speech but the last, as whisper.cpp does.
 const SPEECH_OVERLAP: usize = WHISPER_SAMPLE_RATE as usize / 10;
+
+/// The longest input of one Parakeet run. The memory of its encoder grows
+/// with the input, so a long take runs in pieces.
+const PARAKEET_PIECE: usize = 30 * WHISPER_SAMPLE_RATE as usize;
+
+/// The shortest piece that a cut at the limit leaves.
+const MIN_PIECE: usize = WHISPER_SAMPLE_RATE as usize;
 
 #[derive(Debug, Clone)]
 pub struct TranscriptionResult {
@@ -122,6 +130,12 @@ impl Family {
 #[error("Transcription failed: {0}")]
 struct Rejected(transcribe_cpp::Error);
 
+/// A run that did not fit in the memory of the device. The device works, so
+/// only this take moves to the CPU.
+#[derive(Debug, thiserror::Error)]
+#[error("Transcription ran out of memory: {0}")]
+struct OutOfMemory(transcribe_cpp::Error);
+
 /// The session is created once so that its GPU buffers are reused across
 /// dictations instead of reallocated per call.
 struct Engine {
@@ -184,7 +198,8 @@ impl WhisperTranscriber {
                 warn!("GPU acceleration requested but no GPU backend is available; using CPU");
             }
         }
-        let using_gpu = use_gpu && gpu.available && !gpu_fallback::avoid_gpu(gpu);
+        let family = Family::of_file(model_path).unwrap_or(Family::Whisper);
+        let using_gpu = use_gpu && gpu.available && !gpu_fallback::avoid_gpu(gpu, family);
         info!(
             request_id = %ctx.request_id,
             model_path = %model_path.display(),
@@ -388,9 +403,17 @@ impl WhisperTranscriber {
             .filter(|p| !p.trim().is_empty());
 
         let heard = match self
-            .run_take(Arc::clone(&samples), prompt.clone(), language.clone())
+            .run_take(
+                self.engine(),
+                Arc::clone(&samples),
+                prompt.clone(),
+                language.clone(),
+            )
             .await
         {
+            Err(e) if self.is_using_gpu() && e.downcast_ref::<OutOfMemory>().is_some() => {
+                self.retry_once_on_cpu(e, samples, prompt, language).await
+            },
             Err(e) if self.is_using_gpu() && e.downcast_ref::<Rejected>().is_none() => {
                 self.retry_on_cpu(e, samples, prompt, language).await
             },
@@ -424,11 +447,11 @@ impl WhisperTranscriber {
 
     async fn run_take(
         &self,
+        engine: Arc<Engine>,
         samples: Arc<[f32]>,
         prompt: Option<String>,
         language: String,
     ) -> Result<Heard> {
-        let engine = self.engine();
         let vad = self.vad.clone();
         let langid_dir = self.langid_dir.clone();
         let detect = Arc::clone(&self.detect_languages);
@@ -440,16 +463,24 @@ impl WhisperTranscriber {
                     None
                 },
             });
-            let Some(speech) = whisper_input(&samples, trimmed.as_deref()) else {
+            let starts = trimmed
+                .as_ref()
+                .map_or(&[][..], |(_, starts)| starts.as_slice());
+            let Some(speech) = whisper_input(
+                &samples,
+                trimmed.as_ref().map(|(speech, _)| speech.as_slice()),
+            ) else {
                 debug!("The take is too quiet to hold speech");
                 return Ok(Heard::nothing());
             };
+            if engine.family == Family::Parakeet {
+                return Ok(Heard {
+                    text: run_pieces(&engine, speech, starts)?,
+                    detected: None,
+                });
+            }
             let prompt = prompt.as_deref().filter(|_| engine.family.takes_prompt());
-            if engine.family == Family::Parakeet
-                || language != "auto"
-                || detect.is_empty()
-                || !engine.multilingual
-            {
+            if language != "auto" || detect.is_empty() || !engine.multilingual {
                 let (text, _) = run_full(&engine, speech, &language, prompt)?;
                 return Ok(Heard {
                     text,
@@ -486,7 +517,7 @@ impl WhisperTranscriber {
              and the CPU stays in use for this session: {:#}",
             gpu_error
         );
-        gpu_fallback::remember(self.gpu);
+        gpu_fallback::remember(self.gpu, self.family());
         let engine = load_engine(&self.model_path, false)
             .await
             .with_context(|| {
@@ -504,7 +535,35 @@ impl WhisperTranscriber {
             self.family().name(),
             self.get_device_info()
         );
-        self.run_take(samples, prompt, language).await
+        self.run_take(self.engine(), samples, prompt, language)
+            .await
+    }
+
+    /// Run the take again on a CPU copy of the model after the GPU ran out
+    /// of memory for it. The session keeps the GPU for the next take.
+    async fn retry_once_on_cpu(
+        &self,
+        gpu_error: anyhow::Error,
+        samples: Arc<[f32]>,
+        prompt: Option<String>,
+        language: String,
+    ) -> Result<Heard> {
+        warn!(
+            "The GPU ran out of memory for this take, so it runs again on the CPU. \
+             The next take uses the GPU again: {:#}",
+            gpu_error
+        );
+        let engine = load_engine(&self.model_path, false)
+            .await
+            .with_context(|| {
+                format!(
+                    "The GPU ran out of memory for the take ({:#}), and the model did not \
+                     load on the CPU",
+                    gpu_error
+                )
+            })?;
+        self.run_take(Arc::new(engine), samples, prompt, language)
+            .await
     }
 
     pub fn is_using_gpu(&self) -> bool {
@@ -682,9 +741,51 @@ fn run_full(
         Err(e @ (Error::InvalidArgument(_) | Error::Unsupported(_))) => {
             return Err(Rejected(e).into());
         },
+        Err(e @ Error::OutOfMemory(_)) => return Err(OutOfMemory(e).into()),
         Err(e) => return Err(anyhow::anyhow!("Transcription failed: {}", e)),
     };
     Ok((transcript_text(&transcript), transcript.language))
+}
+
+/// A Parakeet take in [`pieces`], with the text of each piece one space
+/// apart.
+fn run_pieces(engine: &Engine, speech: &[f32], starts: &[usize]) -> Result<String> {
+    let mut text = String::new();
+    for piece in pieces(speech.len(), starts, PARAKEET_PIECE) {
+        let (heard, _) = run_full(engine, &speech[piece], "auto", None)?;
+        if heard.is_empty() {
+            continue;
+        }
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        text.push_str(&heard);
+    }
+    Ok(text)
+}
+
+/// `len` samples in pieces of at most `max`. A cut falls in the middle of the
+/// silence before the last stretch of speech that starts within the limit.
+/// `starts` holds where each stretch starts, as [`join_speech`] gives them.
+/// Without such a stretch, the cut falls at the limit, and the last piece
+/// keeps at least [`MIN_PIECE`].
+fn pieces(len: usize, starts: &[usize], max: usize) -> Vec<Range<usize>> {
+    let max = max.max(MIN_PIECE);
+    let mut pieces = Vec::new();
+    let mut from = 0;
+    while len - from > max {
+        let limit = from + max;
+        let cut = starts
+            .iter()
+            .rev()
+            .map(|&start| start.saturating_sub(SPEECH_GAP / 2))
+            .find(|&cut| cut > from && cut <= limit)
+            .unwrap_or_else(|| limit.min(len - MIN_PIECE));
+        pieces.push(from..cut);
+        from = cut;
+    }
+    pieces.push(from..len);
+    pieces
 }
 
 /// Limited detection without the language-ID model: Whisper detects the
@@ -773,8 +874,9 @@ pub(crate) fn whisper_input<'a>(take: &'a [f32], speech: Option<&'a [f32]>) -> O
     }
 }
 
-/// The speech in `samples`, as the Silero model finds it.
-fn speech_in(vad: &Mutex<VadSession>, samples: &[f32]) -> Result<Vec<f32>> {
+/// The speech in `samples`, as the Silero model finds it, and where each
+/// stretch of it starts (see [`join_speech`]).
+fn speech_in(vad: &Mutex<VadSession>, samples: &[f32]) -> Result<(Vec<f32>, Vec<usize>)> {
     let options = VadOptions {
         min_speech_ms: VAD_MIN_SPEECH_MS,
         speech_pad_ms: VAD_SPEECH_PAD_MS,
@@ -791,14 +893,14 @@ fn speech_in(vad: &Mutex<VadSession>, samples: &[f32]) -> Result<Vec<f32>> {
             .iter()
             .map(|segment| (index(segment.start_sample), index(segment.end_sample))),
     );
-    let speech = join_speech(samples, &spans);
+    let (speech, starts) = join_speech(samples, &spans);
     debug!(
         stretches = spans.len(),
         kept_samples = speech.len(),
         take_samples = samples.len(),
         "Voice activity detection"
     );
-    Ok(speech)
+    Ok((speech, starts))
 }
 
 /// Spans in time order, with spans that touch or overlap made into one.
@@ -818,10 +920,12 @@ pub(crate) fn merge_touching(
 }
 
 /// The stretches of `samples` that `spans` mark as speech (start and end
-/// sample), joined by a short silence. Each stretch but the last keeps a
-/// little audio after its end, without reaching into the next one.
-pub(crate) fn join_speech(samples: &[f32], spans: &[(usize, usize)]) -> Vec<f32> {
+/// sample), joined by a short silence, and where each stretch starts in the
+/// result. Each stretch but the last keeps a little audio after its end,
+/// without reaching into the next one.
+pub(crate) fn join_speech(samples: &[f32], spans: &[(usize, usize)]) -> (Vec<f32>, Vec<usize>) {
     let mut speech = Vec::new();
+    let mut starts = Vec::new();
     let mut cursor = 0;
     for (i, &(start, end)) in spans.iter().enumerate() {
         let start = start.min(samples.len()).max(cursor);
@@ -835,10 +939,11 @@ pub(crate) fn join_speech(samples: &[f32], spans: &[(usize, usize)]) -> Vec<f32>
         if !speech.is_empty() {
             speech.resize(speech.len() + SPEECH_GAP, 0.0);
         }
+        starts.push(speech.len());
         speech.extend_from_slice(&samples[start..end]);
         cursor = end;
     }
-    speech
+    (speech, starts)
 }
 
 /// Whisper writes non-speech as tags like `[BLANK_AUDIO]`, `[MUSIC]` or
@@ -1074,10 +1179,12 @@ mod tests {
     #[test]
     fn speech_stretches_are_joined_by_a_short_silence() {
         let samples: Vec<f32> = (0..48_000).map(|i| 1.0 + i as f32).collect();
-        let speech = join_speech(&samples, &[(8_000, 16_000), (32_000, 40_000)]);
+        let (speech, starts) = join_speech(&samples, &[(8_000, 16_000), (32_000, 40_000)]);
         let first = 8_000..16_000 + SPEECH_OVERLAP;
         let second = 32_000..40_000;
         assert_eq!(speech.len(), first.len() + SPEECH_GAP + second.len());
+        assert_eq!(starts, [0, first.len() + SPEECH_GAP]);
+        assert_eq!(speech[starts[1]], samples[32_000]);
         assert_eq!(speech[0], samples[8_000]);
         assert_eq!(speech[first.len() - 1], samples[first.end - 1]);
         assert!(speech[first.len()..first.len() + SPEECH_GAP]
@@ -1089,7 +1196,7 @@ mod tests {
     #[test]
     fn speech_overlap_never_repeats_audio() {
         let samples: Vec<f32> = (0..32_000).map(|i| i as f32).collect();
-        let speech = join_speech(&samples, &[(0, 16_000), (16_160, 24_000)]);
+        let (speech, _) = join_speech(&samples, &[(0, 16_000), (16_160, 24_000)]);
         let kept: Vec<f32> = speech.into_iter().filter(|s| *s != 0.0).collect();
         assert!(
             kept.windows(2).all(|pair| pair[0] < pair[1]),
@@ -1109,8 +1216,9 @@ mod tests {
 
         let samples: Vec<f32> = (0..160_000).map(|i| 1.0 + i as f32).collect();
         let spans = merge_touching([(2_500, 77_000), (77_000, 149_500)]);
-        let speech = join_speech(&samples, &spans);
+        let (speech, starts) = join_speech(&samples, &spans);
         assert_eq!(speech.len(), 147_000);
+        assert_eq!(starts, [0]);
         assert!(speech.iter().all(|s| *s != 0.0), "no silence mid-speech");
     }
 
@@ -1144,10 +1252,66 @@ mod tests {
     #[test]
     fn no_speech_and_bad_spans_give_nothing() {
         let samples = vec![0.5f32; 16_000];
-        assert!(join_speech(&samples, &[]).is_empty());
-        assert!(join_speech(&samples, &[(12_800, 6_400)]).is_empty());
-        assert_eq!(join_speech(&samples, &[(14_400, 80_000)]).len(), 1_600);
-        assert!(join_speech(&[], &[(0, 16_000)]).is_empty());
+        assert_eq!(join_speech(&samples, &[]), (vec![], vec![]));
+        assert_eq!(join_speech(&samples, &[(12_800, 6_400)]), (vec![], vec![]));
+        assert_eq!(join_speech(&samples, &[(14_400, 80_000)]).0.len(), 1_600);
+        assert_eq!(join_speech(&[], &[(0, 16_000)]), (vec![], vec![]));
+    }
+
+    const SECOND: usize = WHISPER_SAMPLE_RATE as usize;
+
+    #[test]
+    fn a_long_parakeet_take_is_cut_in_the_silence_between_stretches() {
+        let starts = [0, 20 * SECOND, 45 * SECOND, 60 * SECOND];
+        let half_gap = SPEECH_GAP / 2;
+        assert_eq!(
+            pieces(70 * SECOND, &starts, PARAKEET_PIECE),
+            [
+                0..20 * SECOND - half_gap,
+                20 * SECOND - half_gap..45 * SECOND - half_gap,
+                45 * SECOND - half_gap..70 * SECOND,
+            ]
+        );
+    }
+
+    #[test]
+    fn without_stretches_the_cut_falls_at_the_limit() {
+        assert_eq!(
+            pieces(70 * SECOND, &[], PARAKEET_PIECE),
+            [
+                0..30 * SECOND,
+                30 * SECOND..60 * SECOND,
+                60 * SECOND..70 * SECOND
+            ]
+        );
+        assert_eq!(
+            pieces(30 * SECOND + SECOND / 2, &[], PARAKEET_PIECE),
+            [
+                0..29 * SECOND + SECOND / 2,
+                29 * SECOND + SECOND / 2..30 * SECOND + SECOND / 2
+            ],
+            "the last piece keeps a second"
+        );
+        assert_eq!(
+            pieces(70 * SECOND, &[0, 40 * SECOND], PARAKEET_PIECE)[0],
+            0..30 * SECOND,
+            "no stretch starts within the first 30 s"
+        );
+    }
+
+    #[test]
+    fn a_short_take_is_one_piece() {
+        let whole = |len: usize| vec![Range { start: 0, end: len }];
+        assert_eq!(
+            pieces(30 * SECOND, &[0, 10 * SECOND], PARAKEET_PIECE),
+            whole(30 * SECOND)
+        );
+        assert_eq!(pieces(SECOND, &[], PARAKEET_PIECE), whole(SECOND));
+        assert_eq!(
+            pieces(3 * SECOND, &[], 0),
+            [0..SECOND, SECOND..2 * SECOND, 2 * SECOND..3 * SECOND],
+            "a zero limit still ends"
+        );
     }
 
     #[test]

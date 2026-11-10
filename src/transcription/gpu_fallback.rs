@@ -1,13 +1,15 @@
-//! When Whisper uses the CPU in a GPU build.
+//! When the speech model uses the CPU in a GPU build.
 //!
 //! At login, the graphics driver can start after Hush. ggml looks for the
 //! GPU only once in each process, so in the first minutes after boot, the
 //! first model load waits a short time for a render node. When the GPU fails
-//! a take, Hush writes the GPU and its driver to a file in the state folder.
-//! Later starts use the CPU on that GPU until the driver changes.
+//! a take, Hush writes the GPU, its driver, and the model family to a file in
+//! the state folder. Later starts of that family use the CPU on that GPU
+//! until the driver changes.
 
 use crate::config::paths;
 use crate::transcription::device::GpuAvailability;
+use crate::transcription::whisper::Family;
 use crate::Result;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -29,7 +31,17 @@ const UPTIME: &str = "/proc/uptime";
 const NVIDIA_VERSION: &str = "/sys/module/nvidia/version";
 const KERNEL_RELEASE: &str = "/proc/sys/kernel/osrelease";
 
-static FAILED_THIS_SESSION: AtomicBool = AtomicBool::new(false);
+static WHISPER_FAILED: AtomicBool = AtomicBool::new(false);
+static PARAKEET_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Whether `family` failed a take on the GPU in this session. A failure of
+/// one family says nothing about the GPU memory or kernels of the other.
+fn failed_this_session(family: Family) -> &'static AtomicBool {
+    match family {
+        Family::Whisper => &WHISPER_FAILED,
+        Family::Parakeet => &PARAKEET_FAILED,
+    }
+}
 
 /// Whether the model load waits for a render node. ggml looks for the GPU
 /// only once, so a wait after that look cannot help. A machine that booted
@@ -113,7 +125,7 @@ fn has_render_node(dir: &Path) -> bool {
     })
 }
 
-/// A GPU that failed a take, and the driver that ran it.
+/// A GPU that failed a take, the driver that ran it, and the model family.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GpuFailure {
     /// ggml's description of the GPU
@@ -122,6 +134,14 @@ pub struct GpuFailure {
     pub backend: String,
     /// The NVIDIA driver version, or the kernel release for other GPUs
     pub driver: String,
+    /// The model family that failed: Whisper or Parakeet. A record without
+    /// it is a Whisper failure: a Hush that writes no family runs only Whisper.
+    #[serde(default = "whisper_name")]
+    pub family: String,
+}
+
+fn whisper_name() -> String {
+    Family::Whisper.name().to_string()
 }
 
 impl GpuFailure {
@@ -130,8 +150,9 @@ impl GpuFailure {
         paths::state_dir().join("gpu-failure.json")
     }
 
-    /// The GPU that ggml found, with the driver that runs it now.
-    pub fn current(gpu: &GpuAvailability) -> Self {
+    /// The GPU that ggml found, with the driver that runs it now, for a
+    /// model of `family`.
+    pub fn current(gpu: &GpuAvailability, family: Family) -> Self {
         let read = |path: &str| std::fs::read_to_string(path).ok();
         Self {
             gpu: gpu.device_name.clone(),
@@ -141,6 +162,7 @@ impl GpuFailure {
                 read(NVIDIA_VERSION).as_deref(),
                 read(KERNEL_RELEASE).as_deref(),
             ),
+            family: family.name().to_string(),
         }
     }
 
@@ -178,7 +200,7 @@ fn driver_label(gpu: &str, nvidia: Option<&str>, kernel: Option<&str>) -> String
 /// What a remembered GPU failure means for a model load.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Choice {
-    /// No failure is remembered: use the GPU.
+    /// No failure of this model family is remembered: use the GPU.
     Gpu,
     /// This GPU failed with this driver: use the CPU.
     Cpu,
@@ -186,31 +208,40 @@ pub enum Choice {
     Forget,
 }
 
-/// Whether to use the CPU on `current`, from the `record` of a failure.
+/// Whether to use the CPU on `current`, from the `record` of a failure. A
+/// record of the other model family stays for that family.
 pub fn choose(record: Option<&GpuFailure>, current: &GpuFailure) -> Choice {
     match record {
         None => Choice::Gpu,
+        Some(record) if record.family != current.family => Choice::Gpu,
         Some(record) if record == current => Choice::Cpu,
         Some(_) => Choice::Forget,
     }
 }
 
-/// Whether this load uses the CPU on the GPU that ggml found, because the
-/// GPU failed a take in this session or with this driver before.
-pub fn avoid_gpu(gpu: &GpuAvailability) -> bool {
-    if FAILED_THIS_SESSION.load(Ordering::Acquire) {
-        info!("The speech model stays on the CPU, because the GPU failed a take in this session");
+/// Whether this load of a `family` model uses the CPU on the GPU that ggml
+/// found, because the GPU failed a take of that family in this session or
+/// with this driver before.
+pub fn avoid_gpu(gpu: &GpuAvailability, family: Family) -> bool {
+    if failed_this_session(family).load(Ordering::Acquire) {
+        info!(
+            "{} stays on the CPU, because the GPU failed a {} take in this session",
+            family.name(),
+            family.name()
+        );
         return true;
     }
     let path = GpuFailure::path();
-    let current = GpuFailure::current(gpu);
+    let current = GpuFailure::current(gpu, family);
     match choose(GpuFailure::load_from(&path).as_ref(), &current) {
         Choice::Gpu => false,
         Choice::Cpu => {
             warn!(
-                "The speech model loads on the CPU, because {} failed a take with driver {}. \
+                "{} loads on the CPU, because {} failed a {} take with driver {}. \
                  To try the GPU again, delete {} and run `hush daemon restart`",
+                current.family,
                 current.gpu,
+                current.family,
                 current.driver,
                 path.display()
             );
@@ -229,15 +260,16 @@ pub fn avoid_gpu(gpu: &GpuAvailability) -> bool {
     }
 }
 
-/// Keep the CPU for this session, and write the GPU and its driver to the
-/// state folder for later starts.
-pub fn remember(gpu: &GpuAvailability) {
-    FAILED_THIS_SESSION.store(true, Ordering::Release);
+/// Keep `family` on the CPU for this session, and write the GPU, its driver,
+/// and the family to the state folder for later starts.
+pub fn remember(gpu: &GpuAvailability, family: Family) {
+    failed_this_session(family).store(true, Ordering::Release);
     let path = GpuFailure::path();
-    match GpuFailure::current(gpu).save_to(&path) {
+    match GpuFailure::current(gpu, family).save_to(&path) {
         Ok(()) => info!(
-            "Wrote the GPU failure to {}. Later starts use the CPU until the driver changes",
-            path.display()
+            "Wrote the GPU failure to {}. Later starts of {} use the CPU until the driver changes",
+            path.display(),
+            family.name()
         ),
         Err(e) => warn!("Could not write the GPU failure: {:#}", e),
     }
@@ -252,6 +284,7 @@ mod tests {
             gpu: gpu.to_string(),
             backend: backend.to_string(),
             driver: driver.to_string(),
+            family: "Whisper".to_string(),
         }
     }
 
@@ -316,6 +349,40 @@ mod tests {
         assert_eq!(choose(Some(&rtx), &new_driver), Choice::Forget);
         assert_eq!(choose(Some(&rtx), &new_gpu), Choice::Forget);
         assert_eq!(choose(Some(&rtx), &new_backend), Choice::Forget);
+    }
+
+    #[test]
+    fn a_failure_of_one_family_leaves_the_other_on_the_gpu() {
+        let whisper = failure("NVIDIA GeForce RTX 4080", "Vulkan", "NVIDIA 580.95.05");
+        let parakeet = GpuFailure {
+            family: "Parakeet".to_string(),
+            ..whisper.clone()
+        };
+        assert_eq!(choose(Some(&parakeet), &whisper), Choice::Gpu);
+        assert_eq!(choose(Some(&whisper), &parakeet), Choice::Gpu);
+        assert_eq!(choose(Some(&parakeet), &parakeet), Choice::Cpu);
+        let new_driver = GpuFailure {
+            driver: "NVIDIA 580.105.08".to_string(),
+            ..parakeet.clone()
+        };
+        assert_eq!(choose(Some(&parakeet), &new_driver), Choice::Forget);
+    }
+
+    #[test]
+    fn a_record_without_a_family_is_a_whisper_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gpu-failure.json");
+        std::fs::write(
+            &path,
+            r#"{"gpu": "NVIDIA GeForce RTX 4080", "backend": "Vulkan", "driver": "NVIDIA 580.95.05"}"#,
+        )
+        .unwrap();
+        let record = GpuFailure::load_from(&path).unwrap();
+        assert_eq!(record.family, "Whisper");
+        assert_eq!(
+            record,
+            failure("NVIDIA GeForce RTX 4080", "Vulkan", "NVIDIA 580.95.05")
+        );
     }
 
     #[test]

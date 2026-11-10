@@ -424,8 +424,8 @@ fn gpu_failure_report(record: Option<&GpuFailure>, path: &Path) -> Option<Check>
     Some(Check::warn(
         "GPU failure",
         format!(
-            "{} via {} failed a take with driver {}, so Whisper uses the CPU until the driver changes",
-            record.gpu, record.backend, record.driver
+            "{} via {} failed a take with driver {}, so {} uses the CPU until the driver changes",
+            record.gpu, record.backend, record.driver, record.family
         ),
         format!(
             "rm {} && hush daemon restart (tries the GPU again)",
@@ -1020,6 +1020,7 @@ mod tests {
             gpu: "NVIDIA GeForce RTX 4080".to_string(),
             backend: "Vulkan".to_string(),
             driver: "NVIDIA 580.95.05".to_string(),
+            family: "Parakeet".to_string(),
         };
         let check = gpu_failure_report(Some(&record), path).unwrap();
         assert_eq!(check.level, Level::Warn);
@@ -1027,6 +1028,11 @@ mod tests {
             check.detail.starts_with(
                 "NVIDIA GeForce RTX 4080 via Vulkan failed a take with driver NVIDIA 580.95.05"
             ),
+            "{}",
+            check.detail
+        );
+        assert!(
+            check.detail.contains("so Parakeet uses the CPU"),
             "{}",
             check.detail
         );
