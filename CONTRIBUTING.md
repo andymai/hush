@@ -14,7 +14,9 @@
    sudo pacman -S cmake pkgconf alsa-lib libx11 libxi libxtst libxcursor libxrandr libxinerama mesa shaderc vulkan-headers vulkan-icd-loader spirv-headers
    ```
 
-3. Install Node.js 20+ and run `npm install` to enable the commit hooks.
+   The keymap tests skip, and print why, when the system lacks libxkbcommon, `xkb-data`, or the X11 compose tables. CI installs `libxkbcommon0` and `xkb-data`.
+
+3. Install Node.js 22.12 or later and run `npm install` to enable the commit hooks.
 4. Build and test:
 
    ```bash
@@ -26,10 +28,10 @@
 
 1. Branch from `main` as `<type>/<kebab-description>`, for example `feat/evdev-hotkey`.
 2. Make the change with tests alongside the code.
-3. Commit with a [Conventional Commits](https://www.conventionalcommits.org/) message. The commit-msg hook runs commitlint; the pre-commit hook runs `cargo fmt`, `cargo clippy`, `taplo fmt`, and `cargo machete`.
+3. Commit with a [Conventional Commits](https://www.conventionalcommits.org/) message. The commit-msg hook runs commitlint. The pre-commit hook checks `cargo fmt`, `cargo clippy`, `taplo fmt`, and `cargo machete`. It skips `taplo` and `cargo machete` when you did not install them.
 4. Open a pull request. The title must also be a conventional commit subject, because squash merges use it and release-please reads it.
 
-CI gates every PR on format, clippy, tests, MSRV, rustdoc, cargo-deny, cargo-audit, unused dependencies, TOML format, and an OSV scan. The `CI Pass` check must be green to merge.
+CI gates every PR on format, clippy (also with the `vulkan` feature), tests, MSRV, rustdoc, cargo-deny, cargo-audit, unused dependencies, and TOML format. The `CI Pass` check must be green to merge. An OSV scan of both lockfiles reports on each PR and blocks `main`.
 
 ## Commit Messages
 
@@ -48,14 +50,14 @@ chore: bump transcribe-cpp
 ## Code Style
 
 - `rustfmt` defaults, enforced by CI.
-- No `unwrap()` or `expect()` in non-test code. Propagate with `?` and add context with `anyhow::Context`.
+- No `unwrap()` in non-test code. Propagate with `?` and add context with `anyhow::Context`. Use `expect()` only for a regex literal.
 - Async-first with tokio; trait methods use `async_trait`.
 - Comments explain a non-obvious why, never what the code already says.
 - Public APIs get `///` doc comments; examples must compile.
 
 ## Testing
 
-Unit tests live in `#[cfg(test)] mod tests` next to the code, using the mocks in `src/core/mocks.rs`. Audio capture, hotkeys, and text insertion depend on hardware that CI does not have, so describe the manual test you ran in the PR. `hush test all` exercises the full pipeline on a real machine.
+Unit tests live in `#[cfg(test)] mod tests` next to the code, using the mocks in `src/core/mocks.rs`. Audio capture, hotkeys, and text insertion depend on hardware that CI does not have, so describe the manual test you ran in the PR. `hush test all` exercises the full pipeline on a real machine. `scripts/e2e/run.sh` runs dictation from a virtual microphone to the text, and a nightly workflow runs it too. See [tests/e2e/README.md](tests/e2e/README.md).
 
 ## Releases
 

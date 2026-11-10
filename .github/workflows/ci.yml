@@ -20,8 +20,7 @@ permissions: {}
 # rust-toolchain.toml pins the Rust version and includes rustfmt and clippy,
 # so rustup installs the right toolchain without a setup action.
 #
-# Jobs pin ubuntu-24.04: on ubuntu-26.04, whisper-rs-sys 0.14 generates
-# bindings that fail their own layout checks.
+# Jobs pin ubuntu-24.04, so a new runner image cannot change a build.
 
 jobs:
   fmt:

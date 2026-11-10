@@ -11,10 +11,11 @@ silence_stop_secs = 0    # stop a hands-free recording after this many seconds o
 pause_media = false      # pause the media players that play (MPRIS) while you record, and resume them when the recording stops
 
 [transcription]
-# Where speech becomes text. local runs whisper.cpp and nothing leaves this
-# machine. groq and openai send the audio of each dictation to that service,
-# with the window title when context_prompt is on. The key comes from
-# GROQ_API_KEY or OPENAI_API_KEY (in the environment or ~/.config/hush/.env).
+# Where speech becomes text. local runs Whisper, or the opt-in Parakeet,
+# through transcribe.cpp, and nothing leaves this machine. groq and openai
+# send the audio of each dictation to that service, with the window title
+# when context_prompt is on. The key comes from GROQ_API_KEY or
+# OPENAI_API_KEY (in the environment or ~/.config/hush/.env).
 # openai-compatible sends the audio of each dictation to the URL in
 # server_url, such as a whisper.cpp server on your network. Hush adds
 # /v1/audio/transcriptions when the URL does not end with it.
@@ -34,9 +35,10 @@ no_speech_threshold = 0.6
 context_prompt = true     # prime Whisper with the focused window's title and learned terms
 vad = true                # local only: send Whisper only the speech that the Silero model finds; `hush models download` gets the model
 unload_after_mins = 0     # local only: free the model's RAM and GPU memory after this many minutes without a take, and load it again on the next take; 0 never frees it
-# Local only: with language = "auto", Whisper picks the most likely of these
-# languages, e.g. ["en", "de"]. [] allows every language. Groq, OpenAI, and
-# a server detect the language on their own.
+# Local only: with language = "auto", a small language-ID model picks the most
+# likely of these languages, e.g. ["en", "de"], and Whisper writes in it. []
+# allows every language. Groq, OpenAI, and a server detect the language on their
+# own.
 detect_languages = []
 # Hush drops a transcript that is only one of these phrases, without case and
 # punctuation. Whisper invents them for silence or noise. When you set this
@@ -189,8 +191,8 @@ enabled = true
 [updates]
 # Once a day, ask GitHub for the number of the newest release and show a
 # notification when it is newer than this one. The request sends nothing but
-# the Hush version. AppImage and tarball installs only: a package manager
-# updates its own installs, so those never check.
+# the Hush version. AppImage, tarball, and source installs check. A package
+# manager updates its own installs, so those never check.
 check = false
 
 [gui]

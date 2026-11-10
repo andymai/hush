@@ -1,8 +1,8 @@
 # End-to-end tests
 
 `scripts/e2e/run.sh` proves that dictation works from the microphone to the
-text. It starts a test daemon with its own config and folders, plays a
-recorded clip into a PipeWire virtual microphone in real time, and reads the
+text. It starts a test daemon with its own config and folders. It plays a
+recorded clip into a PipeWire virtual microphone in real time, and it reads the
 text with `hush stop --print --json`. The test daemon types nothing.
 
 ## Safety
@@ -18,9 +18,9 @@ does not change them:
 - Each test stream has `node.dont-fallback`, so a missing target plays or
   records nothing. WirePlumber keeps no state for the test nodes.
 - The harness uses `pw-dump` to make sure that the test daemon records only
-  from the virtual source, that `pw-cat` plays only into the virtual sink, and
-  that no other process links to them. It checks the route of `pw-cat` with
-  silence before any speech plays.
+  from the virtual source. It makes sure that `pw-cat` plays only into the
+  virtual sink, and that no other process links to them. It tests the route of
+  `pw-cat` with silence before any speech plays.
 - The test daemon gets a clean environment: a temporary `HOME`, XDG folders,
   and `XDG_RUNTIME_DIR`, so its socket is never the socket of your daemon. It
   has no display and no session bus, so it shows no overlay and no
@@ -31,9 +31,9 @@ does not change them:
   daemon can write `/dev/uinput`, the harness stops. Set
   `HUSH_E2E_ALLOW_UINPUT=1` only on a machine without a desktop session.
 - A `trap` stops the daemon, removes the virtual nodes, and deletes the
-  temporary folder, also when a case fails or you press Ctrl+C. If the
-  harness is killed, the kernel sends `SIGTERM` to the virtual microphone at
-  once and to the test daemon when its case ends (`setpriv --pdeathsig`).
+  temporary folder, also when a case fails or you press Ctrl+C. If a signal
+  kills the harness, the kernel sends `SIGTERM` to the virtual microphone at
+  once. It sends it to the test daemon when its case ends (`setpriv --pdeathsig`).
   Only the temporary folder stays.
 - The harness never uses `~/.config/hush`, `~/.local/share/hush`,
   `~/.local/state/hush`, or `~/.cache/hush`.
@@ -51,16 +51,17 @@ scripts/e2e/run.sh english_clip    # one case
 ```
 
 The first run downloads the `tiny` model and the voice activity model into
-`~/.cache/hush-e2e/`. Later runs use that copy. The `parakeet` case runs the
-opt-in Parakeet model on both clips; its first run downloads that model
-(740 MB) into the same folder, and the nightly job keeps it in its cache.
+`$XDG_CACHE_HOME/hush-e2e/`, which is `~/.cache/hush-e2e/` by default. Later
+runs use that copy. The `parakeet` case runs the opt-in Parakeet model on both
+clips. Its first run downloads that model (740 MB) into the same folder. The
+nightly job keeps it in its cache.
 
 Two cases use the language-ID model:
 
 - `detect_limited` needs the model before its take. With
   `HUSH_E2E_LANGID_MODEL`, the harness links that copy. Without it, the test
   daemon downloads the model (27 MB) from `collectivecontext/hush-models` at
-  start, each run, and the case waits up to 60 s for it.
+  each start, and the case waits up to 60 s for it.
 - `detect_limited_late_model` starts without the model and links
   `HUSH_E2E_LANGID_MODEL` after the first take. Without the variable, it
   checks nothing.

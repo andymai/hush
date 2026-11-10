@@ -14,22 +14,23 @@ Local voice-to-text for Linux. Hold a key, speak, release; your words land at th
 
 </div>
 
-Hush turns speech into text on any Linux desktop. Hold a key, talk, let go, and the words appear wherever your cursor is. It runs OpenAI's Whisper models on your own machine (on the GPU through Vulkan when you have one) and types the result through the kernel's input layer, so it works in terminals, browsers, editors, chat, VMs, games, and password fields, on both Wayland and X11. Audio stays on your computer unless you choose a cloud service for transcription.
+Hush turns speech into text on any Linux desktop. Hold a key, talk, let go, and the words appear wherever your cursor is. It runs OpenAI's Whisper models on your own machine, on the GPU through Vulkan when you have one. It types the result through the kernel's input layer. This works in terminals, browsers, editors, chat, VMs, games, and password fields, on Wayland and X11. Audio stays on your computer unless you choose a cloud service for transcription.
 
-It is built to disappear into a keyboard-driven workflow: bind any key to it, tune the output per application, and teach it the words you use.
+It fits a keyboard-driven workflow: bind any key to it, tune the output for each application, and teach it the words you use.
 
 ## Install
 
 | Method | Command |
 |---|---|
 | Install script (Ubuntu, Debian, Fedora, openSUSE, Arch, and most others) | `curl -fsSL https://raw.githubusercontent.com/andymai/hush/main/install.sh \| sh` |
-| Fedora (repository) | `sudo dnf copr enable veroz/hush && sudo dnf install hush` |
-| Manual | Grab the `.deb`, `.rpm`, `AppImage`, or tarball from the [latest release](https://github.com/andymai/hush/releases/latest) |
+| Fedora (COPR) | `sudo dnf copr enable veroz/hush && sudo dnf install hush` |
+| Release files | Download the `.deb`, `.rpm`, `AppImage`, or tarball from the [latest release](https://github.com/andymai/hush/releases/latest), and see [INSTALL.md](INSTALL.md#release-files) |
 | NixOS (flake) | `nix profile install github:andymai/hush`, and see [INSTALL.md](INSTALL.md#nix-and-nixos) for the system module |
+| Source | `make install`, and see [INSTALL.md](INSTALL.md#build) |
 
-The script detects your distribution, verifies the download's checksum (and its [build provenance](INSTALL.md#verify-a-download) when `gh` is installed), and installs through your package manager, so removal is a normal `apt remove hush` or `dnf remove hush`. On Arch it installs the tarball under `~/.local` until an AUR package is published. It needs only your usual graphics driver: NVIDIA, AMD, and Intel all work through Vulkan, with a CPU fallback everywhere else.
+The script detects your distribution and checks the checksum of the download. It also checks the [build provenance](INSTALL.md#verify-a-download) when your system has GitHub CLI 2.49 or later and you logged in to it. Debian and Ubuntu get the `.deb`, and Fedora, RHEL, and openSUSE get the `.rpm`. Both install through your package manager, so removal is a normal `apt remove hush` or `dnf remove hush`. Every other distribution, Arch included, gets the tarball under `~/.local`.
 
-To build from source, see [INSTALL.md](INSTALL.md).
+The prebuilt packages are for x86-64 Linux. They need only your usual graphics driver: NVIDIA, AMD, and Intel all work through Vulkan, with a CPU fallback everywhere else.
 
 ## Setup
 
@@ -41,32 +42,38 @@ hush daemon start             # runs in the background
 
 Hold `Right Alt`, speak, release. Done.
 
-`hush setup init` walks through model, GPU, and hotkey choices and writes `~/.config/hush/config.toml`. It picks a model for your hardware: medium on a GPU with 16 GB or more of RAM, base on a CPU. `hush install --autostart` starts the daemon at login.
+`hush setup init` asks for the model, the GPU, and the hotkey, and writes `~/.config/hush/config.toml`. The model defaults to base. The Speech page of `hush settings` names the model that suits your hardware. `hush install --autostart` starts the daemon at login.
 
 ## Features
 
 - **Hold to talk, or lock hands-free.** Holding the hotkey while you speak is the default. Double-tap it to keep recording hands-free, then press once to stop; a lone tap records nothing. `Esc` discards a recording, and hands-free recording stops on its own after ten minutes, with a warning a minute before. Set `mode = "toggle"` under `[hotkey]` to lock on a single tap instead.
-- **Long recordings in parts.** A hands-free recording (locked, toggle mode, `hush toggle`, or the panel icon) transcribes in parts while you speak. Hush cuts the audio at each pause of about 0.8 seconds, or after about 30 seconds without one, and transcribes each part in the background on the same model. Each part continues from the text before it, so sentences keep their case and punctuation. Every part is in the language of the recording. With `detect_languages`, the first part with speech detects the language, and the other parts keep it. When you stop, only the last part is left, so the text comes soon after. Hush then polishes the joined text once and types it. A held recording stays one pass.
-- **Speak at the tone.** Hush plays the start tone and shows the recording overlay when the first audio from the microphone arrives, not when you press the key. A microphone that sleeps between recordings can need a moment to wake, and the tone tells you that Hush hears you. If no audio arrives in five seconds, Hush discards the recording and shows a notification.
+- **Long recordings in parts.** A hands-free recording (locked, toggle mode, `hush toggle`, or the panel icon) transcribes in parts while you speak. Hush cuts the audio at each pause of about 0.8 seconds, or after about 30 seconds without one, and transcribes each part in the background. Each part continues from the text before it, so sentences keep their case and punctuation. With `detect_languages`, the first part with speech detects the language, and the other parts keep it. When you stop, only the last part still needs transcription, so Hush polishes the joined text once and types it soon. A held recording stays one pass.
+- **Speak at the tone.** Hush plays the start tone and shows the overlay when the microphone first sends audio, not when you press the key. A microphone that sleeps between recordings can need a moment to wake, and the tone tells you that Hush hears you. If no audio arrives in five seconds, Hush discards the recording and shows a notification.
 - **Bind any key to it.** `hush toggle`, `hush start`, `hush stop`, and `hush cancel` talk to the daemon over a socket, so any compositor keybind can drive dictation. Hyprland: `bind = , F9, exec, hush toggle`. Sway: `bindsym F9 exec hush toggle`.
-- **Tone by application.** Text lands the way the focused app expects: lowercase and unpunctuated in terminals and editors, casual in chat, full sentences in mail and documents. In a terminal, each line break becomes a space, so dictated text cannot run a command. In chat, Hush types a line break as Shift+Enter, so a line break does not send the message. Add a window class to `insertion.submit_apps`, and Hush presses Enter after the text. The window title and your learned terms also prime Whisper, so names come out spelled your way. Works on X11, Hyprland, Sway, and KDE Plasma on Wayland.
-- **Any language Whisper knows.** Set `language = "auto"` under `[transcription]` to detect what you speak, or pick one in the settings window. With `detect_languages = ["en", "de"]`, a small language-ID model picks among only the languages you speak, and local Whisper writes in that language. On every keyboard layout, Hush types key by key through the XKB keymap of the layout. It types accents through dead keys when the layout has them. When a take has a character that no key types, such as an emoji, Hush pastes the full take. With more than one layout, Hush must know which layout is active. KDE Plasma, GNOME, Hyprland, Sway, and X11 report the active layout. If Hush cannot find the active layout, it pastes, because a wrong layout types wrong letters. On GNOME, Hush also pastes when each window keeps its own input source. On X11, Hush types only on the default layout of the X server, because its own keyboard gets that layout. With Caps Lock on, Hush still types each character as written: it reads the Caps Lock LED of its own keyboard and adds or leaves out Shift. A character that Caps Lock makes impossible, such as ß on a German layout, makes the take paste. With Shift Lock (`caps:shiftlock`), every key gets Shift, so Hush pastes with Shift+Insert and presses no Enter after the text. `hush doctor` shows whether Hush types or pastes, and why.
+- **Tone by application.** Text fits the focused app: lowercase and unpunctuated in terminals and editors, casual in chat, full sentences in mail and documents. In a terminal, each line break becomes a space, so dictated text cannot run a command. In chat, Hush types a line break as Shift+Enter, so a line break does not send the message. Add a window class to `insertion.submit_apps`, and Hush presses Enter after the text. The window title and your learned terms also prime Whisper, so names come out spelled your way. Works on X11, Hyprland, Sway, and KDE Plasma on Wayland.
+- **Any language Whisper knows.** Set `language = "auto"` under `[transcription]` to detect what you speak, or pick one in the settings window. With `detect_languages = ["en", "de"]`, a small language-ID model picks among only the languages you speak, and local Whisper writes in that language.
+- **Every keyboard layout.** Hush types key by key through the XKB keymap of the layout, with accents through dead keys when it has them. When a take has a character that no key types, such as an emoji, Hush pastes the full take. `hush doctor` shows whether Hush types or pastes, and why.
+- **The active layout.** With more than one layout, Hush must know which layout is active. KDE Plasma, GNOME, Hyprland, Sway, and X11 report it. If Hush cannot find the active layout, it pastes, because a wrong layout types wrong letters. On GNOME, Hush also pastes when each window keeps its own input source. On X11, Hush types only on the default layout of the X server, because its own keyboard gets that layout.
+- **Caps Lock.** With Caps Lock on, Hush still types each character as written. It reads the Caps Lock LED of its own keyboard, and it adds or leaves out Shift. A character that Caps Lock makes impossible, such as ß on a German layout, makes the take paste. With Shift Lock (`caps:shiftlock`), every key gets Shift, so Hush pastes with Shift+Insert and presses no Enter after the text.
 - **A key for each language.** `languages = { "Shift+RightAlt" = "de" }` under `[hotkey]` gives German its own key, with the same hold, double-tap lock, and cancel as the hotkey. The Language menu of the panel icon sets the language of the hotkey until you change it again, also after a restart. `hush start --lang de` and `hush toggle --lang de` set the language of one recording.
 - **Writing styles.** A style has a name, one line for the polish prompt, and a polish switch. Add styles under `[styles]` in the config or on the Text page of `hush settings`. The built-in `verbatim` style turns polish off for one recording. `styles = { "Super+RightAlt" = "verbatim" }` under `[hotkey]` gives a style its own dictation key, and `hush start --style casual` sets the style of one recording. `app_styles = { slack = "casual" }` under `[profiles]` sets a default style for an application. A style key or `--style` comes first, then the style of the application, then only the tone of the application.
 - **Rewrite with a style.** `rewrite = { "Super+F" = "formal" }` under `[hotkey]` rewrites the selected text with the prompt of the `formal` style, with no speech. `hush rewrite formal` does the same from a script or a compositor bind. With nothing selected, Hush shows a notice and sends nothing to the LLM. When the LLM fails, the selection does not change. The style needs polish on and a prompt, so `verbatim` cannot rewrite.
-- **Teach it your words.** Select a term Hush keeps misspelling and run `hush learn` (or `hush learn Kubernetes`); from then on it is written exactly that way. The Text page of `hush settings` lists, edits, and removes your words. A fix on the History page also suggests words to learn. `hush paste-last` re-types the last transcript, and when insertion fails the text waits on the clipboard.
-- **History.** Hush keeps the last 500 transcripts on your computer, in a file only you can read. The History page of `hush settings` searches them, copies one again, fixes one, or deletes them. Turn it off with `history.enabled = false`. Turn on Keep the audio on that page, or set `history.keep_audio_days`, and Hush also keeps the audio of each take as FLAC for that many days. The page then plays the audio and transcribes it again with the current model. When you fix an entry, the page suggests the new names and terms in your correction. These are words that are not common English words, and words with a new case. Only Add puts a word into the vocabulary, as `hush learn` does.
+- **Teach it your words.** Select a term Hush keeps misspelling and run `hush learn` (or `hush learn Kubernetes`); from then on Hush writes it exactly that way. The Text page of `hush settings` lists, edits, and removes your words. `hush paste-last` re-types the last transcript, and when insertion fails the text waits on the clipboard.
+- **History.** Hush keeps the last 500 transcripts on your computer, in a file only you can read. The History page of `hush settings` searches them, copies one again, fixes one, or deletes them. Turn it off with `history.enabled = false`. To keep the audio of each take as FLAC, turn on Keep the audio on that page, or set `history.keep_audio_days` to a number of days. The page then plays the audio and transcribes it again with the current model.
+- **Fixes that teach.** When you fix a history entry, the page suggests the new names and terms in your correction. These are words that are not common English words, and words with a new case. Only Add puts a word into the vocabulary, as `hush learn` does.
 - **No lost takes.** When a transcription fails, Hush keeps the audio of the take for 7 days, in a file only you can read. Fix the problem, then run `hush recover`: it transcribes the audio, prints or types the text, and deletes the file. `hush transcribe <file>` prints the text of any WAV or FLAC file.
-- **Command Mode.** Hold `Ctrl+Right Alt`, say what to do ("make this friendlier", "turn it into a bullet list"), release. Hush rewrites the selected text, or the last thing it typed when nothing is selected, through a local Ollama server, Anthropic, or an OpenAI-compatible server, whichever `[llm]` resolves to. Only text is sent, never audio.
-- **Cleaner text, automatically.** Voice commands cover "new line", "new paragraph", "undo", and "scratch that". Filler words ("um", "uh", "like") are removed. Optional LLM polishing rewrites every transcript.
+- **Command Mode.** Hold `Ctrl+Right Alt`, say what to do ("make this friendlier", "turn it into a bullet list"), release. Hush rewrites the selected text, or the last thing it typed when you select nothing. It uses a local Ollama server, Anthropic, or an OpenAI-compatible server, whichever `[llm]` resolves to. Hush sends only text, never audio.
+- **Cleaner text, automatically.** Voice commands cover "new line", "new paragraph", "undo", and "scratch that". Hush removes filler words such as "um", "uh", and "hmm". Optional LLM polishing rewrites every transcript.
 - **Panel icon.** A status icon shows whether Hush is idle, recording, or working, and its menu offers the same actions the hotkeys do. Turn it off with `tray.enabled = false`.
-- **A window and a doctor.** `hush settings` opens one window for what still needs setting up and every setting. `Ctrl+K`, or Commands in the sidebar, searches every setting, page, and button action of the window. Pick a setting, and the window opens its page with the focus on its control. Each change saves at once: a text or number field saves when you press Enter or leave it, and Escape puts back the saved value. When a change needs a daemon restart, Hush restarts it once after the changes stop, and waits until a recording ends. `hush doctor` checks the configuration, keyboard access, model, GPU, microphone, hotkey, window detection, polishing, transcript hook, panel icon, update check, autostart, and the daemon, then prints the one command that fixes each problem.
+- **A settings window.** `hush settings` opens one window for what still needs setting up and every setting. `Ctrl+K`, or Commands in the sidebar, searches every setting, page, and button action of the window. Pick a setting, and the window opens its page with the focus on its control.
+- **Saves at once.** Each change saves as you make it. A text or number field saves when you press Enter or leave it, and Escape puts back the saved value. When a change needs a daemon restart, Hush restarts it once after the changes stop, and waits until a recording ends. After you remove a word, a key, a rule, or a style, Undo in the footer puts it back for 10 seconds.
+- **A doctor.** `hush doctor` checks each part of the setup, from keyboard access and the speech model to the microphone, hotkeys, typing, and the daemon. It prints the one command that fixes each problem.
 
 ## Scope
 
 Hush deliberately does not:
 
-- **Send audio without asking.** Transcription runs on your machine. Groq, OpenAI, and an OpenAI-compatible server are an explicit choice (`transcription.backend`), and Hush never falls back to them on its own. The `openai-compatible` backend sends the audio to the URL that you set in `transcription.server_url`. Otherwise the only network traffic is the one-time model download and, if you turn them on, text-only LLM polishing and a daily check for a new release.
+- **Send audio without asking.** Transcription runs on your machine. Groq, OpenAI, and an OpenAI-compatible server are an explicit choice (`transcription.backend`), and Hush never falls back to them on its own. The `openai-compatible` backend sends the audio to the URL that you set in `transcription.server_url`. Otherwise the network carries the one-time model download and the text for the LLM that you use. If you turn on the update check, it also carries a daily request for the newest release number.
 - **Act as a voice assistant.** It types what you say. It does not answer questions, run commands, or wake on a phrase.
 - **Run on macOS or Windows.** Linux-only, by design. It depends on `/dev/uinput`, evdev, and Linux window protocols.
 - **Stream partial words.** It types the text when the recording stops, not live as you speak, also when it transcribes a hands-free recording in parts.
@@ -124,7 +131,7 @@ Diagnostics and lifecycle:
 
 | Command | Does |
 |---|---|
-| `hush status [--full] [--devices] [--config]` | System diagnostics; `--devices` lists microphones |
+| `hush status [--full] [--devices] [--config]` | Daemon state, settings, and microphones. `--full` adds the `hush doctor` report |
 | `hush status --json [--follow]` | Daemon state and setup as JSON; `--follow` prints a Waybar line for each change |
 | `hush test audio\|transcription\|text-insertion\|hotkeys\|window\|pipeline\|all` | Targeted self-tests |
 | `hush install [--autostart] [--desktop] [--system]` | Set up autostart and the desktop entry |
@@ -134,7 +141,7 @@ Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another co
 
 ## Scripts
 
-`hush toggle`, `hush start`, `hush stop`, `hush cancel`, `hush status`, and `hush paste-last` use fixed exit codes:
+`hush toggle`, `hush start`, `hush stop`, `hush cancel`, `hush status`, `hush paste-last`, and `hush rewrite` use fixed exit codes:
 
 | Code | Meaning |
 |---|---|
@@ -244,7 +251,7 @@ Hotkey chords name keys in two ways. Ctrl, Shift, Alt, and Super in a chord mean
 | `history.enabled`, `history.max_entries` | Keep delivered transcripts in `~/.local/share/hush/history.jsonl`, and how many | true, 500 |
 | `history.keep_audio_days` | Keep the audio of each take as FLAC in `~/.local/share/hush/audio` for this many days. 0 keeps none and deletes the audio that Hush kept. The audio of a failed take stays in `~/.local/share/hush/recover` for 7 days for `hush recover`, whatever this says. When the two folders hold more than 500 MB, the oldest files go | 0 |
 | `tray.enabled` | Status icon on the desktop panel | true |
-| `updates.check` | Ask GitHub once a day whether a newer release exists (AppImage and tarball installs only) | false |
+| `updates.check` | Ask GitHub once a day whether a newer release exists. AppImage, tarball, and source installs check. A package manager updates its own installs, so those never check | false |
 | `gui.appearance` | The colors of the settings window: `system` follows the light or dark preference of the desktop and changes with it, and `light` or `dark` keeps one. When the desktop has no preference, the window is light | system |
 
 Point at a different file with `hush -c other.toml …` or `HUSH_CONFIG=other.toml`.
@@ -270,8 +277,12 @@ The Text page of `hush settings` also imports and exports the vocabulary as a pl
 Set `hooks.transcript` to a command, and Hush runs it with `sh -c` on each transcript after polishing and before it types the text. Command Mode results and style rewrites also go through it. The text goes to stdin, and Hush types what the command prints. Hush removes one trailing newline from the output.
 
 - Exit code 77 types nothing, and the take gets no history entry. After a style rewrite, exit code 77 leaves the selection as it is.
-- When the command exits with a code other than 0 or 77, cannot start, prints nothing, or runs longer than 5 seconds, Hush types the original text and logs the reason.
-- The command gets `HUSH_APP` (the window class, empty when unknown), `HUSH_PROFILE` (`terminal`, `editor`, `chat`, `mail`, `docs`, `browser`, or `other`), `HUSH_RAW_TEXT` (the text as Whisper returned it; in Command Mode, the spoken instruction; in a style rewrite, the selected text), and `HUSH_TRIGGER` (`hotkey`, `ipc` for `hush toggle` and `hush start`, `tray`, `command` for Command Mode, or `rewrite` for a rewrite key and `hush rewrite`).
+- When the command fails, prints nothing, or runs longer than 5 seconds, Hush types the original text and logs the reason. A command fails when it exits with a code other than 0 or 77, or cannot start.
+- The command gets four environment variables:
+  - `HUSH_APP`: the window class, empty when unknown.
+  - `HUSH_PROFILE`: `terminal`, `editor`, `chat`, `mail`, `docs`, `browser`, or `other`.
+  - `HUSH_RAW_TEXT`: the text as Whisper returned it. In Command Mode, the spoken instruction. In a style rewrite, the selected text.
+  - `HUSH_TRIGGER`: `hotkey`, `ipc` for `hush toggle` and `hush start`, `tray`, `command` for Command Mode, or `rewrite` for a rewrite key and `hush rewrite`.
 - The command does not get the API keys that Hush reads from its .env files.
 
 Remove every exclamation mark:
@@ -306,11 +317,13 @@ The daemon runs with the PATH of your login session, so use absolute paths. `hus
 | large, large-v2, large-v3 | 3.1 GB each |
 | parakeet-v3 (opt-in) | 740 MB |
 
-Larger models are more accurate and slower. `hush setup init` picks one for your hardware: medium on a GPU with 16 GB or more of RAM, small on a smaller-RAM GPU, base on a CPU. Manage them with `hush models list`, `hush models download <size>`, and `hush models set <size>`. Downloads come from the whisper.cpp catalogue and are checksum-verified.
+Larger models are more accurate and slower. The Speech page of `hush settings` names the one that suits your hardware. That is medium on a GPU with 16 GB or more of RAM, and small on a GPU with less. On a CPU, it is base with 16 GB or more, and tiny with less. Manage models with `hush models list`, `hush models download <size>`, and `hush models set <size>`. Hush downloads the Whisper models from the whisper.cpp catalogue and checks each download against a SHA-256 checksum.
 
-`parakeet-v3` is NVIDIA's Parakeet TDT 0.6B v3, an opt-in model for 25 European languages: Bulgarian, Croatian, Czech, Danish, Dutch, English, Estonian, Finnish, French, German, Greek, Hungarian, Italian, Latvian, Lithuanian, Maltese, Polish, Portuguese, Romanian, Russian, Slovak, Slovenian, Spanish, Swedish, and Ukrainian. Turn it on with `hush models set parakeet-v3`. It tells these languages apart on its own, so `transcription.language` and `detect_languages` do not apply to it, and `hush doctor` warns when `language` names a language it lacks. It reads no prompt: the window title, the learned terms, and the text before a part of a hands-free recording do not prime it. Your vocabulary replacements, styles, Command Mode, and the silence guards still apply to its text. It hears a take of more than 30 seconds in pieces, cut in the pauses between speech. On a GPU, its decoder still runs on about 8 CPU threads.
+`parakeet-v3` is NVIDIA's Parakeet TDT 0.6B v3, an opt-in model for 25 European languages. The languages are Bulgarian, Croatian, Czech, Danish, Dutch, English, Estonian, Finnish, French, German, Greek, and Hungarian. They also include Italian, Latvian, Lithuanian, Maltese, Polish, Portuguese, Romanian, Russian, Slovak, Slovenian, Spanish, Swedish, and Ukrainian. Turn it on with `hush models set parakeet-v3`. It tells these languages apart on its own, so `transcription.language` and `detect_languages` do not apply to it. `hush doctor` warns when `language` names a language it lacks.
 
-Hush also downloads two small helper models. The voice activity model comes with `hush models download`. The language-ID model comes only when `transcription.detect_languages` is set.
+It reads no prompt. The window title, your learned terms, and the text before each part of a hands-free recording do not prime it. Your vocabulary replacements, styles, Command Mode, and the silence guards still apply to its text. It hears a take of more than 30 seconds in pieces, cut in the pauses between speech. On a GPU, its decoder still runs on up to 8 CPU threads.
+
+Hush also downloads two small helper models. The voice activity model comes with `hush models download`. The language-ID model comes only when you set `transcription.detect_languages`.
 
 | Model | Source | License |
 |---|---|---|
@@ -338,11 +351,17 @@ If `hush setup permissions` cannot run where you are (a container, an SSH sessio
 
 In the first three minutes after boot, Hush waits up to five seconds for the graphics driver. If the driver is not ready then, the speech model runs on the CPU until you run `hush daemon restart`. When a take fails on the GPU, Hush runs it again on the CPU. Hush then keeps that model family (Whisper or Parakeet) on the CPU for that GPU until the driver version changes. When the GPU runs out of memory for a take, only that take runs again on the CPU, and the next take uses the GPU. `hush doctor` shows a `GPU failure` line with the command that tries the GPU again.
 
-Hush runs on any x86-64 CPU. Its speech engine has a CPU module for each x86 level, and at start ggml loads the module that fits your CPU. The `Backends` line of `hush doctor` and `hush status --full` name that module and the GPU backend. The modules live next to `libtranscribe` in `/usr/lib/hush` (or `lib/hush` next to the `bin` folder of the tarball), and the binary looks for them there, so a copy of the binary alone does not start. From source, install with `make install`, not `cargo install`. See [INSTALL.md](INSTALL.md#libraries-and-cpu).
+Hush runs on any x86-64 CPU. Its speech engine has a CPU module for each x86 level, and at start ggml loads the module that fits your CPU. The `Backends` line of `hush doctor` and `hush status --full` names that module and the GPU backend. The modules live next to `libtranscribe`: in `/usr/lib/hush` for a package, or in `lib/hush` next to the `bin` folder of the tarball. The binary looks for them there, so a copy of the binary alone does not start. From source, install with `make install`, not `cargo install`, as [INSTALL.md](INSTALL.md#libraries-and-cpu) describes.
 
 ## Privacy and security
 
-Everything runs locally by default. The only network traffic is the one-time model download, text-only LLM polishing if you turn it on (never audio), and the update check if you turn it on (one request a day to GitHub for the newest release number). If you set `transcription.backend` to `groq` or `openai`, Hush sends the audio of each dictation to that service, with the focused window's title when `transcription.context_prompt` is on. If you set it to `openai-compatible`, Hush sends the same data to the URL in `transcription.server_url`; `hush doctor` and `hush status` show whether that address is a local server. When that service fails, Hush reports the error and does not try another service. Hush writes audio to disk only when you set `history.keep_audio_days`, while a hands-free recording transcribes in parts (until Hush types the text), and when a transcription fails (for 7 days, for `hush recover`). Only you can read those files. Hush reads keyboard events and types through `/dev/input` and `/dev/uinput`; one udev rule grants the logged-in user access to those for the length of the session. Details in [SECURITY.md](SECURITY.md).
+Everything runs locally by default. The network carries the one-time model download and the text for your LLM, never audio. It also carries the update check if you turn it on: one request a day to GitHub for the newest release number. Hush uses a local Ollama server when one answers, and Anthropic only when `ANTHROPIC_API_KEY` exists. It uses an OpenAI-compatible server only when `llm.provider` names it.
+
+With `transcription.backend` set to `groq` or `openai`, Hush sends the audio of each dictation to that service. It adds the title of the focused window when `transcription.context_prompt` is on. With `openai-compatible`, Hush sends the same data to the URL in `transcription.server_url`. `hush doctor` and `hush status` show whether that address is a local server. When that service fails, Hush reports the error and does not try another service.
+
+Hush writes audio to disk only when you set `history.keep_audio_days`, while a hands-free recording transcribes in parts, and when a transcription fails. Hush keeps the parts only until it types the text, and it keeps the audio of a failed take for 7 days, for `hush recover`. Only you can read those files.
+
+Hush reads keyboard events and types through `/dev/input` and `/dev/uinput`. One udev rule grants the logged-in user access to those for the length of the session. Details in [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
@@ -352,4 +371,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT
 
 [MIT](LICENSE).
 
-The settings window embeds the [Geist and Geist Mono](https://github.com/vercel/geist-font) fonts, under the SIL Open Font License 1.1 ([OFL.txt](src/gui/fonts/OFL.txt)), and icons from [Lucide](https://lucide.dev), under the ISC License ([LICENSE-lucide.txt](src/gui/fonts/LICENSE-lucide.txt)).
+The settings window embeds the [Geist and Geist Mono](https://github.com/vercel/geist-font) fonts under the SIL Open Font License 1.1 ([OFL.txt](src/gui/fonts/OFL.txt)). It also embeds icons from [Lucide](https://lucide.dev) under the ISC License ([LICENSE-lucide.txt](src/gui/fonts/LICENSE-lucide.txt)).

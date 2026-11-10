@@ -1,28 +1,61 @@
 # Installation
 
+## Release files
+
+Each release has four packages for x86-64 Linux and a `SHA256SUMS` file. The
+[latest release](https://github.com/andymai/hush/releases/latest) lists them.
+`<version>` is the release number, such as `0.30.2`.
+
+| File | Install |
+|---|---|
+| `hush_<version>-1_amd64.deb` | `sudo apt install ./hush_<version>-1_amd64.deb` |
+| `hush-<version>-1.x86_64.rpm` | `sudo dnf install ./hush-<version>-1.x86_64.rpm` |
+| `hush-<version>-x86_64-linux.tar.gz` | Extract it, and keep `bin/hush` and `lib/hush` together |
+| `hush-<version>-x86_64.AppImage` | `chmod +x` the file, then run it |
+
+Three other ways install Hush:
+
+- `install.sh` picks the `.deb` on Debian and Ubuntu, the `.rpm` on Fedora,
+  RHEL, and openSUSE, and the tarball on every other distribution. The tarball
+  goes in `~/.local`. Set `HUSH_VERSION` to a tag, such as `v0.30.2`, to
+  install that release.
+- COPR builds an `.rpm` from the release tarball. Run
+  `sudo dnf copr enable veroz/hush && sudo dnf install hush`.
+- The [Nix flake](#nix-and-nixos) builds Hush from source.
+
+To build from source, see [Build](#build).
+
 ## Libraries and CPU
 
 Hush runs on any x86-64 CPU. The speech engine, `libtranscribe`, loads the ggml
-backends as modules from its own folder: one CPU module for each x86 level,
-from plain x86-64 to AVX-512, and the GPU module (Vulkan, or CUDA in a
-`make release-cuda` build). At start, ggml loads the CPU module that fits the
-CPU best. The `Backends` line of `hush doctor` and of `hush status --full`
-names the CPU module, the GPU backend, and the folder.
+backends as modules from its own folder. The folder has one CPU module for each
+x86 level, from plain x86-64 to AVX-512, and one GPU module. The GPU module is
+Vulkan, or CUDA in a `make release-cuda` build. At start, ggml loads the CPU
+module that fits the CPU best. The `Backends` line of `hush doctor` and of
+`hush status --full` names the CPU module, the GPU backend, and the folder.
 
 The binary looks for `libtranscribe` and the modules in `../lib/hush`, next to
-its `bin` folder:
+its `bin` folder. A binary that `cargo build` or `make release` makes also looks
+in the `lib/hush` folder next to it:
 
 | Install | Binary | Libraries |
 |---|---|---|
-| `.deb`, `.rpm`, COPR, AUR | `/usr/bin/hush` | `/usr/lib/hush` |
+| `.deb`, `.rpm`, COPR | `/usr/bin/hush` | `/usr/lib/hush` |
 | Tarball | `bin/hush` | `lib/hush` |
 | `install.sh` with the tarball | `~/.local/bin/hush` | `~/.local/lib/hush` |
 | AppImage | `usr/bin/hush` in the image | `usr/lib/hush` in the image |
+| Nix flake | `bin/hush` in the store path | `lib/hush` in the store path |
 | `make release` | `target/release/hush` | `target/release/lib/hush` |
 | `make install` | `~/.cargo/bin/hush` | `~/.cargo/lib/hush` |
 
 To move the tarball's Hush, move `bin/hush` and `lib/hush` together. A copy of
 the binary alone does not start.
+
+Hush loads `libxkbcommon` at run time, to type on every keyboard layout. The
+`.deb` and the `.rpm` recommend it with the XKB layout data (`xkb-data` or
+`xkeyboard-config`). With the tarball and the AppImage, install them yourself.
+Without `libxkbcommon`, Hush types on the plain US layout and pastes on every
+other layout.
 
 ## Verify a download
 
@@ -41,14 +74,14 @@ gh attestation verify <file> --repo andymai/hush
 
 The command fails when no attestation from `andymai/hush` matches the file.
 
-`install.sh` checks the attestation after the checksum:
+`install.sh` verifies the attestation after the checksum:
 
-- If `gh` 2.49 or later is installed and logged in, the script runs
-  `gh attestation verify`. If the check fails, the script stops and installs
+- If you have `gh` 2.49 or later and you logged in, the script runs
+  `gh attestation verify`. If verification fails, the script stops and installs
   nothing.
-- If `gh` cannot do the check, the script prints the command to run by hand
+- If `gh` cannot verify, the script prints the command to run by hand
   and continues.
-- A release before 0.17.0 has no attestation, so the script does not check it.
+- A release before 0.17.0 has no attestation, so the script does not verify it.
 
 ## Dependencies
 
@@ -140,7 +173,7 @@ The user service starts the daemon at login. Use it instead of `hush install --a
 The Vulkan build needs `glslc`, the Vulkan headers, and the SPIR-V headers at build
 time and only the graphics driver at runtime. The Makefile sets
 `TRANSCRIBE_CMAKE_ARGS=-DTRANSCRIBE_USE_SYSTEM_BLAS=OFF`. Without it, a plain
-`cargo build` links OpenBLAS when the library is installed, and the binary then needs
+`cargo build` links OpenBLAS when the system has the library, and the binary then needs
 OpenBLAS at runtime. `./hush status --full` shows the modules that loaded and the
 device ggml found.
 
@@ -181,8 +214,8 @@ module loaded":** the binary did not find its libraries in `../lib/hush`. Keep
 **A crash at start with `LD_LIBRARY_PATH` set:** the dynamic loader reads
 `LD_LIBRARY_PATH` before the folder of Hush. When the variable names a folder
 with another `libggml-base.so.0`, `libggml.so.0`, or `libtranscribe.so.0.4`,
-for example from a llama.cpp or whisper.cpp build, Hush loads that copy, and
-its ggml version does not match. Start Hush without that folder in
+Hush loads that copy. A llama.cpp or whisper.cpp build can leave such a copy,
+and its ggml version does not match. Start Hush without that folder in
 `LD_LIBRARY_PATH`.
 
 **Text insertion not working:**
