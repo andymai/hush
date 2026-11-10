@@ -1,11 +1,16 @@
-//! What Hush typed, newest first, to copy again or delete, and the audio of
-//! each take when Hush keeps it, to play or to transcribe again.
+//! What Hush typed, newest first, to copy again, fix, or delete, and the
+//! audio of each take when Hush keeps it, to play or to transcribe again. A
+//! fix proposes the new words in it for the vocabulary.
 
 use crate::audio::{file, store};
 use crate::config::settings::MAX_KEEP_AUDIO_DAYS;
-use crate::gui::theme::{field, hint, quiet_button, row, toggle, toggle_row, BAD, MUTED};
+use crate::gui::theme::{
+    field, hint, palette, quiet_button, row, toggle, toggle_row, ACCENT, BAD, MUTED,
+};
 use crate::gui::Gui;
+use crate::ipc::{client, DaemonCommand};
 use crate::text_processing::transcripts::{self, Transcript};
+use crate::text_processing::{corrections, learn, DomainVocabulary};
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player};
@@ -13,12 +18,14 @@ use std::collections::HashSet;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use tracing::warn;
 
 /// Entries drawn before "Show more"; each one is a wrapped label.
 const PAGE: usize = 50;
 /// A longer transcript shows its start; Copy still copies all of it.
 const PREVIEW_CHARS: usize = 400;
-const ENTRY_CONTROLS: f32 = 110.0;
+const ENTRY_CONTROLS: f32 = 150.0;
+const CHIP_ROUNDING: f32 = 12.0;
 const AUDIO_CONTROLS: f32 = 120.0;
 const TOOLBAR_CONTROLS: f32 = 310.0;
 const RETENTION_CONTROLS: f32 = 190.0;
@@ -39,6 +46,20 @@ struct Again {
     result: Arc<Mutex<Option<Result<String, String>>>>,
 }
 
+/// An entry open for a fix, and its text as the user edits it.
+struct Fix {
+    entry: Transcript,
+    draft: String,
+    /// Put the cursor in the text on the next frame
+    focus: bool,
+}
+
+/// The terms that a saved fix proposes, shown under its entry.
+struct Proposals {
+    entry: Transcript,
+    terms: Vec<String>,
+}
+
 /// The history file as last read, and how the page shows it.
 #[derive(Default)]
 pub struct HistoryView {
@@ -55,6 +76,8 @@ pub struct HistoryView {
     days: u64,
     playback: Option<Playback>,
     again: Option<Again>,
+    fix: Option<Fix>,
+    proposals: Option<Proposals>,
 }
 
 impl HistoryView {
@@ -88,17 +111,24 @@ impl HistoryView {
         self.loaded = false;
     }
 
-    fn matches(&self) -> Vec<&Transcript> {
-        let needle = self.filter.trim().to_lowercase();
-        self.entries
-            .iter()
-            .rev()
-            .filter(|entry| {
-                needle.is_empty()
-                    || entry.text.to_lowercase().contains(&needle)
-                    || entry.app.to_lowercase().contains(&needle)
-            })
-            .collect()
+    /// Forget a proposal after Add or Skip, and the whole row after the last.
+    fn drop_proposal(&mut self, term: &str) {
+        if let Some(proposals) = self.proposals.as_mut() {
+            proposals.terms.retain(|kept| kept != term);
+            if proposals.terms.is_empty() {
+                self.proposals = None;
+            }
+        }
+    }
+
+    /// Forget the fix and the proposals of an entry that is gone.
+    fn forget(&mut self, entry: &Transcript) {
+        if self.fix.as_ref().is_some_and(|fix| fix.entry == *entry) {
+            self.fix = None;
+        }
+        if self.proposals.as_ref().is_some_and(|p| p.entry == *entry) {
+            self.proposals = None;
+        }
     }
 
     /// The entry's audio file name, when the file is there.
@@ -129,6 +159,20 @@ impl HistoryView {
     }
 }
 
+/// The entries whose text or app contains the filter, newest first.
+fn matching<'a>(entries: &'a [Transcript], filter: &str) -> Vec<&'a Transcript> {
+    let needle = filter.trim().to_lowercase();
+    entries
+        .iter()
+        .rev()
+        .filter(|entry| {
+            needle.is_empty()
+                || entry.text.to_lowercase().contains(&needle)
+                || entry.app.to_lowercase().contains(&needle)
+        })
+        .collect()
+}
+
 enum Action {
     Copy(String),
     Delete(Transcript),
@@ -136,6 +180,11 @@ enum Action {
     Play(String),
     StopPlaying,
     Again(String),
+    Fix(Transcript),
+    SaveFix,
+    CancelFix,
+    Learn(String),
+    Skip(String),
 }
 
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -206,7 +255,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     });
 
     let shown = view.shown.max(PAGE);
-    let matches = view.matches();
+    let matches = matching(&view.entries, &view.filter);
     if matches.is_empty() {
         ui.add_space(10.0);
         ui.label(egui::RichText::new("No transcript matches.").color(MUTED));
@@ -222,6 +271,12 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         } else {
             format!("{} · {}", when, entry.app)
         };
+        if let Some(fix) = view.fix.as_mut().filter(|fix| fix.entry == **entry) {
+            if let Some(choice) = show_fix(ui, fix, &meta) {
+                action = Some(choice);
+            }
+            continue;
+        }
         let audio = view.audio_of(entry);
         let reserve = ENTRY_CONTROLS + if audio.is_some() { AUDIO_CONTROLS } else { 0.0 };
         row(&preview(&entry.text))
@@ -233,6 +288,12 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                 }
                 if quiet_button(ui, "Copy").clicked() {
                     action = Some(Action::Copy(entry.text.clone()));
+                }
+                if quiet_button(ui, "Fix")
+                    .on_hover_text("Correct the text and learn the new words in it")
+                    .clicked()
+                {
+                    action = Some(Action::Fix((*entry).clone()));
                 }
                 if let Some(name) = audio {
                     if quiet_button(ui, "Again")
@@ -257,6 +318,11 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         {
             if let Some(copy) = show_again(ui, again) {
                 action = Some(Action::Copy(copy));
+            }
+        }
+        if let Some(proposals) = view.proposals.as_ref().filter(|p| p.entry == **entry) {
+            if let Some(choice) = show_proposals(ui, &proposals.terms) {
+                action = Some(choice);
             }
         }
     }
@@ -295,11 +361,14 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                 Ok(_) => gui.history.entries.retain(|kept| *kept != entry),
                 Err(e) => gui.say(format!("Could not delete: {}", e)),
             }
+            gui.history.forget(&entry);
             gui.history.reload();
         },
         Some(Action::Clear) => {
             gui.history.playback = None;
             gui.history.again = None;
+            gui.history.fix = None;
+            gui.history.proposals = None;
             match transcripts::clear(&transcripts::default_path())
                 .and_then(|()| store::clear(&store::takes_dir()))
             {
@@ -320,8 +389,156 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         Some(Action::Again(name)) => {
             gui.history.again = Some(transcribe_again(&name, ui.ctx()));
         },
+        Some(Action::Fix(entry)) => {
+            gui.history.fix = Some(Fix {
+                draft: entry.text.clone(),
+                entry,
+                focus: true,
+            });
+        },
+        Some(Action::SaveFix) => save_fix(gui),
+        Some(Action::CancelFix) => gui.history.fix = None,
+        Some(Action::Learn(term)) => {
+            gui.history.drop_proposal(&term);
+            learn_term(gui, &term);
+        },
+        Some(Action::Skip(term)) => gui.history.drop_proposal(&term),
         None => {},
     }
+}
+
+/// An entry open for a fix: its text in a box, with Save and Cancel.
+fn show_fix(ui: &mut egui::Ui, fix: &mut Fix, meta: &str) -> Option<Action> {
+    let mut choice = None;
+    ui.add_space(6.0);
+    hint(ui, meta);
+    let response = ui.add(
+        egui::TextEdit::multiline(&mut fix.draft)
+            .desired_width(f32::INFINITY)
+            .desired_rows(2)
+            .margin(egui::vec2(8.0, 6.0)),
+    );
+    if std::mem::take(&mut fix.focus) {
+        response.request_focus();
+    }
+    ui.horizontal(|ui| {
+        if ui.button("Save").clicked() {
+            choice = Some(Action::SaveFix);
+        }
+        if quiet_button(ui, "Cancel").clicked() {
+            choice = Some(Action::CancelFix);
+        }
+        hint(
+            ui,
+            "The entry keeps its time, app, and audio. Hush then suggests \
+             the new words for the vocabulary.",
+        );
+    });
+    ui.add_space(6.0);
+    ui.separator();
+    choice
+}
+
+/// The terms that a saved fix proposes, each as a chip with Add and Skip.
+fn show_proposals(ui: &mut egui::Ui, terms: &[String]) -> Option<Action> {
+    let mut choice = None;
+    let colours = palette(ui.ctx());
+    ui.horizontal_wrapped(|ui| {
+        ui.label(egui::RichText::new("Learn from the fix:").color(MUTED));
+        for term in terms {
+            egui::Frame::none()
+                .fill(colours.raised)
+                .stroke(egui::Stroke::new(1.0_f32, colours.border_strong))
+                .rounding(CHIP_ROUNDING)
+                .inner_margin(egui::Margin::symmetric(10.0, 0.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(term).strong());
+                        let add = egui::Button::new(egui::RichText::new("Add").color(ACCENT))
+                            .frame(false);
+                        if ui
+                            .add(add)
+                            .on_hover_text("Add to the vocabulary, as hush learn does")
+                            .clicked()
+                        {
+                            choice = Some(Action::Learn(term.clone()));
+                        }
+                        if quiet_button(ui, "Skip").clicked() {
+                            choice = Some(Action::Skip(term.clone()));
+                        }
+                    });
+                });
+        }
+    });
+    ui.separator();
+    choice
+}
+
+/// Write the fixed text into its entry, then show the terms that the fix
+/// proposes.
+fn save_fix(gui: &mut Gui) {
+    let Some(fix) = gui.history.fix.take() else {
+        return;
+    };
+    let text = fix.draft.trim().to_string();
+    if text.is_empty() {
+        gui.say("Type the correct text, or delete the entry.");
+        gui.history.fix = Some(fix);
+        return;
+    }
+    if text == fix.entry.text {
+        return;
+    }
+    match transcripts::set_text(&transcripts::default_path(), &fix.entry, &text) {
+        Ok(Some(fixed)) => {
+            let terms = corrections::proposals(&fix.entry.text, &text, &gui.vocabulary);
+            if let Some(kept) = gui.history.entries.iter_mut().find(|e| **e == fix.entry) {
+                *kept = fixed.clone();
+            }
+            gui.history.forget(&fix.entry);
+            if terms.is_empty() {
+                gui.say("Saved the fix. It has no new words to learn.");
+            } else {
+                gui.say("Saved the fix.");
+                gui.history.proposals = Some(Proposals {
+                    entry: fixed,
+                    terms,
+                });
+            }
+        },
+        Ok(None) => gui.say("Could not save the fix: the history no longer has this entry."),
+        Err(e) => {
+            gui.say(format!("Could not save the fix: {:#}", e));
+            gui.history.fix = Some(fix);
+        },
+    }
+    gui.history.reload();
+}
+
+/// Learn the term as `hush learn` does: write it into the vocabulary file,
+/// then tell a running daemon, which reloads the file. The window's copy of
+/// the vocabulary gets the term too, so a later Save keeps it.
+fn learn_term(gui: &mut Gui, term: &str) {
+    let term = match learn::learn_at(&DomainVocabulary::default_path(), term) {
+        Ok(term) => term,
+        Err(e) => {
+            gui.say(format!("Could not add the word: {:#}", e));
+            return;
+        },
+    };
+    learn::learn_into(&mut gui.vocabulary, &term);
+    learn::learn_into(&mut gui.saved_vocabulary, &term);
+    let command = DaemonCommand::Learn {
+        text: Some(term.clone()),
+    };
+    gui.runtime.spawn(async move {
+        match client::send(command).await {
+            Ok(reply) if reply.ok => {},
+            Err(e) if e.is::<client::NotRunning>() => {},
+            _ => warn!("The daemon did not reload the vocabulary after a fix"),
+        }
+    });
+    gui.say(format!("Added {} to the vocabulary.", term));
 }
 
 /// The switch and the days of `history.keep_audio_days`.
@@ -491,7 +708,10 @@ mod tests {
             ("Hello Sam", "slack"),
         ]);
         let texts = |view: &HistoryView| -> Vec<String> {
-            view.matches().iter().map(|e| e.text.clone()).collect()
+            matching(&view.entries, &view.filter)
+                .iter()
+                .map(|e| e.text.clone())
+                .collect()
         };
         assert_eq!(texts(&view), ["Hello Sam", "deploy the build"]);
         view.filter = " KONSOLE ".into();
@@ -499,7 +719,34 @@ mod tests {
         view.filter = "sam".into();
         assert_eq!(texts(&view), ["Hello Sam"]);
         view.filter = "nothing".into();
-        assert!(view.matches().is_empty());
+        assert!(texts(&view).is_empty());
+    }
+
+    #[test]
+    fn each_proposal_goes_after_add_or_skip_and_the_row_after_the_last() {
+        let entry = Transcript::new("Kubernetes and New Relic", "");
+        let mut view = view(&[]);
+        view.proposals = Some(Proposals {
+            entry: entry.clone(),
+            terms: vec!["Kubernetes".into(), "New Relic".into()],
+        });
+        view.drop_proposal("Kubernetes");
+        assert_eq!(
+            view.proposals.as_ref().map(|p| p.terms.clone()),
+            Some(vec!["New Relic".to_string()])
+        );
+        view.drop_proposal("New Relic");
+        assert!(view.proposals.is_none());
+
+        view.fix = Some(Fix {
+            entry: entry.clone(),
+            draft: String::new(),
+            focus: false,
+        });
+        view.forget(&Transcript::new("another", ""));
+        assert!(view.fix.is_some());
+        view.forget(&entry);
+        assert!(view.fix.is_none());
     }
 
     #[test]
