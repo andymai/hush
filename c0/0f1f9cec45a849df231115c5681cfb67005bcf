@@ -1,0 +1,55 @@
+src/audio/take.rs
+  s_115995023cd6f3::t_09ecff7211dcc9 8-9
+  s_115995023cd6f3::t_b4ed6c146f9913 25-70
+  s_115995023cd6f3::t_905a34ae67fa12 338-366
+  s_115995023cd6f3::t_734fc050fbc59e 337
+src/audio/wake.rs
+  s_115995023cd6f3::t_7cc8d8f1f22b8c 1-1368
+  s_115995023cd6f3::t_090b320f64a30e 1369-1398
+src/cli/commands/listen.rs
+  s_115995023cd6f3::t_e5f66b3bdb7db5 881
+src/audio/capture.rs
+  s_115995023cd6f3::t_7d70ee2fbed198 541-552
+INSTALL.md
+  s_115995023cd6f3::t_f0931e33617e78 194-201
+README.md
+  s_115995023cd6f3::t_19de7730d870cc 50,63,118,179,339-342
+scripts/e2e/run.sh
+  s_115995023cd6f3::t_245de246b76fb9 718-745
+src/audio/mod.rs
+  s_115995023cd6f3::t_8600789f6b97fe 49
+src/cli/commands/doctor.rs
+  s_115995023cd6f3::t_98e58d1a9f5a19 4,161-162,180,455-477,1265-1304
+src/cli/commands/setup.rs
+  s_115995023cd6f3::t_c5c1488d320e61 4,24-26,93,159-277,546-560
+src/cli/commands/status.rs
+  s_115995023cd6f3::t_c1125d00c4001c 2,63-65,112-124,183,223-228,263,279-282,297-320
+src/cli_main.rs
+  s_115995023cd6f3::t_3a249db69f2281 351-361
+src/gui/mod.rs
+  s_115995023cd6f3::t_27f6e3170a4b2f 22,42,94-95,123,132,264-265,409,467,1140,1289,1411
+src/gui/pages/speech.rs
+  s_115995023cd6f3::t_7f70b8d870e1d6 3-4,6,14-15,22,24,523,525-527,530,556,570-819,975-1065
+src/gui/palette.rs
+  s_115995023cd6f3::t_3549c4d22d1891 591-592,604,611-612,633,652,669,674-678,690-693,720-721,742-743,794-801
+src/ipc/protocol.rs
+  s_115995023cd6f3::t_66d9f8bdd8b184 1,195-198,213,228,237-241,615-643
+src/ipc/server.rs
+  s_115995023cd6f3::t_57afdca54d85a3 9,88-89,101,123,199-208,308,659-675
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c00f1f9cec45a849df231115c5681cfb67005bcf",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
