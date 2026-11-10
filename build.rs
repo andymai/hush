@@ -4,6 +4,7 @@
 /// when dependencies are missing.
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, SystemTime};
 
 /// Where an installed binary finds libtranscribe and the ggml modules: a
 /// private folder in the same prefix, such as /usr/lib/hush for /usr/bin/hush.
@@ -57,6 +58,7 @@ fn check_system_blas() {
 /// its library search path. `HUSH_PACKAGE` leaves out the path into target/,
 /// so that a package binary looks only in its own prefix.
 fn bundle_runtime() {
+    let started = SystemTime::now();
     println!("cargo:rerun-if-env-changed=HUSH_PACKAGE");
     println!("cargo:rerun-if-env-changed=DEP_TRANSCRIBE_CPP_RUNTIME_DIR");
     let Some(runtime) = std::env::var_os("DEP_TRANSCRIBE_CPP_RUNTIME_DIR").map(PathBuf::from)
@@ -74,17 +76,45 @@ fn bundle_runtime() {
         ));
     };
     let bundle = profile.join("lib").join("hush");
-    if let Err(e) = copy_runtime(&runtime, &bundle) {
+    let marker = profile.join("lib").join("hush.source");
+    if let Err(e) = copy_runtime(&runtime, &bundle).and_then(|()| mark(&marker, &runtime, started))
+    {
         fail(&format!(
             "could not copy the libraries from {} to {}: {e}",
             runtime.display(),
             bundle.display()
         ));
     }
+    // A build with other features (make release, release-cuda, release-cpu)
+    // fills the same folder and writes the marker after this run. Cargo then
+    // runs this script again, so the folder always holds the libraries of
+    // the binary that cargo built last.
+    println!("cargo:rerun-if-changed={}", marker.display());
     println!("cargo:rustc-link-arg=-Wl,-rpath,{PACKAGE_RPATH}");
     if std::env::var_os("HUSH_PACKAGE").is_none() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{BUILD_RPATH}");
+        if std::env::var("PROFILE").as_deref() == Ok("release") {
+            println!(
+                "cargo:warning=target/release/hush finds its libraries in \
+                 target/release/lib/hush. To install it, run `make install`, not `cargo install`"
+            );
+        }
     }
+}
+
+/// Write the transcribe.cpp folder that the bundle came from to `marker`.
+/// Cargo compares the mtime of a watched file with the start of the last run,
+/// and this run must not count its own write as a change, so the mtime goes
+/// back to before this run.
+fn mark(marker: &Path, runtime: &Path, started: SystemTime) -> std::io::Result<()> {
+    std::fs::write(marker, runtime.as_os_str().as_encoded_bytes())?;
+    let before = started
+        .checked_sub(Duration::from_secs(2))
+        .unwrap_or(started);
+    std::fs::File::options()
+        .write(true)
+        .open(marker)?
+        .set_modified(before)
 }
 
 /// The files that run: each library under the name that the loader asks for

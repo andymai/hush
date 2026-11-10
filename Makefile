@@ -134,14 +134,16 @@ link:
 	fi
 
 # Install the Vulkan release build. The binary finds its libraries in
-# ../lib/hush, so both go under the same prefix.
+# ../lib/hush of the folder that really holds it, so a symlinked bin folder
+# counts as its target. ggml loads every module in the folder, so a module
+# that this build lacks goes.
 install: release
-	@echo "📦 Installing to $(PREFIX)/bin and $(PREFIX)/lib/hush..."
 	@install -Dm755 target/release/hush "$(PREFIX)/bin/hush"
-	@install -d "$(PREFIX)/lib/hush"
-	@# ggml loads every module in the folder, so a module that this build lacks goes.
-	@for old in "$(PREFIX)"/lib/hush/libggml-*.so; do \
+	@lib="$$(dirname "$$(cd "$(PREFIX)/bin" && pwd -P)")/lib/hush"; \
+	install -d "$$lib"; \
+	for old in "$$lib"/libggml-*.so; do \
 		[ ! -e "$$old" ] || [ -e "target/release/lib/hush/$${old##*/}" ] || rm -f "$$old"; \
-	done
-	@install -m644 target/release/lib/hush/* "$(PREFIX)/lib/hush/"
-	@echo "✅ Installed! You can now run 'hush' from anywhere."
+	done; \
+	install -m644 target/release/lib/hush/* "$$lib/"; \
+	echo "📦 Installed $(PREFIX)/bin/hush and its libraries in $$lib"
+	@echo "✅ You can now run 'hush' from anywhere."

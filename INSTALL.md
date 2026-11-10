@@ -21,7 +21,8 @@ its `bin` folder:
 | `make release` | `target/release/hush` | `target/release/lib/hush` |
 | `make install` | `~/.cargo/bin/hush` | `~/.cargo/lib/hush` |
 
-To move the tarball's Hush, move `bin/hush` and `lib/hush` together.
+To move the tarball's Hush, move `bin/hush` and `lib/hush` together. A copy of
+the binary alone does not start.
 
 ## Verify a download
 
@@ -88,6 +89,10 @@ Each target puts the binary in `target/release` and `libtranscribe` with the
 ggml modules in `target/release/lib/hush`. `./hush` runs from there. A source
 build has the CPU modules for every x86 level too, so the build machine does
 not limit the CPU that runs it.
+
+Use `make install`, not `cargo install`: `cargo install` copies only the
+binary, which then cannot start. `make install` puts `lib/hush` next to the
+`bin` folder, where the binary looks for its libraries.
 
 ## Setup
 
@@ -169,8 +174,16 @@ matching `-dev` (Ubuntu) or `-devel` (Fedora) package from the lists above.
 
 **"libtranscribe.so.0.4: cannot open shared object file" or "No ggml backend
 module loaded":** the binary did not find its libraries in `../lib/hush`. Keep
-`bin/hush` and `lib/hush` together, or install the package again. See
+`bin/hush` and `lib/hush` together, or install the package again. A binary from
+`cargo install` or a copied binary has no `lib/hush`: use `make install`. See
 [Libraries and CPU](#libraries-and-cpu).
+
+**A crash at start with `LD_LIBRARY_PATH` set:** the dynamic loader reads
+`LD_LIBRARY_PATH` before the folder of Hush. When the variable names a folder
+with another `libggml-base.so.0`, `libggml.so.0`, or `libtranscribe.so.0.4`,
+for example from a llama.cpp or whisper.cpp build, Hush loads that copy, and
+its ggml version does not match. Start Hush without that folder in
+`LD_LIBRARY_PATH`.
 
 **Text insertion not working:**
 ```bash

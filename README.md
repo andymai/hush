@@ -338,7 +338,7 @@ If `hush setup permissions` cannot run where you are (a container, an SSH sessio
 
 In the first three minutes after boot, Hush waits up to five seconds for the graphics driver. If the driver is not ready then, the speech model runs on the CPU until you run `hush daemon restart`. When a take fails on the GPU, Hush runs it again on the CPU. Hush then keeps that model family (Whisper or Parakeet) on the CPU for that GPU until the driver version changes. When the GPU runs out of memory for a take, only that take runs again on the CPU, and the next take uses the GPU. `hush doctor` shows a `GPU failure` line with the command that tries the GPU again.
 
-Hush runs on any x86-64 CPU. Its speech engine has a CPU module for each x86 level, and at start ggml loads the module that fits your CPU. The `Backends` line of `hush doctor` and `hush status --full` name that module and the GPU backend. The modules live next to `libtranscribe` in `/usr/lib/hush` (or `lib/hush` next to the `bin` folder of the tarball), and the binary looks for them there. See [INSTALL.md](INSTALL.md#libraries-and-cpu).
+Hush runs on any x86-64 CPU. Its speech engine has a CPU module for each x86 level, and at start ggml loads the module that fits your CPU. The `Backends` line of `hush doctor` and `hush status --full` name that module and the GPU backend. The modules live next to `libtranscribe` in `/usr/lib/hush` (or `lib/hush` next to the `bin` folder of the tarball), and the binary looks for them there, so a copy of the binary alone does not start. From source, install with `make install`, not `cargo install`. See [INSTALL.md](INSTALL.md#libraries-and-cpu).
 
 ## Privacy and security
 
