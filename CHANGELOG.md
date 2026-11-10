@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/andymai/hush/compare/v0.26.0...v0.27.0) (2026-11-10)
+
+
+### Features
+
+* **transcription:** add Parakeet TDT 0.6B v3 as an opt-in model ([#305](https://github.com/andymai/hush/issues/305)) ([3456272](https://github.com/andymai/hush/commit/345627283bc7b8262192685a84714d2290d43a79))
+
 ## [0.26.0](https://github.com/andymai/hush/compare/v0.25.0...v0.26.0) (2026-11-10)
 
 
