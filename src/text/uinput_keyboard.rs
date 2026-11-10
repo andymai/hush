@@ -1,9 +1,8 @@
 /// Linux uinput-based keyboard emulation using input-linux crate
 /// This provides hardware-level keyboard emulation that works with all applications
+use super::keymap::{KeyTable, Stroke, Tap, EXTRA_KEYS, MAIN_KEYS, MODIFIER_KEYS};
 use super::PasteChord;
 use crate::Result;
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
 use std::fs::File;
 use std::thread;
 use std::time::Duration;
@@ -12,119 +11,6 @@ use tracing::{debug, info, warn};
 use input_linux::{
     sys, EventKind, EventTime, InputId, Key, KeyState, SynchronizeKind, UInputHandle,
 };
-
-/// Static character to key mapping for efficient lookup
-/// Built once on first access and reused for all keyboard instances
-static CHAR_TO_KEY_MAP: Lazy<HashMap<char, (Key, bool)>> = Lazy::new(|| {
-    let mut map = HashMap::with_capacity(100);
-
-    // Lowercase letters
-    map.insert('a', (Key::A, false));
-    map.insert('b', (Key::B, false));
-    map.insert('c', (Key::C, false));
-    map.insert('d', (Key::D, false));
-    map.insert('e', (Key::E, false));
-    map.insert('f', (Key::F, false));
-    map.insert('g', (Key::G, false));
-    map.insert('h', (Key::H, false));
-    map.insert('i', (Key::I, false));
-    map.insert('j', (Key::J, false));
-    map.insert('k', (Key::K, false));
-    map.insert('l', (Key::L, false));
-    map.insert('m', (Key::M, false));
-    map.insert('n', (Key::N, false));
-    map.insert('o', (Key::O, false));
-    map.insert('p', (Key::P, false));
-    map.insert('q', (Key::Q, false));
-    map.insert('r', (Key::R, false));
-    map.insert('s', (Key::S, false));
-    map.insert('t', (Key::T, false));
-    map.insert('u', (Key::U, false));
-    map.insert('v', (Key::V, false));
-    map.insert('w', (Key::W, false));
-    map.insert('x', (Key::X, false));
-    map.insert('y', (Key::Y, false));
-    map.insert('z', (Key::Z, false));
-
-    // Uppercase letters (same keys with shift)
-    map.insert('A', (Key::A, true));
-    map.insert('B', (Key::B, true));
-    map.insert('C', (Key::C, true));
-    map.insert('D', (Key::D, true));
-    map.insert('E', (Key::E, true));
-    map.insert('F', (Key::F, true));
-    map.insert('G', (Key::G, true));
-    map.insert('H', (Key::H, true));
-    map.insert('I', (Key::I, true));
-    map.insert('J', (Key::J, true));
-    map.insert('K', (Key::K, true));
-    map.insert('L', (Key::L, true));
-    map.insert('M', (Key::M, true));
-    map.insert('N', (Key::N, true));
-    map.insert('O', (Key::O, true));
-    map.insert('P', (Key::P, true));
-    map.insert('Q', (Key::Q, true));
-    map.insert('R', (Key::R, true));
-    map.insert('S', (Key::S, true));
-    map.insert('T', (Key::T, true));
-    map.insert('U', (Key::U, true));
-    map.insert('V', (Key::V, true));
-    map.insert('W', (Key::W, true));
-    map.insert('X', (Key::X, true));
-    map.insert('Y', (Key::Y, true));
-    map.insert('Z', (Key::Z, true));
-
-    // Numbers
-    map.insert('1', (Key::Num1, false));
-    map.insert('2', (Key::Num2, false));
-    map.insert('3', (Key::Num3, false));
-    map.insert('4', (Key::Num4, false));
-    map.insert('5', (Key::Num5, false));
-    map.insert('6', (Key::Num6, false));
-    map.insert('7', (Key::Num7, false));
-    map.insert('8', (Key::Num8, false));
-    map.insert('9', (Key::Num9, false));
-    map.insert('0', (Key::Num0, false));
-
-    // Basic symbols
-    map.insert(' ', (Key::Space, false));
-    map.insert('.', (Key::Dot, false));
-    map.insert(',', (Key::Comma, false));
-    map.insert(';', (Key::Semicolon, false));
-    map.insert('\'', (Key::Apostrophe, false));
-    map.insert('/', (Key::Slash, false));
-    map.insert('\\', (Key::Backslash, false));
-    map.insert('-', (Key::Minus, false));
-    map.insert('=', (Key::Equal, false));
-    map.insert('[', (Key::LeftBrace, false));
-    map.insert(']', (Key::RightBrace, false));
-    map.insert('`', (Key::Grave, false));
-
-    // Symbols with shift
-    map.insert('!', (Key::Num1, true));
-    map.insert('@', (Key::Num2, true));
-    map.insert('#', (Key::Num3, true));
-    map.insert('$', (Key::Num4, true));
-    map.insert('%', (Key::Num5, true));
-    map.insert('^', (Key::Num6, true));
-    map.insert('&', (Key::Num7, true));
-    map.insert('*', (Key::Num8, true));
-    map.insert('(', (Key::Num9, true));
-    map.insert(')', (Key::Num0, true));
-    map.insert('_', (Key::Minus, true));
-    map.insert('+', (Key::Equal, true));
-    map.insert('{', (Key::LeftBrace, true));
-    map.insert('}', (Key::RightBrace, true));
-    map.insert('|', (Key::Backslash, true));
-    map.insert(':', (Key::Semicolon, true));
-    map.insert('"', (Key::Apostrophe, true));
-    map.insert('<', (Key::Comma, true));
-    map.insert('>', (Key::Dot, true));
-    map.insert('?', (Key::Slash, true));
-    map.insert('~', (Key::Grave, true));
-
-    map
-});
 
 /// The keys a typed line break presses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -136,35 +22,27 @@ pub enum LineBreak {
     ShiftEnter,
 }
 
-/// One key tap, with or without Shift, or a character the key map lacks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Stroke {
-    Key(Key, bool),
-    Unmapped(char),
-}
-
-/// The key taps that type a text. `\r\n`, `\r`, and `\n` are each one line
-/// break.
-fn strokes(text: &str, line_break: LineBreak) -> Vec<Stroke> {
-    let enter = Stroke::Key(Key::Enter, line_break == LineBreak::ShiftEnter);
-    let mut strokes = Vec::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        strokes.push(match ch {
-            '\r' => {
-                chars.next_if_eq(&'\n');
-                enter
-            },
-            '\n' => enter,
-            '\t' => Stroke::Key(Key::Tab, false),
-            _ => CHAR_TO_KEY_MAP
-                .get(&ch)
-                .map_or(Stroke::Unmapped(ch), |&(key, shift)| {
-                    Stroke::Key(key, shift)
-                }),
-        });
-    }
-    strokes
+/// Every key the device can press: the keys that type characters on some
+/// layout, the keys that can hold Shift or AltGr, and the editing and paste
+/// keys.
+fn device_keys() -> Vec<Key> {
+    let mut keys: Vec<Key> = MAIN_KEYS
+        .iter()
+        .chain(&EXTRA_KEYS)
+        .chain(&MODIFIER_KEYS)
+        .chain(&[
+            Key::Enter,
+            Key::Tab,
+            Key::Backspace,
+            Key::Insert,
+            Key::LeftCtrl,
+            Key::RightCtrl,
+        ])
+        .copied()
+        .collect();
+    keys.sort_by_key(|key| key.code());
+    keys.dedup();
+    keys
 }
 
 pub struct UinputKeyboard {
@@ -205,27 +83,19 @@ impl UinputKeyboard {
         self.ready
     }
 
-    /// Whether the US-layout key map covers every character.
-    pub fn can_type_all(text: &str) -> bool {
-        text.chars()
-            .all(|ch| matches!(ch, '\n' | '\r' | '\t') || CHAR_TO_KEY_MAP.contains_key(&ch))
-    }
-
     /// Hold the chord's modifiers, tap its key, and release the modifiers.
-    pub fn send_paste_shortcut(&mut self, chord: PasteChord) -> Result<()> {
+    /// `table` is the active layout's keys, so the chord presses the key
+    /// that types its letter there.
+    pub fn send_paste_shortcut(
+        &mut self,
+        chord: PasteChord,
+        table: Option<&KeyTable>,
+    ) -> Result<()> {
         if !self.ready {
             return Err(anyhow::anyhow!("Uinput keyboard not ready"));
         }
-        let (modifiers, key) = chord_keys(chord);
-        for modifier in modifiers {
-            self.send_key_event(*modifier, KeyState::PRESSED)?;
-            self.send_sync()?;
-        }
-        self.send_key(key, false)?;
-        for modifier in modifiers.iter().rev() {
-            self.send_key_event(*modifier, KeyState::RELEASED)?;
-        }
-        self.send_sync()
+        let (modifiers, key) = chord_keys(chord, table);
+        self.send_chord(modifiers, key)
     }
 
     pub fn set_typing_delay(&mut self, delay_ms: u64) {
@@ -233,26 +103,27 @@ impl UinputKeyboard {
         debug!("Typing delay set to {}ms", delay_ms);
     }
 
-    pub fn type_text(&mut self, text: &str, line_break: LineBreak) -> Result<()> {
+    /// Type a text with the table's keys. A character the table has no
+    /// keys for is skipped.
+    pub fn type_text(&mut self, text: &str, table: &KeyTable, line_break: LineBreak) -> Result<()> {
         if !self.ready {
             return Err(anyhow::anyhow!("Uinput keyboard not ready"));
         }
 
-        info!(
-            "⌨️ Typing text via uinput: '{}' ({} chars)",
-            text.chars().take(50).collect::<String>(),
-            text.len()
-        );
+        let count = text.chars().count();
+        info!("⌨️ Typing {} characters via uinput", count);
 
-        for (i, stroke) in strokes(text, line_break).into_iter().enumerate() {
+        let mut skipped = 0;
+        for (i, stroke) in table.strokes(text, line_break).into_iter().enumerate() {
             if i > 0 && i % 100 == 0 {
                 debug!("Typed {} keys so far", i);
             }
 
             match stroke {
-                Stroke::Key(key, shift) => self.send_key(key, shift)?,
+                Stroke::Tap(tap) => self.send_tap(tap)?,
                 Stroke::Unmapped(ch) => {
-                    warn!("Character '{}' is not in the US key map, skipping", ch)
+                    skipped += 1;
+                    debug!("No key types '{}' on this layout; skipping it", ch);
                 },
             }
 
@@ -261,9 +132,15 @@ impl UinputKeyboard {
             }
         }
 
+        if skipped > 0 {
+            warn!(
+                "Skipped {} characters that no key on this layout types",
+                skipped
+            );
+        }
         info!(
             "✅ Text typed successfully via uinput ({} characters)",
-            text.len()
+            count
         );
         Ok(())
     }
@@ -274,7 +151,7 @@ impl UinputKeyboard {
             return Err(anyhow::anyhow!("Uinput keyboard not ready"));
         }
 
-        self.send_key(Key::Backspace, false)
+        self.send_tap(Tap::plain(Key::Backspace))
     }
 
     pub fn send_enter(&mut self) -> Result<()> {
@@ -282,7 +159,7 @@ impl UinputKeyboard {
             return Err(anyhow::anyhow!("Uinput keyboard not ready"));
         }
 
-        self.send_key(Key::Enter, false)
+        self.send_tap(Tap::plain(Key::Enter))
     }
 
     pub fn get_device_info(&self) -> String {
@@ -323,69 +200,7 @@ impl UinputKeyboard {
             .set_evbit(EventKind::Synchronize)
             .map_err(|e| anyhow::anyhow!("Failed to set sync event bit: {}", e))?;
 
-        // Enable all the keys we need
-        let keys_to_enable = [
-            Key::A,
-            Key::B,
-            Key::C,
-            Key::D,
-            Key::E,
-            Key::F,
-            Key::G,
-            Key::H,
-            Key::I,
-            Key::J,
-            Key::K,
-            Key::L,
-            Key::M,
-            Key::N,
-            Key::O,
-            Key::P,
-            Key::Q,
-            Key::R,
-            Key::S,
-            Key::T,
-            Key::U,
-            Key::V,
-            Key::W,
-            Key::X,
-            Key::Y,
-            Key::Z,
-            Key::Num1,
-            Key::Num2,
-            Key::Num3,
-            Key::Num4,
-            Key::Num5,
-            Key::Num6,
-            Key::Num7,
-            Key::Num8,
-            Key::Num9,
-            Key::Num0,
-            Key::Space,
-            Key::Enter,
-            Key::Tab,
-            Key::Backspace,
-            Key::Insert,
-            Key::Dot,
-            Key::Comma,
-            Key::Semicolon,
-            Key::Apostrophe,
-            Key::Slash,
-            Key::Backslash,
-            Key::Minus,
-            Key::Equal,
-            Key::LeftBrace,
-            Key::RightBrace,
-            Key::Grave,
-            Key::LeftShift,
-            Key::RightShift,
-            Key::LeftCtrl,
-            Key::RightCtrl,
-            Key::LeftAlt,
-            Key::RightAlt,
-        ];
-
-        for &key in &keys_to_enable {
+        for key in device_keys() {
             handle
                 .set_keybit(key)
                 .map_err(|e| anyhow::anyhow!("Failed to enable key {:?}: {}", key, e))?;
@@ -403,77 +218,94 @@ impl UinputKeyboard {
         Ok(())
     }
 
-    fn send_key(&mut self, key: Key, with_shift: bool) -> Result<()> {
-        if let Some(_device) = &mut self.device {
-            // Press shift if needed
-            if with_shift {
-                self.send_key_event(Key::LeftShift, KeyState::PRESSED)?;
-                self.send_sync()?;
-            }
-
-            // Press the key
-            self.send_key_event(key, KeyState::PRESSED)?;
-            self.send_sync()?;
-
-            // Small delay
-            thread::sleep(Duration::from_millis(1));
-
-            // Release the key
-            self.send_key_event(key, KeyState::RELEASED)?;
-
-            // Release shift if we pressed it
-            if with_shift {
-                self.send_key_event(Key::LeftShift, KeyState::RELEASED)?;
-            }
-
-            self.send_sync()?;
-        }
-        Ok(())
+    fn send_tap(&mut self, tap: Tap) -> Result<()> {
+        self.send_chord(&tap.modifiers(), tap.key)
     }
 
-    fn send_key_event(&mut self, key: Key, state: KeyState) -> Result<()> {
-        if let Some(device) = &mut self.device {
-            // Create event using current timestamp
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
-            let time = EventTime::new(now.as_secs() as i64, (now.subsec_micros() as i64) * 1000);
-
-            let event = sys::input_event {
-                time: time.into_inner(),
-                type_: EventKind::Key as u16,
-                code: key as u16,
-                value: state.value,
-            };
-
-            device
-                .write(&[event])
-                .map_err(|e| anyhow::anyhow!("Failed to write input event: {}", e))?;
+    fn send_chord(&mut self, modifiers: &[Key], key: Key) -> Result<()> {
+        match &mut self.device {
+            Some(device) => press_chord(device, modifiers, key),
+            None => Ok(()),
         }
-        Ok(())
+    }
+}
+
+/// Where key events go: the uinput device, or a recorder in the tests.
+trait Events {
+    fn key(&mut self, key: Key, state: KeyState) -> Result<()>;
+    fn sync(&mut self) -> Result<()>;
+}
+
+impl Events for UInputHandle<File> {
+    fn key(&mut self, key: Key, state: KeyState) -> Result<()> {
+        write_event(self, EventKind::Key as u16, key as u16, state.value)
+            .map_err(|e| anyhow::anyhow!("Failed to write input event: {}", e))
     }
 
-    fn send_sync(&mut self) -> Result<()> {
-        if let Some(device) = &mut self.device {
-            // Create sync event using current timestamp
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
-            let time = EventTime::new(now.as_secs() as i64, (now.subsec_micros() as i64) * 1000);
-
-            let event = sys::input_event {
-                time: time.into_inner(),
-                type_: EventKind::Synchronize as u16,
-                code: SynchronizeKind::Report as u16,
-                value: 0,
-            };
-
-            device
-                .write(&[event])
-                .map_err(|e| anyhow::anyhow!("Failed to write sync event: {}", e))?;
-        }
-        Ok(())
+    fn sync(&mut self) -> Result<()> {
+        write_event(
+            self,
+            EventKind::Synchronize as u16,
+            SynchronizeKind::Report as u16,
+            0,
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to write sync event: {}", e))
     }
+}
+
+fn write_event(
+    device: &UInputHandle<File>,
+    kind: u16,
+    code: u16,
+    value: i32,
+) -> std::io::Result<()> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let time = EventTime::new(now.as_secs() as i64, (now.subsec_micros() as i64) * 1000);
+    let event = sys::input_event {
+        time: time.into_inner(),
+        type_: kind,
+        code,
+        value,
+    };
+    device.write(&[event]).map(drop)
+}
+
+/// Hold the modifiers in order, press and release the key, and release the
+/// modifiers in reverse. Every key that went down comes up again, also
+/// when a write fails, so no modifier stays held after a character or a
+/// paste.
+fn press_chord(events: &mut impl Events, modifiers: &[Key], key: Key) -> Result<()> {
+    let mut down = Vec::with_capacity(modifiers.len() + 1);
+    let pressed = press_all(
+        events,
+        modifiers.iter().copied().chain(std::iter::once(key)),
+        &mut down,
+    );
+    if pressed.is_ok() {
+        thread::sleep(Duration::from_millis(1));
+    }
+    let mut sent = pressed;
+    for &key in down.iter().rev() {
+        let released = events.key(key, KeyState::RELEASED);
+        sent = sent.and(released);
+    }
+    let synced = events.sync();
+    sent.and(synced)
+}
+
+fn press_all(
+    events: &mut impl Events,
+    keys: impl Iterator<Item = Key>,
+    down: &mut Vec<Key>,
+) -> Result<()> {
+    for key in keys {
+        events.key(key, KeyState::PRESSED)?;
+        down.push(key);
+        events.sync()?;
+    }
+    Ok(())
 }
 
 impl Drop for UinputKeyboard {
@@ -484,11 +316,17 @@ impl Drop for UinputKeyboard {
     }
 }
 
-/// The modifiers and the key of a paste chord.
-fn chord_keys(chord: PasteChord) -> (&'static [Key], Key) {
+/// The modifiers and the key of a paste chord. The letter is the key that
+/// types `v` on the active layout, so Ctrl+V stays Ctrl+V on Dvorak.
+/// Without a plain key for `v`, as on a Cyrillic layout, it is the US V
+/// key, which applications match to their Latin shortcuts.
+fn chord_keys(chord: PasteChord, table: Option<&KeyTable>) -> (&'static [Key], Key) {
+    let v = table
+        .and_then(|table| table.plain_key('v'))
+        .unwrap_or(Key::V);
     match chord {
-        PasteChord::CtrlV => (&[Key::LeftCtrl], Key::V),
-        PasteChord::CtrlShiftV => (&[Key::LeftCtrl, Key::LeftShift], Key::V),
+        PasteChord::CtrlV => (&[Key::LeftCtrl], v),
+        PasteChord::CtrlShiftV => (&[Key::LeftCtrl, Key::LeftShift], v),
         PasteChord::ShiftInsert => (&[Key::LeftShift], Key::Insert),
     }
 }
@@ -518,64 +356,164 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_char_mapping() {
-        // Test static character mapping
-        assert_eq!(CHAR_TO_KEY_MAP.get(&'a'), Some(&(Key::A, false)));
-        assert_eq!(CHAR_TO_KEY_MAP.get(&'A'), Some(&(Key::A, true)));
-        assert_eq!(CHAR_TO_KEY_MAP.get(&'1'), Some(&(Key::Num1, false)));
-        assert_eq!(CHAR_TO_KEY_MAP.get(&'!'), Some(&(Key::Num1, true)));
-        assert_eq!(CHAR_TO_KEY_MAP.get(&' '), Some(&(Key::Space, false)));
-    }
-
-    #[test]
-    fn chat_line_breaks_press_shift_enter() {
-        let a = Stroke::Key(Key::A, false);
-        let b = Stroke::Key(Key::B, false);
-        let c = Stroke::Key(Key::C, false);
-        let shift_enter = Stroke::Key(Key::Enter, true);
-        assert_eq!(strokes("a\nb", LineBreak::ShiftEnter), [a, shift_enter, b]);
-        assert_eq!(
-            strokes("a\r\nb\rc", LineBreak::ShiftEnter),
-            [a, shift_enter, b, shift_enter, c],
-            "\\r\\n is one line break, and so is a lone \\r"
-        );
-        assert_eq!(
-            strokes("a\n\nb", LineBreak::ShiftEnter),
-            [a, shift_enter, shift_enter, b],
-            "a paragraph break is two new lines"
-        );
-    }
-
-    #[test]
-    fn other_line_breaks_press_enter() {
-        let enter = Stroke::Key(Key::Enter, false);
-        assert_eq!(
-            strokes("A\r\n\t!é", LineBreak::Enter),
-            [
-                Stroke::Key(Key::A, true),
-                enter,
-                Stroke::Key(Key::Tab, false),
-                Stroke::Key(Key::Num1, true),
-                Stroke::Unmapped('é'),
-            ]
-        );
-        assert!(UinputKeyboard::can_type_all("one\r\ntwo\tthree"));
-        assert!(!UinputKeyboard::can_type_all("café"));
+    fn the_device_has_every_key_a_table_presses() {
+        let keys = device_keys();
+        for key in MAIN_KEYS.iter().chain(&EXTRA_KEYS).chain(&MODIFIER_KEYS) {
+            assert!(keys.contains(key), "{key:?}");
+        }
+        for key in [
+            Key::Enter,
+            Key::Tab,
+            Key::Backspace,
+            Key::Insert,
+            Key::LeftCtrl,
+        ] {
+            assert!(keys.contains(&key), "{key:?}");
+        }
+        let mut sorted = keys.clone();
+        sorted.dedup();
+        assert_eq!(sorted, keys, "no key twice");
     }
 
     #[test]
     fn each_paste_chord_presses_its_keys() {
+        let us = Some(KeyTable::us());
         assert_eq!(
-            chord_keys(PasteChord::CtrlV),
+            chord_keys(PasteChord::CtrlV, us),
             (&[Key::LeftCtrl][..], Key::V)
         );
         assert_eq!(
-            chord_keys(PasteChord::CtrlShiftV),
+            chord_keys(PasteChord::CtrlShiftV, None),
             (&[Key::LeftCtrl, Key::LeftShift][..], Key::V)
         );
         assert_eq!(
-            chord_keys(PasteChord::ShiftInsert),
+            chord_keys(PasteChord::ShiftInsert, us),
             (&[Key::LeftShift][..], Key::Insert)
         );
+    }
+
+    fn table(v: Option<Tap>) -> KeyTable {
+        let chars = v.map(|tap| ('v', vec![tap])).into_iter().collect();
+        KeyTable::new(chars, Key::LeftShift)
+    }
+
+    #[test]
+    fn the_paste_chord_presses_the_key_that_types_v() {
+        let dvorak = table(Some(Tap::plain(Key::Dot)));
+        assert_eq!(
+            chord_keys(PasteChord::CtrlV, Some(&dvorak)),
+            (&[Key::LeftCtrl][..], Key::Dot),
+            "V is on the US period key in Dvorak"
+        );
+        assert_eq!(
+            chord_keys(PasteChord::CtrlShiftV, Some(&dvorak)).1,
+            Key::Dot
+        );
+        assert_eq!(
+            chord_keys(PasteChord::ShiftInsert, Some(&dvorak)).1,
+            Key::Insert
+        );
+        let cyrillic = table(None);
+        assert_eq!(chord_keys(PasteChord::CtrlV, Some(&cyrillic)).1, Key::V);
+        let shifted_only = table(Some(Tap::shifted(Key::Dot)));
+        assert_eq!(
+            chord_keys(PasteChord::CtrlV, Some(&shifted_only)).1,
+            Key::V,
+            "only a plain key keeps the chord as it is"
+        );
+    }
+
+    /// Records events, and fails the write with the given number.
+    #[derive(Default)]
+    struct Recorder {
+        tried: Vec<Option<(Key, i32)>>,
+        events: Vec<Option<(Key, i32)>>,
+        fail_at: Option<usize>,
+    }
+
+    impl Recorder {
+        fn write(&mut self, event: Option<(Key, i32)>) -> Result<()> {
+            self.tried.push(event);
+            if self.fail_at == Some(self.tried.len()) {
+                return Err(anyhow::anyhow!("write {} failed", self.tried.len()));
+            }
+            self.events.push(event);
+            Ok(())
+        }
+
+        fn held(&self) -> Vec<Key> {
+            let mut held = Vec::new();
+            for &(key, value) in self.events.iter().flatten() {
+                if value == KeyState::PRESSED.value {
+                    held.push(key);
+                } else {
+                    held.retain(|&down| down != key);
+                }
+            }
+            held
+        }
+    }
+
+    impl Events for Recorder {
+        fn key(&mut self, key: Key, state: KeyState) -> Result<()> {
+            self.write(Some((key, state.value)))
+        }
+
+        fn sync(&mut self) -> Result<()> {
+            self.write(None)
+        }
+    }
+
+    #[test]
+    fn a_chord_holds_its_modifiers_around_the_key() {
+        let mut recorder = Recorder::default();
+        press_chord(&mut recorder, &[Key::LeftCtrl, Key::LeftShift], Key::V)
+            .expect("every write works");
+        let down = KeyState::PRESSED.value;
+        let up = KeyState::RELEASED.value;
+        assert_eq!(
+            recorder.events,
+            [
+                Some((Key::LeftCtrl, down)),
+                None,
+                Some((Key::LeftShift, down)),
+                None,
+                Some((Key::V, down)),
+                None,
+                Some((Key::V, up)),
+                Some((Key::LeftShift, up)),
+                Some((Key::LeftCtrl, up)),
+                None,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_write_still_releases_every_key() {
+        let up = KeyState::RELEASED.value;
+        for fail_at in 1..=10 {
+            let mut recorder = Recorder {
+                fail_at: Some(fail_at),
+                ..Recorder::default()
+            };
+            let sent = press_chord(&mut recorder, &[Key::RightAlt, Key::LeftShift], Key::Q);
+            assert!(sent.is_err(), "write {fail_at} fails");
+            let failed = recorder.tried[fail_at - 1];
+            for key in recorder.held() {
+                assert_eq!(
+                    failed,
+                    Some((key, up)),
+                    "write {fail_at} failed and left {key:?} held"
+                );
+            }
+            for &(key, value) in recorder.events.iter().flatten() {
+                if value != up {
+                    assert!(
+                        recorder.tried.contains(&Some((key, up))),
+                        "write {fail_at} failed and {key:?} got no release"
+                    );
+                }
+            }
+        }
     }
 }

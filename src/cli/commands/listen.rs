@@ -394,6 +394,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         Ok(mut inserter) => {
             inserter.configure(&config.insertion);
             inserter.set_profiles(&config.profiles);
+            if let Some(manager) = &hotkey_manager {
+                inserter.reserve_keys(manager.grabbed_keys());
+            }
             info!("✅ Text inserter initialized");
             Some(Arc::new(Mutex::new(inserter)))
         },

@@ -306,6 +306,24 @@ impl HotkeyManager {
             Backend::X11(_) => "x11",
         }
     }
+
+    /// The keys, as evdev codes, that Hush's typing must not press.
+    pub fn grabbed_keys(&self) -> Vec<u16> {
+        grabbed_keys(matches!(self.backend, Backend::X11(_)), &self.combination)
+    }
+}
+
+/// The X11 grab takes its key from every keyboard, Hush's typing device
+/// included, so a typed AltGr on a bare RightAlt hotkey would start a
+/// dictation. Typing never holds Ctrl, Alt, or Super, so a chord with one
+/// of those is safe. The evdev backend skips Hush's own devices and
+/// reserves nothing.
+fn grabbed_keys(x11: bool, combination: &KeyCombination) -> Vec<u16> {
+    if x11 && !combination.is_mouse_button() && !combination.has_modifiers() {
+        vec![combination.evdev_key().code()]
+    } else {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]
@@ -326,6 +344,24 @@ mod tests {
         toml::Value::String(value.to_string())
             .try_into()
             .expect("valid variant")
+    }
+
+    #[test]
+    fn only_the_x11_grab_reserves_its_key() {
+        let right_alt = KeyCombination::parse("RightAlt").unwrap();
+        assert_eq!(
+            grabbed_keys(true, &right_alt),
+            [::evdev::KeyCode::KEY_RIGHTALT.code()]
+        );
+        assert!(
+            grabbed_keys(false, &right_alt).is_empty(),
+            "the evdev reader skips Hush's typing device"
+        );
+        let chord = KeyCombination::parse("Ctrl+RightAlt").unwrap();
+        assert!(
+            grabbed_keys(true, &chord).is_empty(),
+            "typing never holds Ctrl"
+        );
     }
 
     #[test]

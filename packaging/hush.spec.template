@@ -16,6 +16,9 @@ ExclusiveArch:  x86_64
 Requires:       vulkan-loader
 Requires:       alsa-lib
 Requires:       libX11
+# Hush loads these with dlopen to type on every layout, and pastes without them.
+Recommends:     libxkbcommon
+Recommends:     xkeyboard-config
 
 %description
 Hush runs OpenAI's Whisper models locally, on the GPU through Vulkan when one

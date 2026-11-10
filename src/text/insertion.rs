@@ -1,11 +1,14 @@
 //! Puts transcribed text into the focused window.
 //!
 //! uinput types the text as key events, which works in every application,
-//! VM, and password field. Text the US-layout key map cannot express (accents,
-//! CJK, emoji) and very long text go through the clipboard: the previous
-//! clipboard is saved, the text is pasted with the chord the focused window
-//! takes, and the clipboard is restored if it still holds the text. Both
-//! paths first wait for the user to release Ctrl, Alt, Shift, and Super.
+//! VM, and password field. The keys come from the active layout's XKB
+//! keymap, with dead keys for accents that have no key of their own. A take
+//! with a character that no key types (CJK, emoji), a very long take, and
+//! every take on a layout Hush cannot read go through the clipboard: the
+//! previous clipboard is saved, the text is pasted with the chord the
+//! focused window takes, and the clipboard is restored if it still holds the
+//! text. Both paths first wait for the user to release Ctrl, Alt, Shift, and
+//! Super.
 //!
 //! A terminal gets the text on one line, so a line break cannot run a
 //! command. A chat application gets a typed line break as Shift+Enter, so
@@ -14,7 +17,9 @@
 
 use super::clipboard::{self, ClipboardBackend, Restore, Selection, Transcript};
 use super::clock::{Clock, SystemClock};
+use super::keymap::KeyTable;
 use super::modifiers::{self, ModifierWait, PhysicalModifiers};
+use super::typing::{Resolver, Typing};
 use super::uinput_keyboard::{LineBreak, UinputKeyboard};
 use super::window::{WindowInfo, WindowProvider};
 use super::{class_matches, InsertionMethod, PasteChord};
@@ -71,15 +76,15 @@ pub enum Chosen {
     Clipboard,
 }
 
-/// `types_like_us` is false when the session's keyboard layout is not plain
-/// US, so Hush's key codes would turn into different characters.
-pub fn choose_method(configured: InsertionMethod, text: &str, types_like_us: bool) -> Chosen {
+/// `table` is the keys for the active layout, or `None` when Hush cannot
+/// type on it. One take uses one method: when any character has no keys,
+/// the whole take pastes.
+pub fn choose_method(configured: InsertionMethod, text: &str, table: Option<&KeyTable>) -> Chosen {
     match configured {
         InsertionMethod::Uinput => Chosen::Uinput,
         InsertionMethod::Clipboard => Chosen::Clipboard,
         InsertionMethod::Auto => {
-            if !types_like_us
-                || !UinputKeyboard::can_type_all(text)
+            if !table.is_some_and(|table| table.covers(text))
                 || text.chars().count() > PASTE_THRESHOLD_CHARS
             {
                 Chosen::Clipboard
@@ -171,7 +176,9 @@ pub struct TextInserter {
     windows: WindowProvider,
     config: InsertionConfig,
     profiles: ProfilesConfig,
-    types_like_us: bool,
+    typing: Resolver,
+    /// What the last take found, to log a change once.
+    last_typing: String,
 }
 
 impl TextInserter {
@@ -186,14 +193,11 @@ impl TextInserter {
         }
         let clipboard = clipboard::open();
         let windows = WindowProvider::detect();
-        let types_like_us = super::layout::types_like_us();
+        let mut typing = Resolver::new();
+        let last_typing = typing.resolve().to_string();
         info!(
             "Text insertion ready: {}, clipboard restore {}, window detection via {}",
-            if types_like_us {
-                "typed key by key"
-            } else {
-                "pasted, because the keyboard layout is not plain US"
-            },
+            last_typing,
             clipboard
                 .as_ref()
                 .map_or("off", |clipboard| clipboard.describe()),
@@ -205,8 +209,31 @@ impl TextInserter {
             windows,
             config: InsertionConfig::default(),
             profiles: ProfilesConfig::defaults(),
-            types_like_us,
+            typing,
+            last_typing,
         })
+    }
+
+    /// evdev codes that typing must never press. The X11 hotkey backend
+    /// grabs its key on every keyboard, Hush's own included, so a typed
+    /// AltGr on that key would start a dictation.
+    pub fn reserve_keys(&mut self, keys: Vec<u16>) {
+        if !keys.is_empty() {
+            debug!("Typing never presses the key codes {:?}", keys);
+        }
+        self.typing.reserve(keys);
+    }
+
+    /// The typing for the layout that is active now. A change since the
+    /// last take is logged once.
+    fn current_typing(&mut self) -> Typing {
+        let typing = self.typing.resolve();
+        let summary = typing.to_string();
+        if summary != self.last_typing {
+            info!("Keyboard layout changed: Hush now {}", summary);
+            self.last_typing = summary;
+        }
+        typing
     }
 
     pub fn configure(&mut self, config: &InsertionConfig) {
@@ -259,10 +286,10 @@ impl TextInserter {
         let submit_app = window
             .as_ref()
             .is_some_and(|window| self.config.submits(&window.class));
-        info!(
-            "Inserting text: '{}' ({} chars)",
-            text.chars().take(50).collect::<String>(),
-            text.chars().count()
+        info!("Inserting {} chars", text.chars().count());
+        debug!(
+            "Inserting text: '{}'",
+            text.chars().take(50).collect::<String>()
         );
         let method = match &window {
             Some(window) => {
@@ -276,13 +303,20 @@ impl TextInserter {
             None => self.config.method,
         };
 
-        match choose_method(method, &text, self.types_like_us) {
-            Chosen::Uinput => self.type_with_uinput(&text, line_break, origin, submit_app)?,
+        let typing = self.current_typing();
+        // An explicit uinput choice, and a failed paste, type even when no
+        // table fits the layout, with the US table as before.
+        let table = typing.table().unwrap_or(KeyTable::us());
+        match choose_method(method, &text, typing.table()) {
+            Chosen::Uinput => {
+                self.type_with_uinput(&text, table, line_break, origin, submit_app)?
+            },
             Chosen::Clipboard => {
-                if let Err(e) = self.paste(&text, window.as_ref(), origin, submit_app) {
+                let pasted = self.paste(&text, window.as_ref(), typing.table(), origin, submit_app);
+                if let Err(e) = pasted {
                     warn!("Paste failed ({}); typing what uinput can", e);
                     // Typing can skip characters, so Hush does not send the result.
-                    self.type_with_uinput(&text, line_break, origin, false)?;
+                    self.type_with_uinput(&text, table, line_break, origin, false)?;
                 }
             },
         }
@@ -292,13 +326,14 @@ impl TextInserter {
     fn type_with_uinput(
         &mut self,
         text: &str,
+        table: &KeyTable,
         line_break: LineBreak,
         origin: Origin,
         submit_app: bool,
     ) -> Result<()> {
         wait_for_modifiers();
         self.uinput.set_typing_delay(self.config.typing_delay_ms);
-        let typed = self.uinput.type_text(text, line_break);
+        let typed = self.uinput.type_text(text, table, line_break);
         if presses_enter(origin, submit_app, text, &typed) {
             press_enter(&mut self.uinput, &SystemClock, TYPED_SUBMIT_DELAY);
         }
@@ -311,6 +346,7 @@ impl TextInserter {
         &mut self,
         text: &str,
         window: Option<&WindowInfo>,
+        table: Option<&KeyTable>,
         origin: Origin,
         submit_app: bool,
     ) -> Result<()> {
@@ -344,7 +380,7 @@ impl TextInserter {
         }
         wait_for_modifiers();
         debug!("Pasting with {}", chord);
-        let sent = self.uinput.send_paste_shortcut(chord);
+        let sent = self.uinput.send_paste_shortcut(chord, table);
         let pasted_at = clock.now();
         if presses_enter(origin, submit_app, text, &sent) {
             press_enter(&mut self.uinput, &clock, PASTED_SUBMIT_DELAY);
@@ -459,23 +495,28 @@ pub fn diagnose_uinput_issues() -> Result<()> {
 mod tests {
     use super::*;
 
+    fn us() -> Option<&'static KeyTable> {
+        Some(KeyTable::us())
+    }
+
     #[test]
     fn auto_types_plain_text_and_pastes_the_rest() {
         assert_eq!(
-            choose_method(InsertionMethod::Auto, "hello, world!\n", true),
+            choose_method(InsertionMethod::Auto, "hello, world!\n", us()),
             Chosen::Uinput
         );
         assert_eq!(
-            choose_method(InsertionMethod::Auto, "café", true),
-            Chosen::Clipboard
+            choose_method(InsertionMethod::Auto, "café", us()),
+            Chosen::Clipboard,
+            "one character without keys pastes the whole take"
         );
         assert_eq!(
-            choose_method(InsertionMethod::Auto, "日本語", true),
+            choose_method(InsertionMethod::Auto, "日本語", us()),
             Chosen::Clipboard
         );
         let long = "a".repeat(PASTE_THRESHOLD_CHARS + 1);
         assert_eq!(
-            choose_method(InsertionMethod::Auto, &long, true),
+            choose_method(InsertionMethod::Auto, &long, us()),
             Chosen::Clipboard
         );
     }
@@ -483,11 +524,31 @@ mod tests {
     #[test]
     fn explicit_methods_win() {
         assert_eq!(
-            choose_method(InsertionMethod::Uinput, "café", true),
+            choose_method(InsertionMethod::Uinput, "café", us()),
             Chosen::Uinput
         );
         assert_eq!(
-            choose_method(InsertionMethod::Clipboard, "abc", true),
+            choose_method(InsertionMethod::Clipboard, "abc", us()),
+            Chosen::Clipboard
+        );
+    }
+
+    #[test]
+    fn a_layout_table_types_its_own_characters() {
+        use super::super::keymap::Tap;
+        use input_linux::Key;
+        let chars = std::collections::HashMap::from([
+            ('a', vec![Tap::plain(Key::Q)]),
+            ('é', vec![Tap::plain(Key::Equal), Tap::plain(Key::E)]),
+            (' ', vec![Tap::plain(Key::Space)]),
+        ]);
+        let table = KeyTable::new(chars, Key::LeftShift);
+        assert_eq!(
+            choose_method(InsertionMethod::Auto, "é a\n", Some(&table)),
+            Chosen::Uinput
+        );
+        assert_eq!(
+            choose_method(InsertionMethod::Auto, "é b", Some(&table)),
             Chosen::Clipboard
         );
     }
@@ -622,14 +683,14 @@ mod tests {
     }
 
     #[test]
-    fn a_non_us_layout_pastes_even_plain_text() {
+    fn a_layout_without_a_table_pastes_even_plain_text() {
         assert_eq!(
-            choose_method(InsertionMethod::Auto, "hello", false),
+            choose_method(InsertionMethod::Auto, "hello", None),
             Chosen::Clipboard,
-            "key codes would come out as other letters"
+            "key codes could come out as other letters"
         );
         assert_eq!(
-            choose_method(InsertionMethod::Uinput, "hello", false),
+            choose_method(InsertionMethod::Uinput, "hello", None),
             Chosen::Uinput,
             "an explicit choice is still honoured"
         );

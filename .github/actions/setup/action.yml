@@ -6,7 +6,8 @@ runs:
   steps:
     # whisper-rs-sys builds whisper.cpp with cmake and, for the vulkan feature,
     # compiles its shaders with glslc against the Vulkan headers; cpal needs ALSA
-    # headers; the overlay's GLFW build and x11rb need the X11 and GL files.
+    # headers; the overlay's GLFW build and x11rb need the X11 and GL files. The
+    # keymap tests load libxkbcommon and read the xkb-data layouts.
     - name: Install system dependencies
       shell: bash
       run: |
@@ -16,7 +17,7 @@ runs:
           libasound2-dev \
           libx11-dev libxi-dev libxtst-dev libxcursor-dev \
           libxrandr-dev libxinerama-dev libgl1-mesa-dev \
-          libvulkan-dev
+          libvulkan-dev libxkbcommon0 xkb-data
         # Ubuntu 22.04, which the release job uses for its glibc floor, has no
         # glslc package; LunarG's Vulkan repository ships it as shaderc.
         if apt-cache show glslc >/dev/null 2>&1; then
