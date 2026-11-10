@@ -194,7 +194,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     hint(
         ui,
         "Click a key, then press the one you want. A modifier on its own, such as \
-         RightAlt, never reaches other applications.",
+         RightAlt, types no character in other applications.",
     );
     if let Some(altgr) = warnings::altgr(gui.config.hotkey.bound(), gui.layout.as_ref()) {
         ui.add_space(4.0);
@@ -289,6 +289,13 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         "Grabs the device the key belongs to. Needed for mouse buttons, which \
          browsers otherwise treat as Back.",
         &mut gui.config.hotkey.exclusive,
+    );
+    toggle_row(
+        ui,
+        "Keep menus closed",
+        "With an Alt or Super key on its own, Hush taps Ctrl when the key goes down. \
+         Applications then open no menu, and the desktop opens no launcher.",
+        &mut gui.config.hotkey.mask_menu,
     );
     chord_keys(
         gui,

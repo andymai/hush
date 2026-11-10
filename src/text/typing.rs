@@ -14,6 +14,7 @@
 use super::keymap::KeyTable;
 use super::layout::{self, plain_us, Active, Session, FIX_SEVERAL};
 use super::xkb::{self, Names, Request};
+use input_linux::Key;
 use std::fmt;
 use std::sync::Arc;
 use tracing::debug;
@@ -203,6 +204,27 @@ fn plan(session: Option<&Session>, library: bool) -> Plan {
         },
         plain_us,
     }
+}
+
+/// The key that holds Control on the session's keyboard, or `None` when
+/// Hush cannot read the keymap.
+pub fn control_key() -> Option<Key> {
+    let session = layout::session();
+    let Plan::Compile {
+        names,
+        other_options,
+        group,
+        ..
+    } = plan(session.as_ref(), xkb::available())
+    else {
+        return None;
+    };
+    let mut all = vec![names.clone()];
+    all.extend(other_options.map(|options| Names { options, ..names }));
+    xkb::control_key(&all, group)
+        .inspect_err(|e| debug!("No Control key from the keymap: {:#}", e))
+        .ok()
+        .flatten()
 }
 
 /// Finds the typing for each take, and keeps the last table so an

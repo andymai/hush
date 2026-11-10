@@ -18,7 +18,7 @@ use xkbcommon_dl::{
     keysyms, xkb_compose_compile_flags, xkb_compose_feed_result, xkb_compose_state,
     xkb_compose_state_flags, xkb_compose_status, xkb_compose_table, xkb_context, xkb_context_flags,
     xkb_key_direction, xkb_keymap, xkb_keymap_compile_flags, xkb_keysym_t, xkb_log_level,
-    xkb_rule_names, xkb_state, xkb_state_component, XkbCommon, XkbCommonCompose,
+    xkb_rule_names, xkb_state, xkb_state_component, XkbCommon, XkbCommonCompose, XKB_MOD_NAME_CTRL,
     XKB_MOD_NAME_SHIFT,
 };
 
@@ -99,6 +99,53 @@ pub fn build(request: &Request) -> Result<KeyTable> {
         }
     }
     Ok(KeyTable::new(chars, shift.unwrap_or(Key::LeftShift)))
+}
+
+/// The keys that can hold Control, in the order Hush tries them.
+const CONTROL_KEYS: [Key; 7] = [
+    Key::LeftCtrl,
+    Key::RightCtrl,
+    Key::CapsLock,
+    Key::LeftMeta,
+    Key::RightMeta,
+    Key::LeftAlt,
+    Key::RightAlt,
+];
+
+/// The key that holds Control in each keymap of `names`. An option such
+/// as `ctrl:swapcaps` moves Control to another key, and the Left Ctrl key
+/// then types Caps Lock.
+pub fn control_key(names: &[Names], group: u32) -> Result<Option<Key>> {
+    let lib =
+        xkbcommon_dl::xkbcommon_option().ok_or_else(|| anyhow!("libxkbcommon is not installed"))?;
+    let context = Context::new(lib)?;
+    let keymaps = names
+        .iter()
+        .map(|names| Keymap::compile(&context, names))
+        .collect::<Result<Vec<_>>>()?;
+    for key in CONTROL_KEYS {
+        let mut every = true;
+        for keymap in &keymaps {
+            every &= holds_control(keymap, group, key)?;
+        }
+        if every {
+            return Ok(Some(key));
+        }
+    }
+    Ok(None)
+}
+
+/// The key types Control_L or Control_R, holds Control while it is down,
+/// and changes nothing else.
+fn holds_control(keymap: &Keymap, group: u32, key: Key) -> Result<bool> {
+    let state = State::new(keymap, group)?;
+    if ![keysyms::Control_L, keysyms::Control_R].contains(&state.sym(key)) {
+        return Ok(false);
+    }
+    state.press(key);
+    let held = state.control_active() && state.layout() == group;
+    state.release(key);
+    Ok(held && state.mods() == 0)
 }
 
 /// What the keys type with each set of modifiers, cheapest first.
@@ -388,11 +435,21 @@ impl State {
     }
 
     fn shift_active(&self) -> bool {
-        // SAFETY: ptr is a live state, and the name is NUL-terminated.
+        self.mod_active(XKB_MOD_NAME_SHIFT)
+    }
+
+    fn control_active(&self) -> bool {
+        self.mod_active(XKB_MOD_NAME_CTRL)
+    }
+
+    /// `name` is one of the NUL-terminated `XKB_MOD_NAME` constants.
+    fn mod_active(&self, name: &'static [u8]) -> bool {
+        // SAFETY: ptr is a live state, and each caller passes a
+        // NUL-terminated name.
         unsafe {
             (self.lib.xkb_state_mod_name_is_active)(
                 self.ptr,
-                XKB_MOD_NAME_SHIFT.as_ptr().cast::<c_char>(),
+                name.as_ptr().cast::<c_char>(),
                 xkb_state_component::XKB_STATE_MODS_EFFECTIVE,
             ) == 1
         }
@@ -729,6 +786,45 @@ pub(crate) mod tests {
                 level3: Some(Key::CapsLock)
             }])
         );
+    }
+
+    #[test]
+    fn control_is_on_the_key_that_the_options_give_it() {
+        if !xkb_ready() {
+            return;
+        }
+        let us = |options: &str| Names {
+            layout: "us".into(),
+            options: options.into(),
+            ..Names::default()
+        };
+        assert_eq!(control_key(&[us("")], 0).unwrap(), Some(Key::LeftCtrl));
+        assert_eq!(
+            control_key(&[us("ctrl:swapcaps")], 0).unwrap(),
+            Some(Key::RightCtrl),
+            "Left Ctrl types Caps Lock"
+        );
+        assert_eq!(
+            control_key(&[us("ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl")], 0).unwrap(),
+            Some(Key::LeftMeta),
+            "both Ctrl keys type Super"
+        );
+        assert_eq!(
+            control_key(&[us(""), us("ctrl:swap_lwin_lctl")], 0).unwrap(),
+            Some(Key::RightCtrl),
+            "the key must hold Control with each option list"
+        );
+        assert!(control_key(
+            &[
+                us(""),
+                Names {
+                    layout: "no-such-layout".into(),
+                    ..Names::default()
+                }
+            ],
+            0
+        )
+        .is_err());
     }
 
     #[test]

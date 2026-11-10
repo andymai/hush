@@ -211,6 +211,7 @@ Give each state a color in the Waybar style sheet, for example `#custom-hush.rec
 | `hotkey.mode` | `hold` (double-tap locks hands-free) or `toggle` (a tap locks) | hold |
 | `hotkey.backend` | `auto`, `evdev`, or `x11` | auto |
 | `hotkey.exclusive` | Grab the hotkey's device so applications never see the key or button | false |
+| `hotkey.mask_menu` | When a key or chord with only Alt and Super keys goes down, such as `RightAlt` or `Super+LeftAlt`, Hush taps Ctrl through its own virtual keyboard. Applications then open no menu bar, and the desktop opens no launcher. Hush does not tap with `hotkey.exclusive` or the `x11` backend, because they hide the key | true |
 | `hotkey.cancel` | Key that discards a recording in progress; `""` disables it | Escape |
 | `hotkey.tap_ms` | Presses shorter than this are taps rather than holds | 300 |
 | `hotkey.paste_last` | Chord that re-types the last transcript, such as `Shift+RightAlt` | unbound |

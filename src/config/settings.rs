@@ -496,6 +496,10 @@ pub struct HotkeyConfig {
     /// Grab the hotkey's device so applications never see the hotkey (evdev)
     #[serde(default)]
     pub exclusive: bool,
+    /// Tap Ctrl when a chord of only Alt and Super keys goes down, so its
+    /// release opens no application menu and no launcher (evdev, not exclusive)
+    #[serde(default = "default_true")]
+    pub mask_menu: bool,
     /// Key that discards a recording in progress; empty disables it
     #[serde(default = "default_cancel_key")]
     pub cancel: String,
@@ -967,11 +971,15 @@ model_size = "small"
         assert_eq!(config.hotkey.mode, HotkeyMode::Hold);
         assert_eq!(config.hotkey.backend, HotkeyBackend::Auto);
         assert!(!config.hotkey.exclusive);
-        let config =
-            Config::parse_over_defaults("[hotkey]\nmode = \"toggle\"\nbackend = \"x11\"\n")
-                .unwrap();
+        assert!(config.hotkey.mask_menu);
+        let config = Config::parse_over_defaults(
+            "[hotkey]\nmode = \"toggle\"\nbackend = \"x11\"\nmask_menu = false\n",
+        )
+        .unwrap();
         assert_eq!(config.hotkey.mode, HotkeyMode::Toggle);
         assert_eq!(config.hotkey.backend, HotkeyBackend::X11);
+        assert!(!config.hotkey.mask_menu);
+        assert!(Config::parse_over_defaults("[hotkey]\nmask_menu = \"yes\"\n").is_err());
         assert!(Config::parse_over_defaults("[hotkey]\ncombination = \"Ctrl+Bogus\"\n").is_err());
     }
 

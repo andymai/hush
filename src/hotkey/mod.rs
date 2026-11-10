@@ -28,6 +28,7 @@
 pub mod combination;
 pub mod evdev;
 pub mod gesture;
+pub mod menu_mask;
 pub mod modifiers;
 pub mod warnings;
 pub mod x11;
@@ -237,27 +238,33 @@ impl HotkeyManager {
             HotkeyBindings::parse(combination, None)?,
             HotkeyBackend::Auto,
             false,
+            false,
         )
     }
 
     /// `exclusive` makes the evdev backend grab the hotkey's device and hide
     /// the hotkey from applications; the X11 grab is exclusive by nature.
+    /// Without a grab, `mask_menu` makes the evdev backend tap Ctrl when a
+    /// chord of only Alt and Super keys goes down. Then its release opens no
+    /// application menu and no launcher.
     pub fn with_backend(
         bindings: HotkeyBindings,
         choice: HotkeyBackend,
         exclusive: bool,
+        mask_menu: bool,
     ) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
         let combination = bindings.primary.clone();
+        let open_evdev = |bindings| evdev::EvdevHotkey::new(bindings, exclusive, mask_menu);
         let (backend, receiver) = match choice {
             HotkeyBackend::Evdev => {
-                let (hotkey, rx) = evdev::EvdevHotkey::new(bindings, exclusive)?;
+                let (hotkey, rx) = open_evdev(bindings)?;
                 (Backend::Evdev(hotkey), rx)
             },
             HotkeyBackend::X11 => {
                 let (hotkey, rx) = x11::X11Hotkey::new(bindings)?;
                 (Backend::X11(hotkey), rx)
             },
-            HotkeyBackend::Auto => match evdev::EvdevHotkey::new(bindings.clone(), exclusive) {
+            HotkeyBackend::Auto => match open_evdev(bindings.clone()) {
                 Ok((hotkey, rx)) => (Backend::Evdev(hotkey), rx),
                 Err(evdev_err) if std::env::var_os("DISPLAY").is_some() => {
                     warn!("{}; falling back to X11 hotkeys", evdev_err);

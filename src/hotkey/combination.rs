@@ -69,7 +69,7 @@ const KEYS: &[KeyDef] = keys![
     ["f16"] => KEY_F16 / F16, ["f17"] => KEY_F17 / F17, ["f18"] => KEY_F18 / F18,
     ["f19"] => KEY_F19 / F19, ["f20"] => KEY_F20 / F20, ["f21"] => KEY_F21 / F21,
     ["f22"] => KEY_F22 / F22, ["f23"] => KEY_F23 / F23, ["f24"] => KEY_F24 / F24,
-    // A bare modifier as the hotkey: applications ignore a modifier pressed on its own.
+    // A bare modifier as the hotkey: it types no character in applications.
     ["rightalt", "altgr"] => KEY_RIGHTALT / AltRight, ["leftalt"] => KEY_LEFTALT / AltLeft,
     ["rightctrl", "rightcontrol"] => KEY_RIGHTCTRL / ControlRight,
     ["leftctrl", "leftcontrol"] => KEY_LEFTCTRL / ControlLeft,
@@ -210,6 +210,21 @@ impl KeyCombination {
     /// Whether the chord needs a keyboard for its modifiers.
     pub fn has_modifiers(&self) -> bool {
         self.modifiers != Modifiers::default()
+    }
+
+    /// Whether each key of the chord is an Alt or a Super key, such as
+    /// `RightAlt` or `Super+LeftAlt`. When such a chord goes up with no
+    /// other key in between, many applications open their menu bar and
+    /// many desktops open their launcher.
+    pub fn only_alt_or_super(&self) -> bool {
+        let main = matches!(
+            self.key.evdev,
+            KeyCode::KEY_LEFTALT
+                | KeyCode::KEY_RIGHTALT
+                | KeyCode::KEY_LEFTMETA
+                | KeyCode::KEY_RIGHTMETA
+        );
+        main && !self.modifiers.ctrl && !self.modifiers.shift
     }
 
     pub fn x11_modifiers(&self) -> X11Modifiers {
@@ -385,6 +400,40 @@ mod tests {
         assert!(KeyCombination::parse("Ctrl+A+B").is_err());
         assert!(KeyCombination::parse("Ctrl+Bogus").is_err());
         assert!(KeyCombination::parse("").is_err());
+    }
+
+    #[test]
+    fn only_chords_of_alt_and_super_keys_open_menus() {
+        for chord in [
+            "RightAlt",
+            "AltGr",
+            "LeftAlt",
+            "LeftSuper",
+            "RightMeta",
+            "Super+RightAlt",
+            "Alt+LeftMeta",
+            "Alt+Super+RightAlt",
+        ] {
+            assert!(
+                KeyCombination::parse(chord).unwrap().only_alt_or_super(),
+                "{chord}"
+            );
+        }
+        for chord in [
+            "Ctrl+RightAlt",
+            "Shift+RightAlt",
+            "Ctrl+LeftSuper",
+            "F13",
+            "Mouse4",
+            "RightCtrl",
+            "Alt+Space",
+            "Super+F",
+        ] {
+            assert!(
+                !KeyCombination::parse(chord).unwrap().only_alt_or_super(),
+                "{chord}"
+            );
+        }
     }
 
     #[test]
