@@ -495,7 +495,8 @@ fn apply_kwin(session: &mut Session, kwin: &[String], index: u32) {
 /// the X11 layout of `localectl`, or US when it names none. Hush types only
 /// when the session's layouts are that default. When the options differ,
 /// Hush's keyboard can have either list, because a desktop daemon can apply
-/// the session options to it, so both lists go to the key table.
+/// the session options to it, so both lists go to the key table. The keys
+/// that hold Ctrl and Shift need both lists also when the layouts differ.
 fn match_server_default(session: &mut Session, localectl: Option<&str>) {
     let Some(text) = localectl else {
         session.active = Active::Unclear {
@@ -510,6 +511,10 @@ fn match_server_default(session: &mut Session, localectl: Option<&str>) {
         field(text, "X11 Layout:").unwrap_or("us"),
         field(text, "X11 Variant:").unwrap_or_default(),
     );
+    let default_options = field(text, "X11 Options:").unwrap_or_default();
+    if session.options.as_deref().map(option_set) != Some(option_set(default_options)) {
+        session.other_options = Some(default_options.to_string());
+    }
     if !same_layouts(&session.layout, &default) {
         session.active = Active::Unclear {
             why: format!(
@@ -519,11 +524,6 @@ fn match_server_default(session: &mut Session, localectl: Option<&str>) {
             ),
             fix: FIX_X11,
         };
-        return;
-    }
-    let default_options = field(text, "X11 Options:").unwrap_or_default();
-    if session.options.as_deref().map(option_set) != Some(option_set(default_options)) {
-        session.other_options = Some(default_options.to_string());
     }
 }
 
@@ -1107,6 +1107,19 @@ mod tests {
             matches!(&session.active, Active::Unclear { why, .. } if why.contains("default layout us")),
             "a setxkbmap change does not reach Hush's own keyboard: {:?}",
             session.active
+        );
+        assert_eq!(session.other_options, None);
+
+        let mut session = setxkbmap("de", "ctrl:swapcaps");
+        match_server_default(
+            &mut session,
+            Some(&localectl("us", "", "ctrl:swap_lwin_lctl")),
+        );
+        assert!(matches!(session.active, Active::Unclear { .. }));
+        assert_eq!(
+            session.other_options.as_deref(),
+            Some("ctrl:swap_lwin_lctl"),
+            "the keys that hold Ctrl must work with the default options too"
         );
 
         let mut session = setxkbmap("us", "");

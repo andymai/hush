@@ -3,6 +3,7 @@
 //! `input` group membership as uinput provides.
 
 use super::combination::KeyCombination;
+use super::menu_mask::MenuMask;
 use super::{HotkeyAction, HotkeyBindings, HotkeyEvent};
 use crate::text_processing::StyleName;
 use crate::transcription::Language;
@@ -31,6 +32,7 @@ pub struct HotkeyMatcher {
     combination: KeyCombination,
     held: HashSet<KeyCode>,
     active: bool,
+    mask: bool,
 }
 
 /// Outcome of one key event.
@@ -39,6 +41,9 @@ pub struct Processed {
     pub event: Option<HotkeyEvent>,
     /// The event belongs to the hotkey and must not reach applications.
     pub swallow: bool,
+    /// The event is the press of a chord of only Alt and Super keys, and
+    /// the reader taps Ctrl so that its release opens no menu.
+    pub mask: bool,
 }
 
 const MODIFIER_PAIRS: [(KeyCode, KeyCode); 4] = [
@@ -54,7 +59,15 @@ impl HotkeyMatcher {
             combination,
             held: HashSet::new(),
             active: false,
+            mask: false,
         }
+    }
+
+    /// With `on`, report [`Processed::mask`] on each press of the chord when
+    /// it has only Alt and Super keys.
+    pub fn with_menu_mask(mut self, on: bool) -> Self {
+        self.mask = on && self.combination.only_alt_or_super();
+        self
     }
 
     /// Feed one key event (`value`: 1 press, 0 release, 2 repeat).
@@ -93,6 +106,7 @@ impl HotkeyMatcher {
         Processed {
             event,
             swallow: code == key && (was_active || self.active),
+            mask: self.mask && event == Some(HotkeyEvent::Pressed),
         }
     }
 
@@ -124,27 +138,43 @@ pub struct Matchers {
 }
 
 impl Matchers {
-    pub fn new(bindings: &HotkeyBindings) -> Self {
+    /// `mask_menu` gives the menu mask to every chord of only Alt and Super
+    /// keys, but not to the cancel key. The cancel key reaches the
+    /// application by design, and Hush ignores it outside a take.
+    pub fn new(bindings: &HotkeyBindings, mask_menu: bool) -> Self {
+        let matcher = |combination: &KeyCombination| {
+            HotkeyMatcher::new(combination.clone()).with_menu_mask(mask_menu)
+        };
         Self {
-            primary: HotkeyMatcher::new(bindings.primary.clone()),
+            primary: matcher(&bindings.primary),
             languages: bindings
                 .languages
                 .iter()
-                .map(|(language, combination)| (*language, HotkeyMatcher::new(combination.clone())))
+                .map(|(language, combination)| (*language, matcher(combination)))
                 .collect(),
             styles: bindings
                 .styles
                 .iter()
-                .map(|(style, combination)| (*style, HotkeyMatcher::new(combination.clone())))
+                .map(|(style, combination)| (*style, matcher(combination)))
                 .collect(),
             cancel: bindings.cancel.clone().map(HotkeyMatcher::new),
             actions: bindings
                 .actions
                 .iter()
-                .map(|(action, combination)| (*action, HotkeyMatcher::new(combination.clone())))
+                .map(|(action, combination)| (*action, matcher(combination)))
                 .collect(),
-            command: bindings.command.clone().map(HotkeyMatcher::new),
+            command: bindings.command.as_ref().map(matcher),
         }
+    }
+
+    /// Whether a chord can report [`Processed::mask`].
+    pub fn masks(&self) -> bool {
+        std::iter::once(&self.primary)
+            .chain(self.languages.iter().map(|(_, matcher)| matcher))
+            .chain(self.styles.iter().map(|(_, matcher)| matcher))
+            .chain(self.actions.iter().map(|(_, matcher)| matcher))
+            .chain(self.command.iter())
+            .any(|matcher| matcher.mask)
     }
 
     /// Language and style chords report their press and release and are
@@ -170,15 +200,17 @@ impl Matchers {
             }
         }
         for (action, matcher) in self.actions.iter_mut() {
-            if matcher.feed(code, value) == Some(HotkeyEvent::Pressed) && processed.event.is_none()
-            {
+            let own = matcher.process(code, value);
+            processed.mask |= own.mask;
+            if own.event == Some(HotkeyEvent::Pressed) && processed.event.is_none() {
                 processed.event = Some(HotkeyEvent::Action(*action));
             }
         }
         if let Some(command) = self.command.as_mut() {
-            let event = command.feed(code, value);
+            let own = command.process(code, value);
+            processed.mask |= own.mask;
             if processed.event.is_none() {
-                match event {
+                match own.event {
                     Some(HotkeyEvent::Pressed) => {
                         processed.event = Some(HotkeyEvent::Command(true))
                     },
@@ -201,6 +233,7 @@ fn merge_dictation_key(
     event: impl Fn(bool) -> HotkeyEvent,
 ) {
     processed.swallow |= own.swallow;
+    processed.mask |= own.mask;
     if processed.event.is_none() {
         processed.event = match own.event {
             Some(HotkeyEvent::Pressed) => Some(event(true)),
@@ -210,12 +243,14 @@ fn merge_dictation_key(
     }
 }
 
-/// Vendor id stamped on every uinput device Hush creates (the typing
-/// keyboard and exclusive-mode proxies) so the hotkey reader can skip its
-/// own output instead of grabbing a proxy and chaining another onto it.
+/// Vendor id on every uinput device that Hush makes: the typing keyboard,
+/// the menu mask, and exclusive-mode proxies. The hotkey reader skips these
+/// devices. Thus it never grabs a proxy to chain another onto it, and never
+/// reads its own Ctrl tap as part of a chord.
 pub const VIRTUAL_VENDOR: u16 = 0x4855;
 pub const VIRTUAL_PRODUCT_KEYBOARD: u16 = 0x0001;
 pub const VIRTUAL_PRODUCT_PROXY: u16 = 0x0002;
+pub const VIRTUAL_PRODUCT_MASK: u16 = 0x0003;
 
 /// Whether an input identity belongs to one of Hush's own virtual devices.
 pub fn is_hush_virtual(id: InputId) -> bool {
@@ -318,21 +353,46 @@ fn explain_no_keyboard() -> anyhow::Error {
     }
 }
 
+type SharedMask = Option<Arc<Mutex<MenuMask>>>;
+
+/// The menu mask on the key that holds Control in the session keymap. Hush
+/// never guesses that key, because a wrong guess taps Caps Lock, Alt, or
+/// Super on every dictation.
+fn open_mask() -> std::result::Result<MenuMask, String> {
+    let key = KeyCode::new(crate::text::typing::control_key()?.code());
+    let mask =
+        MenuMask::new(key).map_err(|e| format!("Hush cannot make its virtual keyboard ({})", e))?;
+    info!(
+        "A lone Alt or Super hotkey gets a Ctrl tap ({:?}), so it opens no menu",
+        key
+    );
+    Ok(mask)
+}
+
+/// Whether the reader taps Ctrl for chords of only Alt and Super keys. A
+/// grab hides those keys from applications, so they need no tap.
+fn masks_menus(exclusive: bool, mask_menu: bool) -> bool {
+    mask_menu && !exclusive
+}
+
 pub struct EvdevHotkey {
     bindings: HotkeyBindings,
     exclusive: bool,
     running: Arc<AtomicBool>,
     matcher: Arc<Mutex<Matchers>>,
+    mask: SharedMask,
     sender: mpsc::Sender<HotkeyEvent>,
 }
 
 impl EvdevHotkey {
     /// With `exclusive`, the device that carries the hotkey's key is grabbed
     /// and every other event it produces is replayed through a uinput proxy,
-    /// so applications never see the hotkey itself.
+    /// so applications never see the hotkey itself. Without it, `mask_menu`
+    /// taps Ctrl when a chord of only Alt and Super keys goes down.
     pub fn new(
         bindings: HotkeyBindings,
         exclusive: bool,
+        mask_menu: bool,
     ) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
         let combination = &bindings.primary;
         let found = devices_for(&bindings);
@@ -357,10 +417,28 @@ impl EvdevHotkey {
             if exclusive { ", exclusive" } else { "" }
         );
 
+        let matchers = Matchers::new(&bindings, masks_menus(exclusive, mask_menu));
+        let mask = if matchers.masks() {
+            match open_mask() {
+                Ok(mask) => Some(Arc::new(Mutex::new(mask))),
+                Err(why) => {
+                    warn!(
+                        "No menu mask: {}. A lone Alt or Super hotkey can open application \
+                         menus; hotkey.exclusive hides the key instead",
+                        why
+                    );
+                    None
+                },
+            }
+        } else {
+            None
+        };
+
         let (sender, receiver) = mpsc::channel();
         Ok((
             Self {
-                matcher: Arc::new(Mutex::new(Matchers::new(&bindings))),
+                matcher: Arc::new(Mutex::new(matchers)),
+                mask,
                 bindings,
                 exclusive,
                 running: Arc::new(AtomicBool::new(false)),
@@ -381,12 +459,13 @@ impl EvdevHotkey {
         }
         let running = Arc::clone(&self.running);
         let matcher = Arc::clone(&self.matcher);
+        let mask = self.mask.clone();
         let sender = self.sender.clone();
         let bindings = self.bindings.clone();
         let exclusive = self.exclusive;
         thread::Builder::new()
             .name("hush-hotkey-scan".into())
-            .spawn(move || supervise(running, matcher, sender, bindings, exclusive))
+            .spawn(move || supervise(running, matcher, mask, sender, bindings, exclusive))
             .map_err(|e| anyhow!("Failed to start hotkey thread: {}", e))?;
         Ok(())
     }
@@ -406,6 +485,7 @@ impl Drop for EvdevHotkey {
 fn supervise(
     running: Arc<AtomicBool>,
     matcher: Arc<Mutex<Matchers>>,
+    mask: SharedMask,
     sender: mpsc::Sender<HotkeyEvent>,
     bindings: HotkeyBindings,
     exclusive: bool,
@@ -419,16 +499,16 @@ fn supervise(
             }
             let running = Arc::clone(&running);
             let matcher = Arc::clone(&matcher);
+            let mask = mask.clone();
             let sender = sender.clone();
             let name = format!("hush-hotkey-{}", path.display());
             let spawn_path = path.clone();
             // Only a device that carries a dictation key is grabbed; a
             // keyboard read for modifiers stays untouched.
             let grab = exclusive && carries_dictation_key(&device, &bindings);
-            match thread::Builder::new()
-                .name(name)
-                .spawn(move || read_device(&spawn_path, device, running, matcher, sender, grab))
-            {
+            match thread::Builder::new().name(name).spawn(move || {
+                read_device(&spawn_path, device, running, matcher, mask, sender, grab)
+            }) {
                 Ok(handle) => {
                     readers.insert(path, handle);
                 },
@@ -471,6 +551,7 @@ fn read_device(
     mut device: Device,
     running: Arc<AtomicBool>,
     matcher: Arc<Mutex<Matchers>>,
+    mask: SharedMask,
     sender: mpsc::Sender<HotkeyEvent>,
     grab: bool,
 ) {
@@ -520,6 +601,17 @@ fn read_device(
             match event.destructure() {
                 EventSummary::Key(_, code, value) => {
                     let processed = matcher.lock().process(code, value);
+                    // Tap before the event goes out, so Ctrl is up again
+                    // before Hush acts on the key and types.
+                    if let Some(mask) = mask.as_ref() {
+                        let sending = crate::text::insertion::sending_keys();
+                        if processed.mask && sending {
+                            debug!("No menu mask tap: Hush sends keys to a window");
+                        }
+                        if let Err(e) = mask.lock().follow(&processed, sending) {
+                            warn!("Menu mask tap failed: {}", e);
+                        }
+                    }
                     if let Some(hotkey_event) = processed.event {
                         debug!("Hotkey {:?} from {}", hotkey_event, path.display());
                         if sender.send(hotkey_event).is_err() {
@@ -728,6 +820,15 @@ mod tests {
             VIRTUAL_PRODUCT_KEYBOARD,
             1
         )));
+        assert!(
+            is_hush_virtual(InputId::new(
+                BusType::BUS_VIRTUAL,
+                VIRTUAL_VENDOR,
+                VIRTUAL_PRODUCT_MASK,
+                1
+            )),
+            "the reader never sees its own Ctrl tap"
+        );
         assert!(!is_hush_virtual(InputId::new(
             BusType::BUS_USB,
             VIRTUAL_VENDOR,
@@ -745,7 +846,7 @@ mod tests {
     #[test]
     fn the_cancel_key_reports_a_press_and_is_never_swallowed() {
         let bindings = HotkeyBindings::parse("Ctrl+Space", Some("Escape")).unwrap();
-        let mut m = Matchers::new(&bindings);
+        let mut m = Matchers::new(&bindings, false);
         let esc = m.process(KeyCode::KEY_ESC, 1);
         assert_eq!(esc.event, Some(HotkeyEvent::Cancel));
         assert!(!esc.swallow);
@@ -769,7 +870,7 @@ mod tests {
             .unwrap()
             .with_action(HotkeyAction::Learn, "Super+RightAlt")
             .unwrap();
-        let mut m = Matchers::new(&bindings);
+        let mut m = Matchers::new(&bindings, false);
         m.process(KeyCode::KEY_LEFTMETA, 1);
         let press = m.process(KeyCode::KEY_RIGHTALT, 1);
         assert_eq!(press.event, Some(HotkeyEvent::Action(HotkeyAction::Learn)));
@@ -789,7 +890,7 @@ mod tests {
             .unwrap()
             .with_action(HotkeyAction::Rewrite(formal), "Super+F")
             .unwrap();
-        let mut m = Matchers::new(&bindings);
+        let mut m = Matchers::new(&bindings, false);
         m.process(KeyCode::KEY_LEFTMETA, 1);
         let press = m.process(KeyCode::KEY_F, 1);
         assert_eq!(
@@ -806,7 +907,7 @@ mod tests {
             .unwrap()
             .with_command("Ctrl+RightAlt")
             .unwrap();
-        let mut m = Matchers::new(&bindings);
+        let mut m = Matchers::new(&bindings, false);
         m.process(KeyCode::KEY_LEFTCTRL, 1);
         assert_eq!(
             m.process(KeyCode::KEY_RIGHTALT, 1).event,
@@ -831,7 +932,7 @@ mod tests {
             .unwrap()
             .with_language(german, "Shift+RightAlt")
             .unwrap();
-        let mut m = Matchers::new(&bindings);
+        let mut m = Matchers::new(&bindings, false);
         m.process(KeyCode::KEY_LEFTSHIFT, 1);
         let press = m.process(KeyCode::KEY_RIGHTALT, 1);
         assert_eq!(press.event, Some(HotkeyEvent::Language(german, true)));
@@ -873,7 +974,7 @@ mod tests {
             .unwrap()
             .with_style(verbatim, "Super+RightAlt")
             .unwrap();
-        let mut m = Matchers::new(&bindings);
+        let mut m = Matchers::new(&bindings, false);
         m.process(KeyCode::KEY_LEFTMETA, 1);
         let press = m.process(KeyCode::KEY_RIGHTALT, 1);
         assert_eq!(press.event, Some(HotkeyEvent::Style(verbatim, true)));
@@ -887,6 +988,25 @@ mod tests {
             Some(HotkeyEvent::Pressed),
             "the bare key is still the dictation hotkey"
         );
+    }
+
+    #[test]
+    fn a_grab_or_the_setting_turns_the_menu_mask_off() {
+        let bindings = HotkeyBindings::parse("RightAlt", Some("Escape")).unwrap();
+        for (exclusive, mask_menu, masks) in [
+            (false, true, true),
+            (true, true, false),
+            (false, false, false),
+            (true, false, false),
+        ] {
+            let mut m = Matchers::new(&bindings, masks_menus(exclusive, mask_menu));
+            assert_eq!(
+                m.masks(),
+                masks,
+                "exclusive {exclusive}, mask_menu {mask_menu}"
+            );
+            assert_eq!(m.process(KeyCode::KEY_RIGHTALT, 1).mask, masks);
+        }
     }
 
     #[test]

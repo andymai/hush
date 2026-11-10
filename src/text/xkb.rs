@@ -18,7 +18,7 @@ use xkbcommon_dl::{
     keysyms, xkb_compose_compile_flags, xkb_compose_feed_result, xkb_compose_state,
     xkb_compose_state_flags, xkb_compose_status, xkb_compose_table, xkb_context, xkb_context_flags,
     xkb_key_direction, xkb_keymap, xkb_keymap_compile_flags, xkb_keysym_t, xkb_log_level,
-    xkb_rule_names, xkb_state, xkb_state_component, XkbCommon, XkbCommonCompose,
+    xkb_rule_names, xkb_state, xkb_state_component, XkbCommon, XkbCommonCompose, XKB_MOD_NAME_CTRL,
     XKB_MOD_NAME_SHIFT,
 };
 
@@ -99,6 +99,82 @@ pub fn build(request: &Request) -> Result<KeyTable> {
         }
     }
     Ok(KeyTable::new(chars, shift.unwrap_or(Key::LeftShift)))
+}
+
+/// The keys that can hold Control or Shift, in the order Hush tries them.
+pub const CHORD_MODIFIER_KEYS: [Key; 9] = [
+    Key::LeftCtrl,
+    Key::RightCtrl,
+    Key::LeftShift,
+    Key::RightShift,
+    Key::CapsLock,
+    Key::LeftMeta,
+    Key::RightMeta,
+    Key::LeftAlt,
+    Key::RightAlt,
+];
+
+/// The keys that hold Control and Shift in every keymap of a list, for a
+/// keyboard that can have any of them. `None` when no key holds the
+/// modifier in every keymap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Holders {
+    pub control: Option<Key>,
+    pub shift: Option<Key>,
+}
+
+pub fn holders(names: &[Names], group: u32) -> Result<Holders> {
+    let lib =
+        xkbcommon_dl::xkbcommon_option().ok_or_else(|| anyhow!("libxkbcommon is not installed"))?;
+    let context = Context::new(lib)?;
+    let keymaps = names
+        .iter()
+        .map(|names| Keymap::compile(&context, names))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Holders {
+        control: common_holder(&keymaps, group, Held::Control)?,
+        shift: common_holder(&keymaps, group, Held::Shift)?,
+    })
+}
+
+#[derive(Clone, Copy)]
+enum Held {
+    Control,
+    Shift,
+}
+
+fn common_holder(keymaps: &[Keymap], group: u32, held: Held) -> Result<Option<Key>> {
+    for key in CHORD_MODIFIER_KEYS {
+        let mut every = true;
+        for keymap in keymaps {
+            every &= holds(keymap, group, key, held)?;
+        }
+        if every {
+            return Ok(Some(key));
+        }
+    }
+    Ok(None)
+}
+
+/// The key types the modifier's keysym, holds the modifier while it is
+/// down, and changes nothing else.
+fn holds(keymap: &Keymap, group: u32, key: Key, held: Held) -> Result<bool> {
+    let state = State::new(keymap, group)?;
+    let wanted = match held {
+        Held::Control => [keysyms::Control_L, keysyms::Control_R],
+        Held::Shift => [keysyms::Shift_L, keysyms::Shift_R],
+    };
+    if !wanted.contains(&state.sym(key)) {
+        return Ok(false);
+    }
+    state.press(key);
+    let active = match held {
+        Held::Control => state.control_active(),
+        Held::Shift => state.shift_active(),
+    };
+    let ok = active && state.layout() == group;
+    state.release(key);
+    Ok(ok && state.mods() == 0)
 }
 
 /// What the keys type with each set of modifiers, cheapest first.
@@ -388,11 +464,21 @@ impl State {
     }
 
     fn shift_active(&self) -> bool {
-        // SAFETY: ptr is a live state, and the name is NUL-terminated.
+        self.mod_active(XKB_MOD_NAME_SHIFT)
+    }
+
+    fn control_active(&self) -> bool {
+        self.mod_active(XKB_MOD_NAME_CTRL)
+    }
+
+    /// `name` is one of the NUL-terminated `XKB_MOD_NAME` constants.
+    fn mod_active(&self, name: &'static [u8]) -> bool {
+        // SAFETY: ptr is a live state, and each caller passes a
+        // NUL-terminated name.
         unsafe {
             (self.lib.xkb_state_mod_name_is_active)(
                 self.ptr,
-                XKB_MOD_NAME_SHIFT.as_ptr().cast::<c_char>(),
+                name.as_ptr().cast::<c_char>(),
                 xkb_state_component::XKB_STATE_MODS_EFFECTIVE,
             ) == 1
         }
@@ -729,6 +815,60 @@ pub(crate) mod tests {
                 level3: Some(Key::CapsLock)
             }])
         );
+    }
+
+    #[test]
+    fn control_is_on_the_key_that_the_options_give_it() {
+        if !xkb_ready() {
+            return;
+        }
+        let us = |options: &str| Names {
+            layout: "us".into(),
+            options: options.into(),
+            ..Names::default()
+        };
+        let control = |names: &[Names]| holders(names, 0).unwrap().control;
+        assert_eq!(
+            holders(&[us("")], 0).unwrap(),
+            Holders {
+                control: Some(Key::LeftCtrl),
+                shift: Some(Key::LeftShift)
+            }
+        );
+        assert_eq!(
+            control(&[us("ctrl:swapcaps")]),
+            Some(Key::RightCtrl),
+            "Left Ctrl types Caps Lock"
+        );
+        assert_eq!(
+            holders(&[us("ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl")], 0).unwrap(),
+            Holders {
+                control: Some(Key::LeftMeta),
+                shift: Some(Key::LeftShift)
+            },
+            "both Ctrl keys type Super, and Left Win types Control_L"
+        );
+        assert_eq!(
+            control(&[us(""), us("ctrl:swap_lwin_lctl")]),
+            Some(Key::RightCtrl),
+            "the key must hold Control with each option list"
+        );
+        assert_eq!(
+            control(&[us("ctrl:swap_lwin_lctl"), us("ctrl:swap_rwin_rctl")]),
+            None,
+            "no key holds Control with both lists"
+        );
+        assert!(holders(
+            &[
+                us(""),
+                Names {
+                    layout: "no-such-layout".into(),
+                    ..Names::default()
+                }
+            ],
+            0
+        )
+        .is_err());
     }
 
     #[test]

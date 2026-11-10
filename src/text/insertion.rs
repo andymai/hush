@@ -27,9 +27,35 @@ use crate::config::settings::InsertionConfig;
 use crate::text_processing::{AppKind, ProcessingContext, ProfilesConfig};
 use crate::Result;
 use anyhow::Context;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 use tracing::{debug, info, warn};
+
+/// Whether Hush sends keys to a window now. The menu mask taps no Ctrl
+/// then: on KWin, one XKB state spans every keyboard, so a Ctrl between
+/// typed keys turns a letter into a shortcut such as Ctrl+W.
+static SENDING: AtomicBool = AtomicBool::new(false);
+
+pub fn sending_keys() -> bool {
+    SENDING.load(Ordering::Acquire)
+}
+
+/// Marks the time that Hush sends keys, until it drops.
+struct Sending;
+
+impl Sending {
+    fn start() -> Self {
+        SENDING.store(true, Ordering::Release);
+        Self
+    }
+}
+
+impl Drop for Sending {
+    fn drop(&mut self) {
+        SENDING.store(false, Ordering::Release);
+    }
+}
 
 /// Texts longer than this paste even when every character is typeable.
 pub const PASTE_THRESHOLD_CHARS: usize = 2000;
@@ -332,6 +358,7 @@ impl TextInserter {
         submit_app: bool,
     ) -> Result<()> {
         wait_for_modifiers();
+        let _sending = Sending::start();
         self.uinput.set_typing_delay(self.config.typing_delay_ms);
         let typed = self.uinput.type_text(text, table, line_break);
         if presses_enter(origin, submit_app, text, &typed) {
@@ -380,11 +407,15 @@ impl TextInserter {
         }
         wait_for_modifiers();
         debug!("Pasting with {}", chord);
-        let sent = self.uinput.send_paste_shortcut(chord, table);
+        let sending = Sending::start();
+        let sent = self
+            .uinput
+            .send_paste_shortcut(chord, table, self.typing.chords());
         let pasted_at = clock.now();
         if presses_enter(origin, submit_app, text, &sent) {
             press_enter(&mut self.uinput, &clock, PASTED_SUBMIT_DELAY);
         }
+        drop(sending);
         if sent.is_ok() {
             let waited = clock.now().saturating_duration_since(pasted_at);
             clock.sleep(AFTER_PASTE.saturating_sub(waited));
@@ -417,6 +448,7 @@ impl TextInserter {
     pub fn undo_last_insertion(&mut self, char_count: usize) -> Result<()> {
         info!("Undoing last insertion ({} chars)", char_count);
         wait_for_modifiers();
+        let _sending = Sending::start();
         for _ in 0..char_count {
             self.uinput.send_backspace()?;
             thread::sleep(Duration::from_millis(self.config.typing_delay_ms));
@@ -497,6 +529,15 @@ mod tests {
 
     fn us() -> Option<&'static KeyTable> {
         Some(KeyTable::us())
+    }
+
+    #[test]
+    fn the_sending_flag_covers_the_guard_only() {
+        assert!(!sending_keys());
+        let sending = Sending::start();
+        assert!(sending_keys(), "the menu mask sees that Hush types");
+        drop(sending);
+        assert!(!sending_keys());
     }
 
     #[test]

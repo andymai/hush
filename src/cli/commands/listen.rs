@@ -273,8 +273,12 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         for (style, chord) in config.hotkey.rewrite_keys() {
             bindings = bindings.with_action(HotkeyAction::Rewrite(style), chord)?;
         }
-        let (manager, receiver) =
-            HotkeyManager::with_backend(bindings, config.hotkey.backend, config.hotkey.exclusive)?;
+        let (manager, receiver) = HotkeyManager::with_backend(
+            bindings,
+            config.hotkey.backend,
+            config.hotkey.exclusive,
+            config.hotkey.mask_menu,
+        )?;
         manager.start_listening()?;
         info!(
             "✅ Hotkey '{}' registered via {}",

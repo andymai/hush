@@ -11,9 +11,10 @@
 //! - When libxkbcommon or the keymap is not available, Hush types with the
 //!   US table on plain US and pastes on every other layout.
 
-use super::keymap::KeyTable;
+use super::keymap::{ChordKeys, KeyTable};
 use super::layout::{self, plain_us, Active, Session, FIX_SEVERAL};
 use super::xkb::{self, Names, Request};
+use input_linux::Key;
 use std::fmt;
 use std::sync::Arc;
 use tracing::debug;
@@ -205,12 +206,86 @@ fn plan(session: Option<&Session>, library: bool) -> Plan {
     }
 }
 
+/// The XKB names that decide which keys hold Control and Shift, or why
+/// Hush cannot know them. The XKB options move these modifiers, and the
+/// layouts do not, so a session whose active layout is unknown, or whose
+/// layout is an input method, still gives names.
+fn modifier_names(session: Option<&Session>) -> Result<Vec<Names>, String> {
+    let session = session.ok_or("no source names the keyboard layout and its XKB options")?;
+    let options = session.options.clone().ok_or(
+        "the compositor does not report its XKB options (Sway does not), and an option can \
+         move Ctrl",
+    )?;
+    let entries = session
+        .layout
+        .entries()
+        .filter(|entries| !entries.is_empty())
+        .unwrap_or_else(|| vec![("us".to_string(), String::new())]);
+    let entries = &entries[..entries.len().min(MAX_GROUPS)];
+    let list = |pick: fn(&(String, String)) -> &str| {
+        entries.iter().map(pick).collect::<Vec<_>>().join(",")
+    };
+    let names = Names {
+        rules: session.rules.clone(),
+        model: session.model.clone(),
+        layout: list(|(layout, _)| layout),
+        variant: list(|(_, variant)| variant),
+        options,
+    };
+    let mut all = vec![names.clone()];
+    all.extend(
+        session
+            .other_options
+            .clone()
+            .map(|options| Names { options, ..names }),
+    );
+    Ok(all)
+}
+
+fn holders_for(names: &Result<Vec<Names>, String>) -> Result<xkb::Holders, String> {
+    let names = names.as_ref().map_err(String::clone)?;
+    if !xkb::available() {
+        return Err("libxkbcommon is not installed".to_string());
+    }
+    xkb::holders(names, 0).map_err(|e| format!("{:#}", e))
+}
+
+/// The keys for a paste chord. A paste must go out, so a modifier that Hush
+/// cannot place keeps its key from a keymap without options.
+fn paste_keys(holders: &Result<xkb::Holders, String>) -> ChordKeys {
+    let defaults = ChordKeys::default();
+    match holders {
+        Ok(holders) => ChordKeys {
+            control: holders.control.unwrap_or(defaults.control),
+            shift: holders.shift.unwrap_or(defaults.shift),
+        },
+        Err(why) => {
+            debug!("Paste chords use Left Ctrl and Left Shift: {}", why);
+            defaults
+        },
+    }
+}
+
+fn control_key_for(session: Option<&Session>) -> Result<Key, String> {
+    holders_for(&modifier_names(session))?
+        .control
+        .ok_or_else(|| "no key holds Ctrl with every XKB option list of the keyboard".to_string())
+}
+
+/// The key that holds Control on the session's keyboard, for a tap that
+/// must not guess: with `ctrl:swapcaps`, a Left Ctrl tap toggles Caps Lock.
+/// The error says why Hush cannot know the key.
+pub fn control_key() -> Result<Key, String> {
+    control_key_for(layout::session().as_ref())
+}
+
 /// Finds the typing for each take, and keeps the last table so an
 /// unchanged layout does not compile again.
 #[derive(Default)]
 pub struct Resolver {
     reserved: Vec<u16>,
     cached: Option<(Vec<Request>, Arc<KeyTable>)>,
+    chords: Option<(Result<Vec<Names>, String>, ChordKeys)>,
 }
 
 impl Resolver {
@@ -227,7 +302,36 @@ impl Resolver {
     pub fn resolve(&mut self) -> Typing {
         let session = layout::session();
         debug!("Keyboard session: {:?}", session);
+        self.update_chords(session.as_ref());
         self.resolve_for(session.as_ref(), xkb::available())
+    }
+
+    /// The keys that hold Control and Shift for a paste chord, as of the
+    /// last [`Self::resolve`].
+    pub fn chords(&self) -> ChordKeys {
+        self.chords
+            .as_ref()
+            .map(|(_, keys)| *keys)
+            .unwrap_or_default()
+    }
+
+    fn update_chords(&mut self, session: Option<&Session>) {
+        let names = modifier_names(session);
+        if self
+            .chords
+            .as_ref()
+            .is_some_and(|(cached, _)| *cached == names)
+        {
+            return;
+        }
+        let keys = paste_keys(&holders_for(&names));
+        if keys != ChordKeys::default() {
+            debug!(
+                "The keymap moves a modifier: Ctrl is {:?}, Shift is {:?}",
+                keys.control, keys.shift
+            );
+        }
+        self.chords = Some((names, keys));
     }
 
     fn resolve_for(&mut self, session: Option<&Session>, library: bool) -> Typing {
@@ -330,6 +434,82 @@ mod tests {
             Plan::Paste { why, .. } => why,
             other => panic!("expected a paste, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_chord_keys_follow_the_options_whatever_the_active_layout() {
+        let mut swapped = session("us,de", ",nodeadkeys", Active::Unknown);
+        swapped.options = Some("ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl".into());
+        let names = modifier_names(Some(&swapped)).unwrap();
+        assert_eq!(names.len(), 1);
+        assert_eq!(names[0].layout, "us,de");
+        assert_eq!(names[0].options, "ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl");
+        swapped.other_options = Some(String::new());
+        assert_eq!(
+            modifier_names(Some(&swapped)).unwrap()[1].options,
+            "",
+            "a keyboard that can have either option list"
+        );
+        swapped.other_options = None;
+
+        let ibus = Session {
+            layout: Layout::Described("ibus mozc-jp".into()),
+            ..session("us", "", Active::Unknown)
+        };
+        let names = modifier_names(Some(&ibus)).unwrap();
+        assert_eq!(
+            (names[0].layout.as_str(), names[0].options.as_str()),
+            ("us", "grp:alt_shift_toggle"),
+            "an input method still gives its XKB options"
+        );
+
+        if !xkb_ready() {
+            return;
+        }
+        let mut resolver = Resolver::new();
+        resolver.update_chords(Some(&swapped));
+        assert_eq!(
+            resolver.chords().control,
+            Key::LeftMeta,
+            "Left Win types Control_L, so Ctrl+V is Left Win+V"
+        );
+        resolver.update_chords(Some(&session("us", "", Active::Unknown)));
+        assert_eq!(resolver.chords(), ChordKeys::default());
+        assert_eq!(control_key_for(Some(&swapped)), Ok(Key::LeftMeta));
+        let mut swapcaps = ibus.clone();
+        swapcaps.options = Some("ctrl:swapcaps".into());
+        assert_eq!(control_key_for(Some(&swapcaps)), Ok(Key::RightCtrl));
+    }
+
+    #[test]
+    fn the_mask_key_is_unknown_when_the_options_are() {
+        let sway = Session {
+            options: None,
+            ..session("us", "", Active::Index(0))
+        };
+        let why = modifier_names(Some(&sway)).unwrap_err();
+        assert!(why.contains("Sway"), "{why}");
+        assert!(control_key_for(Some(&sway)).is_err());
+        assert!(control_key_for(None).is_err(), "no session at all");
+
+        let mut resolver = Resolver::new();
+        resolver.update_chords(Some(&sway));
+        assert_eq!(
+            resolver.chords(),
+            ChordKeys::default(),
+            "a paste still goes out with the usual keys"
+        );
+
+        if !xkb_ready() {
+            return;
+        }
+        let mut two_lists = session("us", "", Active::Unknown);
+        two_lists.options = Some("ctrl:swap_lwin_lctl".into());
+        two_lists.other_options = Some("ctrl:swap_rwin_rctl".into());
+        let why = control_key_for(Some(&two_lists)).unwrap_err();
+        assert!(why.contains("every XKB option list"), "{why}");
+        resolver.update_chords(Some(&two_lists));
+        assert_eq!(resolver.chords(), ChordKeys::default());
     }
 
     #[test]

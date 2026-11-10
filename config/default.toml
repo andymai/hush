@@ -46,10 +46,11 @@ detect_languages = []
 
 [hotkey]
 enabled = true
-combination = "RightAlt"  # a bare modifier never reaches applications; also "F13", "Mouse4", or a chord like "Ctrl+Shift+Space"
+combination = "RightAlt"  # a bare modifier types no character; also "F13", "Mouse4", or a chord like "Ctrl+Shift+Space"
 mode = "hold"             # hold: record while held; toggle: press to start, press again to stop
 backend = "auto"          # auto: evdev (Wayland and X11), falling back to x11; or "evdev", "x11"
 exclusive = false         # true: grab the hotkey's device so applications never see the key or button
+mask_menu = true          # true: tap Ctrl when a key of only Alt and Super goes down, so apps open no menu and the desktop opens no launcher
 cancel = "Escape"         # discards a recording in progress; "" disables
 tap_ms = 300              # shorter presses are taps: a tap discards, a double-tap locks hands-free (hold); a tap locks (toggle)
 paste_last = ""           # chord that types the last transcript again, e.g. "Shift+RightAlt"
