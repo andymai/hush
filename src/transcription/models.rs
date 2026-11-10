@@ -4,7 +4,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
+use std::time::SystemTime;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, info, warn};
 
@@ -63,6 +64,30 @@ pub fn langid_model() -> ModelInfo {
 pub fn langid_model_path(models_dir: &Path) -> PathBuf {
     models_dir.join(LANGID_FILENAME)
 }
+
+/// The size and modification time of a file. A file with the same stamp as
+/// at its last check is taken to be the same file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    len: u64,
+    modified: SystemTime,
+}
+
+impl FileStamp {
+    fn of(path: &Path) -> Option<Self> {
+        let metadata = std::fs::metadata(path).ok()?;
+        Some(Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok()?,
+        })
+    }
+}
+
+/// The last size and SHA-256 check of each model file, so that a file is
+/// hashed again only when its size or modification time changes. The
+/// settings window asks every few hundred milliseconds.
+static CHECKED: LazyLock<parking_lot::Mutex<HashMap<PathBuf, (FileStamp, bool)>>> =
+    LazyLock::new(Default::default);
 
 /// A download that cannot connect, or that gets no bytes for this long,
 /// fails instead of waiting without end.
@@ -332,14 +357,18 @@ impl ModelManager {
     /// check.
     pub fn valid_path(&self, info: &ModelInfo) -> Option<PathBuf> {
         let path = self.cache_dir.join(&info.filename);
-        match Self::is_valid(&path, info) {
-            Ok(true) => Some(path),
-            Ok(false) => None,
-            Err(e) => {
-                warn!("Could not check {}: {:#}", path.display(), e);
-                None
-            },
+        let stamp = FileStamp::of(&path)?;
+        if let Some((checked, valid)) = CHECKED.lock().get(&path) {
+            if *checked == stamp {
+                return valid.then_some(path);
+            }
         }
+        let valid = Self::is_valid(&path, info).unwrap_or_else(|e| {
+            warn!("Could not check {}: {:#}", path.display(), e);
+            false
+        });
+        CHECKED.lock().insert(path.clone(), (stamp, valid));
+        valid.then_some(path)
     }
 
     /// Download the language-ID model unless a valid copy is already in the
@@ -476,7 +505,12 @@ impl ModelManager {
                 info.name
             ));
         }
-        std::fs::rename(partial, target).context("Failed to move the downloaded model into place")
+        std::fs::rename(partial, target)
+            .context("Failed to move the downloaded model into place")?;
+        if let Some(stamp) = FileStamp::of(target) {
+            CHECKED.lock().insert(target.to_path_buf(), (stamp, true));
+        }
+        Ok(())
     }
 
     fn progress_bar(total: u64, name: &str) -> ProgressBar {
@@ -746,11 +780,42 @@ mod tests {
         let manager = ModelManager::new(temp_dir.path()).unwrap();
         assert_eq!(manager.valid_path(&info), Some(target.clone()));
         std::fs::write(&target, b"Hello, World?").unwrap();
+        let later = SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&target)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
         assert_eq!(
             manager.valid_path(&info),
             None,
             "a file damaged later fails"
         );
+    }
+
+    #[test]
+    fn a_file_is_hashed_again_only_when_its_stamp_changes() {
+        let temp_dir = TempDir::new().unwrap();
+        let info = hello_model();
+        let path = temp_dir.path().join("hello.bin");
+        std::fs::write(&path, b"Hello, World!").unwrap();
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        assert_eq!(manager.valid_path(&info), Some(path.clone()));
+        let stamp = FileStamp::of(&path).unwrap();
+        let file = std::fs::File::options().write(true).open(&path).unwrap();
+        std::io::Write::write_all(&mut &file, b"Hello, World?").unwrap();
+        file.set_modified(stamp.modified).unwrap();
+        assert_eq!(
+            manager.valid_path(&info),
+            Some(path.clone()),
+            "the same size and time: the cached check stands, with no hash"
+        );
+        file.set_modified(stamp.modified + std::time::Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(manager.valid_path(&info), None, "a new time: hashed again");
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(manager.valid_path(&info), None, "a missing file");
     }
 
     #[test]
