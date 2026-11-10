@@ -1,0 +1,26 @@
+scripts/e2e/run.sh
+  s_115995023cd6f3::t_21463182818db7 563-580
+src/transcription/parts.rs
+  s_115995023cd6f3::t_776c207ef1fb68 63
+  s_115995023cd6f3::t_21a83ae27e8bdf 39-40,44,55,59,191-196,509,513
+src/transcription/engine.rs
+  s_115995023cd6f3::t_f0daec89bcac9e 124-139,142,147,154
+src/transcription/guard.rs
+  s_115995023cd6f3::t_755c319dfc1fc4 174-206,372-423
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2f8e3d55273d671816284f85744959725ed14171",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
