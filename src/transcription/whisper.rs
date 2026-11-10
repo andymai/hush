@@ -1,6 +1,7 @@
 //! Speech-to-text through transcribe.cpp, which runs Whisper on ggml.
 
 use crate::audio::level;
+use crate::audio::parts;
 use crate::logging::{transcription as logging, RequestContext};
 use crate::transcription::cpu;
 use crate::transcription::device::{self, GpuAvailability};
@@ -48,8 +49,12 @@ const SPEECH_OVERLAP: usize = WHISPER_SAMPLE_RATE as usize / 10;
 /// with the input, so a long take runs in pieces.
 const PARAKEET_PIECE: usize = 30 * WHISPER_SAMPLE_RATE as usize;
 
-/// The shortest piece that a cut at the limit leaves.
+/// The shortest piece that a cut without a stretch of speech leaves.
 const MIN_PIECE: usize = WHISPER_SAMPLE_RATE as usize;
+
+/// The end of a piece that a cut without a stretch of speech searches for
+/// its quietest block, as a hard cut of a hands-free part does.
+const CUT_SEARCH: usize = parts::HARD_CUT_SEARCH.as_secs() as usize * WHISPER_SAMPLE_RATE as usize;
 
 /// Out-of-memory takes that a session runs again on a CPU copy of the model.
 /// Each costs a failed GPU run and a model load, so the next one moves the
@@ -797,7 +802,7 @@ fn retries_on_a_copy(earlier: u32) -> bool {
 /// apart.
 fn run_pieces(engine: &Engine, speech: &[f32], starts: &[usize]) -> Result<String> {
     let mut text = String::new();
-    for piece in pieces(speech.len(), starts, PARAKEET_PIECE) {
+    for piece in pieces(speech, starts, PARAKEET_PIECE) {
         let (heard, _) = run_full(engine, &speech[piece], "auto", None)?;
         if heard.is_empty() {
             continue;
@@ -810,12 +815,14 @@ fn run_pieces(engine: &Engine, speech: &[f32], starts: &[usize]) -> Result<Strin
     Ok(text)
 }
 
-/// `len` samples in pieces of at most `max`. A cut falls in the middle of the
-/// silence before the last stretch of speech that starts within the limit.
-/// `starts` holds where each stretch starts, as [`join_speech`] gives them.
-/// Without such a stretch, the cut falls at the limit, and the last piece
-/// keeps at least [`MIN_PIECE`].
-fn pieces(len: usize, starts: &[usize], max: usize) -> Vec<Range<usize>> {
+/// `speech` in pieces of at most `max` samples. A cut falls in the middle of
+/// the silence before the last stretch of speech that starts within the
+/// limit. `starts` holds where each stretch starts, as [`join_speech`] gives
+/// them. Without such a stretch, the cut falls in the quietest block of the
+/// last [`CUT_SEARCH`] before the limit, and the last piece keeps at least
+/// [`MIN_PIECE`].
+fn pieces(speech: &[f32], starts: &[usize], max: usize) -> Vec<Range<usize>> {
+    let len = speech.len();
     let max = max.max(MIN_PIECE);
     let mut pieces = Vec::new();
     let mut from = 0;
@@ -826,7 +833,11 @@ fn pieces(len: usize, starts: &[usize], max: usize) -> Vec<Range<usize>> {
             .rev()
             .map(|&start| start.saturating_sub(SPEECH_GAP / 2))
             .find(|&cut| cut > from && cut <= limit)
-            .unwrap_or_else(|| limit.min(len - MIN_PIECE));
+            .unwrap_or_else(|| {
+                let end = limit.min(len - MIN_PIECE);
+                parts::quietest_in(speech, end.saturating_sub(CUT_SEARCH).max(from)..end)
+                    .unwrap_or(end)
+            });
         pieces.push(from..cut);
         from = cut;
     }
@@ -1313,12 +1324,31 @@ mod tests {
 
     const SECOND: usize = WHISPER_SAMPLE_RATE as usize;
 
+    /// Speech at one level from end to end.
+    fn loud(len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|i| if i % 2 == 0 { 0.3 } else { -0.3 })
+            .collect()
+    }
+
+    /// The pieces follow each other from 0 to `len`, and none is empty or
+    /// longer than `max`.
+    fn assert_tiles(pieces: &[Range<usize>], len: usize, max: usize) {
+        let mut at = 0;
+        for piece in pieces {
+            assert_eq!(piece.start, at, "{pieces:?}");
+            assert!(!piece.is_empty() && piece.len() <= max, "{pieces:?}");
+            at = piece.end;
+        }
+        assert_eq!(at, len, "{pieces:?}");
+    }
+
     #[test]
     fn a_long_parakeet_take_is_cut_in_the_silence_between_stretches() {
         let starts = [0, 20 * SECOND, 45 * SECOND, 60 * SECOND];
         let half_gap = SPEECH_GAP / 2;
         assert_eq!(
-            pieces(70 * SECOND, &starts, PARAKEET_PIECE),
+            pieces(&loud(70 * SECOND), &starts, PARAKEET_PIECE),
             [
                 0..20 * SECOND - half_gap,
                 20 * SECOND - half_gap..45 * SECOND - half_gap,
@@ -1328,43 +1358,48 @@ mod tests {
     }
 
     #[test]
-    fn without_stretches_the_cut_falls_at_the_limit() {
-        assert_eq!(
-            pieces(70 * SECOND, &[], PARAKEET_PIECE),
-            [
-                0..30 * SECOND,
-                30 * SECOND..60 * SECOND,
-                60 * SECOND..70 * SECOND
-            ]
+    fn without_a_stretch_the_cut_falls_in_the_quietest_block_before_the_limit() {
+        let mut take = loud(70 * SECOND);
+        take[27 * SECOND..27 * SECOND + SECOND / 5].fill(0.0);
+        take[55 * SECOND..55 * SECOND + SECOND / 5].fill(0.0);
+        let cuts = pieces(&take, &[], PARAKEET_PIECE);
+        assert_tiles(&cuts, take.len(), PARAKEET_PIECE);
+        assert_eq!(cuts.len(), 3, "{cuts:?}");
+        let quiet = |at: usize| at..at + SECOND / 5;
+        assert!(quiet(27 * SECOND).contains(&cuts[0].end), "{cuts:?}");
+        assert!(quiet(55 * SECOND).contains(&cuts[1].end), "{cuts:?}");
+
+        let after_a_stretch = pieces(&take, &[0, 40 * SECOND], PARAKEET_PIECE);
+        assert!(
+            quiet(27 * SECOND).contains(&after_a_stretch[0].end),
+            "no stretch starts within the first 30 s: {after_a_stretch:?}"
         );
-        assert_eq!(
-            pieces(30 * SECOND + SECOND / 2, &[], PARAKEET_PIECE),
-            [
-                0..29 * SECOND + SECOND / 2,
-                29 * SECOND + SECOND / 2..30 * SECOND + SECOND / 2
-            ],
-            "the last piece keeps a second"
-        );
-        assert_eq!(
-            pieces(70 * SECOND, &[0, 40 * SECOND], PARAKEET_PIECE)[0],
-            0..30 * SECOND,
-            "no stretch starts within the first 30 s"
-        );
+    }
+
+    #[test]
+    fn a_cut_without_a_quiet_block_stays_within_the_last_seconds() {
+        let take = loud(70 * SECOND);
+        let cuts = pieces(&take, &[], PARAKEET_PIECE);
+        assert_tiles(&cuts, take.len(), PARAKEET_PIECE);
+        assert!(cuts[0].end >= PARAKEET_PIECE - CUT_SEARCH, "{cuts:?}");
+
+        let take = loud(30 * SECOND + SECOND / 2);
+        let cuts = pieces(&take, &[], PARAKEET_PIECE);
+        assert_tiles(&cuts, take.len(), PARAKEET_PIECE);
+        assert_eq!(cuts.len(), 2, "{cuts:?}");
+        assert!(cuts[1].len() >= MIN_PIECE, "the last piece keeps a second");
     }
 
     #[test]
     fn a_short_take_is_one_piece() {
         let whole = |len: usize| vec![Range { start: 0, end: len }];
         assert_eq!(
-            pieces(30 * SECOND, &[0, 10 * SECOND], PARAKEET_PIECE),
+            pieces(&loud(30 * SECOND), &[0, 10 * SECOND], PARAKEET_PIECE),
             whole(30 * SECOND)
         );
-        assert_eq!(pieces(SECOND, &[], PARAKEET_PIECE), whole(SECOND));
-        assert_eq!(
-            pieces(3 * SECOND, &[], 0),
-            [0..SECOND, SECOND..2 * SECOND, 2 * SECOND..3 * SECOND],
-            "a zero limit still ends"
-        );
+        assert_eq!(pieces(&loud(SECOND), &[], PARAKEET_PIECE), whole(SECOND));
+        let take = loud(3 * SECOND);
+        assert_tiles(&pieces(&take, &[], 0), take.len(), MIN_PIECE);
     }
 
     #[test]
