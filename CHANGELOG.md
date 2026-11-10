@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/andymai/hush/compare/v0.18.0...v0.19.0) (2026-11-10)
+
+
+### Features
+
+* **history:** keep the audio of each take ([#284](https://github.com/andymai/hush/issues/284)) ([007e3bc](https://github.com/andymai/hush/commit/007e3bcbbd4b79727975d36efc34f16f6ec706c4))
+
 ## [0.18.0](https://github.com/andymai/hush/compare/v0.17.0...v0.18.0) (2026-11-10)
 
 
