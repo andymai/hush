@@ -1,0 +1,23 @@
+.github/workflows/e2e.yml
+  s_115995023cd6f3::t_11d89aa4aa17fd 36
+scripts/e2e/run.sh
+  s_115995023cd6f3::t_11d89aa4aa17fd 526
+  s_115995023cd6f3::t_27c8a861336631 94-102,522-525,527-541
+  s_115995023cd6f3::t_a51c40a426908b 542
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "00c48c75ffe74c315735238111b25c03adf66616",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
