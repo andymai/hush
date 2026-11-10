@@ -46,6 +46,7 @@ pub mod parts;
 pub mod silence;
 pub mod store;
 pub mod take;
+pub mod wake;
 
 pub use capture::AudioCapture;
 pub use feedback::AudioFeedback;

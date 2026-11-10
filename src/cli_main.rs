@@ -359,6 +359,17 @@ pub enum SetupCommands {
     /// Diagnose UInput setup issues
     DiagnoseUinput,
 
+    /// Keep the microphone awake between takes with a WirePlumber rule
+    Mic {
+        /// Remove the rule of Hush, so that the microphone sleeps again
+        #[arg(long)]
+        undo: bool,
+
+        /// Restart WirePlumber without a question first (for scripts)
+        #[arg(short, long)]
+        yes: bool,
+    },
+
     /// Audio system setup
     Audio {
         /// List available audio devices

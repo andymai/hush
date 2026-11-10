@@ -538,6 +538,18 @@ impl AudioCapture {
             .unwrap_or(false)
     }
 
+    /// The ALSA PCM, such as `default` or `front:CARD=Microphone,DEV=0`, that
+    /// [`AudioCapture::new`] picks for the `audio.device` setting. Nothing
+    /// opens: the lookup reads only the ALSA device hints.
+    pub fn input_pcm(device_name: Option<&str>) -> Option<String> {
+        let host = cpal::default_host();
+        let device = match device_name {
+            Some(name) => Self::find_device_by_name(&host, name).ok()?,
+            None => host.default_input_device()?,
+        };
+        device.description().ok()?.driver().map(str::to_owned)
+    }
+
     /// List all available input devices
     pub fn list_devices() -> Result<Vec<String>> {
         let host = cpal::default_host();

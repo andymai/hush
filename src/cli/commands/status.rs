@@ -1,4 +1,5 @@
 use super::utils::{config_section, device_section, print_line, show_system_info};
+use crate::audio::take::StartDelay;
 use crate::cli::exit::{Exit, ExitStatus};
 use crate::config::settings::TranscriptionBackend;
 use crate::ipc::{DaemonResponse, DaemonState, ModelState};
@@ -75,6 +76,9 @@ pub async fn handle_status(config: bool, devices: bool, full: bool) -> Result<()
     if let Some(reason) = reply.as_ref().and_then(|reply| reply.safe_mode.as_deref()) {
         println!("Safe mode: {}", safe_mode_line(reason));
     }
+    if let Some(delay) = reply.as_ref().and_then(|reply| reply.start_delay) {
+        println!("Microphone start: {}", start_delay_line(&delay));
+    }
     println!();
 
     show_system_info().await?;
@@ -130,6 +134,19 @@ pub struct StatusReport {
     pub config_error: Option<String>,
     /// Why the daemon runs in safe mode, else `None`
     pub safe_mode: Option<String>,
+    /// How long recent takes waited for the first audio, else `None`
+    pub start_delay: Option<StartDelay>,
+}
+
+/// The start delay of recent takes, for `hush status`.
+pub fn start_delay_line(delay: &StartDelay) -> String {
+    if delay.takes == 1 {
+        return format!("{} ms in the last take", delay.last_ms);
+    }
+    format!(
+        "{} ms in the last take, {} ms at most in the last {} takes",
+        delay.last_ms, delay.worst_ms, delay.takes
+    )
 }
 
 /// What safe mode means, with its reason, for `hush status` and `hush doctor`.
@@ -188,6 +205,7 @@ impl StatusReport {
             arch: std::env::consts::ARCH,
             config_error,
             safe_mode: reply.and_then(|reply| reply.safe_mode.clone()),
+            start_delay: reply.and_then(|reply| reply.start_delay),
         }
     }
 }
@@ -227,7 +245,12 @@ mod tests {
     fn json_status_has_stable_keys() {
         let reply = DaemonResponse::ok(DaemonState::Recording { elapsed_ms: 1500 })
             .with_model_state(Some(ModelState::Loading))
-            .with_language(Some("de".to_string()));
+            .with_language(Some("de".to_string()))
+            .with_start_delay(Some(StartDelay {
+                last_ms: 30,
+                worst_ms: 700,
+                takes: 4,
+            }));
         let report = StatusReport::new(
             Some(&reply),
             Config::defaults(),
@@ -262,6 +285,7 @@ mod tests {
                 "running",
                 "safe_mode",
                 "sample_rate",
+                "start_delay",
                 "state",
                 "use_gpu"
             ]
@@ -277,6 +301,10 @@ mod tests {
         assert_eq!(value["hotkey"], "RightAlt");
         assert_eq!(value["language"], "de", "the daemon's language");
         assert_eq!(value["model_path"], "/models/ggml-base.bin");
+        assert_eq!(
+            value["start_delay"],
+            serde_json::json!({"last_ms": 30, "worst_ms": 700, "takes": 4})
+        );
 
         let older = DaemonResponse::ok(DaemonState::Idle);
         let report = StatusReport::new(
@@ -290,6 +318,30 @@ mod tests {
             report.language.as_deref(),
             Some("en"),
             "without one from the daemon, the config language"
+        );
+        assert_eq!(
+            serde_json::to_value(&report).unwrap()["start_delay"],
+            serde_json::Value::Null,
+            "an older daemon or no take yet"
+        );
+    }
+
+    #[test]
+    fn the_start_delay_line_names_the_last_and_the_slowest_take() {
+        let one = StartDelay {
+            last_ms: 640,
+            worst_ms: 640,
+            takes: 1,
+        };
+        assert_eq!(start_delay_line(&one), "640 ms in the last take");
+        let many = StartDelay {
+            last_ms: 12,
+            worst_ms: 640,
+            takes: 10,
+        };
+        assert_eq!(
+            start_delay_line(&many),
+            "12 ms in the last take, 640 ms at most in the last 10 takes"
         );
     }
 

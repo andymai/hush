@@ -6,6 +6,7 @@
 use super::protocol::{
     DaemonCommand, DaemonResponse, DaemonState, ModelState, TakeResult, FILE_TIMEOUT, PRINT_TIMEOUT,
 };
+use crate::audio::take::{StartDelay, StartDelays};
 use crate::text_processing::styles::{self, StyleName};
 use crate::text_processing::{learn, Trigger};
 use crate::transcription::language::{self, Language};
@@ -84,8 +85,8 @@ pub struct FileJob {
     pub reply: TakeWaiter,
 }
 
-/// Current phase, model state, languages, styles, and the last transcript,
-/// written by the session and read by IPC.
+/// Current phase, model state, languages, styles, the last transcript, and
+/// the start delays of recent takes, written by the session and read by IPC.
 pub struct SharedState {
     phase: Mutex<Phase>,
     model: Mutex<Option<ModelState>>,
@@ -97,6 +98,7 @@ pub struct SharedState {
     files: Mutex<VecDeque<FileJob>>,
     changes: watch::Sender<()>,
     safe_mode: Mutex<Option<String>>,
+    start_delays: Mutex<StartDelays>,
 }
 
 impl Default for SharedState {
@@ -118,6 +120,7 @@ impl SharedState {
             files: Mutex::new(VecDeque::new()),
             changes: watch::channel(()).0,
             safe_mode: Mutex::new(None),
+            start_delays: Mutex::new(StartDelays::default()),
         }
     }
 
@@ -191,6 +194,16 @@ impl SharedState {
     /// The stream started and waits for its first audio frame.
     pub fn set_starting(&self) {
         self.set(Phase::Starting);
+    }
+
+    /// The first audio frame of a take arrived `delay` after its stream
+    /// started.
+    pub fn record_start_delay(&self, delay: Duration) {
+        self.start_delays.lock().record(delay);
+    }
+
+    pub fn start_delay(&self) -> Option<StartDelay> {
+        self.start_delays.lock().summary()
     }
 
     /// `since` is the time of the first audio frame.
@@ -292,6 +305,7 @@ impl SharedState {
             .with_model_state(self.model_state())
             .with_language(self.active_language().map(|l| l.code().to_string()))
             .with_safe_mode(self.safe_mode.lock().clone())
+            .with_start_delay(self.start_delay())
     }
 
     pub fn snapshot(&self) -> DaemonState {
@@ -640,6 +654,23 @@ mod tests {
 
         shared.set_transcribing();
         assert!(!shared.is_idle());
+    }
+
+    #[test]
+    fn status_carries_the_start_delay_of_recent_takes() {
+        let shared = SharedState::new();
+        let (tx, _rx) = mpsc::channel();
+        assert_eq!(
+            respond(DaemonCommand::Status, &shared, &tx).start_delay,
+            None,
+            "no take yet"
+        );
+        shared.record_start_delay(Duration::from_millis(820));
+        shared.record_start_delay(Duration::from_millis(15));
+        let delay = respond(DaemonCommand::Status, &shared, &tx)
+            .start_delay
+            .unwrap();
+        assert_eq!((delay.last_ms, delay.worst_ms, delay.takes), (15, 820, 2));
     }
 
     #[test]

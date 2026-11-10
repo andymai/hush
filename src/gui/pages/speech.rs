@@ -1,7 +1,9 @@
 //! What Hush listens with and how it turns speech into words: where the
 //! transcription runs, the model, the language and the languages detection
-//! may pick, the GPU, the microphone, and how long a recording may run.
+//! may pick, the GPU, the microphone and whether it sleeps between takes,
+//! and how long a recording may run.
 
+use crate::audio::wake::{self, Finding, Plan, Probe, Sleep, Undone};
 use crate::config::settings::{TranscriptionBackend, TranscriptionConfig};
 use crate::config::{server, Config};
 use crate::gui::icons;
@@ -9,15 +11,17 @@ use crate::gui::meter::{self, Meter};
 use crate::gui::pages::text_setting;
 use crate::gui::theme::{palette, FIELD_WIDTH};
 use crate::gui::widgets::{
-    dropdown, icon_button, list, list_item, meter as level_meter, option, row, section, stepper,
-    switch_row, Button,
+    busy, dropdown, icon_button, list, list_item, meter as level_meter, option, row, section,
+    stepper, switch_row, Button, Variant,
 };
 use crate::gui::{checked_change, choose};
 use crate::gui::{megabytes, Gui};
 use crate::transcription::device::GpuAvailability;
 use crate::transcription::models::{vad_model, ModelManager, ModelSize};
 use crate::transcription::Language;
+use parking_lot::Mutex;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// The languages Whisper handles best, plus detection.
 const LANGUAGES: &[(&str, &str)] = &[
@@ -516,9 +520,14 @@ fn microphone(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Microphone");
     if !gui.screenshot_mode() {
         ensure_meter(gui);
+        refresh_wake(gui, ui.ctx());
     }
+    let problem = wake_finding(gui)
+        .filter(|finding| finding.warn)
+        .map(|finding| format!("{}.", finding.detail));
     row("speech.microphone", "Input device")
         .describe("The system default follows whatever your desktop picks.")
+        .caution(problem.as_deref())
         .reserve(FIELD_WIDTH + 32.0)
         .show(ui, |ui| {
             if icon_button(ui, icons::REFRESH_CW, "Look for microphones again").clicked() {
@@ -544,6 +553,7 @@ fn microphone(gui: &mut Gui, ui: &mut egui::Ui) {
                 }
             });
         });
+    wake_row(gui, ui);
     let level_text = match &gui.meter_error {
         Some(error) => error.clone(),
         None => "Say something: the bar moves when Hush hears you.".to_string(),
@@ -555,6 +565,256 @@ fn microphone(gui: &mut Gui, ui: &mut egui::Ui) {
             gui.level_shown = level.max(gui.level_shown * 0.85);
             level_meter(ui, gui.level_shown, FIELD_WIDTH);
         });
+}
+
+/// How often the page reads the PipeWire node of the microphone again.
+const WAKE_REFRESH: Duration = Duration::from_secs(15);
+
+const RESTART_CAUTION: &str =
+    "WirePlumber restarts to read the change, so all sound stops for about a second.";
+
+/// Whether the microphone sleeps between takes, read in the background, and
+/// the action of the wake row.
+#[derive(Default)]
+pub struct WakeView {
+    shared: Arc<Mutex<WakeShared>>,
+    /// The action that waits for its second click
+    pub confirm: Option<WakeAction>,
+    /// When the page last asked for a read, and for which `audio.device`
+    asked: Option<(Instant, Option<String>)>,
+}
+
+#[derive(Default)]
+struct WakeShared {
+    probe: Option<Probe>,
+    /// The rule of Hush names the source of the probe
+    hush_rule: bool,
+    /// Hush has a rule file, for any source
+    any_rule: bool,
+    reading: bool,
+    running: Option<WakeAction>,
+    /// What the last action did, for a toast
+    finished: Option<String>,
+}
+
+/// The two buttons of the wake row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WakeAction {
+    /// Write the rule that keeps the microphone awake
+    Keep,
+    /// Remove the rule of Hush
+    Release,
+}
+
+/// The finding of `hush doctor` for the microphone, after the first read.
+fn wake_finding(gui: &Gui) -> Option<Finding> {
+    let shared = gui.wake.shared.lock();
+    let probe = shared.probe.as_ref()?;
+    Some(wake::finding(
+        probe,
+        shared.hush_rule,
+        gui.machine.start_delay,
+    ))
+}
+
+/// The action that the wake row offers now: Keep it awake when `hush setup
+/// mic` fixes a warning, else Let it sleep again when a rule of Hush exists.
+pub fn wake_offer(gui: &Gui) -> Option<WakeAction> {
+    let finding = wake_finding(gui);
+    let shared = gui.wake.shared.lock();
+    if shared.running.is_some() {
+        return None;
+    }
+    if finding.is_some_and(|finding| finding.warn && finding.fixable) {
+        Some(WakeAction::Keep)
+    } else if shared.any_rule {
+        Some(WakeAction::Release)
+    } else {
+        None
+    }
+}
+
+/// Read the node of the microphone again when the choice changed or the last
+/// read is old. `pw-dump` and the ALSA device list stay off the draw thread.
+fn refresh_wake(gui: &mut Gui, ctx: &egui::Context) {
+    let device = gui.config.audio.device.clone();
+    let due = gui
+        .wake
+        .asked
+        .as_ref()
+        .is_none_or(|(at, asked)| *asked != device || at.elapsed() >= WAKE_REFRESH);
+    {
+        let mut shared = gui.wake.shared.lock();
+        if !due || shared.reading || shared.running.is_some() {
+            return;
+        }
+        shared.reading = true;
+    }
+    gui.wake.asked = Some((Instant::now(), device.clone()));
+    let shared = Arc::clone(&gui.wake.shared);
+    let ctx = ctx.clone();
+    gui.runtime.spawn(async move {
+        let probe = wake::look(device.as_deref()).await;
+        let (hush_rule, any_rule) = match wake::config_dir() {
+            Ok(dir) => (
+                matches!(&probe, Probe::Found(source) if wake::rule_names(&dir, source)),
+                !wake::rules_in(&dir).is_empty(),
+            ),
+            Err(_) => (false, false),
+        };
+        {
+            let mut state = shared.lock();
+            state.probe = Some(probe);
+            state.hush_rule = hush_rule;
+            state.any_rule = any_rule;
+            state.reading = false;
+        }
+        ctx.request_repaint();
+    });
+}
+
+/// Run `action` in the background: the same code as `hush setup mic`, after
+/// the second click.
+fn run_wake(gui: &mut Gui, action: WakeAction, ctx: &egui::Context) {
+    gui.wake.confirm = None;
+    {
+        let mut shared = gui.wake.shared.lock();
+        if shared.running.is_some() {
+            return;
+        }
+        shared.running = Some(action);
+    }
+    let device = gui.config.audio.device.clone();
+    let shared = Arc::clone(&gui.wake.shared);
+    let ctx = ctx.clone();
+    gui.runtime.spawn(async move {
+        let message = match action {
+            WakeAction::Keep => keep_awake(device.as_deref())
+                .await
+                .unwrap_or_else(|e| format!("Could not keep it awake: {:#}", e)),
+            WakeAction::Release => let_sleep(device.as_deref())
+                .await
+                .unwrap_or_else(|e| format!("Could not remove the rule: {:#}", e)),
+        };
+        {
+            let mut state = shared.lock();
+            state.running = None;
+            state.finished = Some(message);
+        }
+        ctx.request_repaint();
+    });
+}
+
+async fn keep_awake(device: Option<&str>) -> anyhow::Result<String> {
+    let dir = wake::config_dir()?;
+    let probe = wake::look(device).await;
+    match wake::plan(&wake::Host, &dir, probe).await? {
+        Plan::Awake { source, .. } => Ok(format!("{} stays awake already.", source.label)),
+        Plan::Write(change) => {
+            let source = wake::apply(&wake::Host, &change).await?;
+            Ok(format!("{} stays awake between takes now.", source.label))
+        },
+    }
+}
+
+async fn let_sleep(device: Option<&str>) -> anyhow::Result<String> {
+    let dir = wake::config_dir()?;
+    let probe = wake::look(device).await;
+    Ok(match wake::undo(&wake::Host, &dir, probe).await? {
+        Undone::Nothing => "Hush has no rule to remove.".to_string(),
+        Undone::Removed {
+            source: Some(source),
+            ..
+        } if source.sleep == Sleep::Never => format!(
+            "The rule of Hush is gone. Another WirePlumber rule keeps {} awake.",
+            source.label
+        ),
+        Undone::Removed {
+            source: Some(source),
+            ..
+        } => format!("{} sleeps between takes again.", source.label),
+        Undone::Removed { source: None, .. } => "The rule of Hush is gone.".to_string(),
+    })
+}
+
+/// Show what the last action did. WirePlumber restarted, so the meter opens
+/// its stream again and the page reads the node again.
+pub fn finish_wake(gui: &mut Gui) {
+    let message = {
+        let mut shared = gui.wake.shared.lock();
+        let Some(message) = shared.finished.take() else {
+            return;
+        };
+        shared.probe = None;
+        message
+    };
+    gui.say(message);
+    gui.meter = None;
+    gui.meter_error = None;
+    gui.wake.asked = None;
+}
+
+/// Keep it awake when the microphone sleeps and wakes slowly, Let it sleep
+/// again when a rule of Hush exists. Each asks a second time, because
+/// WirePlumber restarts.
+fn wake_row(gui: &mut Gui, ui: &mut egui::Ui) {
+    if gui.wake.shared.lock().running.is_some() {
+        row("speech.wake", "WirePlumber restarts")
+            .describe("All sound stops for about a second.")
+            .reserve(140.0)
+            .show(ui, |ui| busy(ui, "Please wait"));
+        return;
+    }
+    let Some(action) = wake_offer(gui) else {
+        return;
+    };
+    let confirming = gui.wake.confirm == Some(action);
+    let (title, description, ok, label, icon, stay) = match action {
+        WakeAction::Keep => (
+            "Keep the microphone awake",
+            "A WirePlumber rule stops this microphone from sleeping between takes, so a take \
+             keeps its first word. No app records while it is awake.",
+            false,
+            "Keep it awake",
+            icons::MIC,
+            "Not now",
+        ),
+        WakeAction::Release => (
+            "Hush keeps a microphone awake",
+            "A WirePlumber rule of Hush stops the microphone from sleeping between takes. \
+             Remove the rule to let it sleep again.",
+            true,
+            "Let it sleep again",
+            icons::ROTATE_CCW,
+            "Keep it awake",
+        ),
+    };
+    let mut run = false;
+    row("speech.wake", title)
+        .status(ok)
+        .describe(description)
+        .caution(confirming.then_some(RESTART_CAUTION))
+        .reserve(if confirming { 320.0 } else { 170.0 })
+        .show(ui, |ui| {
+            if !confirming {
+                if ui.add(Button::new(label).icon(icon)).clicked() {
+                    gui.wake.confirm = Some(action);
+                }
+                return;
+            }
+            let restart = Button::new("Restart WirePlumber")
+                .icon(icons::ROTATE_CW)
+                .variant(Variant::Primary);
+            if ui.add(restart).clicked() {
+                run = true;
+            }
+            if ui.add(Button::new(stay).focus_on_jump()).clicked() {
+                gui.wake.confirm = None;
+            }
+        });
+    if run {
+        run_wake(gui, action, ui.ctx());
+    }
 }
 
 /// Keep a meter open on the chosen microphone, reopening when the choice
@@ -711,6 +971,97 @@ fn model_description(selected: Option<ModelSize>, recommended: ModelSize) -> Str
 mod tests {
     use super::*;
     use crate::gui::MODEL_ORDER;
+
+    fn slow_yeti() -> wake::Source {
+        wake::Source {
+            name: "alsa_input.usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00.iec958-stereo"
+                .to_string(),
+            label: "Yeti Stereo Microphone".to_string(),
+            profile: Some("iec958-stereo".to_string()),
+            serial: Some(1),
+            kind: wake::Kind::Alsa,
+            sleep: Sleep::After(5),
+        }
+    }
+
+    #[test]
+    fn the_wake_row_offers_keep_for_a_sleeping_source_and_release_for_a_rule() {
+        let mut gui = crate::gui::tests::window();
+        assert_eq!(wake_offer(&gui), None, "before the first read");
+        assert!(wake_finding(&gui).is_none());
+
+        gui.wake.shared.lock().probe = Some(Probe::Found(slow_yeti()));
+        assert_eq!(wake_offer(&gui), Some(WakeAction::Keep), "nothing measured");
+        gui.machine.start_delay = Some(crate::audio::take::StartDelay {
+            last_ms: 700,
+            worst_ms: 700,
+            takes: 1,
+        });
+        assert_eq!(wake_offer(&gui), Some(WakeAction::Keep));
+        assert!(wake_finding(&gui).unwrap().detail.contains("700 ms"));
+
+        gui.machine.start_delay = Some(crate::audio::take::StartDelay {
+            last_ms: 8,
+            worst_ms: 40,
+            takes: 6,
+        });
+        assert_eq!(wake_offer(&gui), None, "it wakes fast");
+        gui.wake.shared.lock().any_rule = true;
+        assert_eq!(wake_offer(&gui), Some(WakeAction::Release));
+        gui.wake.shared.lock().running = Some(WakeAction::Release);
+        assert_eq!(wake_offer(&gui), None, "an action runs");
+    }
+
+    #[test]
+    fn the_wake_row_draws_each_offer_and_its_second_click() {
+        let mut gui = crate::gui::tests::window();
+        gui.wake.shared.lock().probe = Some(Probe::Found(slow_yeti()));
+        let ctx = egui::Context::default();
+        crate::gui::theme::install(&ctx);
+        let draw = |gui: &mut Gui| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| wake_row(gui, ui));
+            });
+        };
+        for confirm in [None, Some(WakeAction::Keep)] {
+            gui.wake.confirm = confirm;
+            draw(&mut gui);
+        }
+        gui.wake.shared.lock().probe = None;
+        gui.wake.shared.lock().any_rule = true;
+        for confirm in [None, Some(WakeAction::Release)] {
+            gui.wake.confirm = confirm;
+            draw(&mut gui);
+        }
+        gui.wake.shared.lock().running = Some(WakeAction::Release);
+        draw(&mut gui);
+    }
+
+    #[test]
+    fn a_page_change_drops_the_second_click_of_the_wake_row() {
+        let mut gui = crate::gui::tests::window();
+        gui.wake.confirm = Some(WakeAction::Keep);
+        gui.go_to(crate::gui::pages::Page::Text);
+        assert_eq!(gui.wake.confirm, None);
+    }
+
+    #[test]
+    fn a_finished_action_says_so_and_reads_the_microphone_again() {
+        let mut gui = crate::gui::tests::window();
+        gui.wake.asked = Some((Instant::now(), None));
+        gui.meter_error = Some("busy".to_string());
+        gui.wake.shared.lock().finished =
+            Some("Yeti Stereo Microphone stays awake between takes now.".to_string());
+        finish_wake(&mut gui);
+        assert_eq!(
+            gui.toast.as_ref().map(|(message, _)| message.as_str()),
+            Some("Yeti Stereo Microphone stays awake between takes now.")
+        );
+        assert!(gui.wake.asked.is_none(), "the next frame reads again");
+        assert!(wake_finding(&gui).is_none(), "the old read is gone");
+        assert!(gui.meter_error.is_none(), "the meter opens again");
+        finish_wake(&mut gui);
+    }
 
     #[test]
     fn every_model_name_parses_back() {
