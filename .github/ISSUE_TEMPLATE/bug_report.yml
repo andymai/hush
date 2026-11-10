@@ -24,7 +24,7 @@ body:
         Distro: Fedora 42 / Ubuntu 24.04 / Arch
         Desktop and compositor: KDE Plasma 6 Wayland / GNOME 48 / Hyprland / X11
         GPU and driver: RTX 4080 (nvidia 580) / RX 7800 (mesa) / none
-        Install method: .deb / .rpm / AppImage / AUR / COPR / source
+        Install method: .deb / .rpm / AppImage / tarball or install.sh / COPR / Nix / source
         Hush version: output of `hush --version`
     validations:
       required: true
