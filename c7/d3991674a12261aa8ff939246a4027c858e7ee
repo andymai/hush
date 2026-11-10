@@ -1,0 +1,21 @@
+scripts/e2e/run.sh
+  s_115995023cd6f3::t_7c98625d833e81 104-113,404-407,416-417,568-569,573,578-600
+src/transcription/langid.rs
+  s_115995023cd6f3::t_2e8310f38908f5 282
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c7d3991674a12261aa8ff939246a4027c858e7ee",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
