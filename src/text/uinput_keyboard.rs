@@ -1,6 +1,6 @@
 /// Linux uinput-based keyboard emulation using input-linux crate
 /// This provides hardware-level keyboard emulation that works with all applications
-use super::keymap::{KeyTable, Stroke, Tap, EXTRA_KEYS, MAIN_KEYS, MODIFIER_KEYS};
+use super::keymap::{ChordKeys, KeyTable, Stroke, Tap, EXTRA_KEYS, MAIN_KEYS, MODIFIER_KEYS};
 use super::PasteChord;
 use crate::Result;
 use std::fs::File;
@@ -85,17 +85,19 @@ impl UinputKeyboard {
 
     /// Hold the chord's modifiers, tap its key, and release the modifiers.
     /// `table` is the active layout's keys, so the chord presses the key
-    /// that types its letter there.
+    /// that types its letter there. `keys` hold Control and Shift in the
+    /// session keymap.
     pub fn send_paste_shortcut(
         &mut self,
         chord: PasteChord,
         table: Option<&KeyTable>,
+        keys: ChordKeys,
     ) -> Result<()> {
         if !self.ready {
             return Err(anyhow::anyhow!("Uinput keyboard not ready"));
         }
-        let (modifiers, key) = chord_keys(chord, table);
-        self.send_chord(modifiers, key)
+        let (modifiers, key) = chord_keys(chord, table, keys);
+        self.send_chord(&modifiers, key)
     }
 
     pub fn set_typing_delay(&mut self, delay_ms: u64) {
@@ -319,15 +321,17 @@ impl Drop for UinputKeyboard {
 /// The modifiers and the key of a paste chord. The letter is the key that
 /// types `v` on the active layout, so Ctrl+V stays Ctrl+V on Dvorak.
 /// Without a plain key for `v`, as on a Cyrillic layout, it is the US V
-/// key, which applications match to their Latin shortcuts.
-fn chord_keys(chord: PasteChord, table: Option<&KeyTable>) -> (&'static [Key], Key) {
+/// key, which applications match to their Latin shortcuts. The modifiers
+/// are the keys that hold Control and Shift, so Ctrl+V stays Ctrl+V when
+/// an XKB option swaps Ctrl with another key.
+fn chord_keys(chord: PasteChord, table: Option<&KeyTable>, keys: ChordKeys) -> (Vec<Key>, Key) {
     let v = table
         .and_then(|table| table.plain_key('v'))
         .unwrap_or(Key::V);
     match chord {
-        PasteChord::CtrlV => (&[Key::LeftCtrl], v),
-        PasteChord::CtrlShiftV => (&[Key::LeftCtrl, Key::LeftShift], v),
-        PasteChord::ShiftInsert => (&[Key::LeftShift], Key::Insert),
+        PasteChord::CtrlV => (vec![keys.control], v),
+        PasteChord::CtrlShiftV => (vec![keys.control, keys.shift], v),
+        PasteChord::ShiftInsert => (vec![keys.shift], Key::Insert),
     }
 }
 
@@ -373,22 +377,26 @@ mod tests {
         let mut sorted = keys.clone();
         sorted.dedup();
         assert_eq!(sorted, keys, "no key twice");
+        for key in crate::text::xkb::CHORD_MODIFIER_KEYS {
+            assert!(keys.contains(&key), "a paste chord can hold {key:?}");
+        }
+    }
+
+    fn plain(chord: PasteChord, table: Option<&KeyTable>) -> (Vec<Key>, Key) {
+        chord_keys(chord, table, ChordKeys::default())
     }
 
     #[test]
     fn each_paste_chord_presses_its_keys() {
         let us = Some(KeyTable::us());
+        assert_eq!(plain(PasteChord::CtrlV, us), (vec![Key::LeftCtrl], Key::V));
         assert_eq!(
-            chord_keys(PasteChord::CtrlV, us),
-            (&[Key::LeftCtrl][..], Key::V)
+            plain(PasteChord::CtrlShiftV, None),
+            (vec![Key::LeftCtrl, Key::LeftShift], Key::V)
         );
         assert_eq!(
-            chord_keys(PasteChord::CtrlShiftV, None),
-            (&[Key::LeftCtrl, Key::LeftShift][..], Key::V)
-        );
-        assert_eq!(
-            chord_keys(PasteChord::ShiftInsert, us),
-            (&[Key::LeftShift][..], Key::Insert)
+            plain(PasteChord::ShiftInsert, us),
+            (vec![Key::LeftShift], Key::Insert)
         );
     }
 
@@ -401,26 +409,70 @@ mod tests {
     fn the_paste_chord_presses_the_key_that_types_v() {
         let dvorak = table(Some(Tap::plain(Key::Dot)));
         assert_eq!(
-            chord_keys(PasteChord::CtrlV, Some(&dvorak)),
-            (&[Key::LeftCtrl][..], Key::Dot),
+            plain(PasteChord::CtrlV, Some(&dvorak)),
+            (vec![Key::LeftCtrl], Key::Dot),
             "V is on the US period key in Dvorak"
         );
-        assert_eq!(
-            chord_keys(PasteChord::CtrlShiftV, Some(&dvorak)).1,
-            Key::Dot
-        );
-        assert_eq!(
-            chord_keys(PasteChord::ShiftInsert, Some(&dvorak)).1,
-            Key::Insert
-        );
+        assert_eq!(plain(PasteChord::CtrlShiftV, Some(&dvorak)).1, Key::Dot);
+        assert_eq!(plain(PasteChord::ShiftInsert, Some(&dvorak)).1, Key::Insert);
         let cyrillic = table(None);
-        assert_eq!(chord_keys(PasteChord::CtrlV, Some(&cyrillic)).1, Key::V);
+        assert_eq!(plain(PasteChord::CtrlV, Some(&cyrillic)).1, Key::V);
         let shifted_only = table(Some(Tap::shifted(Key::Dot)));
         assert_eq!(
-            chord_keys(PasteChord::CtrlV, Some(&shifted_only)).1,
+            plain(PasteChord::CtrlV, Some(&shifted_only)).1,
             Key::V,
             "only a plain key keeps the chord as it is"
         );
+    }
+
+    #[test]
+    fn the_paste_chord_presses_the_keys_that_hold_control_and_shift() {
+        let swapped = ChordKeys {
+            control: Key::LeftMeta,
+            shift: Key::RightShift,
+        };
+        let us = Some(KeyTable::us());
+        assert_eq!(
+            chord_keys(PasteChord::CtrlV, us, swapped),
+            (vec![Key::LeftMeta], Key::V)
+        );
+        assert_eq!(
+            chord_keys(PasteChord::CtrlShiftV, None, swapped),
+            (vec![Key::LeftMeta, Key::RightShift], Key::V)
+        );
+        assert_eq!(
+            chord_keys(PasteChord::ShiftInsert, us, swapped),
+            (vec![Key::RightShift], Key::Insert)
+        );
+    }
+
+    #[test]
+    fn with_ctrl_and_win_swapped_ctrl_v_is_left_win_and_v() {
+        use crate::text::xkb::{self, tests::xkb_ready, Names};
+        if !xkb_ready() {
+            return;
+        }
+        let names = Names {
+            layout: "us".into(),
+            options: "ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl".into(),
+            ..Names::default()
+        };
+        let keys = xkb::chord_keys(&[names], 0).unwrap();
+        let (modifiers, key) = chord_keys(PasteChord::CtrlV, Some(KeyTable::us()), keys);
+        assert_eq!(
+            (modifiers.as_slice(), key),
+            (&[Key::LeftMeta][..], Key::V),
+            "Left Ctrl types Super there, and Super+V opens Klipper"
+        );
+        let mut recorder = Recorder::default();
+        press_chord(&mut recorder, &modifiers, key).expect("every write works");
+        assert_eq!(
+            recorder.events.first(),
+            Some(&Some((Key::LeftMeta, KeyState::PRESSED.value)))
+        );
+        assert!(recorder.held().is_empty());
+        let (modifiers, _) = chord_keys(PasteChord::CtrlShiftV, None, keys);
+        assert_eq!(modifiers, [Key::LeftMeta, Key::LeftShift]);
     }
 
     /// Records events, and fails the write with the given number.

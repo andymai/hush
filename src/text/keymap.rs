@@ -77,6 +77,25 @@ pub const MODIFIER_KEYS: [Key; 9] = [
     Key::NonUsBackslashAndPipe,
 ];
 
+/// The keys that hold Control and Shift in a chord such as Ctrl+V. An XKB
+/// option can move a modifier: with `ctrl:swapcaps`, the Left Ctrl key
+/// types Caps Lock, and with `ctrl:swap_lwin_lctl`, it types Super.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChordKeys {
+    pub control: Key,
+    pub shift: Key,
+}
+
+impl Default for ChordKeys {
+    /// The keys of a keymap without options.
+    fn default() -> Self {
+        Self {
+            control: Key::LeftCtrl,
+            shift: Key::LeftShift,
+        }
+    }
+}
+
 /// One key press with the modifiers held around it. The third level goes
 /// down before Shift and comes up after it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

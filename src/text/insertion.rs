@@ -380,7 +380,9 @@ impl TextInserter {
         }
         wait_for_modifiers();
         debug!("Pasting with {}", chord);
-        let sent = self.uinput.send_paste_shortcut(chord, table);
+        let sent = self
+            .uinput
+            .send_paste_shortcut(chord, table, self.typing.chords());
         let pasted_at = clock.now();
         if presses_enter(origin, submit_app, text, &sent) {
             press_enter(&mut self.uinput, &clock, PASTED_SUBMIT_DELAY);

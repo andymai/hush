@@ -405,9 +405,7 @@ impl EvdevHotkey {
 
         let matchers = Matchers::new(&bindings, masks_menus(exclusive, mask_menu));
         let mask = if matchers.masks() {
-            let ctrl = crate::text::typing::control_key()
-                .map(|key| KeyCode::new(key.code()))
-                .unwrap_or(KeyCode::KEY_LEFTCTRL);
+            let ctrl = KeyCode::new(crate::text::typing::chord_keys().control.code());
             match MenuMask::new(ctrl) {
                 Ok(mask) => {
                     info!(
