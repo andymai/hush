@@ -1,0 +1,52 @@
+name: E2E
+
+# Nightly end-to-end dictation: a test daemon hears recorded speech through a
+# PipeWire virtual microphone, and `hush stop --print --json` returns the text.
+# It is not a required check. See tests/e2e/README.md.
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions: {}
+
+jobs:
+  e2e:
+    name: End-to-end dictation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Install PipeWire, WirePlumber, and the ALSA plugin
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            pipewire pipewire-bin pipewire-alsa wireplumber dbus jq
+          # The harness hides /dev/uinput from the test daemon in a user
+          # namespace, which AppArmor blocks by default on Ubuntu 24.04.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Build Hush (CPU)
+        run: cargo build
+      - name: Cache the Whisper models
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hush-e2e
+          key: hush-e2e-models-${{ hashFiles('src/transcription/models.rs') }}
+      - name: Run the end-to-end cases
+        env:
+          # The runner has no desktop session, so a key that the test daemon
+          # types reaches no window.
+          HUSH_E2E_ALLOW_UINPUT: "1"
+        run: dbus-run-session -- scripts/e2e/headless.sh scripts/e2e/run.sh
