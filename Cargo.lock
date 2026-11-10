@@ -2081,6 +2081,7 @@ dependencies = [
  "whisper-rs",
  "wl-clipboard-rs",
  "x11rb 0.14.0",
+ "xkbcommon-dl",
  "zbus",
 ]
 

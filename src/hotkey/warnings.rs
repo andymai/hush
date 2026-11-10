@@ -163,7 +163,7 @@ pub fn altgr<'a>(
     bound: impl IntoIterator<Item = (Role, &'a str)>,
     layout: Option<&Layout>,
 ) -> Option<AltGr> {
-    let layout = layout.filter(|layout| !layout.types_directly())?;
+    let layout = layout.filter(|layout| !layout.is_plain_us())?;
     let roles: Vec<Role> = parsed(bound)
         .into_iter()
         .filter(|(_, chord)| chord.evdev_key() == KeyCode::KEY_RIGHTALT)

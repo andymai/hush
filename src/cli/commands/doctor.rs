@@ -6,6 +6,7 @@ use crate::config::settings::{LlmSetting, TranscriptionBackend, TranscriptionCon
 use crate::config::{keys, paths, Config};
 use crate::hotkey::{warnings, HotkeyBindings};
 use crate::text::layout::Layout;
+use crate::text::typing::{Resolver, Typing};
 use crate::text::WindowProvider;
 use crate::text_processing::hook::{self, Program};
 use crate::transcription::cpu;
@@ -141,6 +142,7 @@ pub async fn checks() -> Vec<Check> {
         &config,
         crate::text::layout::current().as_ref(),
     ));
+    checks.push(typing_check(&Resolver::new().resolve()));
     checks.push(window_check());
     checks.push(clipboard_check(crate::text::clipboard::support()));
     checks.push(llm_check(&config, &env_file).await);
@@ -427,6 +429,13 @@ fn hotkeys_checks(config: &Config, layout: Option<&Layout>) -> Vec<Check> {
     checks
 }
 
+fn typing_check(typing: &Typing) -> Check {
+    match typing {
+        Typing::Paste { fix, .. } => Check::warn("Typing", typing.to_string(), *fix),
+        _ => Check::ok("Typing", typing.to_string()),
+    }
+}
+
 fn window_check() -> Check {
     let provider = WindowProvider::detect();
     match provider.name() {
@@ -677,6 +686,30 @@ pub async fn handle_doctor() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_typing_line_says_types_or_pastes_and_why() {
+        use crate::text::keymap::KeyTable;
+        let keys = Typing::Keys {
+            table: std::sync::Arc::new(KeyTable::us().clone()),
+            layout: "de".into(),
+        };
+        let check = typing_check(&keys);
+        assert_eq!(check.level, Level::Ok);
+        assert_eq!(check.detail, "types key by key on de");
+
+        let paste = Typing::Paste {
+            why: "the session has 2 layouts (us,de), and Hush cannot tell which one is active"
+                .into(),
+            fix: "keep one layout",
+        };
+        let check = typing_check(&paste);
+        assert_eq!(check.level, Level::Warn);
+        assert!(check
+            .detail
+            .starts_with("pastes every take: the session has 2 layouts"));
+        assert_eq!(check.fix.as_deref(), Some("keep one layout"));
+    }
 
     #[test]
     fn a_check_prints_its_mark_and_name() {

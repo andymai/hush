@@ -24,6 +24,8 @@ in every application, VM, and password field on X11 and Wayland."""
 section = "utils"
 priority = "optional"
 depends = "$auto"
+# Hush loads libxkbcommon with dlopen to type on every layout, and pastes without it.
+recommends = "libxkbcommon0, xkb-data"
 assets = [
   [
     "target/release/hush",
@@ -74,6 +76,10 @@ assets = [
 vulkan-loader = "*"
 alsa-lib = "*"
 libX11 = "*"
+
+[package.metadata.generate-rpm.recommends]
+libxkbcommon = "*"
+xkeyboard-config = "*"
 
 [features]
 default = []
@@ -178,11 +184,15 @@ eframe = { version = "0.29", default-features = false, features = [
 # ============================================================================
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# X11 window system
-x11rb = "0.14"
+# X11 window system; xkb reads the active layout on X11 sessions
+x11rb = { version = "0.14", features = ["xkb"] }
 
 # Kernel-level keyboard emulation (uinput)
 input-linux = "0.7"
+
+# The session's XKB keymap, to type on every layout. Hush loads libxkbcommon
+# with dlopen, so Hush runs, and pastes, without it.
+xkbcommon-dl = "0.4"
 
 # Every clipboard format through Wayland data-control, for the paste restore
 wl-clipboard-rs = "0.9"

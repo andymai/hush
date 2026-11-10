@@ -1,9 +1,10 @@
 //! Puts transcribed text into the focused window.
 //!
 //! [`TextInserter`] types through `/dev/uinput`, which reaches every
-//! application, VM, and password field on X11 and Wayland. Text the US key
-//! map cannot express, or very long text, is pasted through the clipboard
-//! with the [`PasteChord`] the focused window takes. The [`clipboard`]
+//! application, VM, and password field on X11 and Wayland. The keys for each
+//! character come from the active layout's XKB keymap. Text that no key or
+//! dead-key sequence types, and very long text, is pasted through the
+//! clipboard with the [`PasteChord`] the focused window takes. The [`clipboard`]
 //! module saves the old clipboard before the paste and puts it back
 //! afterwards.
 //! [`WindowProvider`] names the focused window when the compositor offers
@@ -117,6 +118,8 @@ pub mod clock;
 #[cfg(target_os = "linux")]
 pub mod insertion;
 #[cfg(target_os = "linux")]
+pub mod keymap;
+#[cfg(target_os = "linux")]
 pub mod kwin;
 #[cfg(target_os = "linux")]
 pub mod layout;
@@ -125,9 +128,13 @@ pub mod modifiers;
 #[cfg(target_os = "linux")]
 pub mod selection;
 #[cfg(target_os = "linux")]
+pub mod typing;
+#[cfg(target_os = "linux")]
 pub mod uinput_keyboard;
 #[cfg(target_os = "linux")]
 pub mod window;
+#[cfg(target_os = "linux")]
+pub mod xkb;
 
 #[cfg(target_os = "linux")]
 pub use insertion::{
