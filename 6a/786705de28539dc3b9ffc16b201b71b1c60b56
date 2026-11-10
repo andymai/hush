@@ -1,0 +1,71 @@
+src/transcription/device.rs
+  s_115995023cd6f3::t_d6b257cc641bdb 26
+  s_115995023cd6f3::t_fac61cf7f8254a 23-25
+  s_115995023cd6f3::t_af243b530117bf 27-29
+  s_931cb7d08f5f66::t_30e16a9aa01b7b 1,3-6,8-9,11,16-22,30-121,211-212,215-219,249,261,263-265,347,350,353-399
+install.sh
+  s_115995023cd6f3::t_7cdc2b38248df0 115-126
+Makefile
+  s_115995023cd6f3::t_56370d44e1d349 41
+  s_115995023cd6f3::t_9801080b2d9c95 8-10,16-17,23-25
+  s_115995023cd6f3::t_9230e1ceeec466 88-91
+  s_115995023cd6f3::t_3e1216f1e3f0f6 136-141,146
+  s_115995023cd6f3::t_9a6f7c17998396 142-145
+  s_115995023cd6f3::t_18db17f3315848 26
+.github/actions/setup/action.yml
+  s_115995023cd6f3::t_66d42bd6a7e5f2 11-14,41
+.github/workflows/release.yml
+  s_115995023cd6f3::t_bdbadbf53ab335 53-57,59-60,118-121,124-125,128-136,138-158,160-162,166-175,178-195,198-201,204,218,221
+CLAUDE.md
+  s_115995023cd6f3::t_710a1b18d44488 26-34,45-46,83
+Cargo.toml
+  s_115995023cd6f3::t_71425a61357b92 26-29,32-33,40-44,78,86,99-100,120-129
+INSTALL.md
+  s_115995023cd6f3::t_540c47180b67e9 3,5-10,12-13,15-24,84,87-91,139-140,170-173
+README.md
+  s_115995023cd6f3::t_1f794f724de15e 325,340
+build.rs
+  s_115995023cd6f3::t_3cc26f94b44b0d 5,8-17,24,33-34,49,55-86,88-96,98-110,112-118
+flake.nix
+  s_115995023cd6f3::t_ee2721fb545e65 73-76,83-84,86-90
+packaging/aur/PKGBUILD.template
+  s_115995023cd6f3::t_58491e75c7eec9 25-29
+packaging/hush.spec.template
+  s_115995023cd6f3::t_d41f1e562a12ca 7-12,38-40,50
+src/cli/commands/doctor.rs
+  s_115995023cd6f3::t_f4467d0e4e3f6a 13,122-124,149-150,202-209,211-212,214,1005-1016,1018-1022,1024-1028
+src/transcription/engine.rs
+  s_115995023cd6f3::t_c6de900f7c672a 12,55
+src/transcription/langid.rs
+  s_115995023cd6f3::t_25829839935dea 46
+src/transcription/mod.rs
+  s_115995023cd6f3::t_63d6b825372dc0 14-20
+src/transcription/whisper.rs
+  s_115995023cd6f3::t_669ec1aa149fad 184
+tests/e2e/README.md
+  s_115995023cd6f3::t_c74f7ad9a8e8be 70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6a786705de28539dc3b9ffc16b201b71b1c60b56",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    },
+    "s_931cb7d08f5f66": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a4c0e5b14b88d0a35",
+        "model": "unknown"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
