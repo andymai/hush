@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/andymai/hush/compare/v0.28.0...v0.29.0) (2026-11-10)
+
+
+### Features
+
+* **gui:** add a Ctrl+K command palette to the settings window ([#310](https://github.com/andymai/hush/issues/310)) ([72bfece](https://github.com/andymai/hush/commit/72bfece4e025d5d024cdaf651da72c1761aa6b2f))
+
 ## [0.28.0](https://github.com/andymai/hush/compare/v0.27.0...v0.28.0) (2026-11-10)
 
 
