@@ -223,7 +223,7 @@ impl Files {
         Self::at(paths::config_path(), DomainVocabulary::default_path())
     }
 
-    fn at(config_path: PathBuf, vocabulary_path: PathBuf) -> Self {
+    pub(super) fn at(config_path: PathBuf, vocabulary_path: PathBuf) -> Self {
         Self {
             config_stamp: stamp(&config_path),
             vocabulary_stamp: stamp(&vocabulary_path),

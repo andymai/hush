@@ -8,8 +8,10 @@ mod autosave;
 mod capture;
 mod chrome;
 mod icons;
+mod jump;
 mod meter;
 mod pages;
+mod palette;
 mod scheme;
 mod screenshot;
 mod theme;
@@ -276,6 +278,10 @@ pub struct Gui {
     pub confirm_reset: bool,
     /// The page of the last frame, to disarm a second click on a change
     last_page: Page,
+    /// The command palette that Ctrl+K opens
+    palette: palette::Palette,
+    /// The next frame shows the page from its top
+    scroll_top: bool,
     debounce: Debounce,
     attempt: Arc<Mutex<Option<Attempt>>>,
     attempting: bool,
@@ -330,17 +336,44 @@ impl Gui {
                 Some((*size, info.expected_size))
             })
             .collect();
-        let screenshot = Screenshot::from_env();
-        let page = Page::from_env().unwrap_or(Page::Overview);
-        Ok(Self {
-            page,
+        let mut gui = Self::with(config, vocabulary, files, machine, runtime);
+        gui.catalogue = catalogue;
+        gui.recommended = crate::transcription::models::recommended_model();
+        gui.layout = crate::text::layout::current();
+        gui.modifier_keys = ModifierKeys::session();
+        gui.page = Page::from_env().unwrap_or(Page::Overview);
+        gui.last_page = gui.page;
+        gui.screenshot = Screenshot::from_env();
+        if gui.screenshot.is_some() {
+            gui.appearance_override = theme::appearance_from_env();
+            if let Some(query) = Screenshot::palette_query() {
+                gui.palette.open_with(&query);
+            }
+        } else {
+            gui.microphones = meter::input_devices();
+        }
+        Ok(gui)
+    }
+
+    /// The window's state for these settings, files, and machine, with
+    /// nothing read from the desktop: no model catalogue, no keyboard
+    /// layout, and no microphones.
+    fn with(
+        config: Config,
+        vocabulary: DomainVocabulary,
+        files: Files,
+        machine: Machine,
+        runtime: tokio::runtime::Runtime,
+    ) -> Self {
+        Self {
+            page: Page::Overview,
             saved: config.clone(),
             config,
             saved_vocabulary: vocabulary.clone(),
             vocabulary,
             machine,
-            catalogue,
-            recommended: crate::transcription::models::recommended_model(),
+            catalogue: Vec::new(),
+            recommended: ModelSize::Base,
             download: Arc::new(Mutex::new(Download::default())),
             runtime,
             toast: None,
@@ -350,16 +383,12 @@ impl Gui {
             new_rewrite: String::new(),
             editing_key: None,
             focus_editor: false,
-            layout: crate::text::layout::current(),
-            modifier_keys: ModifierKeys::session(),
+            layout: None,
+            modifier_keys: ModifierKeys::physical(),
             meter: None,
             meter_error: None,
             meter_wanted: None,
-            microphones: if screenshot.is_some() {
-                Vec::new()
-            } else {
-                meter::input_devices()
-            },
+            microphones: Vec::new(),
             level_shown: 0.0,
             new_term: String::new(),
             editing_term: None,
@@ -371,10 +400,8 @@ impl Gui {
             history: HistoryView::default(),
             try_text: String::new(),
             desktop: DesktopScheme::default(),
-            appearance_override: screenshot
-                .as_ref()
-                .and_then(|_| theme::appearance_from_env()),
-            screenshot,
+            appearance_override: None,
+            screenshot: None,
             files,
             config_feedback: None,
             vocabulary_feedback: None,
@@ -383,7 +410,9 @@ impl Gui {
             pending: Pending::default(),
             undo: None,
             confirm_reset: false,
-            last_page: page,
+            last_page: Page::Overview,
+            palette: palette::Palette::default(),
+            scroll_top: false,
             debounce: Debounce::default(),
             attempt: Arc::new(Mutex::new(None)),
             attempting: false,
@@ -395,11 +424,37 @@ impl Gui {
             restart: None,
             poll: Poll::default(),
             last_poll: Instant::now(),
-        })
+        }
     }
 
     pub fn say(&mut self, message: impl Into<String>) {
         self.toast = Some((message.into(), Instant::now()));
+    }
+
+    /// Open the command palette. A key field that listens stops, because it
+    /// reads /dev/input whatever has the focus, and would take the keys
+    /// typed into the palette.
+    pub fn open_palette(&mut self, ctx: &egui::Context) {
+        self.capture = None;
+        self.palette.open(ctx);
+    }
+
+    /// Open `page`, and drop the key field that listens and the questions
+    /// of the page before.
+    pub fn go_to(&mut self, page: Page) {
+        self.capture = None;
+        if self.page != page {
+            self.page = page;
+            self.last_page = page;
+            self.disarm();
+        }
+    }
+
+    /// Drop every question that waits for a second click.
+    fn disarm(&mut self) {
+        self.confirm_reset = false;
+        self.confirm_replace = false;
+        self.history.disarm();
     }
 
     /// Put a change into the window's settings, which save at the end of the
@@ -622,6 +677,7 @@ impl Gui {
         if !ctx.input(|input| input.viewport().close_requested()) {
             return;
         }
+        self.palette.dismiss(ctx);
         let focused = ctx.memory(|memory| memory.focused());
         let step = close_step(CloseState {
             focused: focused.is_some(),
@@ -1031,29 +1087,31 @@ impl Gui {
 
     /// The page in the centred column, scrolled under the title bar.
     fn page(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let origin = ui.cursor().min;
-                let (left, width) = theme::column(ui.available_width());
-                let max = egui::Rect::from_min_size(
-                    origin + egui::vec2(left, theme::PAGE_PADDING),
-                    egui::vec2(width, f32::INFINITY),
-                );
-                let mut column = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(max)
-                        .layout(egui::Layout::top_down(egui::Align::Min)),
-                );
-                column.set_width(width);
-                column.spacing_mut().item_spacing.y = 0.0;
-                pages::show(self, &mut column);
-                let bottom = column.min_rect().bottom() + theme::PAGE_PADDING;
-                ui.advance_cursor_after_rect(egui::Rect::from_min_max(
-                    origin,
-                    egui::pos2(origin.x + ui.available_width(), bottom),
-                ));
-            });
+        let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+        if std::mem::take(&mut self.scroll_top) {
+            area = area.vertical_scroll_offset(0.0);
+        }
+        area.show(ui, |ui| {
+            let origin = ui.cursor().min;
+            let (left, width) = theme::column(ui.available_width());
+            let max = egui::Rect::from_min_size(
+                origin + egui::vec2(left, theme::PAGE_PADDING),
+                egui::vec2(width, f32::INFINITY),
+            );
+            let mut column = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(max)
+                    .layout(egui::Layout::top_down(egui::Align::Min)),
+            );
+            column.set_width(width);
+            column.spacing_mut().item_spacing.y = 0.0;
+            pages::show(self, &mut column);
+            let bottom = column.min_rect().bottom() + theme::PAGE_PADDING;
+            ui.advance_cursor_after_rect(egui::Rect::from_min_max(
+                origin,
+                egui::pos2(origin.x + ui.available_width(), bottom),
+            ));
+        });
     }
 }
 
@@ -1070,6 +1128,10 @@ impl eframe::App for Gui {
         self.take_refresh();
         self.finish_download(ctx);
         self.finish_capture();
+        self.palette.keys(ctx, self.capture.is_some());
+        if self.palette.is_open() {
+            self.capture = None;
+        }
         if self.page != Page::Speech {
             self.meter = None;
             self.meter_error = None;
@@ -1083,9 +1145,7 @@ impl eframe::App for Gui {
         }
         if self.page != self.last_page {
             self.last_page = self.page;
-            self.confirm_reset = false;
-            self.confirm_replace = false;
-            self.history.disarm();
+            self.disarm();
         }
         self.intercept_close(ctx);
 
@@ -1121,6 +1181,16 @@ impl eframe::App for Gui {
             .show(ctx, |ui| self.page(ui));
         chrome::resize_edges(ctx);
         chrome::window_border(ctx);
+        if self.palette.is_open() {
+            self.history.refresh();
+        }
+        let mut commands = std::mem::take(&mut self.palette);
+        let pick = commands.show(ctx, self);
+        self.palette = commands;
+        if let Some(pick) = pick {
+            palette::run(self, ctx, pick);
+        }
+        jump::expire(ctx);
         let now = Instant::now();
         let rejected = widgets::take_rejections(ctx) > 0;
         let before = (
@@ -1322,5 +1392,79 @@ mod tests {
     fn sizes_read_as_megabytes() {
         assert_eq!(megabytes(147_000_000), "147 MB");
         assert_eq!(megabytes(0), "0 MB");
+    }
+
+    /// A window on the defaults that reads nothing of this machine. Its
+    /// files are in a folder that nothing writes.
+    fn window() -> Gui {
+        let folder = std::env::temp_dir().join("hush-gui-test-never-written");
+        let files = Files::at(folder.join("config.toml"), folder.join("vocabulary.json"));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        Gui::with(
+            Config::defaults().unwrap(),
+            DomainVocabulary::default(),
+            files,
+            ready_machine(),
+            runtime,
+        )
+    }
+
+    fn listen(gui: &mut Gui) {
+        gui.capture = Some((KeyTarget::Action(Role::Dictate), Capture::stand_in()));
+    }
+
+    #[test]
+    fn a_page_change_stops_a_key_field_that_listens() {
+        let mut gui = window();
+        listen(&mut gui);
+        gui.go_to(Page::Text);
+        assert!(gui.capture.is_none());
+        assert_eq!((gui.page, gui.last_page), (Page::Text, Page::Text));
+        listen(&mut gui);
+        gui.go_to(Page::Text);
+        assert!(
+            gui.capture.is_none(),
+            "a jump on the same page stops it too"
+        );
+    }
+
+    #[test]
+    fn commands_in_the_sidebar_opens_the_palette_and_stops_a_key_field() {
+        let mut gui = window();
+        listen(&mut gui);
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let at = egui::pos2(100.0, 696.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in [
+            Vec::new(),
+            vec![egui::Event::PointerMoved(at), button(true)],
+            vec![button(false)],
+        ] {
+            let input = egui::RawInput {
+                events,
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 720.0),
+                )),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::SidePanel::left("nav")
+                    .resizable(false)
+                    .exact_width(theme::SIDEBAR_WIDTH)
+                    .frame(egui::Frame::none())
+                    .show(ctx, |ui| chrome::sidebar(&mut gui, ui));
+            });
+        }
+        assert!(gui.palette.is_open());
+        assert!(gui.capture.is_none());
     }
 }

@@ -64,6 +64,17 @@ impl ChordMap {
         }
     }
 
+    pub const ALL: [ChordMap; 3] = [ChordMap::Languages, ChordMap::Styles, ChordMap::Rewrite];
+
+    /// The label of the section that lists the chords.
+    pub fn section(self) -> &'static str {
+        match self {
+            ChordMap::Languages => "Language keys",
+            ChordMap::Styles => "Style keys",
+            ChordMap::Rewrite => "Rewrite keys",
+        }
+    }
+
     fn title(self, value: &str) -> String {
         match (self.role(value), self) {
             (Some(role), _) => role.label(),
@@ -104,6 +115,32 @@ pub enum KeyTarget {
 /// Dictation cannot be unbound; every other key can.
 fn required(role: Role) -> bool {
     role == Role::Dictate
+}
+
+/// The key of the row for an action in [`Role::ALL`].
+pub fn role_key(role: Role) -> String {
+    format!("hotkeys.{:?}", role).to_lowercase()
+}
+
+/// The key of the row that adds a chord to `map`.
+pub fn new_chord_key(map: ChordMap) -> String {
+    format!("hotkeys.{:?}.new", map).to_lowercase()
+}
+
+fn chord_key(map: ChordMap, chord: &str) -> String {
+    format!("hotkeys.{:?}.{}", map, chord).to_lowercase()
+}
+
+/// Each chord row that the page shows: its key, its title, and its section.
+pub fn chord_rows(hotkey: &HotkeyConfig) -> Vec<(String, String, &'static str)> {
+    ChordMap::ALL
+        .into_iter()
+        .flat_map(|map| {
+            map.entries(hotkey)
+                .iter()
+                .map(move |(chord, value)| (chord_key(map, chord), map.title(value), map.section()))
+        })
+        .collect()
 }
 
 /// Width of a key field.
@@ -305,7 +342,6 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         gui,
         ui,
         ChordMap::Languages,
-        "Language keys",
         "Each key dictates in its own language, with the same hold, double-tap, and \
          cancel as the dictation key. The tray menu sets the language of the dictation key.",
     );
@@ -313,7 +349,6 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         gui,
         ui,
         ChordMap::Styles,
-        "Style keys",
         "Each key dictates in its own writing style, with the same hold, double-tap, and \
          cancel as the dictation key. Verbatim turns polish off. Add styles on the Text page.",
     );
@@ -321,7 +356,6 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         gui,
         ui,
         ChordMap::Rewrite,
-        "Rewrite keys",
         "Each key rewrites the selected text with the prompt of a style, with no speech. \
          A style needs polish on and a prompt to rewrite.",
     );
@@ -352,8 +386,8 @@ fn backend_name(backend: HotkeyBackend) -> &'static str {
     }
 }
 
-fn chord_keys(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap, title: &str, about: &str) {
-    section(ui, title);
+fn chord_keys(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap, about: &str) {
+    section(ui, map.section());
     intro(ui, about);
     let chords: Vec<String> = map.entries(&gui.config.hotkey).keys().cloned().collect();
     for chord in chords {
@@ -406,7 +440,7 @@ fn chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap, chord: &str) {
         .or_else(|| map_taken(&gui.config.hotkey, map, Some(chord), chord));
     let notice = map_caution(&gui.config.hotkey, map, chord);
     let style_names = map.style_names(&gui.config);
-    let key = format!("hotkeys.{:?}.{}", map, chord).to_lowercase();
+    let key = chord_key(map, chord);
     row(&key, &map.title(&value))
         .problem(error.as_deref())
         .caution(notice.as_deref())
@@ -454,7 +488,7 @@ fn new_chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap) {
         ),
     };
     let style_names = map.style_names(&gui.config);
-    let key = format!("hotkeys.{:?}.new", map).to_lowercase();
+    let key = new_chord_key(map);
     row(&key, title)
         .describe(about)
         .reserve(CHORD_KEY_WIDTH + PICKER_WIDTH + 8.0)
@@ -524,7 +558,7 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
     let error = combination_error(&value, required(role))
         .or_else(|| taken(&gui.config.hotkey, role, &value));
     let notice = printable_caution(&gui.config.hotkey, role);
-    let key = format!("hotkeys.{:?}", role).to_lowercase();
+    let key = role_key(role);
     row(&key, &role.label())
         .describe(hint_text)
         .problem(error.as_deref())

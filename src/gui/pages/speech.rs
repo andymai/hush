@@ -590,7 +590,22 @@ fn language_name(code: &str) -> String {
         .to_string()
 }
 
-fn start_download(gui: &mut Gui, size: ModelSize) {
+/// The model that the Download button on this page fetches, when the page
+/// shows the button: the chosen model, or voice detection for it.
+pub fn download_offer(gui: &Gui) -> Option<ModelSize> {
+    if gui.config.transcription.backend.is_cloud()
+        || gui.catalogue.is_empty()
+        || gui.download.lock().size.is_some()
+    {
+        return None;
+    }
+    let size: ModelSize = gui.config.transcription.model_size.parse().ok()?;
+    let installed = gui.machine.installed_models.contains(&size);
+    let vad_missing = gui.config.transcription.vad && !gui.machine.vad_installed;
+    (!installed || vad_missing).then_some(size)
+}
+
+pub fn start_download(gui: &mut Gui, size: ModelSize) {
     let fetch_model = !gui.machine.installed_models.contains(&size);
     {
         let mut download = gui.download.lock();

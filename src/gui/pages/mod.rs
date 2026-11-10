@@ -69,6 +69,19 @@ impl Page {
             Page::History => "History",
         }
     }
+
+    /// Words about the page that the command palette also matches.
+    pub fn words(self) -> &'static str {
+        match self {
+            Page::Overview => "status setup start ready access model try",
+            Page::Hotkeys => "keys shortcuts keyboard chords languages styles rewrite",
+            Page::Speech => "transcription whisper model language microphone recording",
+            Page::Text => "tone polish llm styles vocabulary words",
+            Page::Output => "typing paste insertion applications",
+            Page::Desktop => "tray panel sounds media updates theme configuration reset",
+            Page::History => "transcripts audio recordings search",
+        }
+    }
 }
 
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -118,7 +131,10 @@ fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
                     if ui.add(replace).clicked() {
                         gui.replace_config();
                     }
-                    if ui.add(Button::new("Keep the file")).clicked() {
+                    if ui
+                        .add(Button::new("Keep the file").focus_on_jump())
+                        .clicked()
+                    {
                         gui.confirm_replace = false;
                     }
                     return;
@@ -166,7 +182,7 @@ fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
 /// some: the bad file has no history settings to keep, and the user did not
 /// turn on Keep the audio in the window. The file and the audio folder are
 /// read again only when their stamps change.
-fn replace_loses_audio(gui: &Gui, ctx: &egui::Context) -> bool {
+pub fn replace_loses_audio(gui: &Gui, ctx: &egui::Context) -> bool {
     if gui.config.history.keep_audio_days > 0 {
         return false;
     }

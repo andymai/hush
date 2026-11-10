@@ -2,7 +2,8 @@
 //! one frame as a PNG, and exits, for the documentation and for review. With
 //! `HUSH_SETTINGS_PAGE` and `HUSH_SETTINGS_APPEARANCE` it picks the page and
 //! the scheme, and with `HUSH_SETTINGS_SIZE=1000x2400` the window size, to
-//! show a whole page.
+//! show a whole page. `HUSH_SETTINGS_PALETTE=model` opens the command
+//! palette with that query; an empty value opens it with none.
 
 use anyhow::{Context as _, Result};
 use std::path::PathBuf;
@@ -26,6 +27,12 @@ impl Screenshot {
             frames: 0,
             requested: false,
         })
+    }
+
+    /// The query of the command palette that `HUSH_SETTINGS_PALETTE` asks
+    /// for, when it asks for the palette.
+    pub fn palette_query() -> Option<String> {
+        std::env::var("HUSH_SETTINGS_PALETTE").ok()
     }
 
     /// The window size that `HUSH_SETTINGS_SIZE` asks for.

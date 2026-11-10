@@ -256,11 +256,53 @@ pub fn sidebar(gui: &mut Gui, ui: &mut Ui) {
                 for page in *pages {
                     let alert = *page == Page::Overview && !ready;
                     if nav_item(ui, page.icon(), page.title(), gui.page == *page, alert).clicked() {
-                        gui.page = *page;
+                        gui.go_to(*page);
                     }
                 }
             }
         });
+    ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+        egui::Frame::none()
+            .inner_margin(egui::Margin::same(8.0))
+            .show(ui, |ui| {
+                if commands_item(ui).clicked() {
+                    gui.open_palette(ui.ctx());
+                }
+            });
+    });
+}
+
+/// The sidebar item that opens the command palette, with its key.
+fn commands_item(ui: &mut Ui) -> egui::Response {
+    let colours = palette(ui.ctx());
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Commands"));
+    let hovered = response.hovered();
+    if hovered {
+        ui.painter()
+            .rect_filled(rect, theme::RADIUS_SM, colours.hover);
+    }
+    let ink = if hovered { colours.ink } else { colours.muted };
+    widgets::paint_icon(
+        ui,
+        Pos2::new(rect.left() + 8.0 + theme::ICON / 2.0, rect.center().y),
+        icons::SEARCH,
+        theme::ICON,
+        ink,
+    );
+    ui.painter().text(
+        Pos2::new(rect.left() + 32.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        "Commands",
+        theme::sans(theme::BODY),
+        ink,
+    );
+    widgets::key_caps(ui, rect.right() - 8.0, rect.center().y, &["Ctrl", "K"]);
+    if response.has_focus() {
+        widgets::focus_ring(ui, rect.shrink(2.0), theme::RADIUS_SM);
+    }
+    response.on_hover_text("Find a setting, a page, or an action")
 }
 
 const GROUPS: [(&str, &[Page]); 2] = [
