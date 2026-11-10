@@ -279,7 +279,7 @@ pub(crate) fn pick(
                 language = code,
                 probability,
                 allowed_mass,
-                "Detected {} among {}",
+                "Language ID picked {} among {}",
                 code,
                 allowed.join(", ")
             );

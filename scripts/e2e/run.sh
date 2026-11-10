@@ -101,6 +101,16 @@ hush_log_file() {
   printf '%s\n' "${file:-$CASE_HOME/.local/share/hush/logs/missing.log}"
 }
 
+# Wait until the hush log of the test daemon contains the text.
+wait_for_log() {
+  local text=$1 secs=${2:-60} _
+  for _ in $(seq $((secs * 5))); do
+    grep -qF -- "$text" "$(hush_log_file)" 2>/dev/null && return
+    sleep 0.2
+  done
+  fail "the hush log did not show '$text' within $secs s"
+}
+
 assert_log_lacks() {
   if grep -qF -- "$1" "$CASE_DIR/daemon.log"; then
     fail "the daemon log contains '$1'"
@@ -391,6 +401,10 @@ EOF
   } >"$CASE_HOME/.config/hush/config.toml"
 }
 
+link_langid_model() {
+  ln -sf "$HUSH_E2E_LANGID_MODEL" "$CASE_HOME/.local/share/hush/models/lang-id-voxlingua107-ecapa-Q8_0.gguf"
+}
+
 # Start the test daemon with the base config and the case's TOML, and wait for
 # its socket.
 start_daemon() {
@@ -399,8 +413,8 @@ start_daemon() {
   for vad in "$MODEL_CACHE"/ggml-silero-*.bin; do
     [ -f "$vad" ] && ln -sf "$vad" "$CASE_HOME/.local/share/hush/models/"
   done
-  if [ -n "${HUSH_E2E_LANGID_MODEL:-}" ]; then
-    ln -sf "$HUSH_E2E_LANGID_MODEL" "$CASE_HOME/.local/share/hush/models/lang-id-voxlingua107-ecapa-Q8_0.gguf"
+  if [ -n "${HUSH_E2E_LANGID_MODEL:-}" ] && [ -z "${SKIP_LANGID_LINK:-}" ]; then
+    link_langid_model
   fi
   home_env "$CASE_HOME"
   "${SANDBOX[@]}" setpriv --pdeathsig TERM -- env -i "${HOME_ENV[@]}" \
@@ -551,14 +565,39 @@ case_style_flag() {
   assert_file "$(hush_log_file)" "The take uses the style verbatim"
 }
 
+# The language-ID model must pick the language. Whisper's own detection, the
+# fallback without the model, writes a different line.
 case_detect_limited() {
   start_daemon 'transcription.language = "auto"
 transcription.detect_languages = ["en", "de"]'
+  wait_for_log "Language identification is ready"
   record_clip "$SAMPLES/verwandlung_de.wav"
   stop_print_json
   assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
   assert_words "$TAKE_TEXT" samsa morgens bett verwandelt
-  assert_file "$(hush_log_file)" "Detected de among en, de"
+  assert_file "$(hush_log_file)" "Language identification is ready"
+  assert_file "$(hush_log_file)" "Language ID picked de among en, de"
+}
+
+# A daemon that starts without the language-ID model, for example before the
+# network is up, uses the model from the first take after the file appears.
+case_detect_limited_late_model() {
+  if [ -z "${HUSH_E2E_LANGID_MODEL:-}" ]; then
+    log "detect_limited_late_model needs HUSH_E2E_LANGID_MODEL, so it checks nothing"
+    return 0
+  fi
+  SKIP_LANGID_LINK=1 start_daemon 'transcription.language = "auto"
+transcription.detect_languages = ["en", "de"]'
+  record_clip "$SAMPLES/verwandlung_de.wav"
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  assert_words "$TAKE_TEXT" samsa
+  link_langid_model
+  record_clip "$SAMPLES/verwandlung_de.wav"
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  assert_words "$TAKE_TEXT" samsa
+  assert_file "$(hush_log_file)" "Language ID picked de among en, de"
 }
 
 case_keep_audio() {
