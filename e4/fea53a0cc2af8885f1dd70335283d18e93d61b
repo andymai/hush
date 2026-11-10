@@ -1,0 +1,68 @@
+src/audio/mod.rs
+  s_115995023cd6f3::t_6c325d46d6f229 42,46
+src/audio/file.rs
+  s_115995023cd6f3::t_0b5229304cf927 94-107
+  s_115995023cd6f3::t_66defe54fd9716 188
+  s_115995023cd6f3::t_8bcae20ee9dfdb 1-93,108-187,189-253
+src/config/settings.rs
+  s_115995023cd6f3::t_f26279759b834f 72-74,82,87-93,95
+  s_115995023cd6f3::t_3f8a8b8ba6d776 959-971
+  s_115995023cd6f3::t_9b1a85468637ba 724-729
+  s_115995023cd6f3::t_9959ba9d79a5c6 958
+src/cli/commands/transcribe.rs
+  s_115995023cd6f3::t_60ddcdf3e56ab8 264
+  s_115995023cd6f3::t_d4168575ba8aba 1-263,265-287
+  s_115995023cd6f3::t_5f0606bd84085d 288-293
+src/gui/pages/history.rs
+  s_115995023cd6f3::t_0065c3afe172bc 1-2,4-6,9-15,22,24-40,46-47,54-57,79-88,103-129,136-138,143-146,162,179,225-226,229,237-251,253-261,286-293,298,301-305,310-321,327-464,513-532,534-535
+  s_115995023cd6f3::t_77d474079a6513 533,536-545
+src/audio/store.rs
+  s_115995023cd6f3::t_944b3c8d94f802 153,156
+  s_115995023cd6f3::t_819c9fa828e62a 1-152,154-155,157-394
+  s_115995023cd6f3::t_16a7c625f1e478 395-421
+src/text_processing/transcripts.rs
+  s_115995023cd6f3::t_ab024b6428b832 44,241-263
+  s_115995023cd6f3::t_0abcdd2abbb013 25-28,37,40-43
+  s_115995023cd6f3::t_222de6ea37d6a6 240
+src/ipc/protocol.rs
+  s_115995023cd6f3::t_2418a93198ad9d 41-42
+  s_115995023cd6f3::t_ba80ac4b3828d5 3,9-10
+  s_115995023cd6f3::t_ccc81f35c11a1c 235-243
+  s_115995023cd6f3::t_75f98ea2e2f231 11,43-45
+src/cli_main.rs
+  s_115995023cd6f3::t_70cbf21f67ecd0 110-130
+config/default.toml
+  s_115995023cd6f3::t_d04843442e1b7d 85-91
+src/gui/mod.rs
+  s_115995023cd6f3::t_d69642f3563292 275-281
+Cargo.toml
+  s_115995023cd6f3::t_5c10b33afdcf94 89-90
+Cargo.lock
+  s_115995023cd6f3::t_1aa36e69793cc5 465-473,514-519,546-551,749-754,950-964,1023-1032,1060-1069,1076,1078,1496-1510,1649-1658,1919-1927,1958-1967,2046,2054,2628-2637,4051-4056,4140
+README.md
+  s_115995023cd6f3::t_0c80d5f21eb554 54-55,84-85,227,314
+src/cli/commands/listen.rs
+  s_115995023cd6f3::t_70e77a19396743 1-2,4,16,145,194-195,482,660-666,729-730,942-963,1242,1247,1250-1257,1299-1354
+src/cli/commands/mod.rs
+  s_115995023cd6f3::t_425a625656cdad 12,52
+src/cli/dispatcher.rs
+  s_115995023cd6f3::t_e6202fb74cb41b 4-6,44-45,150-155
+src/ipc/server.rs
+  s_115995023cd6f3::t_ffe39844c7fb1f 7,12,38-39,62-67,75,92,124-144,293-295,358-381,429-431,602-651
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e4fea53a0cc2af8885f1dd70335283d18e93d61b",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
