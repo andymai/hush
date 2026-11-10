@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -50,6 +50,11 @@ const PARAKEET_PIECE: usize = 30 * WHISPER_SAMPLE_RATE as usize;
 
 /// The shortest piece that a cut at the limit leaves.
 const MIN_PIECE: usize = WHISPER_SAMPLE_RATE as usize;
+
+/// Out-of-memory takes that a session runs again on a CPU copy of the model.
+/// Each costs a failed GPU run and a model load, so the next one moves the
+/// session to the CPU.
+const OUT_OF_MEMORY_RETRIES: u32 = 1;
 
 #[derive(Debug, Clone)]
 pub struct TranscriptionResult {
@@ -159,6 +164,8 @@ pub struct WhisperTranscriber {
     langid_dir: Option<PathBuf>,
     gpu: &'static GpuAvailability,
     using_gpu: AtomicBool,
+    /// The takes that ran out of GPU memory in this session
+    out_of_memory: AtomicU32,
     model_path: PathBuf,
     language: String,
     /// The languages that detection may pick; empty allows every language.
@@ -225,6 +232,7 @@ impl WhisperTranscriber {
             langid_dir: None,
             gpu,
             using_gpu: AtomicBool::new(using_gpu),
+            out_of_memory: AtomicU32::new(0),
             model_path: model_path.to_path_buf(),
             language: "en".to_string(),
             detect_languages: Arc::from([]),
@@ -412,7 +420,12 @@ impl WhisperTranscriber {
             .await
         {
             Err(e) if self.is_using_gpu() && e.downcast_ref::<OutOfMemory>().is_some() => {
-                self.retry_once_on_cpu(e, samples, prompt, language).await
+                let earlier = self.out_of_memory.fetch_add(1, Ordering::AcqRel);
+                if retries_on_a_copy(earlier) {
+                    self.retry_once_on_cpu(e, samples, prompt, language).await
+                } else {
+                    self.stay_on_cpu(e, samples, prompt, language).await
+                }
             },
             Err(e) if self.is_using_gpu() && e.downcast_ref::<Rejected>().is_none() => {
                 self.retry_on_cpu(e, samples, prompt, language).await
@@ -518,6 +531,34 @@ impl WhisperTranscriber {
             gpu_error
         );
         gpu_fallback::remember(self.gpu, self.family());
+        self.move_to_cpu(&gpu_error).await?;
+        self.run_take(self.engine(), samples, prompt, language)
+            .await
+    }
+
+    /// Run the take again on the CPU after the GPU ran out of memory again,
+    /// and keep the CPU for the rest of the session. The GPU works, so no
+    /// failure is written for later starts.
+    async fn stay_on_cpu(
+        &self,
+        gpu_error: anyhow::Error,
+        samples: Arc<[f32]>,
+        prompt: Option<String>,
+        language: String,
+    ) -> Result<Heard> {
+        warn!(
+            "The GPU ran out of memory again, so the take runs again on the CPU, and the CPU \
+             stays in use for this session: {:#}",
+            gpu_error
+        );
+        gpu_fallback::keep_on_cpu(self.family());
+        self.move_to_cpu(&gpu_error).await?;
+        self.run_take(self.engine(), samples, prompt, language)
+            .await
+    }
+
+    /// Put a CPU engine in place of the GPU engine for the rest of the session.
+    async fn move_to_cpu(&self, gpu_error: &anyhow::Error) -> Result<()> {
         let engine = load_engine(&self.model_path, false)
             .await
             .with_context(|| {
@@ -535,8 +576,7 @@ impl WhisperTranscriber {
             self.family().name(),
             self.get_device_info()
         );
-        self.run_take(self.engine(), samples, prompt, language)
-            .await
+        Ok(())
     }
 
     /// Run the take again on a CPU copy of the model after the GPU ran out
@@ -745,6 +785,12 @@ fn run_full(
         Err(e) => return Err(anyhow::anyhow!("Transcription failed: {}", e)),
     };
     Ok((transcript_text(&transcript), transcript.language))
+}
+
+/// Whether an out-of-memory take runs again on a CPU copy of the model,
+/// after `earlier` such takes in the session, and the session keeps the GPU.
+fn retries_on_a_copy(earlier: u32) -> bool {
+    earlier < OUT_OF_MEMORY_RETRIES
 }
 
 /// A Parakeet take in [`pieces`], with the text of each piece one space
@@ -1256,6 +1302,13 @@ mod tests {
         assert_eq!(join_speech(&samples, &[(12_800, 6_400)]), (vec![], vec![]));
         assert_eq!(join_speech(&samples, &[(14_400, 80_000)]).0.len(), 1_600);
         assert_eq!(join_speech(&[], &[(0, 16_000)]), (vec![], vec![]));
+    }
+
+    #[test]
+    fn the_second_out_of_memory_take_moves_the_session_to_the_cpu() {
+        assert!(retries_on_a_copy(0), "the first runs on a CPU copy");
+        assert!(!retries_on_a_copy(1));
+        assert!(!retries_on_a_copy(7));
     }
 
     const SECOND: usize = WHISPER_SAMPLE_RATE as usize;

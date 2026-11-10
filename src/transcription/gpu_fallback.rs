@@ -3,9 +3,9 @@
 //! At login, the graphics driver can start after Hush. ggml looks for the
 //! GPU only once in each process, so in the first minutes after boot, the
 //! first model load waits a short time for a render node. When the GPU fails
-//! a take, Hush writes the GPU, its driver, and the model family to a file in
-//! the state folder. Later starts of that family use the CPU on that GPU
-//! until the driver changes.
+//! a take, Hush writes the GPU and its driver under the model family in a
+//! file in the state folder. Later starts of that family use the CPU on that
+//! GPU until the driver changes.
 
 use crate::config::paths;
 use crate::transcription::device::GpuAvailability;
@@ -13,6 +13,7 @@ use crate::transcription::whisper::Family;
 use crate::Result;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -145,11 +146,6 @@ fn whisper_name() -> String {
 }
 
 impl GpuFailure {
-    /// `$XDG_STATE_HOME/hush/gpu-failure.json`
-    pub fn path() -> PathBuf {
-        paths::state_dir().join("gpu-failure.json")
-    }
-
     /// The GPU that ggml found, with the driver that runs it now, for a
     /// model of `family`.
     pub fn current(gpu: &GpuAvailability, family: Family) -> Self {
@@ -165,21 +161,86 @@ impl GpuFailure {
             family: family.name().to_string(),
         }
     }
+}
 
-    /// The saved record, or `None` when the file is missing or unreadable.
-    pub fn load_from(path: &Path) -> Option<Self> {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
+/// The remembered GPU failure of each model family. A failure of one family
+/// never removes the record of the other.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GpuFailures(BTreeMap<String, GpuFailure>);
+
+/// The file holds a record for each family by name. A file that holds one
+/// bare record is a Whisper failure from a Hush that runs only Whisper.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum FailureFile {
+    Families(BTreeMap<String, GpuFailure>),
+    One(GpuFailure),
+}
+
+impl GpuFailures {
+    /// `$XDG_STATE_HOME/hush/gpu-failure.json`
+    pub fn path() -> PathBuf {
+        paths::state_dir().join("gpu-failure.json")
     }
 
+    /// The saved records, or none when the file is missing or unreadable.
+    pub fn load_from(path: &Path) -> Self {
+        let Some(file) = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+        else {
+            return Self::default();
+        };
+        match file {
+            FailureFile::Families(records) => Self(
+                records
+                    .into_iter()
+                    .map(|(family, record)| {
+                        let record = GpuFailure {
+                            family: family.clone(),
+                            ..record
+                        };
+                        (family, record)
+                    })
+                    .collect(),
+            ),
+            FailureFile::One(record) => Self(BTreeMap::from([(record.family.clone(), record)])),
+        }
+    }
+
+    /// Write the records, or delete the file when none is left.
     pub fn save_to(&self, path: &Path) -> Result<()> {
+        if self.0.is_empty() {
+            return match std::fs::remove_file(path) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    Err(e).with_context(|| format!("Failed to delete {}", path.display()))
+                },
+                _ => Ok(()),
+            };
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create {}", parent.display()))?;
         }
-        let text = serde_json::to_string_pretty(self)?;
+        let text = serde_json::to_string_pretty(&self.0)?;
         std::fs::write(path, text).with_context(|| format!("Failed to write {}", path.display()))
+    }
+
+    pub fn get(&self, family: Family) -> Option<&GpuFailure> {
+        self.0.get(family.name())
+    }
+
+    /// Keep `record` in place of the record of its family.
+    pub fn insert(&mut self, record: GpuFailure) {
+        self.0.insert(record.family.clone(), record);
+    }
+
+    pub fn remove(&mut self, family: Family) -> Option<GpuFailure> {
+        self.0.remove(family.name())
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &GpuFailure> {
+        self.0.values()
     }
 }
 
@@ -204,7 +265,8 @@ pub enum Choice {
     Gpu,
     /// This GPU failed with this driver: use the CPU.
     Cpu,
-    /// The record names another GPU or driver: delete it and use the GPU.
+    /// The record names another GPU or driver: delete the record of this
+    /// family and use the GPU.
     Forget,
 }
 
@@ -231,9 +293,10 @@ pub fn avoid_gpu(gpu: &GpuAvailability, family: Family) -> bool {
         );
         return true;
     }
-    let path = GpuFailure::path();
+    let path = GpuFailures::path();
+    let mut records = GpuFailures::load_from(&path);
     let current = GpuFailure::current(gpu, family);
-    match choose(GpuFailure::load_from(&path).as_ref(), &current) {
+    match choose(records.get(family), &current) {
         Choice::Gpu => false,
         Choice::Cpu => {
             warn!(
@@ -249,23 +312,31 @@ pub fn avoid_gpu(gpu: &GpuAvailability, family: Family) -> bool {
         },
         Choice::Forget => {
             info!(
-                "The GPU or its driver changed after a GPU failure, so Hush tries {} with driver {} again",
-                current.gpu, current.driver
+                "The GPU or its driver changed after a GPU failure, so Hush tries {} on {} with driver {} again",
+                current.family, current.gpu, current.driver
             );
-            if let Err(e) = std::fs::remove_file(&path) {
-                warn!("Could not delete {}: {}", path.display(), e);
+            records.remove(family);
+            if let Err(e) = records.save_to(&path) {
+                warn!("Could not update {}: {:#}", path.display(), e);
             }
             false
         },
     }
 }
 
-/// Keep `family` on the CPU for this session, and write the GPU, its driver,
-/// and the family to the state folder for later starts.
-pub fn remember(gpu: &GpuAvailability, family: Family) {
+/// Keep `family` on the CPU for the rest of this session, and write nothing.
+pub fn keep_on_cpu(family: Family) {
     failed_this_session(family).store(true, Ordering::Release);
-    let path = GpuFailure::path();
-    match GpuFailure::current(gpu, family).save_to(&path) {
+}
+
+/// Keep `family` on the CPU for this session, and write the GPU and its
+/// driver under the family to the state folder for later starts.
+pub fn remember(gpu: &GpuAvailability, family: Family) {
+    keep_on_cpu(family);
+    let path = GpuFailures::path();
+    let mut records = GpuFailures::load_from(&path);
+    records.insert(GpuFailure::current(gpu, family));
+    match records.save_to(&path) {
         Ok(()) => info!(
             "Wrote the GPU failure to {}. Later starts of {} use the CPU until the driver changes",
             path.display(),
@@ -377,12 +448,58 @@ mod tests {
             r#"{"gpu": "NVIDIA GeForce RTX 4080", "backend": "Vulkan", "driver": "NVIDIA 580.95.05"}"#,
         )
         .unwrap();
-        let record = GpuFailure::load_from(&path).unwrap();
-        assert_eq!(record.family, "Whisper");
+        let records = GpuFailures::load_from(&path);
         assert_eq!(
-            record,
-            failure("NVIDIA GeForce RTX 4080", "Vulkan", "NVIDIA 580.95.05")
+            records.get(Family::Whisper),
+            Some(&failure(
+                "NVIDIA GeForce RTX 4080",
+                "Vulkan",
+                "NVIDIA 580.95.05"
+            ))
         );
+        assert_eq!(records.get(Family::Parakeet), None);
+    }
+
+    #[test]
+    fn keeping_one_family_on_the_cpu_leaves_the_other_on_the_gpu() {
+        keep_on_cpu(Family::Parakeet);
+        assert!(failed_this_session(Family::Parakeet).load(Ordering::Acquire));
+        assert!(!failed_this_session(Family::Whisper).load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn each_family_keeps_its_own_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state/gpu-failure.json");
+        let whisper = failure("NVIDIA GeForce RTX 4080", "Vulkan", "NVIDIA 580.95.05");
+        let parakeet = GpuFailure {
+            family: "Parakeet".to_string(),
+            ..whisper.clone()
+        };
+        let mut records = GpuFailures::load_from(&path);
+        records.insert(whisper.clone());
+        records.save_to(&path).unwrap();
+        let mut records = GpuFailures::load_from(&path);
+        records.insert(parakeet.clone());
+        records.save_to(&path).unwrap();
+
+        let mut records = GpuFailures::load_from(&path);
+        assert_eq!(records.get(Family::Whisper), Some(&whisper));
+        assert_eq!(records.get(Family::Parakeet), Some(&parakeet));
+
+        records.remove(Family::Parakeet);
+        records.save_to(&path).unwrap();
+        let mut records = GpuFailures::load_from(&path);
+        assert_eq!(
+            records.get(Family::Whisper),
+            Some(&whisper),
+            "forgetting Parakeet keeps the Whisper record"
+        );
+        assert_eq!(records.get(Family::Parakeet), None);
+
+        records.remove(Family::Whisper);
+        records.save_to(&path).unwrap();
+        assert!(!path.exists(), "no record left, no file");
     }
 
     #[test]
@@ -412,14 +529,19 @@ mod tests {
     fn a_record_survives_a_save_and_a_bad_file_is_no_record() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state/gpu-failure.json");
-        assert_eq!(GpuFailure::load_from(&path), None);
+        assert_eq!(GpuFailures::load_from(&path), GpuFailures::default());
 
         let rtx = failure("NVIDIA GeForce RTX 4080", "CUDA", "NVIDIA 580.95.05");
-        rtx.save_to(&path).unwrap();
-        assert_eq!(GpuFailure::load_from(&path), Some(rtx));
+        let mut records = GpuFailures::default();
+        records.insert(rtx.clone());
+        records.save_to(&path).unwrap();
+        assert_eq!(
+            GpuFailures::load_from(&path).get(Family::Whisper),
+            Some(&rtx)
+        );
 
         std::fs::write(&path, "not json").unwrap();
-        assert_eq!(GpuFailure::load_from(&path), None);
+        assert_eq!(GpuFailures::load_from(&path), GpuFailures::default());
     }
 
     #[test]
