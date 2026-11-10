@@ -224,7 +224,7 @@ impl GpuFailures {
                 .with_context(|| format!("Failed to create {}", parent.display()))?;
         }
         let text = serde_json::to_string_pretty(&self.0)?;
-        std::fs::write(path, text).with_context(|| format!("Failed to write {}", path.display()))
+        crate::config::transfer::write_atomic(path, text.as_bytes(), true)
     }
 
     pub fn get(&self, family: Family) -> Option<&GpuFailure> {
