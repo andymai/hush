@@ -93,7 +93,7 @@ pub enum Commands {
         #[arg(long, value_name = "CODE", value_parser = language_code)]
         lang: Option<String>,
 
-        /// Style of the take it starts: verbatim, or a style under [styles]
+        /// Style of the take it starts: verbatim, or a style from the styles table
         #[arg(long, value_name = "NAME", value_parser = style_name)]
         style: Option<String>,
     },
@@ -104,7 +104,7 @@ pub enum Commands {
         #[arg(long, value_name = "CODE", value_parser = language_code)]
         lang: Option<String>,
 
-        /// Style of this take: verbatim, or a style under [styles]
+        /// Style of this take: verbatim, or a style from the styles table
         #[arg(long, value_name = "NAME", value_parser = style_name)]
         style: Option<String>,
     },
