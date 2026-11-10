@@ -95,6 +95,8 @@ pub struct AltGr {
     pub roles: Vec<Role>,
     /// A key that types Ctrl, to use alone in place of `key`.
     pub instead: Option<KeyCombination>,
+    /// Whether the keys come from the session keymap, not from their names.
+    pub keymap: bool,
 }
 
 impl AltGr {
@@ -108,7 +110,12 @@ impl AltGr {
                     KeyCode::KEY_LEFTCTRL | KeyCode::KEY_RIGHTCTRL
                 ) =>
             {
-                format!("use {} in place of {}", instead, self.key)
+                let caveat = if self.keymap {
+                    String::new()
+                } else {
+                    format!(", if {} types Ctrl on your layout", instead)
+                };
+                format!("use {} in place of {}{}", instead, self.key, caveat)
             },
             Some(instead) => format!(
                 "use {}, which types Ctrl on this layout, in place of {}",
@@ -211,6 +218,7 @@ pub fn altgr<'a>(
         key: bare(first.evdev_key())?,
         roles: found.iter().map(|(role, _)| *role).collect(),
         instead: keys.ctrl_key().and_then(bare),
+        keymap: keys.from_keymap(),
     })
 }
 
@@ -357,7 +365,11 @@ mod tests {
             german.to_string(),
             "On the de layout, RightAlt is AltGr: it types special characters, and each one can also start a dictation"
         );
-        assert_eq!(german.advice(), "use RightCtrl in place of RightAlt");
+        assert_eq!(
+            german.advice(),
+            "use RightCtrl in place of RightAlt, if RightCtrl types Ctrl on your layout",
+            "without the keymap, Hush cannot know what Right Ctrl types"
+        );
     }
 
     #[test]

@@ -166,34 +166,82 @@ pub struct KeyClasses {
     pub other: Vec<Key>,
 }
 
-pub fn key_classes(names: &Names) -> Result<KeyClasses> {
+/// The classes of the keys in the keymap with these names. With `group`,
+/// the classes of that layout. Without it, a key whose class differs
+/// between the layouts gets the class of its name, such as Alt for Right
+/// Alt, which is Alt on `us` and AltGr on `de`.
+pub fn key_classes(names: &Names, group: Option<u32>) -> Result<KeyClasses> {
     let lib =
         xkbcommon_dl::xkbcommon_option().ok_or_else(|| anyhow!("libxkbcommon is not installed"))?;
     let context = Context::new(lib)?;
     let keymap = Keymap::compile(&context, names)?;
+    let groups: Vec<u32> = match group {
+        Some(group) if group < keymap.layouts() => vec![group],
+        _ => (0..keymap.layouts().max(1)).collect(),
+    };
     let mut classes = KeyClasses::default();
     for key in CLASS_KEYS {
-        let class = if holds(&keymap, 0, key, Held::Control)? {
-            &mut classes.control
-        } else if holds(&keymap, 0, key, Held::Shift)? {
-            &mut classes.shift
-        } else if holds(&keymap, 0, key, Held::Alt)? {
-            &mut classes.alt
-        } else if holds(&keymap, 0, key, Held::Super)? {
-            &mut classes.super_keys
-        } else {
-            match State::new(&keymap, 0)?.sym(key) {
-                keysyms::ISO_Level3_Shift => &mut classes.altgr,
-                keysyms::ISO_Level5_Shift
-                | keysyms::Mode_switch
-                | keysyms::Hyper_L
-                | keysyms::Hyper_R => &mut classes.other,
-                _ => continue,
-            }
+        let mut found = Vec::with_capacity(groups.len());
+        for &group in &groups {
+            found.push(classify(&keymap, group, key)?);
+        }
+        let class = match found.as_slice() {
+            [first, rest @ ..] if rest.iter().all(|class| class == first) => *first,
+            _ => physical_class(key),
         };
-        class.push(key);
+        let list = match class {
+            Some(Class::Control) => &mut classes.control,
+            Some(Class::Shift) => &mut classes.shift,
+            Some(Class::Alt) => &mut classes.alt,
+            Some(Class::Super) => &mut classes.super_keys,
+            Some(Class::AltGr) => &mut classes.altgr,
+            Some(Class::Other) => &mut classes.other,
+            None => continue,
+        };
+        list.push(key);
     }
     Ok(classes)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Class {
+    Control,
+    Shift,
+    Alt,
+    Super,
+    AltGr,
+    Other,
+}
+
+fn classify(keymap: &Keymap, group: u32, key: Key) -> Result<Option<Class>> {
+    for (held, class) in [
+        (Held::Control, Class::Control),
+        (Held::Shift, Class::Shift),
+        (Held::Alt, Class::Alt),
+        (Held::Super, Class::Super),
+    ] {
+        if holds(keymap, group, key, held)? {
+            return Ok(Some(class));
+        }
+    }
+    Ok(match State::new(keymap, group)?.sym(key) {
+        keysyms::ISO_Level3_Shift => Some(Class::AltGr),
+        keysyms::ISO_Level5_Shift | keysyms::Mode_switch | keysyms::Hyper_L | keysyms::Hyper_R => {
+            Some(Class::Other)
+        },
+        _ => None,
+    })
+}
+
+/// The class that the name of a key gives it.
+fn physical_class(key: Key) -> Option<Class> {
+    match key {
+        Key::LeftCtrl | Key::RightCtrl => Some(Class::Control),
+        Key::LeftShift | Key::RightShift => Some(Class::Shift),
+        Key::LeftAlt | Key::RightAlt => Some(Class::Alt),
+        Key::LeftMeta | Key::RightMeta => Some(Class::Super),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -892,14 +940,13 @@ pub(crate) mod tests {
         if !xkb_ready() {
             return;
         }
-        let classes = |layout: &str, options: &str| {
-            key_classes(&Names {
-                layout: layout.into(),
-                options: options.into(),
-                ..Names::default()
-            })
-            .unwrap()
+        let names = |layout: &str, options: &str| Names {
+            layout: layout.into(),
+            options: options.into(),
+            ..Names::default()
         };
+        let classes =
+            |layout: &str, options: &str| key_classes(&names(layout, options), None).unwrap();
         let us = classes("us", "");
         assert_eq!(us.control, [Key::LeftCtrl, Key::RightCtrl]);
         assert_eq!(us.alt, [Key::LeftAlt, Key::RightAlt]);
@@ -926,6 +973,39 @@ pub(crate) mod tests {
         assert_eq!(german.alt, [Key::LeftAlt]);
         assert_eq!(german.altgr, [Key::RightAlt]);
         assert_eq!(classes("us", "lv3:caps_switch").altgr, [Key::CapsLock]);
+
+        let both = names("us,de", "ctrl:swap_lwin_lctl");
+        let us = key_classes(&both, Some(0)).unwrap();
+        assert_eq!(us.alt, [Key::LeftAlt, Key::RightAlt], "us is active");
+        assert!(us.altgr.is_empty());
+        let de = key_classes(&both, Some(1)).unwrap();
+        assert_eq!(de.altgr, [Key::RightAlt], "de is active");
+        assert_eq!(de.control, [Key::RightCtrl, Key::LeftMeta]);
+        let unknown = key_classes(&both, None).unwrap();
+        assert_eq!(
+            unknown.alt,
+            [Key::LeftAlt, Key::RightAlt],
+            "Right Alt differs between the layouts, so it keeps its name"
+        );
+        assert!(unknown.altgr.is_empty());
+        assert_eq!(
+            unknown.control,
+            [Key::RightCtrl, Key::LeftMeta],
+            "an option moves Ctrl in every layout"
+        );
+        assert_eq!(
+            key_classes(&both, Some(7)).unwrap(),
+            unknown,
+            "a group past the keymap is unknown"
+        );
+        let de_first = names("de,us", "");
+        for group in [Some(0), Some(1), None] {
+            assert_eq!(
+                key_classes(&de_first, group).unwrap().altgr,
+                [Key::RightAlt],
+                "us after de keeps the AltGr of de on Right Alt"
+            );
+        }
     }
 
     #[test]

@@ -10,9 +10,10 @@
 
 use super::combination::{KeyCombination, Modifiers};
 use crate::text::layout::Layout;
-use crate::text::xkb::{self, KeyClasses, Names};
+use crate::text::typing::{user_keymap, UserKeymap};
+use crate::text::xkb::{self, KeyClasses};
 use evdev::KeyCode;
-use tracing::info;
+use tracing::{debug, info};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModifierKeys {
@@ -61,28 +62,27 @@ impl ModifierKeys {
         }
     }
 
-    /// The keys of the keymap with these names, or the physical keys and
-    /// why, when Hush cannot read the keymap.
-    pub fn of_names(names: &Result<Names, String>) -> (Self, Option<String>) {
-        let names = match names {
-            Ok(names) => names,
-            Err(why) => return (Self::physical(), Some(why.clone())),
-        };
+    /// The keys of a keymap, or why Hush cannot compile it.
+    pub fn of_keymap(keymap: &UserKeymap) -> Result<Self, String> {
         if !xkb::available() {
-            return (
-                Self::physical(),
-                Some("libxkbcommon is not installed".to_string()),
-            );
+            return Err("libxkbcommon is not installed".to_string());
         }
-        match xkb::key_classes(names) {
-            Ok(classes) => (Self::from_classes(&classes), None),
-            Err(e) => (Self::physical(), Some(format!("{:#}", e))),
-        }
+        xkb::key_classes(&keymap.names, keymap.group)
+            .map(|classes| Self::from_classes(&classes))
+            .map_err(|e| format!("{:#}", e))
     }
 
-    /// The keys of the session's keymap.
+    /// The keys of the user's keymap, or the physical keys when Hush cannot
+    /// read it.
     pub fn session() -> Self {
-        Self::of_names(&crate::text::typing::keyboard_names()).0
+        user_keymap()
+            .and_then(|keymap| Self::of_keymap(&keymap))
+            .unwrap_or_else(|_| Self::physical())
+    }
+
+    /// Whether the keys come from the keymap, not from their names.
+    pub fn from_keymap(&self) -> bool {
+        self.altgr.is_some()
     }
 
     /// The modifiers that the held keys hold, or `None` when a held key
@@ -166,12 +166,18 @@ impl ModifierKeys {
     }
 }
 
-/// Reads the keymap names again on each call, and compiles a keymap only
-/// when they change, so a hotkey reader can follow a change of the XKB
-/// options.
+/// Reads the user's keymap again on each call, and changes the modifier
+/// keys only on a steady change. A read that fails keeps the keys, and new
+/// names count only when two reads in a row give them: a one-off failure of
+/// hyprctl, gsettings, or D-Bus can fall back to other names, and those
+/// would swap Ctrl and Super until the next read.
 #[derive(Default)]
 pub struct KeymapWatch {
-    names: Option<Result<Names, String>>,
+    /// The keymap in use: `None` before the first read, and `Some(None)`
+    /// for the physical keys.
+    applied: Option<Option<UserKeymap>>,
+    /// New names from the last read, which the next read must give again.
+    pending: Option<UserKeymap>,
 }
 
 impl KeymapWatch {
@@ -179,30 +185,72 @@ impl KeymapWatch {
         Self::default()
     }
 
-    /// The modifier keys when the keymap names changed since the last call.
-    /// The first call always gives keys. The log says once why Hush keeps
-    /// the physical keys.
+    /// The modifier keys when they change. The first call always gives
+    /// keys, and the log says once why Hush keeps the physical keys.
     pub fn changed(&mut self) -> Option<ModifierKeys> {
-        self.changed_to(crate::text::typing::keyboard_names())
+        self.changed_to(user_keymap())
     }
 
-    fn changed_to(&mut self, names: Result<Names, String>) -> Option<ModifierKeys> {
-        if self.names.as_ref() == Some(&names) {
+    fn changed_to(&mut self, read: Result<UserKeymap, String>) -> Option<ModifierKeys> {
+        let Some(applied) = &self.applied else {
+            let compiled = read.and_then(|keymap| Ok((ModifierKeys::of_keymap(&keymap)?, keymap)));
+            let (keys, keymap) = match compiled {
+                Ok((keys, keymap)) => {
+                    info!(
+                        "Modifier names in hotkeys follow the keymap: {}",
+                        keys.describe()
+                    );
+                    (keys, Some(keymap))
+                },
+                Err(why) => {
+                    info!(
+                        "Modifier names in hotkeys mean the keys with those names: {}",
+                        why
+                    );
+                    (ModifierKeys::physical(), None)
+                },
+            };
+            self.applied = Some(keymap);
+            return Some(keys);
+        };
+        let keymap = match read {
+            Ok(keymap) => keymap,
+            Err(why) => {
+                debug!(
+                    "The keymap read failed ({}); the hotkeys keep their keys",
+                    why
+                );
+                self.pending = None;
+                return None;
+            },
+        };
+        if applied.as_ref() == Some(&keymap) {
+            self.pending = None;
             return None;
         }
-        let (keys, why) = ModifierKeys::of_names(&names);
-        match why {
-            Some(why) => info!(
-                "Modifier names in hotkeys mean the keys with those names: {}",
-                why
-            ),
-            None => info!(
-                "Modifier names in hotkeys follow the keymap: {}",
-                keys.describe()
-            ),
+        if self.pending.as_ref() != Some(&keymap) {
+            debug!("The keymap names changed; the next read must give them again");
+            self.pending = Some(keymap);
+            return None;
         }
-        self.names = Some(names);
-        Some(keys)
+        self.pending = None;
+        match ModifierKeys::of_keymap(&keymap) {
+            Ok(keys) => {
+                info!(
+                    "Modifier names in hotkeys follow the new keymap: {}",
+                    keys.describe()
+                );
+                self.applied = Some(Some(keymap));
+                Some(keys)
+            },
+            Err(why) => {
+                debug!(
+                    "The new keymap does not compile ({}); the hotkeys keep their keys",
+                    why
+                );
+                None
+            },
+        }
     }
 }
 
@@ -347,34 +395,41 @@ pub(crate) mod tests {
             watch.changed_to(sway.clone()),
             Some(ModifierKeys::physical())
         );
-        assert_eq!(watch.changed_to(sway), None, "the same names compile once");
-        let (keys, why) = ModifierKeys::of_names(&Err("no session".to_string()));
-        assert_eq!(keys, ModifierKeys::physical());
-        assert_eq!(why.as_deref(), Some("no session"));
+        assert_eq!(watch.changed_to(sway), None, "nothing changes");
     }
 
+    fn keymap(layout: &str, options: &str, group: Option<u32>) -> Result<UserKeymap, String> {
+        Ok(UserKeymap {
+            names: crate::text::xkb::Names {
+                layout: layout.into(),
+                options: options.into(),
+                ..Default::default()
+            },
+            group,
+        })
+    }
+
+    const SWAP: &str = "ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl";
+
     #[test]
-    fn the_watch_compiles_the_options_it_is_given() {
+    fn the_watch_follows_the_options_it_is_given() {
         if !crate::text::xkb::tests::xkb_ready() {
             return;
         }
-        let names = |options: &str| {
-            Ok(Names {
-                layout: "us".into(),
-                options: options.into(),
-                ..Names::default()
-            })
-        };
         let mut watch = KeymapWatch::new();
         assert_eq!(
-            watch.changed_to(names("ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl")),
-            Some(swapped())
+            watch.changed_to(keymap("us", SWAP, Some(0))),
+            Some(swapped()),
+            "the first read applies at once"
         );
+        assert_eq!(watch.changed_to(keymap("us", SWAP, Some(0))), None);
         assert_eq!(
-            watch.changed_to(names("ctrl:swap_lwin_lctl,ctrl:swap_rwin_rctl")),
+            watch.changed_to(keymap("us", "ctrl:swapcaps", Some(0))),
             None
         );
-        let swapcaps = watch.changed_to(names("ctrl:swapcaps")).unwrap();
+        let swapcaps = watch
+            .changed_to(keymap("us", "ctrl:swapcaps", Some(0)))
+            .expect("the second read in a row applies");
         assert_eq!(
             swapcaps.held([KeyCode::KEY_CAPSLOCK]),
             Some(chord("Ctrl+A").modifiers)
@@ -384,11 +439,81 @@ pub(crate) mod tests {
             Some(Modifiers::default()),
             "Left Ctrl types Caps Lock"
         );
-        let alt_win = watch.changed_to(names("altwin:swap_alt_win")).unwrap();
+        let alt_win = KeymapWatch::new()
+            .changed_to(keymap("us", "altwin:swap_alt_win", None))
+            .unwrap();
         assert_eq!(
             alt_win.held([KeyCode::KEY_LEFTMETA]),
             Some(chord("Alt+A").modifiers)
         );
-        assert!(alt_win.only_alt_or_super(&chord("RightAlt")));
+        assert!(
+            alt_win.only_alt_or_super(&chord("RightAlt")),
+            "it types Super"
+        );
+    }
+
+    #[test]
+    fn a_failed_or_odd_read_keeps_the_keys() {
+        if !crate::text::xkb::tests::xkb_ready() {
+            return;
+        }
+        let mut watch = KeymapWatch::new();
+        watch.changed_to(keymap("us", SWAP, Some(0)));
+        assert_eq!(
+            watch.changed_to(Err("hyprctl did not answer".to_string())),
+            None,
+            "a failed read keeps the keymap's keys"
+        );
+        assert_eq!(
+            watch.changed_to(keymap("us", "", None)),
+            None,
+            "names from a fallback source count only twice in a row"
+        );
+        assert_eq!(watch.changed_to(keymap("us", SWAP, Some(0))), None);
+        assert_eq!(
+            watch.changed_to(keymap("us", "", None)),
+            None,
+            "the last read gave the keymap in use, so this one starts over"
+        );
+        assert_eq!(watch.changed_to(Err("D-Bus timed out".to_string())), None);
+        assert_eq!(
+            watch.changed_to(keymap("us", "", None)),
+            None,
+            "a failed read between them breaks the run"
+        );
+
+        let mut watch = KeymapWatch::new();
+        assert_eq!(
+            watch.changed_to(Err("gsettings failed".to_string())),
+            Some(ModifierKeys::physical())
+        );
+        assert_eq!(watch.changed_to(keymap("us", SWAP, Some(0))), None);
+        assert_eq!(
+            watch.changed_to(keymap("us", SWAP, Some(0))),
+            Some(swapped()),
+            "a steady keymap replaces the physical keys"
+        );
+    }
+
+    #[test]
+    fn the_active_layout_decides_what_right_alt_types() {
+        if !crate::text::xkb::tests::xkb_ready() {
+            return;
+        }
+        let of = |group| ModifierKeys::of_keymap(&keymap("us,de", "", group).unwrap()).unwrap();
+        assert!(
+            of(Some(0)).only_alt_or_super(&chord("RightAlt")),
+            "Alt on us"
+        );
+        assert!(
+            !of(Some(1)).only_alt_or_super(&chord("RightAlt")),
+            "AltGr on de"
+        );
+        assert_eq!(of(Some(1)).held([KeyCode::KEY_RIGHTALT]), None);
+        assert_eq!(
+            of(None).held([KeyCode::KEY_RIGHTALT]),
+            Some(chord("Alt+A").modifiers),
+            "with the active layout unknown, Right Alt keeps its name"
+        );
     }
 }
