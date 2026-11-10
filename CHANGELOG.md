@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/andymai/hush/compare/v0.21.0...v0.22.0) (2026-11-10)
+
+
+### Features
+
+* **text:** add writing styles and a style for one take ([#290](https://github.com/andymai/hush/issues/290)) ([efe2266](https://github.com/andymai/hush/commit/efe2266b70d39fec555332d52716bbadae26ef62))
+
 ## [0.21.0](https://github.com/andymai/hush/compare/v0.20.0...v0.21.0) (2026-11-10)
 
 
