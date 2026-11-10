@@ -34,8 +34,9 @@ use crate::text_processing::{
     CommandExecutor, CommandParser, DomainVocabulary, EditingMode, HookEnv, InsertionHistory,
     LlmProvider, ProcessingConfig, TextProcessor, TranscriptHook, Trigger,
 };
+use crate::transcription::language::{self, Language};
 use crate::transcription::{IdleTimer, ModelSlot, SlotState, SpeechToText, WHISPER_SAMPLE_RATE};
-use crate::tray;
+use crate::tray::{self, TrayLanguages};
 use crate::AudioCapture;
 
 #[cfg(target_os = "linux")]
@@ -161,6 +162,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     if !config.hotkey.cancel.trim().is_empty() {
         println!("{} discards a recording", config.hotkey.cancel.trim());
     }
+    for (language, chord) in config.hotkey.language_keys() {
+        println!("{} dictates in {}", chord, language.name());
+    }
     println!("`hush toggle` starts and stops from a keybind; Ctrl+C or `hush daemon stop` quits");
     println!("═══════════════════════════════════════════════════════\n");
 
@@ -198,6 +202,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     // Single instance and control socket, before any device is opened
     let handles = daemon::claim(audio_cmd_tx.clone()).await?;
     let shared = Arc::clone(&handles.shared);
+    let config_language = Language::parse(&config.transcription.language).unwrap_or(Language::AUTO);
+    shared.set_config_language(config_language);
+    let chosen_language =
+        language::load_choice(&language::choice_path()).filter(|chosen| *chosen != config_language);
+    if let Some(chosen) = chosen_language {
+        info!("The tray chose {} for takes", chosen.name());
+    }
+    shared.set_chosen_language(chosen_language);
 
     {
         let quit_tx = audio_cmd_tx.clone();
@@ -220,10 +232,13 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     }
 
     let (hotkey_manager, hotkey_rx) = if config.hotkey.enabled {
-        let bindings = HotkeyBindings::parse(&hotkey_combination, Some(&config.hotkey.cancel))?
+        let mut bindings = HotkeyBindings::parse(&hotkey_combination, Some(&config.hotkey.cancel))?
             .with_action(HotkeyAction::PasteLast, &config.hotkey.paste_last)?
             .with_action(HotkeyAction::Learn, &config.hotkey.learn)?
             .with_command(&config.hotkey.command)?;
+        for (language, chord) in config.hotkey.language_keys() {
+            bindings = bindings.with_language(language, chord)?;
+        }
         let (manager, receiver) =
             HotkeyManager::with_backend(bindings, config.hotkey.backend, config.hotkey.exclusive)?;
         manager.start_listening()?;
@@ -249,6 +264,16 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             Arc::clone(&shared),
             audio_cmd_tx.clone(),
             hotkey_combination.clone(),
+            TrayLanguages {
+                config: config_language,
+                chords: config
+                    .hotkey
+                    .language_keys()
+                    .into_iter()
+                    .map(|(language, _)| language)
+                    .collect(),
+                chosen: chosen_language,
+            },
         )
         .await
     } else {
@@ -425,7 +450,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 },
             };
             let command = match action {
-                Some(GestureAction::Start) => Some(SessionCommand::StartRecording(Trigger::Hotkey)),
+                Some(GestureAction::Start) => Some(SessionCommand::StartRecording(
+                    Trigger::Hotkey,
+                    gesture.language(),
+                )),
                 // The overlay stays in Recording until transcription completes
                 Some(GestureAction::Stop) => Some(SessionCommand::StopRecording),
                 Some(GestureAction::Cancel) => Some(SessionCommand::CancelRecording),
@@ -730,6 +758,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let context_prompt = config.transcription.context_prompt;
     let mut current_window: Option<WindowInfo> = None;
     let mut current_trigger = Trigger::Hotkey;
+    let mut current_language = config_language;
     let mut command_target: Option<CommandTarget> = None;
     let mut media = MediaPause::new(config.audio.pause_media);
     let mut last_stream = StreamOutcome::Worked;
@@ -939,6 +968,20 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     processor.reload_vocabulary();
                 }
             },
+            SessionCommand::ChooseLanguage(choice) => {
+                let choice = choice.filter(|chosen| *chosen != config_language);
+                shared.set_chosen_language(choice);
+                info!(
+                    "Takes are in {} until the tray chooses again",
+                    choice.unwrap_or(config_language).name()
+                );
+                if let Err(e) = language::save_choice(&language::choice_path(), choice) {
+                    warn!(
+                        "Could not keep the language for the next daemon start: {:#}",
+                        e
+                    );
+                }
+            },
             SessionCommand::CancelRecording => {
                 let Some(clock) = take.take() else {
                     continue;
@@ -958,13 +1001,13 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 show(OverlayState::idle());
                 shared.set_idle();
             },
-            SessionCommand::StartRecording(_) | SessionCommand::StartCommand => {
+            SessionCommand::StartRecording(..) | SessionCommand::StartCommand => {
                 if take.is_some() {
                     continue;
                 }
-                let trigger = match command {
-                    SessionCommand::StartRecording(trigger) => trigger,
-                    _ => Trigger::Command,
+                let (trigger, once) = match command {
+                    SessionCommand::StartRecording(trigger, once) => (trigger, once),
+                    _ => (Trigger::Command, None),
                 };
                 let is_command = trigger == Trigger::Command;
                 // Reset stop signal for new recording
@@ -993,6 +1036,12 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     let can_be_tap = trigger == Trigger::Hotkey && hotkey_mode == HotkeyMode::Hold;
                     media.started(stream_started, can_be_tap.then_some(tap_window));
                     current_trigger = trigger;
+                    current_language =
+                        language::for_take(once, shared.chosen_language(), config_language);
+                    if current_language != config_language {
+                        info!("The take is in {}", current_language.name());
+                    }
+                    shared.set_take_language(current_language);
                     shared.set_starting();
                     if model.begin_load() {
                         publish_model(&model);
@@ -1187,10 +1236,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             None
                         };
                         transcriber
-                            .transcribe_with_prompt(
+                            .transcribe_in(
                                 &audio_data,
                                 WHISPER_SAMPLE_RATE,
                                 initial_prompt.as_deref(),
+                                Some(current_language),
                             )
                             .await
                     },

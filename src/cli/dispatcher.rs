@@ -1,7 +1,7 @@
 use crate::cli::commands::{
     handle_client_command, handle_config, handle_daemon_restart, handle_daemon_start,
     handle_daemon_status, handle_daemon_stop, handle_doctor, handle_listen, handle_manual,
-    handle_models, handle_record, handle_setup, handle_status, handle_status_follow,
+    handle_models, handle_record, handle_setup, handle_start, handle_status, handle_status_follow,
     handle_status_json, handle_stop, handle_test, SessionOptions,
 };
 use crate::cli::{Commands, DaemonCommands};
@@ -32,8 +32,8 @@ impl CommandDispatcher {
             Commands::Manual { .. } => "manual",
             Commands::Listen { .. } => "listen",
             Commands::Daemon { .. } => "daemon",
-            Commands::Toggle => "toggle",
-            Commands::Start => "start",
+            Commands::Toggle { .. } => "toggle",
+            Commands::Start { .. } => "start",
             Commands::Stop { .. } => "stop",
             Commands::Cancel => "cancel",
             Commands::Doctor => "doctor",
@@ -131,8 +131,8 @@ impl CommandDispatcher {
                 },
                 DaemonCommands::Status => handle_daemon_status().await,
             },
-            Commands::Toggle => handle_client_command(DaemonCommand::Toggle).await,
-            Commands::Start => handle_client_command(DaemonCommand::Start).await,
+            Commands::Toggle { lang } => handle_start(true, lang.as_deref()).await,
+            Commands::Start { lang } => handle_start(false, lang.as_deref()).await,
             Commands::Stop { print, json } => handle_stop(print, json).await,
             Commands::Cancel => handle_client_command(DaemonCommand::Cancel).await,
             Commands::Doctor => handle_doctor().await,
@@ -520,6 +520,13 @@ pub async fn test_hotkey_system(combination: Option<String>, duration: u64) -> R
                             crate::hotkey::HotkeyEvent::Command(pressed) => {
                                 println!(
                                     "🎯 Command chord {}!",
+                                    if pressed { "pressed" } else { "released" }
+                                );
+                            },
+                            crate::hotkey::HotkeyEvent::Language(language, pressed) => {
+                                println!(
+                                    "🎯 {} chord {}!",
+                                    language.name(),
                                     if pressed { "pressed" } else { "released" }
                                 );
                             },

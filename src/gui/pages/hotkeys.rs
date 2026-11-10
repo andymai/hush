@@ -1,9 +1,11 @@
-//! The keys that start, stop, cancel, and command a dictation. Each one is a
-//! button that captures the next key pressed, with a text box behind it for
-//! keys the capture cannot see.
+//! The keys that start, stop, cancel, and command a dictation, and a key
+//! for each language. Each one is a button that captures the next key
+//! pressed; the action keys have a text box behind it for keys the capture
+//! cannot see.
 
 use crate::config::settings::HotkeyConfig;
 use crate::gui::capture::Capture;
+use crate::gui::pages::speech::language_picker;
 use crate::gui::theme::{
     caution, field, hint, quiet_button, row, section, slider, toggle_row, ACCENT, CONTROL_HEIGHT,
     FIELD_WIDTH, MUTED,
@@ -11,6 +13,16 @@ use crate::gui::theme::{
 use crate::gui::Gui;
 use crate::hotkey::warnings;
 use crate::hotkey::{HotkeyBackend, HotkeyMode, KeyCombination, Role};
+use crate::transcription::Language;
+
+/// What a captured key goes to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyTarget {
+    Action(Role),
+    /// A language chord, by the chord it has now; `None` adds a chord for
+    /// the language in [`Gui::new_language`].
+    Language(Option<String>),
+}
 
 /// Dictation cannot be unbound; every other key can.
 fn required(role: Role) -> bool {
@@ -19,6 +31,12 @@ fn required(role: Role) -> bool {
 
 /// Width of the key button plus its Type and Clear actions.
 const KEY_COLUMN: f32 = 320.0;
+
+/// Width of the key button, the language picker, and Remove.
+const LANGUAGE_COLUMN: f32 = 420.0;
+
+/// Width of the language picker beside a key.
+const PICKER_WIDTH: f32 = 130.0;
 
 /// Red text under a hotkey field that does not parse.
 pub fn combination_error(text: &str, required: bool) -> Option<String> {
@@ -30,7 +48,20 @@ pub fn combination_error(text: &str, required: bool) -> Option<String> {
 
 /// The other actions that already use `chord`, as a sentence.
 pub fn taken(hotkey: &HotkeyConfig, role: Role, chord: &str) -> Option<String> {
-    let holders = warnings::holders(hotkey.chords(), role, chord);
+    sentence(warnings::holders(hotkey.bound(), role, chord), chord)
+}
+
+/// The actions and language chords, other than the language chord `own`,
+/// that already use `chord`, as a sentence.
+pub fn language_taken(hotkey: &HotkeyConfig, own: Option<&str>, chord: &str) -> Option<String> {
+    let others = hotkey
+        .bound()
+        .into_iter()
+        .filter(|(role, text)| !(matches!(role, Role::Language(_)) && Some(*text) == own));
+    sentence(warnings::users(others, chord), chord)
+}
+
+fn sentence(holders: Vec<Role>, chord: &str) -> Option<String> {
     if holders.is_empty() {
         return None;
     }
@@ -57,13 +88,27 @@ fn printable_caution(hotkey: &HotkeyConfig, role: Role) -> Option<String> {
     warnings::printable(hotkey.chords(), hotkey.hides_keys())
         .into_iter()
         .find(|(found, _)| *found == role)
-        .map(|(_, chord)| {
-            format!(
-                "{} also reaches the focused app. To hide it, turn on Keep the key from \
-                 other applications.",
-                chord
-            )
-        })
+        .map(|(_, chord)| reaches_the_app(&chord))
+}
+
+/// [`printable_caution`] for the language chord `chord`.
+fn language_caution(hotkey: &HotkeyConfig, chord: &str) -> Option<String> {
+    let own = hotkey
+        .language_keys()
+        .into_iter()
+        .filter(|(_, text)| *text == chord)
+        .map(|(language, text)| (Role::Language(language), text));
+    warnings::printable(own, hotkey.hides_keys())
+        .first()
+        .map(|(_, chord)| reaches_the_app(chord))
+}
+
+fn reaches_the_app(chord: &KeyCombination) -> String {
+    format!(
+        "{} also reaches the focused app. To hide it, turn on Keep the key from \
+         other applications.",
+        chord
+    )
 }
 
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -72,7 +117,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         "Click a key, then press the one you want. A modifier on its own, such as \
          RightAlt, never reaches other applications.",
     );
-    if let Some(altgr) = warnings::altgr(gui.config.hotkey.chords(), gui.layout.as_ref()) {
+    if let Some(altgr) = warnings::altgr(gui.config.hotkey.bound(), gui.layout.as_ref()) {
         ui.add_space(4.0);
         caution(
             ui,
@@ -166,6 +211,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
          browsers otherwise treat as Back.",
         &mut gui.config.hotkey.exclusive,
     );
+    language_keys(gui, ui);
 }
 
 fn mode_name(mode: HotkeyMode) -> &'static str {
@@ -183,21 +229,152 @@ fn backend_name(backend: HotkeyBackend) -> &'static str {
     }
 }
 
+fn language_keys(gui: &mut Gui, ui: &mut egui::Ui) {
+    section(ui, "Language keys");
+    hint(
+        ui,
+        "Each key dictates in its own language, with the same hold, double-tap, and \
+         cancel as the dictation key. The tray menu sets the language of the dictation key.",
+    );
+    let chords: Vec<String> = gui.config.hotkey.languages.keys().cloned().collect();
+    for chord in chords {
+        language_row(gui, ui, &chord);
+    }
+    new_language_row(gui, ui);
+}
+
+fn language_row(gui: &mut Gui, ui: &mut egui::Ui, chord: &str) {
+    let target = KeyTarget::Language(Some(chord.to_string()));
+    let capturing = gui.capture.as_ref().is_some_and(|(t, _)| *t == target);
+    let code = gui
+        .config
+        .hotkey
+        .languages
+        .get(chord)
+        .cloned()
+        .unwrap_or_default();
+    let title = match Language::parse(&code) {
+        Some(language) => Role::Language(language).label(),
+        None => format!("Dictate in {}", code),
+    };
+    let error = combination_error(chord, true)
+        .or_else(|| language_taken(&gui.config.hotkey, Some(chord), chord));
+    let notice = language_caution(&gui.config.hotkey, chord);
+    row(&title)
+        .problem(error.as_deref())
+        .caution(notice.as_deref())
+        .reserve(LANGUAGE_COLUMN)
+        .show(ui, |ui| {
+            let button = capture_button(capturing, egui::RichText::new(chord).strong());
+            if ui
+                .add(button)
+                .on_hover_text("Click, then press the key you want")
+                .clicked()
+            {
+                toggle_capture(gui, target);
+            }
+            if let Some(code) = gui.config.hotkey.languages.get_mut(chord) {
+                language_picker(ui, ("language_key", chord), code, true, PICKER_WIDTH, "");
+            }
+            if quiet_button(ui, "Remove").clicked() {
+                gui.capture = None;
+                gui.config.hotkey.languages.remove(chord);
+            }
+        });
+}
+
+fn new_language_row(gui: &mut Gui, ui: &mut egui::Ui) {
+    let target = KeyTarget::Language(None);
+    let capturing = gui.capture.as_ref().is_some_and(|(t, _)| *t == target);
+    row("Add a language key")
+        .describe("Pick a language, then click the button and press the key.")
+        .reserve(LANGUAGE_COLUMN)
+        .show(ui, |ui| {
+            let button = capture_button(capturing, egui::RichText::new("Choose the key"));
+            let ready = !gui.new_language.is_empty();
+            if ui.add_enabled(ready, button).clicked() {
+                toggle_capture(gui, target);
+            }
+            language_picker(
+                ui,
+                "new_language_key",
+                &mut gui.new_language,
+                true,
+                PICKER_WIDTH,
+                "Language",
+            );
+        });
+}
+
+/// The button that captures a key: `idle` until it is clicked, then a
+/// prompt to press the key.
+fn capture_button(capturing: bool, idle: egui::RichText) -> egui::Button<'static> {
+    if capturing {
+        egui::Button::new(egui::RichText::new("Press a key or button…").color(ACCENT))
+            .min_size(egui::vec2(FIELD_WIDTH, CONTROL_HEIGHT))
+            .stroke(egui::Stroke::new(1.5_f32, ACCENT))
+    } else {
+        egui::Button::new(idle).min_size(egui::vec2(FIELD_WIDTH, CONTROL_HEIGHT))
+    }
+}
+
+fn toggle_capture(gui: &mut Gui, target: KeyTarget) {
+    if gui.capture.as_ref().is_some_and(|(t, _)| *t == target) {
+        gui.capture = None;
+        return;
+    }
+    if gui.machine.permissions.readable_event_nodes == 0 {
+        gui.say("Grant keyboard access on Overview, or add the key under [hotkey] in config.toml.");
+        return;
+    }
+    match Capture::start() {
+        Ok(capture) => {
+            finish_typing(gui);
+            gui.capture = Some((target, capture));
+        },
+        Err(e) => gui.say(format!("Could not read the keyboard: {}", e)),
+    }
+}
+
+/// Give the captured `chord` to a language: move the language chord `own`
+/// to it, or add a chord for [`Gui::new_language`]. Another action's chord
+/// is refused.
+pub fn bind_language(gui: &mut Gui, own: Option<String>, chord: String) {
+    if let Some(message) = language_taken(&gui.config.hotkey, own.as_deref(), &chord) {
+        gui.say(format!("{} Pick another key.", message));
+        return;
+    }
+    let languages = &mut gui.config.hotkey.languages;
+    let code = match own {
+        Some(own) => languages.remove(&own),
+        None => Some(std::mem::take(&mut gui.new_language)).filter(|code| !code.is_empty()),
+    };
+    if let Some(code) = code {
+        languages.insert(chord, code);
+    }
+}
+
 fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
-    let capturing = gui.capture.as_ref().is_some_and(|(r, _)| *r == role);
+    let capturing = gui
+        .capture
+        .as_ref()
+        .is_some_and(|(target, _)| *target == KeyTarget::Action(role));
     let editing = gui.editing_key.as_ref().is_some_and(|(r, _)| *r == role);
     let value = gui.config.hotkey.chord(role).to_string();
     let error = combination_error(&value, required(role))
         .or_else(|| taken(&gui.config.hotkey, role, &value));
     let notice = printable_caution(&gui.config.hotkey, role);
-    row(role.label())
+    row(&role.label())
         .describe(hint_text)
         .problem(error.as_deref())
         .caution(notice.as_deref())
         .reserve(KEY_COLUMN)
         .show(ui, |ui| {
             if editing {
-                let response = field(ui, gui.config.hotkey.chord_mut(role), "Ctrl+Shift+Space");
+                let Some(slot) = gui.config.hotkey.chord_mut(role) else {
+                    return;
+                };
+                let response = field(ui, slot, "Ctrl+Shift+Space");
                 if gui.focus_editor {
                     response.request_focus();
                     gui.focus_editor = false;
@@ -207,18 +384,12 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
                 return;
             }
 
-            let text = if capturing {
-                egui::RichText::new("Press a key or button…").color(ACCENT)
-            } else if value.is_empty() {
+            let idle = if value.is_empty() {
                 egui::RichText::new("Not set").color(MUTED)
             } else {
                 egui::RichText::new(&value).strong()
             };
-            let mut button =
-                egui::Button::new(text).min_size(egui::vec2(FIELD_WIDTH, CONTROL_HEIGHT));
-            if capturing {
-                button = button.stroke(egui::Stroke::new(1.5_f32, ACCENT));
-            }
+            let button = capture_button(capturing, idle);
             if ui
                 .add(button)
                 .on_hover_text("Click, then press the key you want")
@@ -232,7 +403,9 @@ fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
             }
             if !required(role) && !value.is_empty() && quiet_button(ui, "Clear").clicked() {
                 gui.capture = None;
-                gui.config.hotkey.chord_mut(role).clear();
+                if let Some(slot) = gui.config.hotkey.chord_mut(role) {
+                    slot.clear();
+                }
             }
             if quiet_button(ui, "Type")
                 .on_hover_text("Type the key's name instead")
@@ -258,7 +431,9 @@ fn finish_typing(gui: &mut Gui) {
     };
     let typed = gui.config.hotkey.chord(role).to_string();
     if let Some(message) = refusal(&gui.config.hotkey, role, &typed) {
-        *gui.config.hotkey.chord_mut(role) = before;
+        if let Some(slot) = gui.config.hotkey.chord_mut(role) {
+            *slot = before;
+        }
         gui.say(message);
     }
 }
@@ -272,7 +447,7 @@ fn start_capture(gui: &mut Gui, role: Role) {
     match Capture::start() {
         Ok(capture) => {
             finish_typing(gui);
-            gui.capture = Some((role, capture));
+            gui.capture = Some((KeyTarget::Action(role), capture));
         },
         Err(e) => {
             gui.say(format!("Could not read the keyboard: {}", e));
@@ -326,6 +501,44 @@ mod tests {
             taken(&hotkey, Role::Dictate, "f12").as_deref(),
             Some("Type last again and Learn selection already use F12.")
         );
+    }
+
+    #[test]
+    fn language_chords_are_taken_keys_but_not_their_own() {
+        let mut hotkey = Config::defaults().unwrap().hotkey;
+        hotkey
+            .languages
+            .insert("Shift+RightAlt".into(), "de".into());
+        assert_eq!(
+            refusal(&hotkey, Role::PasteLast, "shift+rightalt").as_deref(),
+            Some("Dictate in German already uses Shift+RightAlt. Pick another key.")
+        );
+        assert_eq!(
+            language_taken(&hotkey, Some("Shift+RightAlt"), "Shift+RightAlt"),
+            None,
+            "a language chord never conflicts with itself"
+        );
+        assert_eq!(
+            language_taken(&hotkey, None, "Shift+RightAlt").as_deref(),
+            Some("Dictate in German already uses Shift+RightAlt.")
+        );
+        assert_eq!(
+            language_taken(&hotkey, Some("Shift+RightAlt"), "Ctrl+RightAlt").as_deref(),
+            Some("Command already uses Ctrl+RightAlt.")
+        );
+        assert_eq!(language_taken(&hotkey, None, "F13"), None);
+    }
+
+    #[test]
+    fn a_language_key_that_types_is_flagged() {
+        let mut hotkey = Config::defaults().unwrap().hotkey;
+        hotkey.languages.insert("Ctrl+G".into(), "de".into());
+        hotkey.languages.insert("F13".into(), "fr".into());
+        let caution = language_caution(&hotkey, "Ctrl+G").unwrap();
+        assert!(caution.starts_with("Ctrl+G also reaches"), "{caution}");
+        assert_eq!(language_caution(&hotkey, "F13"), None);
+        hotkey.exclusive = true;
+        assert_eq!(language_caution(&hotkey, "Ctrl+G"), None);
     }
 
     #[test]

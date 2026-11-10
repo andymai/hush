@@ -13,7 +13,8 @@
 //! GPU that failed a take on the CPU until its driver changes. [`cpu`]
 //! refuses to call ggml on a CPU below the floor of a prebuilt binary.
 //! [`ModelSlot`] frees the local model after idle minutes, and the next take
-//! loads it again.
+//! loads it again. [`language`] lists Whisper's languages and picks the
+//! language of each take.
 
 pub mod cloud;
 pub mod cpu;
@@ -21,6 +22,7 @@ pub mod device;
 pub mod engine;
 pub mod gpu_fallback;
 pub mod guard;
+pub mod language;
 pub mod models;
 pub mod slot;
 pub mod whisper;
@@ -28,6 +30,7 @@ pub mod whisper;
 pub use cloud::CloudTranscriber;
 pub use device::{BackendDevice, GpuAvailability, GpuType};
 pub use engine::SpeechToText;
+pub use language::Language;
 pub use models::{ModelInfo, ModelManager, ModelSize};
 pub use slot::{IdleTimer, ModelSlot, SlotState};
 pub use whisper::{TranscriptionResult, WhisperTranscriber, WHISPER_SAMPLE_RATE};

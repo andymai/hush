@@ -18,6 +18,7 @@
 //!         HotkeyEvent::Cancel => println!("discarded"),
 //!         HotkeyEvent::Action(action) => println!("{:?}", action),
 //!         HotkeyEvent::Command(pressed) => println!("command chord {}", pressed),
+//!         HotkeyEvent::Language(language, pressed) => println!("{} chord {}", language, pressed),
 //!     }
 //! }
 //! # Ok::<(), anyhow::Error>(())
@@ -30,6 +31,7 @@ pub mod modifiers;
 pub mod warnings;
 pub mod x11;
 
+use crate::transcription::Language;
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc;
@@ -49,6 +51,9 @@ pub enum HotkeyEvent {
     Action(HotkeyAction),
     /// The Command Mode chord went down (`true`) or up (`false`).
     Command(bool),
+    /// A language chord went down (`true`) or up (`false`). It works like
+    /// the dictation hotkey, for a take in that language.
+    Language(Language, bool),
 }
 
 /// Secondary chords that run a daemon command.
@@ -59,13 +64,14 @@ pub enum HotkeyAction {
 }
 
 /// The keys a backend watches: the dictation hotkey, an optional cancel key,
-/// and optional action chords.
+/// optional action chords, and a dictation chord for each language.
 #[derive(Debug, Clone)]
 pub struct HotkeyBindings {
     pub primary: KeyCombination,
     pub cancel: Option<KeyCombination>,
     pub actions: Vec<(HotkeyAction, KeyCombination)>,
     pub command: Option<KeyCombination>,
+    pub languages: Vec<(Language, KeyCombination)>,
 }
 
 impl HotkeyBindings {
@@ -89,6 +95,7 @@ impl HotkeyBindings {
             cancel,
             actions: Vec::new(),
             command: None,
+            languages: Vec::new(),
         })
     }
 
@@ -133,11 +140,29 @@ impl HotkeyBindings {
         Ok(self)
     }
 
+    /// Bind a dictation chord for `language`.
+    pub fn with_language(mut self, language: Language, text: &str) -> Result<Self> {
+        let combination = KeyCombination::parse(text)?;
+        if self
+            .all()
+            .any(|existing| existing.to_string() == combination.to_string())
+        {
+            return Err(anyhow::anyhow!(
+                "{} is already bound; the {} chord needs its own chord",
+                combination,
+                language.name()
+            ));
+        }
+        self.languages.push((language, combination));
+        Ok(self)
+    }
+
     fn all(&self) -> impl Iterator<Item = &KeyCombination> {
         std::iter::once(&self.primary)
             .chain(self.cancel.iter())
             .chain(self.actions.iter().map(|(_, c)| c))
             .chain(self.command.iter())
+            .chain(self.languages.iter().map(|(_, c)| c))
     }
 }
 
@@ -301,6 +326,28 @@ mod tests {
             .with_action(HotkeyAction::Learn, "shift+rightalt")
             .is_err());
         assert!(b.with_action(HotkeyAction::Learn, "Escape").is_err());
+    }
+
+    #[test]
+    fn language_chords_are_distinct_from_every_other_chord() {
+        let german = Language::parse("de").unwrap();
+        let french = Language::parse("fr").unwrap();
+        let b = HotkeyBindings::parse("RightAlt", Some("Escape"))
+            .unwrap()
+            .with_command("Ctrl+RightAlt")
+            .unwrap()
+            .with_language(german, "Shift+RightAlt")
+            .unwrap();
+        assert_eq!(b.languages.len(), 1);
+        assert_eq!(b.languages[0].0, german);
+        assert!(b.clone().with_language(french, "shift+rightalt").is_err());
+        assert!(b.clone().with_language(french, "Ctrl+RightAlt").is_err());
+        assert!(b.clone().with_language(french, "Ctrl+Nope").is_err());
+        assert!(b
+            .clone()
+            .with_action(HotkeyAction::Learn, "Shift+RightAlt")
+            .is_err());
+        assert!(b.with_language(french, "F13").is_ok());
     }
 
     #[test]

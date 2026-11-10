@@ -10,6 +10,7 @@ use crate::config::settings::TranscriptionConfig;
 use crate::transcription::cloud::CloudTranscriber;
 use crate::transcription::cpu;
 use crate::transcription::guard::{self, EchoChoice};
+use crate::transcription::language::Language;
 use crate::transcription::models::{self, ModelManager, ModelSize};
 use crate::transcription::whisper::{TranscriptionResult, WhisperTranscriber};
 use crate::Result;
@@ -59,7 +60,8 @@ impl SpeechToText {
                     config.model_size
                 )
             })?
-            .with_language(&config.language);
+            .with_language(&config.language)
+            .with_detect_languages(&config.detect_languages);
         if config.vad {
             load_vad(&mut whisper, models_dir, &config.model_size);
         }
@@ -108,12 +110,28 @@ impl SpeechToText {
         sample_rate: u32,
         prompt: Option<&str>,
     ) -> Result<TranscriptionResult> {
+        self.transcribe_in(audio, sample_rate, prompt, None).await
+    }
+
+    /// [`Self::transcribe_with_prompt`] in `language`; `None` is
+    /// `transcription.language`.
+    pub async fn transcribe_in(
+        &self,
+        audio: &[f32],
+        sample_rate: u32,
+        prompt: Option<&str>,
+        language: Option<Language>,
+    ) -> Result<TranscriptionResult> {
         let prompt = prompt.map(str::trim).filter(|p| !p.is_empty());
-        let mut result = self.transcribe_once(audio, sample_rate, prompt).await?;
+        let mut result = self
+            .transcribe_once(audio, sample_rate, prompt, language)
+            .await?;
 
         if let Some(prompt) = prompt.filter(|p| guard::is_prompt_echo(&result.text, p)) {
             info!("The transcript looks like an echo of the prompt, transcribing again without it");
-            let retry = self.transcribe_once(audio, sample_rate, None).await?;
+            let retry = self
+                .transcribe_once(audio, sample_rate, None, language)
+                .await?;
             result.processing_time += retry.processing_time;
             match guard::after_echo(&result.text, &retry.text, prompt) {
                 EchoChoice::Drop => {
@@ -155,16 +173,18 @@ impl SpeechToText {
         audio: &[f32],
         sample_rate: u32,
         prompt: Option<&str>,
+        language: Option<Language>,
     ) -> Result<TranscriptionResult> {
+        let language = language.map(Language::code);
         match &self.backend {
             Backend::Local(whisper) => {
                 whisper
-                    .transcribe_with_prompt(audio, sample_rate, prompt)
+                    .transcribe_in(audio, sample_rate, prompt, language)
                     .await
             },
             Backend::Cloud(cloud) => {
                 cloud
-                    .transcribe_with_prompt(audio, sample_rate, prompt)
+                    .transcribe_in(audio, sample_rate, prompt, language)
                     .await
             },
         }

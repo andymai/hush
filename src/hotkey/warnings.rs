@@ -1,10 +1,11 @@
-//! Checks on the chords under `[hotkey]`: two actions on one chord, Right Alt
-//! on a layout where it is AltGr, and keys that type a character. Each check
-//! is a pure function, so the settings window, the config load, and
-//! `hush doctor` give the same answer.
+//! Checks on the chords under `[hotkey]`, language chords included: two
+//! actions on one chord, Right Alt on a layout where it is AltGr, and keys
+//! that type a character. Each check is a pure function, so the settings
+//! window, the config load, and `hush doctor` give the same answer.
 
 use super::KeyCombination;
 use crate::text::layout::Layout;
+use crate::transcription::Language;
 use evdev::KeyCode;
 use std::fmt;
 
@@ -16,9 +17,12 @@ pub enum Role {
     Command,
     PasteLast,
     Learn,
+    /// A language chord: dictation in that language
+    Language(Language),
 }
 
 impl Role {
+    /// The actions with a key of their own under `[hotkey]`.
     pub const ALL: [Role; 5] = [
         Role::Dictate,
         Role::Cancel,
@@ -28,13 +32,14 @@ impl Role {
     ];
 
     /// The name the settings window shows.
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Role::Dictate => "Dictate",
-            Role::Cancel => "Cancel",
-            Role::Command => "Command",
-            Role::PasteLast => "Type last again",
-            Role::Learn => "Learn selection",
+            Role::Dictate => "Dictate".to_string(),
+            Role::Cancel => "Cancel".to_string(),
+            Role::Command => "Command".to_string(),
+            Role::PasteLast => "Type last again".to_string(),
+            Role::Learn => "Learn selection".to_string(),
+            Role::Language(language) => format!("Dictate in {}", language.name()),
         }
     }
 
@@ -46,7 +51,13 @@ impl Role {
             Role::Command => "command",
             Role::PasteLast => "paste_last",
             Role::Learn => "learn",
+            Role::Language(_) => "languages",
         }
+    }
+
+    /// The chord starts a dictation: the dictation key or a language chord.
+    pub fn dictates(self) -> bool {
+        matches!(self, Role::Dictate | Role::Language(_))
     }
 }
 
@@ -72,7 +83,7 @@ pub struct AltGr {
 
 impl fmt::Display for AltGr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let target = if self.roles.contains(&Role::Dictate) {
+        let target = if self.roles.iter().any(|role| role.dictates()) {
             "a dictation".to_string()
         } else {
             labels(&self.roles)
@@ -117,13 +128,21 @@ pub fn holders<'a>(
     role: Role,
     chord: &str,
 ) -> Vec<Role> {
+    users(bound, chord)
+        .into_iter()
+        .filter(|other| *other != role)
+        .collect()
+}
+
+/// Every action in `bound` that uses `chord`.
+pub fn users<'a>(bound: impl IntoIterator<Item = (Role, &'a str)>, chord: &str) -> Vec<Role> {
     let Ok(chord) = KeyCombination::parse(chord) else {
         return Vec::new();
     };
     parsed(bound)
         .into_iter()
-        .filter(|(other, used)| *other != role && *used == chord)
-        .map(|(other, _)| other)
+        .filter(|(_, used)| *used == chord)
+        .map(|(role, _)| role)
         .collect()
 }
 
@@ -163,7 +182,7 @@ pub fn printable<'a>(
 
 /// Action names as an English list: `Dictate and Cancel`.
 pub fn labels(roles: &[Role]) -> String {
-    let names: Vec<String> = roles.iter().map(|role| role.label().to_string()).collect();
+    let names: Vec<String> = roles.iter().map(|role| role.label()).collect();
     join(&names)
 }
 
@@ -343,6 +362,63 @@ mod tests {
                 "{chord} types nothing"
             );
         }
+    }
+
+    fn german() -> Role {
+        Role::Language(Language::parse("de").unwrap())
+    }
+
+    #[test]
+    fn language_chords_conflict_with_actions_and_with_each_other() {
+        let french = Role::Language(Language::parse("fr").unwrap());
+        let mut bound = defaults().to_vec();
+        bound.push((german(), "Shift+RightAlt"));
+        bound.push((french, "F13"));
+        assert!(conflicts(bound.clone()).is_empty());
+
+        bound.push((Role::PasteLast, "shift+rightalt"));
+        let found = conflicts(bound.clone());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].roles, vec![german(), Role::PasteLast]);
+        assert_eq!(
+            found[0].to_string(),
+            "Dictate in German and Type last again use Shift+RightAlt"
+        );
+
+        let found = conflicts([(german(), "F13"), (french, "f13")]);
+        assert_eq!(found.len(), 1, "two language chords must differ");
+        assert_eq!(found[0].roles, vec![german(), french]);
+        assert_eq!(
+            conflicts([(Role::Dictate, "RightAlt"), (german(), "AltGr")])[0].roles,
+            vec![Role::Dictate, german()]
+        );
+
+        assert_eq!(
+            holders(bound.clone(), Role::Learn, "Shift+RightAlt"),
+            vec![german(), Role::PasteLast]
+        );
+        assert_eq!(users(bound, "F13"), vec![french]);
+    }
+
+    #[test]
+    fn language_chords_get_the_altgr_and_typing_warnings() {
+        let warning = altgr(
+            [(Role::Dictate, "F13"), (german(), "Shift+RightAlt")],
+            Some(&xkb("de", "")),
+        )
+        .unwrap();
+        assert_eq!(warning.roles, vec![german()]);
+        assert!(
+            warning.to_string().ends_with("can also start a dictation"),
+            "{warning}"
+        );
+        let typing = printable([(Role::Dictate, "RightAlt"), (german(), "Ctrl+G")], false);
+        assert_eq!(typing.len(), 1);
+        assert_eq!(typing[0].0, german());
+        assert_eq!(german().label(), "Dictate in German");
+        assert_eq!(german().config_key(), "languages");
+        assert!(german().dictates() && Role::Dictate.dictates());
+        assert!(!Role::Command.dictates());
     }
 
     #[test]

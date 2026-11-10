@@ -385,13 +385,14 @@ fn hotkey_check(config: &Config) -> Check {
 }
 
 /// Chords that two actions share, Right Alt on an AltGr layout, and keys
-/// that type a character: one line for each kind of problem.
+/// that type a character, language chords included: one line for each kind
+/// of problem.
 fn hotkeys_checks(config: &Config, layout: Option<&Layout>) -> Vec<Check> {
     const NAME: &str = "Hotkeys";
-    let chords = config.hotkey.chords();
+    let chords = config.hotkey.bound();
     let mut checks = Vec::new();
 
-    let conflicts = warnings::conflicts(chords);
+    let conflicts = warnings::conflicts(chords.clone());
     if !conflicts.is_empty() {
         let each: Vec<String> = conflicts.iter().map(ToString::to_string).collect();
         checks.push(Check::fail(
@@ -400,7 +401,7 @@ fn hotkeys_checks(config: &Config, layout: Option<&Layout>) -> Vec<Check> {
             "give each action its own chord in hush settings, or under [hotkey]",
         ));
     }
-    if let Some(altgr) = warnings::altgr(chords, layout) {
+    if let Some(altgr) = warnings::altgr(chords.clone(), layout) {
         checks.push(Check::warn(
             NAME,
             altgr.to_string(),
@@ -898,6 +899,26 @@ mod tests {
             "Space (Cancel) also reaches the focused app"
         );
         assert!(checks[1].fix.as_ref().unwrap().contains("exclusive = true"));
+
+        let mut config = Config::defaults().unwrap();
+        config
+            .hotkey
+            .languages
+            .insert("ctrl+rightalt".into(), "de".into());
+        config
+            .hotkey
+            .languages
+            .insert("Shift+Q".into(), "fr".into());
+        let checks = hotkeys_checks(&config, Some(&us));
+        assert_eq!(checks.len(), 2);
+        assert_eq!(
+            checks[0].detail,
+            "Command and Dictate in German use Ctrl+RightAlt"
+        );
+        assert_eq!(
+            checks[1].detail,
+            "Shift+Q (Dictate in French) also reaches the focused app"
+        );
 
         config.hotkey.exclusive = true;
         assert_eq!(hotkeys_checks(&config, Some(&us)).len(), 1);

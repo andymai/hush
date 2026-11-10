@@ -93,6 +93,9 @@ pub struct StatusReport {
     pub gpu_type: String,
     pub sample_rate: Option<u32>,
     pub hotkey: Option<String>,
+    /// The language of the take in progress or of the next take; without a
+    /// daemon, `transcription.language`
+    pub language: Option<String>,
     pub devices: Vec<String>,
     pub os: &'static str,
     pub arch: &'static str,
@@ -138,6 +141,9 @@ impl StatusReport {
             hotkey: config
                 .as_ref()
                 .map(|config| config.hotkey.combination.clone()),
+            language: reply
+                .and_then(|reply| reply.language.clone())
+                .or_else(|| transcription.map(|t| t.language.clone())),
             devices,
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,
@@ -180,7 +186,8 @@ mod tests {
     #[test]
     fn json_status_has_stable_keys() {
         let reply = DaemonResponse::ok(DaemonState::Recording { elapsed_ms: 1500 })
-            .with_model_state(Some(ModelState::Loading));
+            .with_model_state(Some(ModelState::Loading))
+            .with_language(Some("de".to_string()));
         let report = StatusReport::new(
             Some(&reply),
             Config::defaults(),
@@ -207,6 +214,7 @@ mod tests {
                 "gpu",
                 "gpu_type",
                 "hotkey",
+                "language",
                 "model",
                 "model_path",
                 "model_state",
@@ -226,7 +234,22 @@ mod tests {
         assert_eq!(value["gpu"], serde_json::Value::Null);
         assert_eq!(value["gpu_type"], "cpu");
         assert_eq!(value["hotkey"], "RightAlt");
+        assert_eq!(value["language"], "de", "the daemon's language");
         assert_eq!(value["model_path"], "/models/ggml-base.bin");
+
+        let older = DaemonResponse::ok(DaemonState::Idle);
+        let report = StatusReport::new(
+            Some(&older),
+            Config::defaults(),
+            Path::new("/models"),
+            &cpu(),
+            vec![],
+        );
+        assert_eq!(
+            report.language.as_deref(),
+            Some("en"),
+            "without one from the daemon, the config language"
+        );
     }
 
     #[test]
@@ -242,6 +265,7 @@ mod tests {
         assert!(!report.running);
         assert_eq!(report.model_state, None);
         assert_eq!(report.backend, None);
+        assert_eq!(report.language, None);
         assert_eq!(report.config_error.as_deref(), Some("bad toml"));
     }
 

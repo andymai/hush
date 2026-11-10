@@ -7,6 +7,7 @@ use crate::ipc::protocol::PRINT_TIMEOUT;
 use crate::ipc::{
     self, client, lock, paths, DaemonCommand, DaemonResponse, DaemonState, TakeResult,
 };
+use crate::transcription::Language;
 use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use std::os::unix::process::CommandExt;
@@ -128,7 +129,7 @@ pub async fn handle_daemon_status() -> Result<()> {
     Ok(())
 }
 
-/// `hush toggle`, `hush start`, `hush cancel`, `hush paste-last`, `hush learn`
+/// `hush cancel`, `hush paste-last`, `hush learn`
 pub async fn handle_client_command(command: DaemonCommand) -> Result<()> {
     let response = client::send(command).await?;
     if !response.ok {
@@ -139,6 +140,32 @@ pub async fn handle_client_command(command: DaemonCommand) -> Result<()> {
         None => println!("{}", state_line(response.state)),
     }
     Ok(())
+}
+
+/// `hush start [--lang CODE]` and `hush toggle [--lang CODE]`.
+pub async fn handle_start(toggle: bool, lang: Option<&str>) -> Result<()> {
+    let language = lang.map(Language::from_code).transpose()?;
+    let code = language.map(|language| language.code().to_string());
+    let command = if toggle {
+        DaemonCommand::Toggle { language: code }
+    } else {
+        DaemonCommand::Start { language: code }
+    };
+    let response = client::send(command).await?;
+    if !response.ok {
+        return Err(anyhow!(rejection(response)));
+    }
+    if ignored_language(language, &response) {
+        return Err(anyhow!(OLD_DAEMON_LANGUAGE));
+    }
+    println!("{}", state_line(response.state));
+    Ok(())
+}
+
+/// A daemon from before `--lang` starts the take in its own language, and
+/// its reply names no language.
+fn ignored_language(asked: Option<Language>, response: &DaemonResponse) -> bool {
+    asked.is_some() && response.state == Some(DaemonState::Starting) && response.language.is_none()
 }
 
 fn rejection(response: DaemonResponse) -> String {
@@ -161,6 +188,8 @@ fn state_line(state: Option<DaemonState>) -> String {
 const NO_SPEECH: &str = "Hush heard no speech.";
 const OLD_DAEMON: &str =
     "The running daemon is older than this client and typed the text. Restart it with: hush daemon restart";
+const OLD_DAEMON_LANGUAGE: &str =
+    "The running daemon is older than this client and records in its own language. Restart it with: hush daemon restart";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -348,6 +377,22 @@ mod tests {
             StopReport::from_reply(Ok(DaemonResponse::ok(DaemonState::Transcribing)), true);
         assert_eq!(report.exit, ExitStatus::Error);
         assert_eq!(report.message.as_deref(), Some(OLD_DAEMON));
+    }
+
+    #[test]
+    fn an_older_daemon_that_ignores_the_language_is_found() {
+        let german = Language::parse("de");
+        let old = DaemonResponse::ok(DaemonState::Starting);
+        assert!(ignored_language(german, &old));
+        assert!(!ignored_language(None, &old), "no language was asked for");
+
+        let new = DaemonResponse::ok(DaemonState::Starting).with_language(Some("de".into()));
+        assert!(!ignored_language(german, &new));
+        let stopped = DaemonResponse::ok(DaemonState::Transcribing);
+        assert!(
+            !ignored_language(german, &stopped),
+            "a toggle that stops a take starts none"
+        );
     }
 
     #[test]

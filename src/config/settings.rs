@@ -2,6 +2,7 @@ use crate::config::{paths, server};
 use crate::hotkey::{warnings, HotkeyBackend, HotkeyMode, KeyCombination, Role};
 use crate::text::{InsertionMethod, PasteChord};
 use crate::transcription::models::ModelSize;
+use crate::transcription::Language;
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -356,8 +357,12 @@ pub struct TranscriptionConfig {
     pub model_path: Option<PathBuf>,
     /// Model size identifier (tiny, base, small, medium, large, large-v2, large-v3)
     pub model_size: String,
-    /// Language code for transcription (e.g., "en" for English)
+    /// Whisper language code, such as "en", or "auto" to detect the language
     pub language: String,
+    /// With `language = "auto"`, local Whisper picks the most likely of these
+    /// languages; empty allows every language
+    #[serde(default)]
+    pub detect_languages: Vec<String>,
     /// Use the GPU backend the binary was built with (`vulkan` or `cuda`)
     pub use_gpu: bool,
     /// Beam search width (1-20, higher = more accurate but slower)
@@ -491,10 +496,14 @@ pub struct HotkeyConfig {
     /// Command Mode chord: hold, speak an instruction, release; empty disables it
     #[serde(default = "default_command_chord")]
     pub command: String,
+    /// Dictation chords for one language each, such as `"Shift+RightAlt" = "de"`
+    #[serde(default)]
+    pub languages: BTreeMap<String, String>,
 }
 
 impl HotkeyConfig {
-    /// The chord text for an action; empty means unbound.
+    /// The chord text for an action; empty means unbound. A language has
+    /// no single chord: [`Self::language_keys`] lists them.
     pub fn chord(&self, role: Role) -> &str {
         match role {
             Role::Dictate => &self.combination,
@@ -502,22 +511,46 @@ impl HotkeyConfig {
             Role::Command => &self.command,
             Role::PasteLast => &self.paste_last,
             Role::Learn => &self.learn,
+            Role::Language(_) => "",
         }
     }
 
-    pub fn chord_mut(&mut self, role: Role) -> &mut String {
+    /// The chord text of an action in [`Role::ALL`]; `None` for a language.
+    pub fn chord_mut(&mut self, role: Role) -> Option<&mut String> {
         match role {
-            Role::Dictate => &mut self.combination,
-            Role::Cancel => &mut self.cancel,
-            Role::Command => &mut self.command,
-            Role::PasteLast => &mut self.paste_last,
-            Role::Learn => &mut self.learn,
+            Role::Dictate => Some(&mut self.combination),
+            Role::Cancel => Some(&mut self.cancel),
+            Role::Command => Some(&mut self.command),
+            Role::PasteLast => Some(&mut self.paste_last),
+            Role::Learn => Some(&mut self.learn),
+            Role::Language(_) => None,
         }
     }
 
     /// Every action with its chord text.
     pub fn chords(&self) -> [(Role, &str); 5] {
         Role::ALL.map(|role| (role, self.chord(role)))
+    }
+
+    /// Each language chord with its language. A code that Whisper does not
+    /// know gets its own error from [`Config::validate`].
+    pub fn language_keys(&self) -> Vec<(Language, &str)> {
+        self.languages
+            .iter()
+            .filter_map(|(chord, code)| Some((Language::parse(code)?, chord.as_str())))
+            .collect()
+    }
+
+    /// Every action and every language chord with its chord text: what the
+    /// conflict, AltGr, and typing checks look at.
+    pub fn bound(&self) -> Vec<(Role, &str)> {
+        let mut bound = self.chords().to_vec();
+        bound.extend(
+            self.language_keys()
+                .into_iter()
+                .map(|(language, chord)| (Role::Language(language), chord)),
+        );
+        bound
     }
 
     /// Whether applications never see the chords: the evdev backend grabs
@@ -527,7 +560,7 @@ impl HotkeyConfig {
     }
 
     fn warn_conflicts(&self) {
-        for conflict in warnings::conflicts(self.chords()) {
+        for conflict in warnings::conflicts(self.bound()) {
             let keys: Vec<String> = conflict
                 .roles
                 .iter()
@@ -636,17 +669,36 @@ impl Config {
 
     /// A Whisper language code, or `auto` to detect it.
     pub fn valid_language(language: &str) -> bool {
-        let language = language.trim();
-        language == "auto"
-            || (language.len() == 2 && language.chars().all(|c| c.is_ascii_lowercase()))
+        Language::parse(language).is_some()
     }
 
     pub fn validate(&self) -> Result<()> {
         if !Self::valid_language(&self.transcription.language) {
             return Err(anyhow::anyhow!(
-                "Invalid language '{}': use a two-letter code such as en, or auto",
+                "Invalid language '{}': use a Whisper language code such as en or de, or auto",
                 self.transcription.language
             ));
+        }
+        for code in &self.transcription.detect_languages {
+            if Language::parse(code).is_none_or(Language::is_auto) {
+                return Err(anyhow::anyhow!(
+                    "Invalid language '{}' in transcription.detect_languages: use Whisper \
+                     language codes such as en or de",
+                    code
+                ));
+            }
+        }
+        for (chord, code) in &self.hotkey.languages {
+            KeyCombination::parse(chord)
+                .map_err(|e| anyhow::anyhow!("Invalid chord in hotkey.languages: {}", e))?;
+            if Language::parse(code).is_none() {
+                return Err(anyhow::anyhow!(
+                    "Invalid language '{}' for {} in hotkey.languages: use a Whisper language \
+                     code such as de, or auto",
+                    code,
+                    chord
+                ));
+            }
         }
         if self.hotkey.tap_ms > 2000 {
             return Err(anyhow::anyhow!(
@@ -1059,8 +1111,11 @@ model_size = "small"
     #[test]
     fn each_role_maps_to_its_hotkey_key() {
         let mut config = Config::defaults().unwrap().hotkey;
-        *config.chord_mut(Role::Learn) = "Super+RightAlt".to_string();
+        *config.chord_mut(Role::Learn).unwrap() = "Super+RightAlt".to_string();
         assert_eq!(config.learn, "Super+RightAlt");
+        let german = Role::Language(Language::parse("de").unwrap());
+        assert!(config.chord_mut(german).is_none());
+        assert_eq!(config.chord(german), "");
         assert_eq!(
             config.chords(),
             [
@@ -1246,15 +1301,91 @@ model_size = "small"
     }
 
     #[test]
-    fn languages_are_two_letters_or_auto() {
+    fn languages_are_whisper_codes_or_auto() {
         assert!(Config::valid_language("en"));
         assert!(Config::valid_language("de"));
+        assert!(Config::valid_language("haw"));
         assert!(Config::valid_language("auto"));
         assert!(!Config::valid_language("english"));
         assert!(!Config::valid_language("EN"));
+        assert!(!Config::valid_language("xx"));
         assert!(!Config::valid_language(""));
         let mut config = Config::defaults().unwrap();
         config.transcription.language = "klingon".to_string();
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn language_chords_and_the_detection_list_are_checked_at_load() {
+        let defaults = Config::defaults().unwrap();
+        assert!(defaults.hotkey.languages.is_empty());
+        assert!(defaults.transcription.detect_languages.is_empty());
+
+        let config = Config::parse_over_defaults(
+            "[hotkey]\nlanguages = { \"Shift+RightAlt\" = \"de\", F13 = \"auto\" }\n\
+             [transcription]\nlanguage = \"auto\"\ndetect_languages = [\"en\", \"de\"]\n",
+        )
+        .unwrap();
+        let german = Language::parse("de").unwrap();
+        assert_eq!(
+            config.hotkey.language_keys(),
+            vec![(Language::AUTO, "F13"), (german, "Shift+RightAlt")]
+        );
+        assert_eq!(config.transcription.detect_languages, ["en", "de"]);
+        let bound = config.hotkey.bound();
+        assert_eq!(bound.len(), 7);
+        assert!(bound.contains(&(Role::Language(german), "Shift+RightAlt")));
+
+        for (user, needle) in [
+            ("[hotkey]\nlanguages = { F13 = \"klingon\" }\n", "'klingon'"),
+            ("[hotkey]\nlanguages = { F13 = \"DE\" }\n", "'DE'"),
+            (
+                "[hotkey]\nlanguages = { \"Ctrl+Nope\" = \"de\" }\n",
+                "hotkey.languages",
+            ),
+            (
+                "[transcription]\ndetect_languages = [\"en\", \"xx\"]\n",
+                "detect_languages",
+            ),
+            (
+                "[transcription]\ndetect_languages = [\"auto\"]\n",
+                "detect_languages",
+            ),
+        ] {
+            let err = format!("{:#}", Config::parse_over_defaults(user).unwrap_err());
+            assert!(err.contains(needle), "{user:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_language_chord_conflict_is_no_load_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[hotkey]\npaste_last = \"F13\"\nlanguages = { f13 = \"de\" }\n",
+        )
+        .unwrap();
+        let config = Config::load_from(Some(&path)).unwrap();
+        let found = warnings::conflicts(config.hotkey.bound());
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].to_string(),
+            "Type last again and Dictate in German use F13"
+        );
+    }
+
+    #[test]
+    fn language_chords_survive_a_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut config = Config::defaults().unwrap();
+        config
+            .hotkey
+            .languages
+            .insert("Shift+RightAlt".to_string(), "de".to_string());
+        config.transcription.detect_languages = vec!["en".to_string(), "fr".to_string()];
+        config.save_to_file(&path).unwrap();
+        assert_eq!(Config::load_from(Some(&path)).unwrap(), config);
     }
 }
