@@ -155,6 +155,25 @@ fn chord_without_primary(window: Option<&WindowInfo>, profiles: &ProfilesConfig)
     }
 }
 
+/// The chord when the primary selection cannot take the text, or `None`
+/// when no chord pastes it. Under Shift Lock, Ctrl+V arrives as
+/// Ctrl+Shift+V, so a window that pastes the clipboard on Shift+Insert
+/// keeps Shift+Insert. A terminal pastes the primary selection on it, so
+/// no chord is left, and the take falls back to typing.
+fn fallback_without_primary(
+    window: Option<&WindowInfo>,
+    profiles: &ProfilesConfig,
+    shift_locked: bool,
+) -> Option<PasteChord> {
+    if !shift_locked {
+        return Some(chord_without_primary(window, profiles));
+    }
+    match window {
+        Some(window) if AppKind::classify(window, profiles) == AppKind::Terminal => None,
+        _ => Some(PasteChord::ShiftInsert),
+    }
+}
+
 /// Text for a terminal, where a line break runs the command. Each run of
 /// line breaks (`\n`, `\r\n`, `\r`) and the spaces next to them becomes one
 /// space, or nothing at the start or end of the text. Other control
@@ -188,6 +207,35 @@ pub fn one_line(text: &str) -> String {
     line
 }
 
+/// Where a paste goes, and what the keyboard's locks do to its chord.
+#[derive(Clone, Copy)]
+struct PasteTarget<'a> {
+    window: Option<&'a WindowInfo>,
+    table: Option<&'a KeyTable>,
+    shift_locked: bool,
+}
+
+/// Under Shift Lock, every key Hush sends gets Shift, so Ctrl+V arrives as
+/// Ctrl+Shift+V, which is Paste Special in LibreOffice and the clipboard
+/// history in JetBrains editors. Shift+Insert pastes in every layout.
+pub fn paste_chord(chosen: PasteChord, shift_locked: bool) -> PasteChord {
+    if shift_locked && chosen != PasteChord::ShiftInsert {
+        debug!("Shift can be locked, so the paste uses Shift+Insert");
+        PasteChord::ShiftInsert
+    } else {
+        chosen
+    }
+}
+
+/// Under Shift Lock, Enter arrives as Shift+Enter, which starts a new line
+/// in chat instead of sending the message, so no Enter follows the take.
+pub fn submits(submit_app: bool, shift_locked: bool) -> bool {
+    if submit_app && shift_locked {
+        debug!("Shift can be locked, so no Enter follows the text");
+    }
+    submit_app && !shift_locked
+}
+
 /// Whether Enter follows an insertion: only after a dictation in a
 /// `submit_apps` window, only when the keys went out, and only when they
 /// carried text. A printed take and a hook that typed nothing never reach
@@ -211,7 +259,7 @@ impl TextInserter {
     /// Needs a working uinput device; both paths type through it.
     pub fn new() -> Result<Self> {
         info!("Initializing text insertion");
-        let uinput = UinputKeyboard::new()?;
+        let mut uinput = UinputKeyboard::new()?;
         if !uinput.is_ready() {
             return Err(anyhow::anyhow!(
                 "uinput is not available; run `hush setup permissions` and try again"
@@ -220,7 +268,7 @@ impl TextInserter {
         let clipboard = clipboard::open();
         let windows = WindowProvider::detect();
         let mut typing = Resolver::new();
-        let last_typing = typing.resolve().to_string();
+        let last_typing = typing.resolve(&mut uinput).to_string();
         info!(
             "Text insertion ready: {}, clipboard restore {}, window detection via {}",
             last_typing,
@@ -250,13 +298,13 @@ impl TextInserter {
         self.typing.reserve(keys);
     }
 
-    /// The typing for the layout that is active now. A change since the
-    /// last take is logged once.
+    /// The typing for the active layout and the Caps Lock state of now. A
+    /// change since the last take is logged once.
     fn current_typing(&mut self) -> Typing {
-        let typing = self.typing.resolve();
+        let typing = self.typing.resolve(&mut self.uinput);
         let summary = typing.to_string();
         if summary != self.last_typing {
-            info!("Keyboard layout changed: Hush now {}", summary);
+            info!("Keyboard state changed: Hush now {}", summary);
             self.last_typing = summary;
         }
         typing
@@ -330,6 +378,8 @@ impl TextInserter {
         };
 
         let typing = self.current_typing();
+        let shift_locked = self.typing.shift_locked();
+        let submit_app = submits(submit_app, shift_locked);
         // An explicit uinput choice, and a failed paste, type even when no
         // table fits the layout, with the US table as before.
         let table = typing.table().unwrap_or(KeyTable::us());
@@ -338,7 +388,12 @@ impl TextInserter {
                 self.type_with_uinput(&text, table, line_break, origin, submit_app)?
             },
             Chosen::Clipboard => {
-                let pasted = self.paste(&text, window.as_ref(), typing.table(), origin, submit_app);
+                let target = PasteTarget {
+                    window: window.as_ref(),
+                    table: typing.table(),
+                    shift_locked,
+                };
+                let pasted = self.paste(&text, target, origin, submit_app);
                 if let Err(e) = pasted {
                     warn!("Paste failed ({}); typing what uinput can", e);
                     // Typing can skip characters, so Hush does not send the result.
@@ -372,13 +427,20 @@ impl TextInserter {
     fn paste(
         &mut self,
         text: &str,
-        window: Option<&WindowInfo>,
-        table: Option<&KeyTable>,
+        target: PasteTarget,
         origin: Origin,
         submit_app: bool,
     ) -> Result<()> {
+        let PasteTarget {
+            window,
+            table,
+            shift_locked,
+        } = target;
         let clock = SystemClock;
-        let mut chord = choose_chord(window, &self.config, &self.profiles);
+        let mut chord = paste_chord(
+            choose_chord(window, &self.config, &self.profiles),
+            shift_locked,
+        );
         let clipboard = self
             .clipboard
             .as_deref_mut()
@@ -389,6 +451,7 @@ impl TextInserter {
             selections.push(Selection::Primary);
         }
         let mut saved = Vec::with_capacity(selections.len());
+        let mut no_chord = None;
         for selection in selections {
             let snapshot = clipboard::snapshot(clipboard, selection, &clock);
             match clipboard.offer(selection, transcript.formats()) {
@@ -396,14 +459,33 @@ impl TextInserter {
                 Err(e) if selection == Selection::Clipboard => {
                     return Err(e).context("failed to set clipboard");
                 },
-                Err(e) => {
-                    chord = chord_without_primary(window, &self.profiles);
-                    warn!(
-                        "Could not set the {} ({:#}); pasting with {} instead",
-                        selection, e, chord
-                    );
+                Err(e) => match fallback_without_primary(window, &self.profiles, shift_locked) {
+                    Some(fallback) => {
+                        chord = fallback;
+                        warn!(
+                            "Could not set the {} ({:#}); pasting with {} instead",
+                            selection, e, chord
+                        );
+                    },
+                    None => {
+                        no_chord = Some(anyhow::anyhow!(
+                            "could not set the {} ({:#}), and under Shift Lock no other \
+                             chord pastes in a terminal",
+                            selection,
+                            e
+                        ));
+                        break;
+                    },
                 },
             }
+        }
+        if let Some(e) = no_chord {
+            for (selection, snapshot) in saved {
+                let outcome =
+                    clipboard::restore(clipboard, selection, snapshot, &transcript, &clock);
+                log_restore(selection, &outcome);
+            }
+            return Err(e);
         }
         wait_for_modifiers();
         debug!("Pasting with {}", chord);
@@ -795,6 +877,53 @@ mod tests {
             !presses_enter(dictation, false, "ls -la", &sent),
             "a window outside submit_apps"
         );
+    }
+
+    #[test]
+    fn under_shift_lock_a_failed_primary_selection_keeps_shift_insert_or_types() {
+        let profiles = ProfilesConfig::defaults();
+        let editor = window("firefox");
+        let terminal = window("kitty");
+        assert_eq!(
+            fallback_without_primary(Some(&editor), &profiles, false),
+            Some(PasteChord::CtrlV)
+        );
+        assert_eq!(
+            fallback_without_primary(Some(&terminal), &profiles, false),
+            Some(PasteChord::CtrlShiftV)
+        );
+        assert_eq!(
+            fallback_without_primary(Some(&editor), &profiles, true),
+            Some(PasteChord::ShiftInsert),
+            "Ctrl+V would arrive as Ctrl+Shift+V; Shift+Insert pastes the clipboard here"
+        );
+        assert_eq!(
+            fallback_without_primary(None, &profiles, true),
+            Some(PasteChord::ShiftInsert)
+        );
+        assert_eq!(
+            fallback_without_primary(Some(&terminal), &profiles, true),
+            None,
+            "a terminal pastes the primary selection on Shift+Insert, so the take types"
+        );
+    }
+
+    #[test]
+    fn shift_lock_pastes_with_shift_insert_and_sends_no_enter() {
+        for chord in [
+            PasteChord::CtrlV,
+            PasteChord::CtrlShiftV,
+            PasteChord::ShiftInsert,
+        ] {
+            assert_eq!(paste_chord(chord, true), PasteChord::ShiftInsert, "{chord}");
+            assert_eq!(paste_chord(chord, false), chord, "{chord}");
+        }
+        assert!(submits(true, false));
+        assert!(
+            !submits(true, true),
+            "Enter would arrive as Shift+Enter, a new line in chat"
+        );
+        assert!(!submits(false, false));
     }
 
     #[test]

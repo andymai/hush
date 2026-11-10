@@ -10,10 +10,15 @@
 //!   types only the characters whose keys are the same with both.
 //! - When libxkbcommon or the keymap is not available, Hush types with the
 //!   US table on plain US and pastes on every other layout.
+//! - With Caps Lock on, Hush finds the keys with the lock held, so each
+//!   character comes out as written. When Hush cannot tell what the lock
+//!   holds, it types only the characters whose keys agree with each
+//!   possible lock. When it cannot read the lock at all, it types as if the
+//!   lock is off.
 
 use super::keymap::{ChordKeys, KeyTable};
-use super::layout::{self, plain_us, Active, Session, FIX_SEVERAL};
-use super::xkb::{self, Names, Request};
+use super::layout::{self, plain_us, Active, LockSource, Session, FIX_SEVERAL};
+use super::xkb::{self, Locked, Names, Request};
 use input_linux::Key;
 use std::fmt;
 use std::sync::Arc;
@@ -21,6 +26,69 @@ use tracing::debug;
 
 /// XKB keymaps hold at most four layouts.
 const MAX_GROUPS: usize = 4;
+/// Tables to keep, so that Caps Lock on and off do not compile again.
+const CACHED_TABLES: usize = 2;
+
+/// Reads the Caps Lock LED of Hush's own keyboard. `None` when the LED
+/// cannot be read.
+pub trait CapsLed {
+    fn caps_lock(&mut self) -> Option<bool>;
+}
+
+/// For a process without Hush's keyboard, such as `hush doctor`.
+pub struct NoLeds;
+
+impl CapsLed for NoLeds {
+    fn caps_lock(&mut self) -> Option<bool> {
+        None
+    }
+}
+
+/// Whether Caps Lock is on for the keys Hush types, or `None` when Hush
+/// cannot tell.
+fn caps_on(session: Option<&Session>, leds: &mut dyn CapsLed) -> Option<bool> {
+    match session.map_or(LockSource::Leds, |session| session.locks) {
+        LockSource::Leds => leds.caps_lock(),
+        LockSource::Reported(on) => Some(on),
+        LockSource::Unknown => None,
+    }
+}
+
+/// Whether the Caps Lock LED can show Shift Lock: with `caps:shiftlock`, or
+/// with options that Hush does not know. For a take without a key table.
+fn shift_lock_possible(session: Option<&Session>) -> bool {
+    session
+        .and_then(|session| session.options.as_deref())
+        .is_none_or(|options| {
+            options
+                .split(',')
+                .any(|option| option.trim() == "caps:shiftlock")
+        })
+}
+
+/// The locked modifiers to build the tables with, one table for each.
+/// With known XKB options, the keymap's Caps Lock indicator says what the
+/// LED shows. With unknown options (Sway), the LED can show Lock, Shift
+/// with `caps:shiftlock`, or a layout other than the first with
+/// `grp_led:caps`, so Hush keeps only the keys that agree with each.
+fn locks_for(session: Option<&Session>, group: u32, on: Option<bool>) -> Vec<Locked> {
+    let options_known = session.is_some_and(|session| session.options.is_some());
+    match on {
+        Some(true) if options_known => vec![Locked::CapsIndicator],
+        Some(true) => {
+            let mut locks = vec![Locked::Named(xkb::LOCK_MOD), Locked::Named(xkb::SHIFT_MOD)];
+            if group != 0 {
+                locks.push(Locked::None);
+            }
+            locks
+        },
+        Some(false) => vec![Locked::None],
+        None => {
+            debug!("Caps Lock state unknown; typing as if it is off");
+            vec![Locked::None]
+        },
+    }
+}
 
 /// How the session's text goes in.
 #[derive(Debug, Clone)]
@@ -89,6 +157,10 @@ enum Plan {
 }
 
 const FIX_NAMES: &str = "to type, set the layout by its XKB name";
+const FIX_CAPS: &str = "to type with Caps Lock on, install libxkbcommon (libxkbcommon0 on Debian \
+     and Ubuntu); with Caps Lock off, Hush types";
+const WHY_CAPS: &str = "Caps Lock is on, and the built-in US key table types every letter in the \
+     wrong case with it";
 const FIX_LIBRARY: &str =
     "install libxkbcommon (libxkbcommon0 on Debian and Ubuntu) to type on this layout";
 
@@ -311,8 +383,11 @@ pub fn control_key() -> Result<Key, String> {
 #[derive(Default)]
 pub struct Resolver {
     reserved: Vec<u16>,
-    cached: Option<(Vec<Request>, Arc<KeyTable>)>,
+    /// The newest first.
+    cached: Vec<(Vec<Request>, Arc<KeyTable>)>,
     chords: Option<(Result<Vec<Names>, String>, ChordKeys)>,
+    /// Whether Shift can be locked for the last take.
+    shift_locked: bool,
 }
 
 impl Resolver {
@@ -326,11 +401,19 @@ impl Resolver {
         self.reserved = keys;
     }
 
-    pub fn resolve(&mut self) -> Typing {
+    /// `leds` reads the Caps Lock LED of Hush's own keyboard.
+    pub fn resolve(&mut self, leds: &mut dyn CapsLed) -> Typing {
         let session = layout::session();
         debug!("Keyboard session: {:?}", session);
         self.update_chords(session.as_ref());
-        self.resolve_for(session.as_ref(), xkb::available())
+        self.resolve_with(session.as_ref(), xkb::available(), leds)
+    }
+
+    /// Whether Shift can be locked (Shift Lock) as of the last
+    /// [`Self::resolve`]. Every key Hush sends then gets Shift, so a paste
+    /// needs Shift+Insert, and Enter does not send a chat message.
+    pub fn shift_locked(&self) -> bool {
+        self.shift_locked
     }
 
     /// The keys that hold Control and Shift for a paste chord, as of the
@@ -361,9 +444,28 @@ impl Resolver {
         self.chords = Some((names, keys));
     }
 
-    fn resolve_for(&mut self, session: Option<&Session>, library: bool) -> Typing {
+    fn resolve_with(
+        &mut self,
+        session: Option<&Session>,
+        library: bool,
+        leds: &mut dyn CapsLed,
+    ) -> Typing {
+        let on = caps_on(session, leds);
+        let typing = self.typing_for(session, library, on);
+        self.shift_locked = match &typing {
+            Typing::Keys { table, .. } => table.locks().shift_locked,
+            _ => on == Some(true) && shift_lock_possible(session),
+        };
+        typing
+    }
+
+    fn typing_for(&mut self, session: Option<&Session>, library: bool, on: Option<bool>) -> Typing {
         match plan(session, library) {
             Plan::Paste { why, fix } => Typing::Paste { why, fix },
+            Plan::UsTable { .. } if on == Some(true) => Typing::Paste {
+                why: WHY_CAPS.to_string(),
+                fix: FIX_CAPS,
+            },
             Plan::UsTable { layout, why } => Typing::UsTable { layout, why },
             Plan::Compile {
                 names,
@@ -373,32 +475,49 @@ impl Resolver {
                 layout,
                 plain_us,
             } => {
+                let locks = locks_for(session, group, on);
+                let layout = if locks == [Locked::None] {
+                    layout
+                } else {
+                    format!("{} with Caps Lock on", layout)
+                };
                 let request = Request {
                     names,
                     group,
                     level3,
                     reserved: self.reserved.clone(),
                     locale: xkb::session_locale(),
+                    locked: Locked::None,
                 };
-                let mut requests = vec![request.clone()];
-                if let Some(options) = other_options {
-                    let mut other = request;
-                    other.names.options = options;
-                    requests.push(other);
-                }
-                if let Some((cached, table)) = &self.cached {
-                    if *cached == requests {
-                        return Typing::Keys {
-                            table: Arc::clone(table),
-                            layout,
-                        };
-                    }
+                let mut option_lists = vec![request.names.options.clone()];
+                option_lists.extend(other_options);
+                let requests: Vec<Request> = option_lists
+                    .iter()
+                    .flat_map(|options| {
+                        locks.iter().map(|&locked| {
+                            let mut each = request.clone();
+                            each.names.options = options.clone();
+                            each.locked = locked;
+                            each
+                        })
+                    })
+                    .collect();
+                if let Some((_, table)) = self.cached.iter().find(|(key, _)| *key == requests) {
+                    return Typing::Keys {
+                        table: Arc::clone(table),
+                        layout,
+                    };
                 }
                 match build_common(&requests) {
                     Ok(table) => {
                         let table = Arc::new(table);
-                        self.cached = Some((requests, Arc::clone(&table)));
+                        self.cached.insert(0, (requests, Arc::clone(&table)));
+                        self.cached.truncate(CACHED_TABLES);
                         Typing::Keys { table, layout }
+                    },
+                    Err(e) if plain_us && on == Some(true) => Typing::Paste {
+                        why: format!("{} ({:#})", WHY_CAPS, e),
+                        fix: FIX_NAMES,
                     },
                     Err(e) if plain_us => Typing::UsTable {
                         layout,
@@ -430,6 +549,12 @@ mod tests {
     use crate::text::layout::Layout;
     use crate::text::xkb::tests::xkb_ready;
 
+    impl Resolver {
+        fn resolve_for(&mut self, session: Option<&Session>, library: bool) -> Typing {
+            self.resolve_with(session, library, &mut NoLeds)
+        }
+    }
+
     fn session(layout: &str, variant: &str, active: Active) -> Session {
         Session {
             layout: Layout::Xkb {
@@ -441,6 +566,7 @@ mod tests {
             options: Some("grp:alt_shift_toggle".into()),
             other_options: None,
             active,
+            locks: LockSource::Leds,
         }
     }
 
@@ -816,6 +942,193 @@ mod tests {
             .resolve_for(Some(&session("us,de", "", Active::Unknown)), true)
             .table()
             .is_none());
+    }
+
+    /// A fake Caps Lock LED that counts its reads.
+    struct FakeLed {
+        on: Option<bool>,
+        reads: usize,
+    }
+
+    impl FakeLed {
+        fn new(on: Option<bool>) -> Self {
+            Self { on, reads: 0 }
+        }
+    }
+
+    impl CapsLed for FakeLed {
+        fn caps_lock(&mut self) -> Option<bool> {
+            self.reads += 1;
+            self.on
+        }
+    }
+
+    fn locks(session: &Session, group: u32, led: &mut FakeLed) -> Vec<Locked> {
+        locks_for(Some(session), group, caps_on(Some(session), led))
+    }
+
+    #[test]
+    fn the_led_and_the_options_decide_the_locks() {
+        let known = session("de", "", Active::Unknown);
+        let mut led = FakeLed::new(Some(true));
+        assert_eq!(locks(&known, 0, &mut led), [Locked::CapsIndicator]);
+        assert_eq!(led.reads, 1);
+        for off in [Some(false), None] {
+            assert_eq!(
+                locks(&known, 0, &mut FakeLed::new(off)),
+                [Locked::None],
+                "{off:?}: an LED that is off or unreadable types as before"
+            );
+        }
+
+        let sway = Session {
+            options: None,
+            ..known.clone()
+        };
+        assert_eq!(
+            locks(&sway, 0, &mut FakeLed::new(Some(true))),
+            [Locked::Named(xkb::LOCK_MOD), Locked::Named(xkb::SHIFT_MOD)],
+            "unknown options: the LED shows Lock, or Shift with caps:shiftlock"
+        );
+        assert_eq!(
+            locks(&sway, 1, &mut FakeLed::new(Some(true))),
+            [
+                Locked::Named(xkb::LOCK_MOD),
+                Locked::Named(xkb::SHIFT_MOD),
+                Locked::None
+            ],
+            "on a second layout, the LED can show the layout"
+        );
+
+        let hyprland = Session {
+            locks: LockSource::Reported(true),
+            ..known.clone()
+        };
+        let mut led = FakeLed::new(Some(false));
+        assert_eq!(locks(&hyprland, 0, &mut led), [Locked::CapsIndicator]);
+        assert_eq!(led.reads, 0, "Hyprland's LEDs come from other keyboards");
+        let unknown = Session {
+            locks: LockSource::Unknown,
+            ..known
+        };
+        let mut led = FakeLed::new(Some(true));
+        assert_eq!(locks(&unknown, 0, &mut led), [Locked::None]);
+        assert_eq!(led.reads, 0);
+    }
+
+    #[test]
+    fn the_us_table_pastes_with_caps_lock_on() {
+        let us = session("us", "", Active::Unknown);
+        let mut resolver = Resolver::new();
+        let on = resolver.resolve_with(Some(&us), false, &mut FakeLed::new(Some(true)));
+        assert!(on.table().is_none(), "{on}");
+        assert!(on.to_string().contains("Caps Lock is on"), "{on}");
+        assert!(!resolver.shift_locked(), "Lock, not Shift Lock");
+        let off = resolver.resolve_with(Some(&us), false, &mut FakeLed::new(Some(false)));
+        assert!(matches!(off, Typing::UsTable { .. }), "{off}");
+        let unknown = resolver.resolve_with(Some(&us), false, &mut FakeLed::new(None));
+        assert!(matches!(unknown, Typing::UsTable { .. }), "{unknown}");
+
+        let shift_lock = Session {
+            options: Some("caps:shiftlock".into()),
+            ..us.clone()
+        };
+        resolver.resolve_with(Some(&shift_lock), false, &mut FakeLed::new(Some(true)));
+        assert!(resolver.shift_locked());
+        resolver.resolve_with(Some(&shift_lock), false, &mut FakeLed::new(Some(false)));
+        assert!(!resolver.shift_locked());
+
+        if !xkb_ready() {
+            return;
+        }
+        let bad_us = Session {
+            rules: "no-such-rules".into(),
+            ..us
+        };
+        let failed = resolver.resolve_with(Some(&bad_us), true, &mut FakeLed::new(Some(true)));
+        assert!(
+            failed.table().is_none(),
+            "a failed keymap on US with Caps Lock on pastes: {failed}"
+        );
+        let failed_off = resolver.resolve_with(Some(&bad_us), true, &mut FakeLed::new(Some(false)));
+        assert!(matches!(failed_off, Typing::UsTable { .. }), "{failed_off}");
+    }
+
+    #[test]
+    fn shift_lock_is_known_for_each_take() {
+        if !xkb_ready() {
+            return;
+        }
+        let mut resolver = Resolver::new();
+        let shift_lock = Session {
+            options: Some("caps:shiftlock".into()),
+            ..session("us", "", Active::Unknown)
+        };
+        let typing = resolver.resolve_with(Some(&shift_lock), true, &mut FakeLed::new(Some(true)));
+        assert!(resolver.shift_locked(), "{typing}");
+        let table = typing.table().expect("US types");
+        assert!(table.covers("HELLO"));
+        assert!(
+            !table.covers("HELLO\nWORLD"),
+            "no key holds Shift, so a line break pastes"
+        );
+        resolver.resolve_with(Some(&shift_lock), true, &mut FakeLed::new(Some(false)));
+        assert!(!resolver.shift_locked());
+
+        let caps = session("us", "", Active::Unknown);
+        let typing = resolver.resolve_with(Some(&caps), true, &mut FakeLed::new(Some(true)));
+        assert!(!resolver.shift_locked());
+        assert!(typing
+            .table()
+            .is_some_and(|table| table.covers("Hi\nthere")));
+
+        let sway = Session {
+            options: None,
+            ..caps
+        };
+        resolver.resolve_with(Some(&sway), true, &mut FakeLed::new(Some(true)));
+        assert!(resolver.shift_locked(), "Sway can have caps:shiftlock");
+    }
+
+    #[test]
+    fn caps_lock_types_each_character_as_written() {
+        if !xkb_ready() {
+            return;
+        }
+        let us = session("us", "", Active::Unknown);
+        let mut resolver = Resolver::new();
+        let on = resolver.resolve_with(Some(&us), true, &mut FakeLed::new(Some(true)));
+        assert_eq!(on.to_string(), "types key by key on us with Caps Lock on");
+        let table = on.table().expect("US types");
+        assert_eq!(
+            table.taps('h'),
+            Some(&[crate::text::keymap::Tap::shifted(Key::H)][..])
+        );
+        assert!(table.covers("Hello World"));
+
+        let off = resolver.resolve_with(Some(&us), true, &mut FakeLed::new(Some(false)));
+        assert_eq!(off.to_string(), "types key by key on us");
+        let again = resolver.resolve_with(Some(&us), true, &mut FakeLed::new(Some(true)));
+        assert!(
+            matches!(
+                (&on, &again),
+                (Typing::Keys { table: a, .. }, Typing::Keys { table: b, .. }) if Arc::ptr_eq(a, b)
+            ),
+            "Caps Lock on and off each keep a table"
+        );
+
+        let sway = Session {
+            options: None,
+            ..us
+        };
+        let unsure = resolver.resolve_with(Some(&sway), true, &mut FakeLed::new(Some(true)));
+        let table = unsure.table().expect("US types");
+        assert!(table.covers("HELLO WORLD"));
+        assert!(
+            !table.covers("Hello"),
+            "Lock and Shift Lock disagree on lower case, so it pastes"
+        );
+        assert!(!table.covers("42"), "and on digits");
     }
 
     #[test]
