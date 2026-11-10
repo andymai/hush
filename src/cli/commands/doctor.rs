@@ -7,7 +7,7 @@ use crate::config::{keys, paths, Config};
 use crate::hotkey::keymap::ModifierKeys;
 use crate::hotkey::{warnings, HotkeyBindings};
 use crate::text::layout::Layout;
-use crate::text::typing::{Resolver, Typing};
+use crate::text::typing::{NoLeds, Resolver, Typing};
 use crate::text::WindowProvider;
 use crate::text_processing::hook::{self, Program};
 use crate::transcription::device::{self, GpuAvailability, Modules};
@@ -166,7 +166,7 @@ pub async fn checks() -> Vec<Check> {
         crate::text::layout::current().as_ref(),
         &ModifierKeys::session(),
     ));
-    checks.push(typing_check(&Resolver::new().resolve()));
+    checks.push(typing_check(&Resolver::new().resolve(&mut NoLeds)));
     checks.push(window_check());
     checks.push(clipboard_check(crate::text::clipboard::support()));
     checks.push(llm_check(&config, &env_file).await);

@@ -1,16 +1,30 @@
 /// Linux uinput-based keyboard emulation using input-linux crate
 /// This provides hardware-level keyboard emulation that works with all applications
 use super::keymap::{ChordKeys, KeyTable, Stroke, Tap, EXTRA_KEYS, MAIN_KEYS, MODIFIER_KEYS};
+use super::typing::CapsLed;
 use super::PasteChord;
 use crate::Result;
 use std::fs::File;
+use std::os::unix::fs::OpenOptionsExt;
 use std::thread;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
 use input_linux::{
-    sys, EventKind, EventTime, InputId, Key, KeyState, SynchronizeKind, UInputHandle,
+    sys, EvdevHandle, EventKind, EventTime, InputId, Key, KeyState, LedKind, SynchronizeKind,
+    UInputHandle,
 };
+
+/// The lock LEDs the device has. The compositor sets them from the lock
+/// state that the device's keys get, and Hush reads Caps Lock back.
+const DEVICE_LEDS: [LedKind; 3] = [LedKind::NumLock, LedKind::CapsLock, LedKind::ScrollLock];
+const LED_BYTES: usize = (sys::LED_CNT as usize).div_ceil(8);
+
+fn led_on(bits: &[u8], led: LedKind) -> bool {
+    let code = led as usize;
+    bits.get(code / 8)
+        .is_some_and(|byte| byte & (1 << (code % 8)) != 0)
+}
 
 /// The keys a typed line break presses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -201,6 +215,14 @@ impl UinputKeyboard {
         handle
             .set_evbit(EventKind::Synchronize)
             .map_err(|e| anyhow::anyhow!("Failed to set sync event bit: {}", e))?;
+        handle
+            .set_evbit(EventKind::Led)
+            .map_err(|e| anyhow::anyhow!("Failed to set LED event bit: {}", e))?;
+        for led in DEVICE_LEDS {
+            handle
+                .set_ledbit(led)
+                .map_err(|e| anyhow::anyhow!("Failed to enable LED {:?}: {}", led, e))?;
+        }
 
         for key in device_keys() {
             handle
@@ -229,6 +251,27 @@ impl UinputKeyboard {
             Some(device) => press_chord(device, modifiers, key),
             None => Ok(()),
         }
+    }
+}
+
+impl CapsLed for UinputKeyboard {
+    /// Asks the kernel for the LEDs of the device's event node, which the
+    /// compositor sets. The node opens for each query, so no typed key
+    /// waits in its buffer.
+    fn caps_lock(&mut self) -> Option<bool> {
+        let path = self.device.as_ref()?.evdev_path().ok()?;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+            .map_err(|e| debug!("Cannot read the LEDs of {}: {}", path.display(), e))
+            .ok()?;
+        let mut bits = [0u8; LED_BYTES];
+        EvdevHandle::new(file)
+            .led_state(&mut bits)
+            .map_err(|e| debug!("Cannot read the LEDs of {}: {}", path.display(), e))
+            .ok()?;
+        Some(led_on(&bits, LedKind::CapsLock))
     }
 }
 
@@ -326,7 +369,7 @@ impl Drop for UinputKeyboard {
 /// an XKB option swaps Ctrl with another key.
 fn chord_keys(chord: PasteChord, table: Option<&KeyTable>, keys: ChordKeys) -> (Vec<Key>, Key) {
     let v = table
-        .and_then(|table| table.plain_key('v'))
+        .and_then(|table| table.letter_key('v'))
         .unwrap_or(Key::V);
     match chord {
         PasteChord::CtrlV => (vec![keys.control], v),
@@ -403,6 +446,29 @@ mod tests {
     fn table(v: Option<Tap>) -> KeyTable {
         let chars = v.map(|tap| ('v', vec![tap])).into_iter().collect();
         KeyTable::new(chars, Key::LeftShift)
+    }
+
+    #[test]
+    fn the_led_bitmap_is_read_per_led() {
+        let mut bits = [0u8; LED_BYTES];
+        assert!(!led_on(&bits, LedKind::CapsLock));
+        bits[0] = 1 << (LedKind::CapsLock as usize);
+        assert!(led_on(&bits, LedKind::CapsLock));
+        assert!(!led_on(&bits, LedKind::NumLock));
+        assert!(!led_on(&[], LedKind::CapsLock));
+    }
+
+    #[test]
+    fn with_caps_lock_on_the_chord_keeps_the_key_of_v() {
+        let mut chars = std::collections::HashMap::new();
+        chars.insert('V', vec![Tap::plain(Key::Dot)]);
+        chars.insert('v', vec![Tap::shifted(Key::Dot)]);
+        let dvorak_locked = KeyTable::new(chars, Key::LeftShift);
+        assert_eq!(
+            plain(PasteChord::CtrlV, Some(&dvorak_locked)),
+            (vec![Key::LeftCtrl], Key::Dot),
+            "with Caps Lock on, the plain key types the capital V"
+        );
     }
 
     #[test]

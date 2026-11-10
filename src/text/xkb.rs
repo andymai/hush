@@ -6,6 +6,9 @@
 //! a dead key and a base key, but only when the compose table for the
 //! locale turns that pair into the character.
 //!
+//! With a locked modifier, such as Caps Lock, the state holds the lock
+//! too, so the keymap's own key types decide when a letter needs Shift.
+//!
 //! Hush loads libxkbcommon at run time, so a system without it falls back
 //! to the US table or to the clipboard.
 
@@ -14,12 +17,13 @@ use anyhow::{anyhow, bail, Result};
 use input_linux::Key;
 use std::collections::HashMap;
 use std::ffi::{c_char, CString};
+use tracing::debug;
 use xkbcommon_dl::{
     keysyms, xkb_compose_compile_flags, xkb_compose_feed_result, xkb_compose_state,
     xkb_compose_state_flags, xkb_compose_status, xkb_compose_table, xkb_context, xkb_context_flags,
-    xkb_key_direction, xkb_keymap, xkb_keymap_compile_flags, xkb_keysym_t, xkb_log_level,
-    xkb_rule_names, xkb_state, xkb_state_component, XkbCommon, XkbCommonCompose, XKB_MOD_NAME_ALT,
-    XKB_MOD_NAME_CTRL, XKB_MOD_NAME_LOGO, XKB_MOD_NAME_SHIFT,
+    xkb_key_direction, xkb_keymap, xkb_keymap_compile_flags, xkb_keymap_format, xkb_keysym_t,
+    xkb_log_level, xkb_rule_names, xkb_state, xkb_state_component, XkbCommon, XkbCommonCompose,
+    XKB_MOD_INVALID, XKB_MOD_NAME_ALT, XKB_MOD_NAME_CTRL, XKB_MOD_NAME_LOGO, XKB_MOD_NAME_SHIFT,
 };
 
 /// XKB key codes are evdev codes plus 8.
@@ -50,6 +54,27 @@ pub struct Request {
     pub reserved: Vec<u16>,
     /// The locale whose compose table confirms dead-key sequences.
     pub locale: String,
+    /// The modifiers that are locked while Hush types.
+    pub locked: Locked,
+}
+
+/// The NUL-terminated XKB names of the modifiers that Caps Lock can lock.
+pub const LOCK_MOD: &[u8] = xkbcommon_dl::XKB_MOD_NAME_CAPS;
+pub const SHIFT_MOD: &[u8] = XKB_MOD_NAME_SHIFT;
+
+/// The locked modifiers that the keys Hush types get.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum Locked {
+    #[default]
+    None,
+    /// The modifiers that the Caps Lock indicator of the keymap shows when
+    /// its LED is on: Lock, or Shift with `caps:shiftlock`. An indicator
+    /// that shows the layout, as with `grp_led:caps`, shows no lock, so
+    /// Hush locks nothing.
+    CapsIndicator,
+    /// One modifier by its NUL-terminated XKB name, for a keymap whose
+    /// options Hush does not know.
+    Named(&'static [u8]),
 }
 
 pub fn available() -> bool {
@@ -79,13 +104,17 @@ pub fn build(request: &Request) -> Result<KeyTable> {
         );
     }
     let free = |key: Key| !request.reserved.contains(&key.code());
-    let shift = find_modifier(&keymap, request.group, free, Modifier::Shift)?;
+    let base = Base {
+        group: request.group,
+        locked: locked_mask(&keymap, request.locked),
+    };
+    let shift = find_modifier(&keymap, base, free, Modifier::Shift)?;
     let level3 = if request.level3 {
-        find_modifier(&keymap, request.group, free, Modifier::Level3)?
+        find_modifier(&keymap, base, free, Modifier::Level3)?
     } else {
         None
     };
-    let found = scan(&keymap, request.group, shift, level3, free)?;
+    let found = scan(&keymap, base, shift, level3, free)?;
     let mut chars: HashMap<char, Vec<Tap>> = found
         .direct
         .iter()
@@ -295,6 +324,66 @@ fn holds(keymap: &Keymap, group: u32, key: Key, held: Held) -> Result<bool> {
     Ok(ok && state.mods() == 0)
 }
 
+/// The state every key press starts from: the active layout and the
+/// locked modifiers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Base {
+    group: u32,
+    locked: u32,
+}
+
+fn locked_mask(keymap: &Keymap, locked: Locked) -> u32 {
+    match locked {
+        Locked::None => 0,
+        Locked::Named(name) => keymap.mod_mask(name),
+        Locked::CapsIndicator => {
+            let names = keymap.as_text().and_then(|text| caps_indicator(&text));
+            match names {
+                Some(names) => names.iter().fold(0, |mask, name| {
+                    let name = CString::new(name.as_str()).unwrap_or_default();
+                    mask | keymap.mod_mask(name.as_bytes_with_nul())
+                }),
+                None => {
+                    debug!("The Caps Lock indicator of the keymap shows no locked modifier");
+                    0
+                },
+            }
+        },
+    }
+}
+
+/// The modifiers that the `Caps Lock` indicator of a keymap text shows,
+/// when it shows only locked modifiers. An indicator that also shows a
+/// layout or a control, or shows a modifier that is not locked, gives
+/// `None`.
+fn caps_indicator(text: &str) -> Option<Vec<String>> {
+    let start = text.find("indicator \"Caps Lock\"")?;
+    let body = &text[start..];
+    let body = &body[body.find('{')? + 1..body.find('}')?];
+    let mut locked = false;
+    let mut modifiers = Vec::new();
+    for statement in body.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+        let Some((field, value)) = statement.split_once('=') else {
+            continue;
+        };
+        let value = value.trim();
+        match field.trim().to_lowercase().as_str() {
+            "whichmodstate" => locked = value.eq_ignore_ascii_case("locked"),
+            "modifiers" => {
+                modifiers = value
+                    .split('+')
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty() && !name.eq_ignore_ascii_case("none"))
+                    .map(str::to_string)
+                    .collect();
+            },
+            "groups" | "controls" | "whichgroupstate" => return None,
+            _ => {},
+        }
+    }
+    (locked && !modifiers.is_empty()).then_some(modifiers)
+}
+
 /// What the keys type with each set of modifiers, cheapest first.
 struct Found {
     direct: Vec<(char, Tap, xkb_keysym_t)>,
@@ -303,7 +392,7 @@ struct Found {
 
 fn scan(
     keymap: &Keymap,
-    group: u32,
+    base: Base,
     shift: Option<Key>,
     level3: Option<Key>,
     free: impl Fn(Key) -> bool,
@@ -324,14 +413,14 @@ fn scan(
     };
     for keys in [&MAIN_KEYS[..], &EXTRA_KEYS[..]] {
         for &(shift, level3) in &levels {
-            let state = State::new(keymap, group)?;
+            let state = State::with_locks(keymap, base)?;
             if let Some(key) = level3 {
                 state.press(key);
             }
             if let Some(key) = shift {
                 state.press(key);
             }
-            if state.layout() != group {
+            if state.layout() != base.group {
                 continue;
             }
             for &key in keys {
@@ -399,11 +488,12 @@ enum Modifier {
 }
 
 /// The key that holds the modifier in the group: Shift_L or Shift_R for
-/// Shift, ISO_Level3_Shift for the third level. A press must hold a
-/// modifier without a group change, and the release must clear it.
+/// Shift, ISO_Level3_Shift for the third level. A press must add the
+/// modifier to the locked ones without a group change, and the release
+/// must leave only the locked ones. With Shift locked, no press adds Shift.
 fn find_modifier(
     keymap: &Keymap,
-    group: u32,
+    base: Base,
     free: impl Fn(Key) -> bool,
     modifier: Modifier,
 ) -> Result<Option<Key>> {
@@ -411,22 +501,25 @@ fn find_modifier(
         Modifier::Shift => &[keysyms::Shift_L, keysyms::Shift_R],
         Modifier::Level3 => &[keysyms::ISO_Level3_Shift],
     };
+    let shift = keymap.mod_mask(XKB_MOD_NAME_SHIFT);
     for key in MODIFIER_KEYS {
         if !free(key) {
             continue;
         }
-        let state = State::new(keymap, group)?;
+        let state = State::with_locks(keymap, base)?;
         if !wanted.contains(&state.sym(key)) {
             continue;
         }
+        let before = state.mods();
         state.press(key);
-        let holds = state.layout() == group
+        let added = state.mods() & !before;
+        let holds = state.layout() == base.group
             && match modifier {
-                Modifier::Shift => state.shift_active(),
-                Modifier::Level3 => state.mods() != 0 && !state.shift_active(),
+                Modifier::Shift => added & shift != 0,
+                Modifier::Level3 => added != 0 && added & shift == 0,
             };
         state.release(key);
-        if holds && state.mods() == 0 && state.layout() == group {
+        if holds && state.mods() == before && state.layout() == base.group {
             return Ok(Some(key));
         }
     }
@@ -508,6 +601,41 @@ impl Keymap {
         unsafe { (self.lib.xkb_keymap_num_layouts)(self.ptr) }
     }
 
+    /// The mask of a modifier by its NUL-terminated name, or 0 when the
+    /// keymap has no such modifier.
+    fn mod_mask(&self, name: &[u8]) -> u32 {
+        if name.last() != Some(&0) {
+            return 0;
+        }
+        // SAFETY: ptr is a live keymap, and the name is NUL-terminated.
+        let index = unsafe { (self.lib.xkb_keymap_mod_get_index)(self.ptr, name.as_ptr().cast()) };
+        if index == XKB_MOD_INVALID || index >= 32 {
+            0
+        } else {
+            1 << index
+        }
+    }
+
+    /// The keymap in the XKB text format.
+    fn as_text(&self) -> Option<String> {
+        // SAFETY: ptr is a live keymap. The result is a malloc'ed,
+        // NUL-terminated string that the caller frees.
+        unsafe {
+            let text = (self.lib.xkb_keymap_get_as_string)(
+                self.ptr,
+                xkb_keymap_format::XKB_KEYMAP_FORMAT_TEXT_V1,
+            );
+            if text.is_null() {
+                return None;
+            }
+            let owned = std::ffi::CStr::from_ptr(text)
+                .to_string_lossy()
+                .into_owned();
+            libc::free(text.cast_mut().cast());
+            Some(owned)
+        }
+    }
+
     fn char_for(&self, sym: xkb_keysym_t) -> Option<char> {
         // SAFETY: the function takes any keysym value.
         let code = unsafe { (self.lib.xkb_keysym_to_utf32)(sym) };
@@ -530,13 +658,17 @@ struct State {
 
 impl State {
     fn new(keymap: &Keymap, group: u32) -> Result<Self> {
+        Self::with_locks(keymap, Base { group, locked: 0 })
+    }
+
+    fn with_locks(keymap: &Keymap, base: Base) -> Result<Self> {
         // SAFETY: the keymap is live; the state takes its own reference.
         let ptr = unsafe { (keymap.lib.xkb_state_new)(keymap.ptr) };
         if ptr.is_null() {
             bail!("libxkbcommon could not make a keyboard state");
         }
         // SAFETY: ptr is a live state.
-        unsafe { (keymap.lib.xkb_state_update_mask)(ptr, 0, 0, 0, 0, 0, group) };
+        unsafe { (keymap.lib.xkb_state_update_mask)(ptr, 0, 0, base.locked, 0, 0, base.group) };
         Ok(Self {
             lib: keymap.lib,
             ptr,
@@ -731,6 +863,7 @@ pub(crate) mod tests {
             level3: true,
             reserved: Vec::new(),
             locale: LOCALE.into(),
+            locked: Locked::None,
         }
     }
 
@@ -1060,6 +1193,137 @@ pub(crate) mod tests {
             0
         )
         .is_err());
+    }
+
+    fn locked(layout: &str, options: &str, locked: Locked) -> KeyTable {
+        build(&Request {
+            names: Names {
+                options: options.into(),
+                ..names(layout, "")
+            },
+            locked,
+            ..request(layout, "", 0)
+        })
+        .expect("the keymap compiles")
+    }
+
+    #[test]
+    fn caps_lock_moves_the_letters_to_shift() {
+        if !xkb_ready() {
+            return;
+        }
+        let us = locked("us", "", Locked::CapsIndicator);
+        assert_eq!(taps(&us, 'A'), Some(plain(Key::A)));
+        assert_eq!(taps(&us, 'a'), Some(shifted(Key::A)));
+        assert_eq!(
+            taps(&us, '1'),
+            Some(plain(Key::Num1)),
+            "Caps Lock leaves the digits"
+        );
+        assert_eq!(taps(&us, '!'), Some(shifted(Key::Num1)));
+        assert_eq!(taps(&us, ';'), Some(plain(Key::Semicolon)));
+        assert!(us.covers("Hello World, 42!"));
+        assert_eq!(
+            us,
+            locked("us", "", Locked::Named(LOCK_MOD)),
+            "the indicator of a keymap without options shows Lock"
+        );
+        assert_ne!(us, table("us", ""));
+
+        let de = locked("de", "", Locked::CapsIndicator);
+        assert_eq!(taps(&de, 'Z'), Some(plain(Key::Y)));
+        assert_eq!(taps(&de, 'z'), Some(shifted(Key::Y)));
+        assert_eq!(taps(&de, 'Ä'), Some(plain(Key::Apostrophe)));
+        assert_eq!(taps(&de, 'ä'), Some(shifted(Key::Apostrophe)));
+        assert_eq!(taps(&de, '@'), Some(vec![altgr(Key::Q, false)]));
+        assert_eq!(
+            taps(&de, 'é'),
+            Some(vec![Tap::plain(Key::Equal), Tap::shifted(Key::E)]),
+            "the base key of a dead-key sequence needs Shift too"
+        );
+        assert!(de.covers("Grün: 3 € @ café"));
+        assert_eq!(
+            taps(&de, 'ẞ'),
+            Some(plain(Key::Minus)),
+            "Caps Lock turns the ß key into capital ẞ"
+        );
+        assert_eq!(taps(&de, 'ß'), None, "so a take with ß pastes");
+
+        let fr = locked("fr", "", Locked::CapsIndicator);
+        assert_eq!(taps(&fr, 'A'), Some(plain(Key::Q)));
+        assert_eq!(taps(&fr, 'a'), Some(shifted(Key::Q)));
+        assert!(fr.covers("Bonjour tout le monde"));
+        assert_eq!(
+            taps(&fr, 'À'),
+            Some(plain(Key::Num0)),
+            "Caps Lock capitalizes the accented key"
+        );
+        assert_eq!(
+            taps(&fr, 'à').and_then(|taps| taps.last().copied()),
+            Some(Tap::shifted(Key::Q)),
+            "so à takes the dead grave and a shifted a"
+        );
+    }
+
+    #[test]
+    fn shift_lock_shifts_the_digits_too() {
+        if !xkb_ready() {
+            return;
+        }
+        let us = locked("us", "caps:shiftlock", Locked::CapsIndicator);
+        assert_eq!(taps(&us, 'A'), Some(plain(Key::A)));
+        assert_eq!(taps(&us, '!'), Some(plain(Key::Num1)));
+        assert_eq!(taps(&us, 'a'), None, "Shift stays on while it is locked");
+        assert_eq!(taps(&us, '1'), None);
+        assert!(us.covers("HELLO WORLD!"));
+        assert!(!us.covers("hello"));
+        assert_eq!(
+            us,
+            locked("us", "caps:shiftlock", Locked::Named(SHIFT_MOD)),
+            "with caps:shiftlock the indicator shows Shift"
+        );
+    }
+
+    #[test]
+    fn caps_lock_options_keep_their_meaning() {
+        if !xkb_ready() {
+            return;
+        }
+        assert_eq!(
+            locked("us", "grp_led:caps", Locked::CapsIndicator),
+            locked("us", "grp_led:caps", Locked::None),
+            "an LED that shows the layout locks nothing"
+        );
+        for options in ["ctrl:nocaps", "caps:escape", "shift:both_capslock"] {
+            let table = locked("us", options, Locked::CapsIndicator);
+            assert_eq!(taps(&table, 'a'), Some(shifted(Key::A)), "{options}");
+            assert_eq!(taps(&table, 'A'), Some(plain(Key::A)), "{options}");
+        }
+    }
+
+    #[test]
+    fn the_caps_indicator_is_read_from_the_keymap_text() {
+        let text = |body: &str| {
+            format!("xkb_compat {{\n\tindicator \"Num Lock\" {{\n\t\twhichModState= locked;\n\t\tmodifiers= Mod2;\n\t}};\n\tindicator \"Caps Lock\" {{\n{body}\t}};\n}};")
+        };
+        assert_eq!(
+            caps_indicator(&text("\t\twhichModState= locked;\n\t\tmodifiers= Lock;\n")),
+            Some(vec!["Lock".to_string()])
+        );
+        assert_eq!(
+            caps_indicator(&text(
+                "\t\twhichModState= Locked;\n\t\tmodifiers= Shift+Lock;\n"
+            )),
+            Some(vec!["Shift".to_string(), "Lock".to_string()])
+        );
+        assert_eq!(caps_indicator(&text("\t\tgroups= 0xfffffffe;\n")), None);
+        assert_eq!(
+            caps_indicator(&text("\t\twhichModState= base;\n\t\tmodifiers= Lock;\n")),
+            None,
+            "a held modifier is no lock"
+        );
+        assert_eq!(caps_indicator(&text("\t\tmodifiers= none;\n")), None);
+        assert_eq!(caps_indicator("xkb_compat { };"), None);
     }
 
     #[test]

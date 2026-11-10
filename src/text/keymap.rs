@@ -277,6 +277,17 @@ impl KeyTable {
         }
     }
 
+    /// The key that types a letter, in either case, with no modifier. With
+    /// Caps Lock on, the plain key types the capital letter.
+    pub fn letter_key(&self, letter: char) -> Option<Key> {
+        self.plain_key(letter).or_else(|| {
+            letter
+                .to_uppercase()
+                .next()
+                .and_then(|upper| self.plain_key(upper))
+        })
+    }
+
     /// The characters that both tables type with the same taps, for a
     /// keyboard that can have either keymap.
     pub fn common(&self, other: &KeyTable) -> KeyTable {

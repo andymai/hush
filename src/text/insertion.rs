@@ -211,7 +211,7 @@ impl TextInserter {
     /// Needs a working uinput device; both paths type through it.
     pub fn new() -> Result<Self> {
         info!("Initializing text insertion");
-        let uinput = UinputKeyboard::new()?;
+        let mut uinput = UinputKeyboard::new()?;
         if !uinput.is_ready() {
             return Err(anyhow::anyhow!(
                 "uinput is not available; run `hush setup permissions` and try again"
@@ -220,7 +220,7 @@ impl TextInserter {
         let clipboard = clipboard::open();
         let windows = WindowProvider::detect();
         let mut typing = Resolver::new();
-        let last_typing = typing.resolve().to_string();
+        let last_typing = typing.resolve(&mut uinput).to_string();
         info!(
             "Text insertion ready: {}, clipboard restore {}, window detection via {}",
             last_typing,
@@ -250,13 +250,13 @@ impl TextInserter {
         self.typing.reserve(keys);
     }
 
-    /// The typing for the layout that is active now. A change since the
-    /// last take is logged once.
+    /// The typing for the active layout and the Caps Lock state of now. A
+    /// change since the last take is logged once.
     fn current_typing(&mut self) -> Typing {
-        let typing = self.typing.resolve();
+        let typing = self.typing.resolve(&mut self.uinput);
         let summary = typing.to_string();
         if summary != self.last_typing {
-            info!("Keyboard layout changed: Hush now {}", summary);
+            info!("Keyboard state changed: Hush now {}", summary);
             self.last_typing = summary;
         }
         typing

@@ -141,6 +141,24 @@ pub struct Session {
     /// whose keys are the same with both lists.
     pub other_options: Option<String>,
     pub active: Active,
+    /// Where Hush learns whether the keys it types get Caps Lock.
+    pub locks: LockSource,
+}
+
+/// Where Hush learns whether the keys it types get a locked modifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockSource {
+    /// The Caps Lock LED of Hush's own keyboard. The compositor sets it
+    /// from the state that the keys of that keyboard get: KWin and GNOME
+    /// keep one state for all keyboards, Sway keeps one for each keyboard
+    /// or keyboard group, and an X server copies the locks to every
+    /// keyboard.
+    Leds,
+    /// The compositor reports the Caps Lock state of Hush's own keyboard.
+    Reported(bool),
+    /// No source. Hyprland keeps a lock state for each keyboard, but copies
+    /// the LEDs of the last keyboard that changed to all the others.
+    Unknown,
 }
 
 impl Session {
@@ -152,6 +170,7 @@ impl Session {
             options: Some(String::new()),
             other_options: None,
             active: Active::Unknown,
+            locks: LockSource::Leds,
         }
     }
 }
@@ -615,7 +634,8 @@ fn pick_keyboard<'a>(
     }
 }
 
-/// `hyprctl devices -j`: the keyboard's XKB names and its active layout.
+/// `hyprctl devices -j`: the keyboard's XKB names, its active layout, and,
+/// for Hush's own keyboard, its Caps Lock state.
 fn parse_hyprland(json: &str, registry: Option<&Registry>, reader: Reader) -> Option<Session> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     let keyboards = value.get("keyboards")?.as_array()?;
@@ -642,11 +662,17 @@ fn parse_hyprland(json: &str, registry: Option<&Registry>, reader: Reader) -> Op
             .and_then(|(registry, entries)| registry.index_of(&entries, &text("active_keymap")))
             .map_or(Active::Unknown, Active::Index),
     };
+    let own = keyboard.get("name").and_then(|n| n.as_str()) == Some(HYPRLAND_DEVICE_NAME);
+    let locks = match keyboard.get("capsLock").and_then(|c| c.as_bool()) {
+        Some(on) if own => LockSource::Reported(on),
+        _ => LockSource::Unknown,
+    };
     Some(Session {
         rules: text("rules"),
         model: text("model"),
         options: Some(text("options")),
         active,
+        locks,
         ..Session::new(layout)
     })
 }
@@ -1183,6 +1209,39 @@ mod tests {
         let mut session = setxkbmap("us", "");
         match_server_default(&mut session, None);
         assert!(matches!(session.active, Active::Unclear { .. }));
+    }
+
+    #[test]
+    fn hyprland_reports_the_caps_lock_of_hushs_own_keyboard() {
+        let json = |own_caps: bool| {
+            format!(
+                r#"{{"keyboards":[
+            {{"name":"at-translated-set-2-keyboard","layout":"us","options":"","capsLock":true,"main":true}},
+            {{"name":"hush-voice-keyboard","layout":"us","options":"","capsLock":{own_caps},"main":false}}]}}"#
+            )
+        };
+        let session = parse_hyprland(&json(false), None, Reader::Typing).unwrap();
+        assert_eq!(
+            session.locks,
+            LockSource::Reported(false),
+            "the user's Caps Lock stays on the user's keyboard"
+        );
+        let session = parse_hyprland(&json(true), None, Reader::Typing).unwrap();
+        assert_eq!(session.locks, LockSource::Reported(true));
+        let user_only =
+            r#"{"keyboards":[{"name":"kb","layout":"us","capsLock":true,"main":true}]}"#;
+        assert_eq!(
+            parse_hyprland(user_only, None, Reader::Typing)
+                .unwrap()
+                .locks,
+            LockSource::Unknown,
+            "another keyboard's lock and its LEDs say nothing about Hush's keys"
+        );
+        assert_eq!(
+            Session::new(layout("us", "")).locks,
+            LockSource::Leds,
+            "other desktops set the LEDs of Hush's own keyboard"
+        );
     }
 
     #[test]
