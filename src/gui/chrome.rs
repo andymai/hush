@@ -20,10 +20,9 @@ const BAR_WIDTH: f32 = 0.068;
 const BAR_STEP: f32 = 0.119;
 const TILE_ROUNDING: f32 = 0.219;
 const MARK_SIZE: f32 = 22.0;
-/// The band at each edge of the window that resizes it, and the square at
-/// each corner.
-const EDGE: f32 = 4.0;
+/// The square at each corner of the window that resizes it.
 const CORNER: f32 = 8.0;
+const EDGE: f32 = theme::EDGE_CLEARANCE;
 
 /// The Hush mark: the five-bar waveform on a violet tile.
 pub fn mark(ui: &Ui, rect: Rect) {
@@ -84,12 +83,12 @@ pub fn title_bar(ui: &mut Ui, title: &str) {
                 ui.ctx().send_viewport_cmd(ViewportCommand::Close);
             }
             let maximized = ui.input(|input| input.viewport().maximized.unwrap_or(false));
-            let (icon, size, label) = if maximized {
-                (icons::COPY, 13.0, "Restore")
+            let (icon, label) = if maximized {
+                (icons::COPY, "Restore")
             } else {
-                (icons::SQUARE, 13.0, "Maximize")
+                (icons::SQUARE, "Maximize")
             };
-            if window_button(ui, icon, size, label, false).clicked() {
+            if window_button(ui, icon, 13.0, label, false).clicked() {
                 ui.ctx()
                     .send_viewport_cmd(ViewportCommand::Maximized(!maximized));
             }
@@ -341,7 +340,7 @@ fn nav_item(ui: &mut Ui, icon: char, label: &str, current: bool, alert: bool) ->
         widgets::focus_ring(ui, rect.shrink(2.0), theme::RADIUS_SM);
     }
     if alert {
-        response.on_hover_text("Something still needs setting up")
+        response.on_hover_text("Hush is not ready yet")
     } else {
         response
     }

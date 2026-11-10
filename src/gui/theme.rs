@@ -153,6 +153,9 @@ pub const CONTROL_HEIGHT: f32 = 30.0;
 /// An icon button, a stepper's buttons, and a segment
 pub const SMALL_CONTROL: f32 = 24.0;
 pub const FIELD_WIDTH: f32 = 200.0;
+/// The band at each window edge that resizes the window, which the scroll
+/// bar keeps clear of
+pub const EDGE_CLEARANCE: f32 = 4.0;
 pub const RADIUS_XS: f32 = 4.0;
 pub const RADIUS_SM: f32 = 6.0;
 pub const RADIUS_MD: f32 = 8.0;
@@ -250,6 +253,7 @@ fn style(palette: &Palette, dark: bool) -> egui::Style {
         ..Default::default()
     };
 
+    style.interaction.selectable_labels = false;
     let spacing = &mut style.spacing;
     spacing.item_spacing = egui::vec2(8.0, 8.0);
     spacing.button_padding = egui::vec2(12.0, 0.0);
@@ -265,7 +269,7 @@ fn style(palette: &Palette, dark: bool) -> egui::Style {
         bar_width: 8.0,
         floating_width: 4.0,
         bar_inner_margin: 2.0,
-        bar_outer_margin: 2.0,
+        bar_outer_margin: EDGE_CLEARANCE,
         ..egui::style::ScrollStyle::floating()
     };
 

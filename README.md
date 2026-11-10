@@ -244,7 +244,7 @@ Hotkey chords name keys in two ways. Ctrl, Shift, Alt, and Super in a chord mean
 | `history.keep_audio_days` | Keep the audio of each take as FLAC in `~/.local/share/hush/audio` for this many days. 0 keeps none and deletes the audio that Hush kept. The audio of a failed take stays in `~/.local/share/hush/recover` for 7 days for `hush recover`, whatever this says. When the two folders hold more than 500 MB, the oldest files go | 0 |
 | `tray.enabled` | Status icon on the desktop panel | true |
 | `updates.check` | Ask GitHub once a day whether a newer release exists (AppImage and tarball installs only) | false |
-| `gui.appearance` | The colours of the settings window: `system` follows the light or dark preference of the desktop and changes with it, and `light` or `dark` keeps one. When the desktop has no preference, the window is light | system |
+| `gui.appearance` | The colors of the settings window: `system` follows the light or dark preference of the desktop and changes with it, and `light` or `dark` keeps one. When the desktop has no preference, the window is light | system |
 
 Point at a different file with `hush -c other.toml …` or `HUSH_CONFIG=other.toml`.
 

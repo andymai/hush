@@ -304,13 +304,10 @@ impl Gui {
     }
 
     /// Write the configuration and the vocabulary, then restart a running
-    /// daemon so the change is live.
+    /// daemon when it reads something that changed.
     pub fn save(&mut self) {
-        let daemon_unchanged = {
-            let mut window_only = self.saved.clone();
-            window_only.gui = self.config.gui.clone();
-            window_only == self.config && self.vocabulary == self.saved_vocabulary
-        };
+        let daemon_unchanged = !daemon_reads_a_change(&self.saved, &self.config)
+            && self.vocabulary == self.saved_vocabulary;
         let path = crate::config::paths::config_path();
         if let Err(e) = self.config.save_to_file(&path) {
             self.say(format!("Could not save: {}", e));
@@ -467,6 +464,14 @@ impl Gui {
             POLL_INTERVAL
         }
     }
+}
+
+/// Whether `config` differs from `saved` in more than the window's own
+/// settings, which the daemon never reads.
+fn daemon_reads_a_change(saved: &Config, config: &Config) -> bool {
+    let mut window_only = saved.clone();
+    window_only.gui = config.gui.clone();
+    window_only != *config
 }
 
 fn load_vocabulary() -> DomainVocabulary {
@@ -715,6 +720,20 @@ mod tests {
         assert!(machine.busy());
         machine.daemon = None;
         assert!(!machine.running() && !machine.busy());
+    }
+
+    #[test]
+    fn only_a_setting_the_daemon_reads_restarts_it() {
+        let saved = Config::defaults().unwrap();
+        let mut config = saved.clone();
+        assert!(!daemon_reads_a_change(&saved, &config));
+        config.gui.appearance = Appearance::Dark;
+        assert!(
+            !daemon_reads_a_change(&saved, &config),
+            "the appearance is the window's own"
+        );
+        config.tray.enabled = !config.tray.enabled;
+        assert!(daemon_reads_a_change(&saved, &config));
     }
 
     #[test]
