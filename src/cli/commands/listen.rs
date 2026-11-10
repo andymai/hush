@@ -693,10 +693,17 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         }
     });
 
-    // Overlay thread
-    let overlay_thread = thread::spawn(move || {
-        let _ = overlay.run();
-    });
+    // GLFW aborts the whole process when it finds no display.
+    let has_display =
+        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let overlay_thread = if has_display {
+        Some(thread::spawn(move || {
+            let _ = overlay.run();
+        }))
+    } else {
+        info!("No display, so the daemon runs without the overlay");
+        None
+    };
 
     // Main thread: audio handling
     info!("🚀 Audio handler ready");
