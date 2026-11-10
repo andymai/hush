@@ -4,7 +4,7 @@
 //! pressed; the action keys have a text box behind it for keys the capture
 //! cannot see.
 
-use crate::config::settings::HotkeyConfig;
+use crate::config::settings::{HotkeyConfig, MAX_TAP_MS};
 use crate::gui::capture::Capture;
 use crate::gui::icons;
 use crate::gui::pages::speech::language_picker;
@@ -119,9 +119,6 @@ const PICKER_WIDTH: f32 = 130.0;
 
 /// Width of the key field, the picker, and Remove.
 const CHORD_COLUMN: f32 = CHORD_KEY_WIDTH + PICKER_WIDTH + 40.0;
-
-/// The longest press that `hotkey.tap_ms` may call a tap.
-const MAX_TAP_MS: u64 = 2000;
 
 /// Red text under a hotkey field that does not parse.
 pub fn combination_error(text: &str, required: bool) -> Option<String> {
@@ -280,7 +277,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         .describe("A shorter press is a tap: taps lock and unlock, holds record.")
         .reserve(110.0)
         .show(ui, |ui| {
-            number(ui, &mut gui.config.hotkey.tap_ms, 100..=MAX_TAP_MS, "ms");
+            number(ui, &mut gui.config.hotkey.tap_ms, 0..=MAX_TAP_MS, "ms");
         });
     switch_row(
         ui,

@@ -993,8 +993,9 @@ pub fn submitted(ui: &Ui, response: &Response) -> bool {
 }
 
 /// A number typed into a field, kept in `range`, with `unit` after it. The
-/// value changes when the user presses Enter or leaves the field; a number
-/// out of range is clamped, and text that is no number is dropped.
+/// value follows each number the user types, clamped to `range`, so Save
+/// never reads an older value. When the field loses focus, it shows the
+/// value again, and text that is no number is dropped.
 pub fn number(ui: &mut Ui, value: &mut u64, range: RangeInclusive<u64>, unit: &str) -> Response {
     let colours = palette(ui.ctx());
     let unit_text = egui::RichText::new(unit)
@@ -1010,15 +1011,15 @@ pub fn number(ui: &mut Ui, value: &mut u64, range: RangeInclusive<u64>, unit: &s
         .unwrap_or_else(|| value.to_string());
     let response = ui.add(Field::new(&mut draft, "").number().width(72.0));
     let mut changed = false;
+    if response.changed() || response.lost_focus() {
+        if let Some(parsed) = parse_number(&draft, &range) {
+            changed = parsed != *value;
+            *value = parsed;
+        }
+    }
     if response.has_focus() {
         ui.data_mut(|data| data.insert_temp(id, draft));
     } else {
-        if response.lost_focus() {
-            if let Some(parsed) = parse_number(&draft, &range) {
-                changed = parsed != *value;
-                *value = parsed;
-            }
-        }
         ui.data_mut(|data| data.remove::<String>(id));
     }
     if !backwards {

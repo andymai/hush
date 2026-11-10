@@ -1,6 +1,7 @@
 //! How the words reach the application: typed key by key, or pasted, with
 //! rules for applications that need one or the other.
 
+use crate::config::settings::MAX_TYPING_DELAY_MS;
 use crate::gui::icons;
 use crate::gui::theme::FIELD_WIDTH;
 use crate::gui::widgets::{
@@ -11,8 +12,6 @@ use crate::gui::Gui;
 use crate::text::InsertionMethod;
 
 const ADD_COLUMN: f32 = FIELD_WIDTH + 90.0;
-/// The most `insertion.typing_delay_ms` may be.
-const MAX_TYPING_DELAY: u64 = 200;
 
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Typing");
@@ -39,7 +38,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         .reserve(110.0)
         .show(ui, |ui| {
             let mut delay = gui.config.insertion.typing_delay_ms;
-            if number(ui, &mut delay, 0..=MAX_TYPING_DELAY, "ms").changed() {
+            if number(ui, &mut delay, 0..=MAX_TYPING_DELAY_MS, "ms").changed() {
                 gui.config.insertion.typing_delay_ms = delay;
             }
         });
