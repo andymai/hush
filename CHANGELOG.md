@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/andymai/hush/compare/v0.23.0...v0.24.0) (2026-11-10)
+
+
+### Features
+
+* **text:** type on every layout through the XKB keymap ([#294](https://github.com/andymai/hush/issues/294)) ([dcf150b](https://github.com/andymai/hush/commit/dcf150b617c7466e6b3f4875d759a9eb3425dbd5))
+
 ## [0.23.0](https://github.com/andymai/hush/compare/v0.22.0...v0.23.0) (2026-11-10)
 
 
