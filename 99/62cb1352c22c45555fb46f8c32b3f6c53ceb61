@@ -14,6 +14,7 @@ src/cli/commands/doctor.rs
   s_115995023cd6f3::t_bddcb774253f85 388-389,392,395,404,903-922
 src/cli/commands/listen.rs
   s_115995023cd6f3::t_e4a311372aa2fe 37,39,165-167,205-212,267-276,453-456,761,971-984,1004,1008-1010,1039-1044,1239,1243
+  s_115995023cd6f3::t_d7c2343f0846ab 235,239-241
 src/cli/commands/mod.rs
   s_115995023cd6f3::t_cd34b0cb3be917 40
 src/cli/commands/status.rs
