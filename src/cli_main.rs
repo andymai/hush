@@ -161,7 +161,7 @@ pub enum Commands {
 
     /// Rewrite the selected text with a style's prompt (talks to the daemon)
     Rewrite {
-        /// A style under [styles] with polish = true and a prompt
+        /// A style from the styles table with polish = true and a prompt
         #[arg(value_name = "STYLE", value_parser = style_name)]
         style: String,
     },
