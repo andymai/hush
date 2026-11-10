@@ -53,6 +53,7 @@ Hold `Right Alt`, speak, release. Done.
 - **Any language Whisper knows.** Set `language = "auto"` under `[transcription]` to detect what you speak, or pick one in the settings window. With `detect_languages = ["en", "de"]`, local Whisper picks only from the languages you speak. On a keyboard layout other than plain US (Dvorak, Colemak, and US variants such as US International included), Hush pastes rather than typing key by key, so the letters come out right.
 - **A key for each language.** `languages = { "Shift+RightAlt" = "de" }` under `[hotkey]` gives German its own key, with the same hold, double-tap lock, and cancel as the hotkey. The Language menu of the panel icon sets the language of the hotkey until you change it again, also after a restart. `hush start --lang de` and `hush toggle --lang de` set the language of one recording.
 - **Writing styles.** A style has a name, one line for the polish prompt, and a polish switch. Add styles under `[styles]` in the config or on the Text page of `hush settings`. The built-in `verbatim` style turns polish off for one recording. `styles = { "Super+RightAlt" = "verbatim" }` under `[hotkey]` gives a style its own dictation key, and `hush start --style casual` sets the style of one recording. `app_styles = { slack = "casual" }` under `[profiles]` sets a default style for an application. A style key or `--style` comes first, then the style of the application, then only the tone of the application.
+- **Rewrite with a style.** `rewrite = { "Super+F" = "formal" }` under `[hotkey]` rewrites the selected text with the prompt of the `formal` style, with no speech. `hush rewrite formal` does the same from a script or a compositor bind. With nothing selected, Hush shows a notice and sends nothing to the LLM. When the LLM fails, the selection does not change. The style needs polish on and a prompt, so `verbatim` cannot rewrite.
 - **Teach it your words.** Select a term Hush keeps misspelling and run `hush learn` (or `hush learn Kubernetes`); from then on it is written exactly that way. The Text page of `hush settings` lists, edits, and removes your words. A fix on the History page also suggests words to learn. `hush paste-last` re-types the last transcript, and when insertion fails the text waits on the clipboard.
 - **History.** Hush keeps the last 500 transcripts on your computer, in a file only you can read. The History page of `hush settings` searches them, copies one again, fixes one, or deletes them. Turn it off with `history.enabled = false`. Turn on Keep the audio on that page, or set `history.keep_audio_days`, and Hush also keeps the audio of each take as FLAC for that many days. The page then plays the audio and transcribes it again with the current model. When you fix an entry, the page suggests the new names and terms in your correction. These are words that are not common English words, and words with a new case. Only Add puts a word into the vocabulary, as `hush learn` does.
 - **No lost takes.** When a transcription fails, Hush keeps the audio of the take for 7 days, in a file only you can read. Fix the problem, then run `hush recover`: it transcribes the audio, prints or types the text, and deletes the file. `hush transcribe <file>` prints the text of any WAV or FLAC file.
@@ -85,6 +86,7 @@ Everyday dictation:
 | `hush listen` | Run a dictation session attached to the terminal |
 | `hush record [-d secs]` | Record for N seconds (default 30) and transcribe |
 | `hush learn [words…]` | Add the selection, or the given words, to the vocabulary |
+| `hush rewrite <style>` | Rewrite the selected text with the prompt of a style. The style needs polish on and a prompt. Another style exits with code 2 |
 | `hush paste-last` | Re-type the last transcript |
 | `hush transcribe <file>` | Print the text of a WAV or FLAC file, with the daemon's model when the daemon runs |
 | `hush recover [--all] [--list] [--type]` | Transcribe the newest take that failed (or `--all` of them), print or type the text, and delete its audio. `--list` only lists them |
@@ -216,6 +218,7 @@ Give each state a color in the Waybar style sheet, for example `#custom-hush.rec
 | `hotkey.command` | Command Mode chord; `""` disables it | Ctrl+RightAlt |
 | `hotkey.languages` | A dictation key for each language, such as `{ "Shift+RightAlt" = "de" }`, with the same hold, double-tap lock, toggle mode, and cancel as `hotkey.combination`. The Language menu of the panel icon sets the language of `hotkey.combination` | none |
 | `hotkey.styles` | A dictation key for each writing style, such as `{ "Super+RightAlt" = "verbatim" }`, with the same hold, double-tap lock, toggle mode, and cancel as `hotkey.combination` | none |
+| `hotkey.rewrite` | A key that rewrites the selected text with the prompt of a style, such as `{ "Super+F" = "formal" }`. The style needs polish on and a prompt | none |
 | `styles.<name>.prompt`, `styles.<name>.polish` | A writing style. `prompt` is one line that Hush adds to the polish prompt next to the tone of the application. `polish` turns the LLM polish on or off for recordings in this style, whatever `llm.polish` says. A name uses lowercase letters, digits, `-`, and `_`. `verbatim` is built in and turns polish off | only `verbatim` |
 | `llm.provider` | `auto` (Ollama when reachable, else Anthropic when a key exists), `ollama`, `anthropic`, `openai-compatible`, or `none`. `auto` never picks `openai-compatible` | auto |
 | `llm.ollama_url`, `llm.ollama_model` | The local Ollama server and model | localhost:11434, llama3.2 |
@@ -259,11 +262,11 @@ The Text page of `hush settings` also imports and exports the vocabulary as a pl
 
 ### Transcript hook
 
-Set `hooks.transcript` to a command, and Hush runs it with `sh -c` on each transcript after polishing and before it types the text. Command Mode results also go through it. The text goes to stdin, and Hush types what the command prints. Hush removes one trailing newline from the output.
+Set `hooks.transcript` to a command, and Hush runs it with `sh -c` on each transcript after polishing and before it types the text. Command Mode results and style rewrites also go through it. The text goes to stdin, and Hush types what the command prints. Hush removes one trailing newline from the output.
 
-- Exit code 77 types nothing, and the take gets no history entry.
+- Exit code 77 types nothing, and the take gets no history entry. After a style rewrite, exit code 77 leaves the selection as it is.
 - When the command exits with a code other than 0 or 77, cannot start, prints nothing, or runs longer than 5 seconds, Hush types the original text and logs the reason.
-- The command gets `HUSH_APP` (the window class, empty when unknown), `HUSH_PROFILE` (`terminal`, `editor`, `chat`, `mail`, `docs`, `browser`, or `other`), `HUSH_RAW_TEXT` (the text as Whisper returned it; in Command Mode, the spoken instruction), and `HUSH_TRIGGER` (`hotkey`, `ipc` for `hush toggle` and `hush start`, `tray`, or `command` for Command Mode).
+- The command gets `HUSH_APP` (the window class, empty when unknown), `HUSH_PROFILE` (`terminal`, `editor`, `chat`, `mail`, `docs`, `browser`, or `other`), `HUSH_RAW_TEXT` (the text as Whisper returned it; in Command Mode, the spoken instruction; in a style rewrite, the selected text), and `HUSH_TRIGGER` (`hotkey`, `ipc` for `hush toggle` and `hush start`, `tray`, `command` for Command Mode, or `rewrite` for a rewrite key and `hush rewrite`).
 - The command does not get the API keys that Hush reads from its .env files.
 
 Remove every exclamation mark:

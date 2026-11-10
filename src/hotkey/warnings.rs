@@ -1,5 +1,5 @@
-//! Checks on the chords under `[hotkey]`, language and style chords
-//! included: two actions on one chord, Right Alt on a layout where it is AltGr, and keys
+//! Checks on the chords under `[hotkey]`, language, style, and rewrite
+//! chords included: two actions on one chord, Right Alt on a layout where it is AltGr, and keys
 //! that type a character. Each check is a pure function, so the settings
 //! window, the config load, and `hush doctor` give the same answer.
 
@@ -22,6 +22,8 @@ pub enum Role {
     Language(Language),
     /// A style chord: dictation in that style
     Style(StyleName),
+    /// A rewrite chord: the selected text, rewritten in that style
+    Rewrite(StyleName),
 }
 
 impl Role {
@@ -44,6 +46,7 @@ impl Role {
             Role::Learn => "Learn selection".to_string(),
             Role::Language(language) => format!("Dictate in {}", language.name()),
             Role::Style(style) => format!("Dictate in the {} style", style),
+            Role::Rewrite(style) => format!("Rewrite in the {} style", style),
         }
     }
 
@@ -57,6 +60,7 @@ impl Role {
             Role::Learn => "learn",
             Role::Language(_) => "languages",
             Role::Style(_) => "styles",
+            Role::Rewrite(_) => "rewrite",
         }
     }
 
@@ -455,6 +459,32 @@ mod tests {
         assert!(verbatim.dictates());
         let typing = printable([(Role::Dictate, "RightAlt"), (casual, "Ctrl+G")], false);
         assert_eq!(typing[0].0, casual);
+    }
+
+    #[test]
+    fn rewrite_chords_conflict_with_every_other_chord() {
+        let formal = StyleName::parse("formal").unwrap();
+        let rewrite = Role::Rewrite(formal);
+        let mut bound = defaults().to_vec();
+        bound.push((Role::Style(formal), "Super+RightAlt"));
+        bound.push((rewrite, "Super+F"));
+        assert!(conflicts(bound.clone()).is_empty());
+        bound.push((german(), "super+f"));
+        let found = conflicts(bound);
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].to_string(),
+            "Rewrite in the formal style and Dictate in German use Super+F"
+        );
+        assert_eq!(
+            conflicts([(rewrite, "F14"), (Role::Style(formal), "f14")])[0].roles,
+            vec![rewrite, Role::Style(formal)],
+            "a rewrite chord and a style chord of one style still differ"
+        );
+        assert_eq!(rewrite.config_key(), "rewrite");
+        assert!(!rewrite.dictates());
+        let typing = printable([(Role::Dictate, "RightAlt"), (rewrite, "Ctrl+G")], false);
+        assert_eq!(typing[0].0, rewrite);
     }
 
     #[test]

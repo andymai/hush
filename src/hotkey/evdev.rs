@@ -783,6 +783,24 @@ mod tests {
     }
 
     #[test]
+    fn a_rewrite_chord_reports_its_press_with_its_style() {
+        let formal = crate::text_processing::StyleName::parse("formal").unwrap();
+        let bindings = HotkeyBindings::parse("RightAlt", None)
+            .unwrap()
+            .with_action(HotkeyAction::Rewrite(formal), "Super+F")
+            .unwrap();
+        let mut m = Matchers::new(&bindings);
+        m.process(KeyCode::KEY_LEFTMETA, 1);
+        let press = m.process(KeyCode::KEY_F, 1);
+        assert_eq!(
+            press.event,
+            Some(HotkeyEvent::Action(HotkeyAction::Rewrite(formal)))
+        );
+        assert!(!press.swallow);
+        assert_eq!(m.process(KeyCode::KEY_F, 0).event, None);
+    }
+
+    #[test]
     fn the_command_chord_reports_press_and_release() {
         let bindings = HotkeyBindings::parse("RightAlt", Some("Escape"))
             .unwrap()

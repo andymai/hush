@@ -43,6 +43,8 @@ pub enum SessionCommand {
     ChooseLanguage(Option<Language>),
     /// A file waits in [`SharedState::next_file`]
     TranscribeFile,
+    /// Rewrite the selected text with the prompt of the style
+    Rewrite(StyleName),
     Quit,
 }
 
@@ -89,6 +91,7 @@ pub struct SharedState {
     model: Mutex<Option<ModelState>>,
     languages: Mutex<Languages>,
     styles: Mutex<Vec<StyleName>>,
+    rewriters: Mutex<Vec<StyleName>>,
     last_text: Mutex<Option<String>>,
     waiter: Mutex<Option<oneshot::Sender<TakeResult>>>,
     files: Mutex<VecDeque<FileJob>>,
@@ -108,6 +111,7 @@ impl SharedState {
             model: Mutex::new(None),
             languages: Mutex::new(Languages::default()),
             styles: Mutex::new(vec![styles::VERBATIM]),
+            rewriters: Mutex::new(Vec::new()),
             last_text: Mutex::new(None),
             waiter: Mutex::new(None),
             files: Mutex::new(VecDeque::new()),
@@ -228,6 +232,15 @@ impl SharedState {
 
     pub fn knows_style(&self, name: StyleName) -> bool {
         self.styles.lock().contains(&name)
+    }
+
+    /// The styles that `hush rewrite` can use: polish on and a prompt.
+    pub fn set_rewriters(&self, names: Vec<StyleName>) {
+        *self.rewriters.lock() = names;
+    }
+
+    pub fn can_rewrite(&self, name: StyleName) -> bool {
+        self.rewriters.lock().contains(&name)
     }
 
     pub fn set_config_language(&self, language: Language) {
@@ -521,6 +534,25 @@ pub fn respond(
                 forward(SessionCommand::PasteLast, DaemonState::Inserting)
             }
         },
+        DaemonCommand::Rewrite { style } => {
+            let name = match StyleName::from_name(&style) {
+                Ok(name) => name,
+                Err(e) => return DaemonResponse::error(e.to_string()),
+            };
+            if !shared.knows_style(name) {
+                DaemonResponse::error(unknown_style(name))
+            } else if !shared.can_rewrite(name) {
+                DaemonResponse::error(format!(
+                    "The style {} cannot rewrite text: it needs polish = true and a prompt",
+                    name
+                ))
+            } else if shared.in_take() {
+                DaemonResponse::error("A recording is in progress. Rewrite after it ends.")
+            } else {
+                forward(SessionCommand::Rewrite(name), shared.snapshot())
+                    .with_message(format!("Rewriting the selection in the {} style.", name))
+            }
+        },
         DaemonCommand::Learn { text } => match learn::learn(text.as_deref()) {
             Ok(term) => forward(SessionCommand::ReloadVocabulary, shared.snapshot())
                 .with_message(format!("Learned '{}'", term)),
@@ -761,6 +793,43 @@ mod tests {
             &tx,
         );
         assert_eq!(reply.style, None, "a start without a style names none");
+    }
+
+    #[test]
+    fn a_rewrite_reaches_the_session_only_with_a_style_that_can_rewrite() {
+        let shared = SharedState::new();
+        let (tx, rx) = mpsc::channel();
+        let formal = StyleName::parse("formal").unwrap();
+        let raw = StyleName::parse("raw").unwrap();
+        shared.set_styles(vec![styles::VERBATIM, formal, raw]);
+        shared.set_rewriters(vec![formal]);
+        let rewrite = |style: &str| DaemonCommand::Rewrite {
+            style: style.to_string(),
+        };
+
+        let reply = respond(rewrite("formal"), &shared, &tx);
+        assert!(reply.ok);
+        assert_eq!(reply.state, Some(DaemonState::Idle));
+        assert!(reply.message.unwrap().contains("formal"));
+        assert_eq!(rx.try_recv(), Ok(SessionCommand::Rewrite(formal)));
+
+        for (style, needle) in [
+            ("verbatim", "cannot rewrite"),
+            ("raw", "cannot rewrite"),
+            ("nosuch", "knows no style 'nosuch'"),
+            ("No Such", "Invalid style name"),
+        ] {
+            let reply = respond(rewrite(style), &shared, &tx);
+            assert!(!reply.ok, "{style}");
+            let error = reply.error.unwrap();
+            assert!(error.contains(needle), "{style}: {error}");
+        }
+        assert!(rx.try_recv().is_err(), "nothing reaches the session");
+
+        shared.set_recording(Instant::now());
+        let reply = respond(rewrite("formal"), &shared, &tx);
+        assert!(!reply.ok, "no rewrite while a take records");
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

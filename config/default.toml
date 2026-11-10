@@ -62,6 +62,10 @@ languages = {} # e.g. { "Shift+RightAlt" = "de", "F13" = "auto" }
 # A dictation key for each writing style (see [styles]), with the same hold,
 # double-tap lock, toggle mode, and cancel as the hotkey.
 styles = {} # e.g. { "Super+RightAlt" = "verbatim" }
+# A key that rewrites the selected text with the prompt of a style, with no
+# speech. The style needs polish = true and a prompt, so verbatim cannot
+# rewrite. With nothing selected, Hush shows a notice and sends nothing.
+rewrite = {} # e.g. { "Super+F" = "formal" }
 
 [feedback]
 audio_enabled = true # start, stop, cancel, and warning tones
@@ -150,6 +154,8 @@ temperature = 0.3
 # (default true). The rule-based cleanup always runs. A name uses lowercase
 # letters, digits, - and _. "verbatim" is built in: it turns polish off, so
 # you cannot use that name.
+# A style with polish on and a prompt can also rewrite the selected text:
+# see hotkey.rewrite and `hush rewrite NAME`.
 # [styles.casual]
 # prompt = "Casual and brief, like a chat message to a friend."
 # [styles.formal]
@@ -157,13 +163,15 @@ temperature = 0.3
 
 [hooks]
 # A command that changes each transcript. Hush runs it with sh -c after
-# polishing and before it types the text, also for Command Mode. The text
-# goes to stdin, and Hush types what the command prints, without one
-# trailing newline. Exit code 77 types nothing. When the command fails,
-# prints nothing, or runs longer than 5 seconds, Hush types the original text.
+# polishing and before it types the text, also for Command Mode and a style
+# rewrite. The text goes to stdin, and Hush types what the command prints,
+# without one trailing newline. Exit code 77 types nothing, so a style
+# rewrite leaves the selection as it is. When the command fails, prints
+# nothing, or runs longer than 5 seconds, Hush types the original text.
 # The command gets HUSH_APP (the window class), HUSH_PROFILE (terminal,
 # editor, chat, mail, docs, browser, or other), HUSH_RAW_TEXT (the text as
-# Whisper returned it), and HUSH_TRIGGER (hotkey, ipc, tray, or command).
+# Whisper returned it, or the selected text for a style rewrite), and
+# HUSH_TRIGGER (hotkey, ipc, tray, command, or rewrite).
 # Use an absolute path: the daemon gets the PATH of your login session.
 transcript = "" # e.g. "/usr/bin/tr -d '!'"; empty is off
 

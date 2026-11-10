@@ -518,6 +518,9 @@ pub struct HotkeyConfig {
     /// Dictation chords for one style each, such as `"Super+RightAlt" = "verbatim"`
     #[serde(default)]
     pub styles: BTreeMap<String, String>,
+    /// Chords that rewrite the selected text with a style, such as `"Super+F" = "formal"`
+    #[serde(default)]
+    pub rewrite: BTreeMap<String, String>,
 }
 
 impl HotkeyConfig {
@@ -530,12 +533,12 @@ impl HotkeyConfig {
             Role::Command => &self.command,
             Role::PasteLast => &self.paste_last,
             Role::Learn => &self.learn,
-            Role::Language(_) | Role::Style(_) => "",
+            Role::Language(_) | Role::Style(_) | Role::Rewrite(_) => "",
         }
     }
 
-    /// The chord text of an action in [`Role::ALL`]; `None` for a language
-    /// or a style.
+    /// The chord text of an action in [`Role::ALL`]; `None` for a language,
+    /// a style, or a rewrite.
     pub fn chord_mut(&mut self, role: Role) -> Option<&mut String> {
         match role {
             Role::Dictate => Some(&mut self.combination),
@@ -543,7 +546,7 @@ impl HotkeyConfig {
             Role::Command => Some(&mut self.command),
             Role::PasteLast => Some(&mut self.paste_last),
             Role::Learn => Some(&mut self.learn),
-            Role::Language(_) | Role::Style(_) => None,
+            Role::Language(_) | Role::Style(_) | Role::Rewrite(_) => None,
         }
     }
 
@@ -570,8 +573,17 @@ impl HotkeyConfig {
             .collect()
     }
 
-    /// Every action, language chord, and style chord with its chord text:
-    /// what the conflict, AltGr, and typing checks look at.
+    /// Each rewrite chord with its style. A style that cannot rewrite gets
+    /// its own error from [`Config::validate`].
+    pub fn rewrite_keys(&self) -> Vec<(StyleName, &str)> {
+        self.rewrite
+            .iter()
+            .filter_map(|(chord, name)| Some((StyleName::parse(name)?, chord.as_str())))
+            .collect()
+    }
+
+    /// Every action, language chord, style chord, and rewrite chord with its
+    /// chord text: what the conflict, AltGr, and typing checks look at.
     pub fn bound(&self) -> Vec<(Role, &str)> {
         let mut bound = self.chords().to_vec();
         bound.extend(
@@ -583,6 +595,11 @@ impl HotkeyConfig {
             self.style_keys()
                 .into_iter()
                 .map(|(style, chord)| (Role::Style(style), chord)),
+        );
+        bound.extend(
+            self.rewrite_keys()
+                .into_iter()
+                .map(|(style, chord)| (Role::Rewrite(style), chord)),
         );
         bound
     }
@@ -742,6 +759,15 @@ impl Config {
                 &self.styles,
                 name,
                 &format!("for {} in hotkey.styles", chord),
+            )?;
+        }
+        for (chord, name) in &self.hotkey.rewrite {
+            KeyCombination::parse(chord)
+                .map_err(|e| anyhow::anyhow!("Invalid chord in hotkey.rewrite: {}", e))?;
+            styles::rewriter(
+                &self.styles,
+                name,
+                &format!("for {} in hotkey.rewrite", chord),
             )?;
         }
         for (app, name) in &self.profiles.app_styles {
@@ -1513,6 +1539,60 @@ model_size = "small"
     }
 
     #[test]
+    fn rewrite_chords_need_a_style_that_can_rewrite() {
+        assert!(Config::defaults().unwrap().hotkey.rewrite.is_empty());
+        let styles = "[styles.formal]\nprompt = \"Formal English.\"\n\
+                      [styles.raw]\nprompt = \"Formal English.\"\npolish = false\n\
+                      [styles.bare]\nprompt = \"\"\n";
+        let config = Config::parse_over_defaults(&format!(
+            "{styles}[hotkey]\nrewrite = {{ \"Super+F\" = \"formal\" }}\n"
+        ))
+        .unwrap();
+        let formal = StyleName::parse("formal").unwrap();
+        assert_eq!(config.hotkey.rewrite_keys(), vec![(formal, "Super+F")]);
+        assert!(config
+            .hotkey
+            .bound()
+            .contains(&(Role::Rewrite(formal), "Super+F")));
+
+        for (rewrite, needle) in [
+            (
+                "verbatim",
+                "verbatim for Super+F in hotkey.rewrite turns polish off",
+            ),
+            ("raw", "raw for Super+F in hotkey.rewrite turns polish off"),
+            ("bare", "has no prompt"),
+            ("nosuch", "'nosuch' for Super+F in hotkey.rewrite"),
+        ] {
+            let user = format!("{styles}[hotkey]\nrewrite = {{ \"Super+F\" = \"{rewrite}\" }}\n");
+            let err = format!("{:#}", Config::parse_over_defaults(&user).unwrap_err());
+            assert!(err.contains(needle), "{rewrite}: {err}");
+        }
+        let err = Config::parse_over_defaults(&format!(
+            "{styles}[hotkey]\nrewrite = {{ \"Ctrl+Nope\" = \"formal\" }}\n"
+        ))
+        .unwrap_err();
+        assert!(format!("{:#}", err).contains("hotkey.rewrite"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            format!(
+                "{styles}[hotkey]\nlearn = \"Super+F\"\nrewrite = {{ \"super+f\" = \"formal\" }}\n"
+            ),
+        )
+        .unwrap();
+        let config = Config::load_from(Some(&path)).unwrap();
+        let found = warnings::conflicts(config.hotkey.bound());
+        assert_eq!(found.len(), 1, "a conflict is a warning, not a load error");
+        assert_eq!(
+            found[0].to_string(),
+            "Learn selection and Rewrite in the formal style use Super+F"
+        );
+    }
+
+    #[test]
     fn styles_survive_a_save() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
@@ -1528,6 +1608,10 @@ model_size = "small"
             .hotkey
             .styles
             .insert("Super+RightAlt".to_string(), "formal".to_string());
+        config
+            .hotkey
+            .rewrite
+            .insert("Super+F".to_string(), "formal".to_string());
         config
             .profiles
             .app_styles

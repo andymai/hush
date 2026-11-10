@@ -66,6 +66,8 @@ pub enum HotkeyEvent {
 pub enum HotkeyAction {
     PasteLast,
     Learn,
+    /// Rewrite the selected text with the style's prompt
+    Rewrite(StyleName),
 }
 
 /// The keys a backend watches: the dictation hotkey, an optional cancel key,
@@ -138,10 +140,14 @@ impl HotkeyBindings {
             .all()
             .any(|existing| existing.to_string() == combination.to_string());
         if taken {
+            let name = match action {
+                HotkeyAction::Rewrite(style) => format!("the {} rewrite", style),
+                other => format!("{:?}", other),
+            };
             return Err(anyhow::anyhow!(
-                "{} is already bound; {:?} needs its own chord",
+                "{} is already bound; {} needs its own chord",
                 combination,
-                action
+                name
             ));
         }
         self.actions.push((action, combination));
@@ -403,6 +409,30 @@ mod tests {
             .with_action(HotkeyAction::PasteLast, "Super+RightAlt")
             .is_err());
         assert!(b.with_style(casual, "F13").is_ok());
+    }
+
+    #[test]
+    fn rewrite_chords_are_actions_with_their_own_chord() {
+        let formal = StyleName::parse("formal").unwrap();
+        let b = HotkeyBindings::parse("RightAlt", Some("Escape"))
+            .unwrap()
+            .with_style(formal, "Super+RightAlt")
+            .unwrap()
+            .with_action(HotkeyAction::Rewrite(formal), "Super+F")
+            .unwrap();
+        assert_eq!(b.actions.len(), 1);
+        assert_eq!(b.actions[0].0, HotkeyAction::Rewrite(formal));
+        let err = b
+            .clone()
+            .with_action(HotkeyAction::Rewrite(formal), "super+rightalt")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("the formal rewrite needs its own chord"),
+            "{err}"
+        );
+        assert!(b.clone().with_style(formal, "Super+F").is_err());
+        assert!(b.with_action(HotkeyAction::Rewrite(formal), "").is_ok());
     }
 
     #[test]

@@ -177,6 +177,8 @@ pub struct Gui {
     pub new_language: String,
     /// The style name for the next style key; empty until one is picked.
     pub new_style: String,
+    /// The style name for the next rewrite key; empty until one is picked.
+    pub new_rewrite: String,
     /// The hotkey field showing a text box instead of a capture button, and
     /// its chord from before the edit.
     pub editing_key: Option<(Role, String)>,
@@ -244,6 +246,7 @@ impl Gui {
             capture: None,
             new_language: String::new(),
             new_style: String::new(),
+            new_rewrite: String::new(),
             editing_key: None,
             focus_editor: false,
             layout: crate::text::layout::current(),

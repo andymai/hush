@@ -1,6 +1,6 @@
-//! Exit codes for scripts. `toggle`, `start`, `stop`, `cancel`, `status`, and
-//! `paste-last` use them; clap exits with [`ExitStatus::Usage`] on a usage
-//! error before a command runs.
+//! Exit codes for scripts. `toggle`, `start`, `stop`, `cancel`, `status`,
+//! `paste-last`, and `rewrite` use them; clap exits with
+//! [`ExitStatus::Usage`] on a usage error before a command runs.
 
 use crate::ipc::client::NotRunning;
 use std::fmt;
