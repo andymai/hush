@@ -187,6 +187,10 @@ pub struct DaemonResponse {
     /// The style that a start asked for, for the take it began
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<String>,
+    /// In a status reply: why the daemon runs in safe mode, which writes
+    /// and deletes nothing in the history or the kept audio
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safe_mode: Option<String>,
 }
 
 impl DaemonResponse {
@@ -200,6 +204,7 @@ impl DaemonResponse {
             model_state: None,
             language: None,
             style: None,
+            safe_mode: None,
         }
     }
 
@@ -213,7 +218,13 @@ impl DaemonResponse {
             model_state: None,
             language: None,
             style: None,
+            safe_mode: None,
         }
+    }
+
+    pub fn with_safe_mode(mut self, safe_mode: Option<String>) -> Self {
+        self.safe_mode = safe_mode;
+        self
     }
 
     pub fn with_language(mut self, language: Option<String>) -> Self {

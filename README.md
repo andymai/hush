@@ -174,6 +174,7 @@ text="$(hush stop --print)" && notify-send "Hush heard" "$text"
 | `devices` | Names of the audio input devices |
 | `os`, `arch` | Operating system and CPU architecture |
 | `config_error` | Why the configuration did not load, else `null` |
+| `safe_mode` | Why the daemon runs in safe mode, else `null`. A daemon that started while the configuration did not load dictates on the defaults and writes and deletes nothing in the history and the kept audio |
 
 ### Waybar
 
