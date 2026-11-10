@@ -30,3 +30,6 @@ The build fails closed on the patterns the 2025-2026 npm and GitHub Actions supp
 | cargo-deny license and source policy, cargo-audit advisories | `deny.toml`, `.github/workflows/ci.yml` | Unvetted licenses, unknown registries, RustSec advisories. |
 | Dependabot cooldown (7d default, 14d major) across cargo, npm, github-actions | `.github/dependabot.yml` | Fresh malicious uploads. |
 | Workflow tokens default to no permissions; each job opts in | `.github/workflows/*.yml` | Credential reach from a compromised step. |
+| Build provenance attestation for each release file, checked by `install.sh` when `gh` is present | `.github/workflows/release.yml`, `install.sh` | A release file that the release workflow did not build. |
+
+From 0.17.0, each release file has a Sigstore-signed build provenance attestation. This includes the tarball, the `.deb`, the `.rpm`, the AppImage, and `SHA256SUMS`. To verify a file, run `gh attestation verify <file> --repo andymai/hush` with GitHub CLI 2.49 or later. [INSTALL.md](INSTALL.md#verify-a-download) has the full steps.
