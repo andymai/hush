@@ -39,8 +39,9 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Build Hush (CPU)
         run: cargo build
-      - name: Cache the Whisper models
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the cached models
+        id: models
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/hush-e2e
           key: hush-e2e-models-${{ hashFiles('src/transcription/models.rs') }}
@@ -50,3 +51,11 @@ jobs:
           # types reaches no window.
           HUSH_E2E_ALLOW_UINPUT: "1"
         run: dbus-run-session -- scripts/e2e/headless.sh scripts/e2e/run.sh
+      # Also after a failed case, so that the next night does not download
+      # the models again.
+      - name: Save the models
+        if: ${{ !cancelled() && steps.models.outcome == 'success' && steps.models.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hush-e2e
+          key: ${{ steps.models.outputs.cache-primary-key }}
