@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/andymai/hush/compare/v0.22.0...v0.23.0) (2026-11-10)
+
+
+### Features
+
+* **llm:** rewrite the selected text with a style ([#292](https://github.com/andymai/hush/issues/292)) ([3a96f2b](https://github.com/andymai/hush/commit/3a96f2b89924c0ce900faa13e42fa27a37ebf0d4))
+
 ## [0.22.0](https://github.com/andymai/hush/compare/v0.21.0...v0.22.0) (2026-11-10)
 
 
