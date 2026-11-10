@@ -1,21 +1,28 @@
 # Installation
 
-## CPU requirement
+## Libraries and CPU
 
-The prebuilt binaries (the tarball, `.deb`, `.rpm`, AppImage, COPR, and AUR
-packages) need an x86-64-v3 CPU: Intel Haswell (2013) and newer, or AMD
-Excavator, Zen, and newer. These CPUs have AVX, AVX2, FMA, F16C, and BMI2.
-Some Intel Pentium, Celeron, and Atom CPUs from the same years do not have
-them.
+Hush runs on any x86-64 CPU. The speech engine, `libtranscribe`, loads the ggml
+backends as modules from its own folder: one CPU module for each x86 level,
+from plain x86-64 to AVX-512, and the GPU module (Vulkan, or CUDA in a
+`make release-cuda` build). At start, ggml loads the CPU module that fits the
+CPU best. The `Backends` line of `hush doctor` and of `hush status --full`
+names the CPU module, the GPU backend, and the folder.
 
-On an older CPU, Hush does not load the Whisper model and names the missing
-features. The `CPU` line of `hush doctor` shows the same problem. To fix it, do
-one of these:
+The binary looks for `libtranscribe` and the modules in `../lib/hush`, next to
+its `bin` folder:
 
-- Build Hush from source with `make release`. A source build targets the CPU
-  that builds it.
-- Use a cloud backend: set `backend = "groq"` or `backend = "openai"` under
-  `[transcription]`. A cloud backend does not run Whisper on your CPU.
+| Install | Binary | Libraries |
+|---|---|---|
+| `.deb`, `.rpm`, COPR, AUR | `/usr/bin/hush` | `/usr/lib/hush` |
+| Tarball | `bin/hush` | `lib/hush` |
+| `install.sh` with the tarball | `~/.local/bin/hush` | `~/.local/lib/hush` |
+| AppImage | `usr/bin/hush` in the image | `usr/lib/hush` in the image |
+| `make release` | `target/release/hush` | `target/release/lib/hush` |
+| `make install` | `~/.cargo/bin/hush` | `~/.cargo/lib/hush` |
+
+To move the tarball's Hush, move `bin/hush` and `lib/hush` together. A copy of
+the binary alone does not start.
 
 ## Verify a download
 
@@ -75,7 +82,17 @@ cd hush
 make release        # Vulkan GPU build: NVIDIA, AMD, and Intel with the stock driver
 make release-cuda   # CUDA build, needs the CUDA toolkit (nvcc)
 make release-cpu    # CPU only
+make install        # The Vulkan build in ~/.cargo/bin and ~/.cargo/lib/hush; PREFIX=... for another place
 ```
+
+Each target puts the binary in `target/release` and `libtranscribe` with the
+ggml modules in `target/release/lib/hush`. `./hush` runs from there. A source
+build has the CPU modules for every x86 level too, so the build machine does
+not limit the CPU that runs it.
+
+Use `make install`, not `cargo install`: `cargo install` copies only the
+binary, which then cannot start. `make install` puts `lib/hush` next to the
+`bin` folder, where the binary looks for its libraries.
 
 ## Setup
 
@@ -124,7 +141,8 @@ The Vulkan build needs `glslc`, the Vulkan headers, and the SPIR-V headers at bu
 time and only the graphics driver at runtime. The Makefile sets
 `TRANSCRIBE_CMAKE_ARGS=-DTRANSCRIBE_USE_SYSTEM_BLAS=OFF`. Without it, a plain
 `cargo build` links OpenBLAS when the library is installed, and the binary then needs
-OpenBLAS at runtime. `./hush status` shows the device ggml found.
+OpenBLAS at runtime. `./hush status --full` shows the modules that loaded and the
+device ggml found.
 
 ### CUDA
 
@@ -154,9 +172,18 @@ sudo pacman -S cuda
 **Build fails with missing library:** the error names the header; install the
 matching `-dev` (Ubuntu) or `-devel` (Fedora) package from the lists above.
 
-**"This CPU does not have AVX2" or "Illegal instruction":** the prebuilt binary
-needs an x86-64-v3 CPU. Build from source with `make release`, or use a cloud
-backend. See [CPU requirement](#cpu-requirement).
+**"libtranscribe.so.0.4: cannot open shared object file" or "No ggml backend
+module loaded":** the binary did not find its libraries in `../lib/hush`. Keep
+`bin/hush` and `lib/hush` together, or install the package again. A binary from
+`cargo install` or a copied binary has no `lib/hush`: use `make install`. See
+[Libraries and CPU](#libraries-and-cpu).
+
+**A crash at start with `LD_LIBRARY_PATH` set:** the dynamic loader reads
+`LD_LIBRARY_PATH` before the folder of Hush. When the variable names a folder
+with another `libggml-base.so.0`, `libggml.so.0`, or `libtranscribe.so.0.4`,
+for example from a llama.cpp or whisper.cpp build, Hush loads that copy, and
+its ggml version does not match. Start Hush without that folder in
+`LD_LIBRARY_PATH`.
 
 **Text insertion not working:**
 ```bash

@@ -22,7 +22,11 @@ sha256sums=('@SHA256@')
 
 package() {
   cd "hush-${pkgver}-x86_64-linux"
-  install -Dm755 hush "$pkgdir/usr/bin/hush"
+  install -Dm755 bin/hush "$pkgdir/usr/bin/hush"
+  # libtranscribe and the ggml backend modules, private to Hush: the binary's
+  # RUNPATH is $ORIGIN/../lib/hush.
+  install -d "$pkgdir/usr/lib/hush"
+  install -m644 lib/hush/* "$pkgdir/usr/lib/hush/"
   install -Dm644 io.github.andymai.hush.desktop "$pkgdir/usr/share/applications/io.github.andymai.hush.desktop"
   install -Dm644 io.github.andymai.hush.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.andymai.hush.svg"
   install -Dm644 70-hush.rules "$pkgdir/usr/lib/udev/rules.d/70-hush.rules"

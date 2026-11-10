@@ -112,7 +112,20 @@ case "$kind" in
     mkdir -p "$bin" "$data/applications" "$data/icons/hicolor/scalable/apps"
     tar -xzf "$tmp/$file" -C "$tmp"
     dir="$tmp/hush-${version}-x86_64-linux"
-    install -m 755 "$dir/hush" "$bin/hush"
+    if [ -d "$dir/lib/hush" ]; then
+      # The binary looks for libtranscribe and the ggml modules in ../lib/hush
+      # of the folder that really holds it, so a symlinked bin folder counts as
+      # its target. The old folder goes with $tmp, so ggml never loads a module
+      # of another release.
+      lib="$(dirname "$(cd "$bin" && pwd -P)")/lib/hush"
+      [ ! -d "$lib" ] || mv "$lib" "$tmp/old-lib"
+      mkdir -p "$lib"
+      install -m 644 "$dir"/lib/hush/* "$lib/"
+      install -m 755 "$dir/bin/hush" "$bin/hush"
+      say "Installed the libraries in $lib"
+    else
+      install -m 755 "$dir/hush" "$bin/hush"
+    fi
     sed "s|^Exec=hush|Exec=$bin/hush|" "$dir/io.github.andymai.hush.desktop" > "$data/applications/io.github.andymai.hush.desktop"
     install -m 644 "$dir/io.github.andymai.hush.svg" "$data/icons/hicolor/scalable/apps/"
     say "Installed $bin/hush"

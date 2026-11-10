@@ -10,8 +10,7 @@ use crate::text::layout::Layout;
 use crate::text::typing::{Resolver, Typing};
 use crate::text::WindowProvider;
 use crate::text_processing::hook::{self, Program};
-use crate::transcription::cpu;
-use crate::transcription::device::GpuAvailability;
+use crate::transcription::device::{self, GpuAvailability, Modules};
 use crate::transcription::engine::local_model_path;
 use crate::transcription::gpu_fallback::GpuFailures;
 use crate::transcription::models::{
@@ -120,9 +119,9 @@ pub async fn checks() -> Vec<Check> {
             .is_none_or(|var| keys::api_key_in(&env_file, var).is_some());
         checks.push(cloud_check(&config.transcription, key_present));
     } else {
-        let cpu = cpu_report(cpu::floor(), &cpu::missing());
-        let cpu_supported = cpu.level == Level::Ok;
-        checks.push(cpu);
+        let backends = backends_report(device::init_backends(), &device::loaded_modules());
+        let backends_loaded = backends.level == Level::Ok;
+        checks.push(backends);
         checks.push(model_check(&config, &models_dir));
         let manager = ModelManager::new(&models_dir).ok();
         checks.push(vad_check(
@@ -147,8 +146,8 @@ pub async fn checks() -> Vec<Check> {
                     .and_then(ModelManager::langid_model_path)
                     .is_some(),
         ));
-        // Below the floor, ggml lists no devices, so a GPU line would blame the driver.
-        if cpu_supported {
+        // Without the modules, ggml lists no devices, so a GPU line would blame the driver.
+        if backends_loaded {
             checks.push(gpu_check(&config));
         }
         let failures = GpuFailures::path();
@@ -200,20 +199,19 @@ fn permissions_check() -> Check {
     Check::fail("Keyboard access", detail, "hush setup permissions")
 }
 
-fn cpu_report(floor: Option<&str>, missing: &[&str]) -> Check {
-    match floor {
-        None => Check::ok("CPU", "this build has no CPU floor"),
-        Some(floor) if missing.is_empty() => {
-            Check::ok("CPU", format!("has the {} features of this build", floor))
-        },
-        Some(floor) => Check::fail(
-            "CPU",
+/// The ggml modules that loaded: the CPU code that ggml picked for this CPU,
+/// and the GPU backend.
+fn backends_report(loaded: anyhow::Result<()>, modules: &Modules) -> Check {
+    const NAME: &str = "Backends";
+    match loaded {
+        Ok(()) => Check::ok(NAME, modules.to_string()),
+        Err(_) => Check::fail(
+            NAME,
             format!(
-                "does not have {}, which this {} build needs",
-                cpu::feature_list(missing),
-                floor
+                "no ggml backend module loaded from {}",
+                device::module_folder(modules.dir.as_deref())
             ),
-            cpu::FIX,
+            "reinstall Hush, or run `make release` again in the source tree",
         ),
     }
 }
@@ -1033,17 +1031,30 @@ mod tests {
     }
 
     #[test]
-    fn the_cpu_line_fails_only_below_the_floor() {
-        assert_eq!(cpu_report(None, &[]).level, Level::Ok);
-        assert_eq!(cpu_report(Some(cpu::X86_64_V3), &[]).level, Level::Ok);
+    fn the_backends_line_names_the_modules_or_fails_without_them() {
+        let modules = Modules {
+            dir: Some("/usr/lib/hush".into()),
+            cpu: Some("haswell".to_string()),
+            gpu: vec!["Vulkan".to_string()],
+        };
+        let check = backends_report(Ok(()), &modules);
+        assert_eq!(check.level, Level::Ok);
+        assert_eq!(
+            check.detail,
+            "CPU code haswell, GPU backend Vulkan (/usr/lib/hush)"
+        );
 
-        let check = cpu_report(Some(cpu::X86_64_V3), &["avx2", "bmi2"]);
+        let missing = Modules {
+            dir: Some("/usr/lib/hush".into()),
+            ..Modules::default()
+        };
+        let check = backends_report(Err(anyhow::anyhow!("status 8")), &missing);
         assert_eq!(check.level, Level::Fail);
-        assert!(check.detail.contains("AVX2, BMI2"), "{}", check.detail);
-        assert!(check.detail.contains("x86-64-v3"), "{}", check.detail);
-        let fix = check.fix.unwrap();
-        assert!(fix.contains("make release"), "{fix}");
-        assert!(fix.contains("backend = \"groq\""), "{fix}");
+        assert_eq!(
+            check.detail,
+            "no ggml backend module loaded from /usr/lib/hush"
+        );
+        assert!(check.fix.unwrap().contains("reinstall Hush"));
     }
 
     #[test]

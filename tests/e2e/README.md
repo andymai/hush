@@ -67,7 +67,7 @@ Two cases use the language-ID model:
 
 | Variable | Use |
 | --- | --- |
-| `HUSH_BIN` | The binary to test. The default is `target/debug/hush`, which the harness builds when it is missing. |
+| `HUSH_BIN` | The binary to test. The default is `target/debug/hush`, which the harness builds when it is missing. A build's binary loads its libraries from `lib/hush` next to it, so `HUSH_BIN=target/release/hush` tests a `make release` build. |
 | `HUSH_E2E_MODEL` | A ggml model file to use instead of `tiny`. |
 | `HUSH_E2E_PARAKEET_MODEL` | A copy of `parakeet-tdt-0.6b-v3-Q8_0.gguf` for the `parakeet` case. Without it, the harness downloads the model (740 MB) once into `~/.cache/hush-e2e/`. |
 | `HUSH_E2E_LANGID_MODEL` | A copy of `lang-id-voxlingua107-ecapa-Q8_0.gguf` for the language-ID cases. It must match the SHA-256 in `models.rs`. |

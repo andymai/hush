@@ -23,14 +23,24 @@ one is present, and types the result at the cursor through uinput, so it works \
 in every application, VM, and password field on X11 and Wayland."""
 section = "utils"
 priority = "optional"
-depends = "$auto"
+# The release job fills in Depends with dpkg-shlibdeps on the unpacked package.
+# cargo-deb's $auto runs it on each file outside a package tree, where it cannot
+# follow $ORIGIN to the private libraries in /usr/lib/hush.
+depends = ""
 # Hush loads libxkbcommon with dlopen to type on every layout, and pastes without it.
 recommends = "libxkbcommon0, xkb-data"
+# libtranscribe and the ggml backend modules are private to Hush, in the folder
+# that the binary's RUNPATH ($ORIGIN/../lib/hush) names.
 assets = [
   [
     "target/release/hush",
     "usr/bin/",
     "755",
+  ],
+  [
+    "target/release/lib/hush/*",
+    "usr/lib/hush/",
+    "644",
   ],
   [
     "packaging/io.github.andymai.hush.desktop",
@@ -65,6 +75,7 @@ summary = "Local voice-to-text for Linux desktops"
 auto-req = "disabled"
 assets = [
   { source = "target/release/hush", dest = "/usr/bin/hush", mode = "755" },
+  { source = "target/release/lib/hush/*", dest = "/usr/lib/hush/", mode = "644" },
   { source = "packaging/io.github.andymai.hush.desktop", dest = "/usr/share/applications/io.github.andymai.hush.desktop", mode = "644" },
   { source = "packaging/io.github.andymai.hush.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.andymai.hush.svg", mode = "644" },
   { source = "packaging/70-hush.rules", dest = "/usr/lib/udev/rules.d/70-hush.rules", mode = "644" },
@@ -72,6 +83,7 @@ assets = [
   { source = "README.md", dest = "/usr/share/doc/hush/README.md", mode = "644", doc = true },
 ]
 
+# auto-req would list the private libraries in /usr/lib/hush as requirements.
 [package.metadata.generate-rpm.requires]
 vulkan-loader = "*"
 alsa-lib = "*"
@@ -84,8 +96,8 @@ xkeyboard-config = "*"
 [features]
 default = []
 
-# transcribe.cpp GPU backends, mutually exclusive. Release binaries use vulkan,
-# which runs on NVIDIA, AMD, and Intel with only the graphics driver present.
+# The GPU backend module of transcribe.cpp, one of the two. Release packages use
+# vulkan, which runs on NVIDIA, AMD, and Intel with only the graphics driver.
 cuda = ["transcribe-cpp/cuda"]
 vulkan = ["transcribe-cpp/vulkan"]
 
@@ -105,10 +117,16 @@ sha2 = "0.11"        # SHA256 checksum validation for model integrity
 indicatif = "0.18"   # Model download progress
 futures-util = "0.3" # Streaming download bodies
 
-# transcribe.cpp runs Whisper on ggml; GPU backends are enabled through the cuda
-# and vulkan features. The link is static. Builds set TRANSCRIBE_CMAKE_ARGS to
-# -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF (Makefile, CI), so no OpenBLAS is linked.
-transcribe-cpp = { version = "0.4.1", default-features = false }
+# transcribe.cpp runs the speech models on ggml. With dynamic-backends,
+# libtranscribe is a shared library, and each ggml backend is a module that it
+# loads at run time: one CPU module for each x86 level, from which ggml picks
+# the best for this CPU, and the GPU module of the cuda or vulkan feature.
+# build.rs puts them in target/<profile>/lib/hush. Builds set
+# TRANSCRIBE_CMAKE_ARGS to -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF (Makefile, CI), so no
+# OpenBLAS is linked.
+transcribe-cpp = { version = "0.4.1", default-features = false, features = [
+  "dynamic-backends",
+] }
 
 # Text processing
 regex = "1.12" # Pattern matching for filler words

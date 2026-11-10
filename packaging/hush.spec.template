@@ -4,6 +4,12 @@
 %global debug_package %{nil}
 %{!?_udevrulesdir:%global _udevrulesdir /usr/lib/udev/rules.d}
 %{!?_userunitdir:%global _userunitdir /usr/lib/systemd/user}
+# libtranscribe and the ggml backend modules are private to Hush, in the folder
+# that the binary's RUNPATH ($ORIGIN/../lib/hush) names, so the package neither
+# provides nor requires them.
+%global hushlibdir %{_prefix}/lib/hush
+%global __provides_exclude_from ^%{hushlibdir}/.*$
+%global __requires_exclude ^lib(transcribe|ggml)
 
 Name:           hush
 Version:        @VERSION@
@@ -29,7 +35,9 @@ every application, VM, and password field on X11 and Wayland.
 %setup -q -n hush-%{version}-x86_64-linux
 
 %install
-install -Dm755 hush %{buildroot}%{_bindir}/hush
+install -Dm755 bin/hush %{buildroot}%{_bindir}/hush
+install -d %{buildroot}%{hushlibdir}
+install -m644 lib/hush/* %{buildroot}%{hushlibdir}/
 install -Dm644 io.github.andymai.hush.desktop %{buildroot}%{_datadir}/applications/io.github.andymai.hush.desktop
 install -Dm644 io.github.andymai.hush.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.github.andymai.hush.svg
 install -Dm644 70-hush.rules %{buildroot}%{_udevrulesdir}/70-hush.rules
@@ -39,6 +47,7 @@ install -Dm644 hush.service %{buildroot}%{_userunitdir}/hush.service
 %license LICENSE
 %doc README.md
 %{_bindir}/hush
+%{hushlibdir}
 %{_datadir}/applications/io.github.andymai.hush.desktop
 %{_datadir}/icons/hicolor/scalable/apps/io.github.andymai.hush.svg
 %{_udevrulesdir}/70-hush.rules

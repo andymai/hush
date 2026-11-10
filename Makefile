@@ -5,24 +5,24 @@
 # then needs it at runtime.
 export TRANSCRIBE_CMAKE_ARGS ?= -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF
 
-# CUDA builds need the toolkit's stub libcuda.so at link time; the real driver
-# library (libcuda.so.1) resolves at runtime. Pointing the linker at the stubs
-# directory avoids creating a system-wide symlink. CUDA_HOME is derived from
-# nvcc so distro packages (/usr/local/cuda, /usr/local/cuda-12.x, /opt/cuda)
-# all work.
+# The CUDA backend module links the toolkit's stub libcuda.so; the real driver
+# library (libcuda.so.1) resolves at runtime. CUDA_HOME is derived from nvcc so
+# distro packages (/usr/local/cuda, /usr/local/cuda-12.x, /opt/cuda) all work.
 CUDA_HOME ?= $(shell dirname $$(dirname $$(command -v nvcc 2>/dev/null || echo /usr/local/cuda/bin/nvcc)))
 CUDA_STUBS := $(CUDA_HOME)/lib64/stubs
 
 # ggml's CMake auto-detects sccache from PATH and deadlocks on the CUDA kernel
 # fan-out, so CUDA builds drop it from PATH entirely; unsetting RUSTC_WRAPPER
-# alone only covers rustc, not nvcc. mold cannot link the CUDA stub library,
-# so CUDA builds force the bfd linker regardless of any local .cargo/config.
-# NCCL serves several GPUs and would be one more runtime library, so it is off.
+# alone only covers rustc, not nvcc. NCCL serves several GPUs and would be one
+# more runtime library, so it is off.
 CUDA_ENV = PATH="$$(dirname $$(rustup which cargo)):$$(echo $$PATH | tr ':' '\n' | grep -v '\.cargo/bin' | paste -sd:)" \
 	RUSTC_WRAPPER= \
-	RUSTFLAGS="-C link-arg=-fuse-ld=bfd -L $(CUDA_STUBS)" \
 	CUDA_HOME="$(CUDA_HOME)" \
 	TRANSCRIBE_CMAKE_ARGS="$(TRANSCRIBE_CMAKE_ARGS) -DGGML_CUDA_NCCL=OFF"
+
+# `make install` puts the binary in $(PREFIX)/bin and its libraries in
+# $(PREFIX)/lib/hush, where the binary looks for them.
+PREFIX ?= $(HOME)/.cargo
 
 # Default target
 help:
@@ -38,7 +38,7 @@ help:
 	@echo "  production   - Build max-optimized Vulkan version (full LTO, slow compile)"
 	@echo "  clean        - Clean build artifacts and remove symlink"
 	@echo "  link         - Create/update symlink to binary"
-	@echo "  install      - Build release and install to ~/.cargo/bin"
+	@echo "  install      - Build release, install to ~/.cargo/bin and ~/.cargo/lib/hush (PREFIX=...)"
 	@echo "  help         - Show this help message"
 
 # Development build (default)
@@ -85,6 +85,10 @@ cuda-preflight:
 		exit 1; \
 	}
 
+# Each release target leaves the binary in target/release, and libtranscribe
+# with the ggml backend modules in target/release/lib/hush: the CPU modules,
+# from which ggml picks the best for this CPU at run time, and the GPU module.
+
 # Release build (Vulkan GPU acceleration)
 release: vulkan-preflight
 	@echo "🚀 Building release version with Vulkan..."
@@ -129,8 +133,17 @@ link:
 		echo "⚠️  Binary not found. Run 'make build' first."; \
 	fi
 
-# Install to user's cargo bin
-install: vulkan-preflight
-	@echo "📦 Installing to ~/.cargo/bin..."
-	@cargo install --path . --features vulkan
-	@echo "✅ Installed! You can now run 'hush' from anywhere."
+# Install the Vulkan release build. The binary finds its libraries in
+# ../lib/hush of the folder that really holds it, so a symlinked bin folder
+# counts as its target. ggml loads every module in the folder, so a module
+# that this build lacks goes.
+install: release
+	@install -Dm755 target/release/hush "$(PREFIX)/bin/hush"
+	@lib="$$(dirname "$$(cd "$(PREFIX)/bin" && pwd -P)")/lib/hush"; \
+	install -d "$$lib"; \
+	for old in "$$lib"/libggml-*.so; do \
+		[ ! -e "$$old" ] || [ -e "target/release/lib/hush/$${old##*/}" ] || rm -f "$$old"; \
+	done; \
+	install -m644 target/release/lib/hush/* "$$lib/"; \
+	echo "📦 Installed $(PREFIX)/bin/hush and its libraries in $$lib"
+	@echo "✅ You can now run 'hush' from anywhere."

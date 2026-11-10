@@ -50,18 +50,14 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     # transcribe-cpp-sys passes TRANSCRIBE_CMAKE_ARGS to the CMake build of
-    # transcribe.cpp and ggml. Without the GGML flags, ggml builds with
-    # -march=native for the runner CPU, and the binary can stop with SIGILL on
-    # an older CPU. Without TRANSCRIBE_USE_SYSTEM_BLAS=OFF, the binary needs
-    # OpenBLAS when the runner has it. HUSH_CPU_FLOOR turns on the runtime check
-    # that names the fix on a CPU below x86-64-v3, and build.rs refuses a floor
-    # build without these flags or with a system BLAS.
+    # transcribe.cpp and ggml. Without TRANSCRIBE_USE_SYSTEM_BLAS=OFF, the
+    # libraries need OpenBLAS when the runner has it. ggml builds one CPU module
+    # for each x86 level and picks the best at run time, so no flag sets a CPU
+    # floor. HUSH_PACKAGE gives the binary only the package RUNPATH,
+    # $ORIGIN/../lib/hush, and makes build.rs refuse a system BLAS.
     env:
-      TRANSCRIBE_CMAKE_ARGS: >-
-        -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF
-        -DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON
-        -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON -DGGML_AVX512=OFF
-      HUSH_CPU_FLOOR: x86-64-v3
+      TRANSCRIBE_CMAKE_ARGS: -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF
+      HUSH_PACKAGE: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,55 +115,93 @@ jobs:
       - run: cargo build --release --features vulkan
 
       # Inlined, like the dependencies step, so that a dispatch for an older tag
-      # also runs it. ggml and transcribe.cpp take their instruction set from
-      # compile flags, so AVX-512 in C or C++ code means ggml was built for the
+      # also runs it. The libggml-cpu-*.so modules use AVX-512 and other
+      # instructions by design: ggml loads only the module that this CPU runs.
+      # The binary, libtranscribe, libggml, libggml-base, and the GPU module
+      # always load, so AVX-512 in their C or C++ code means a build for the
       # runner CPU. Rust code targets baseline x86-64, so AVX-512 in a Rust
       # function is a #[target_feature] path that its crate selects after a
-      # runtime CPU check, as crc32fast does. Function names cannot limit the
-      # check to ggml, because some ggml functions, such as quantize_row_q8_1,
-      # do not have "ggml" in their name.
-      - name: Check that C and C++ code has no AVX-512
+      # runtime CPU check, as crc32fast does.
+      - name: Check that code that always loads has no AVX-512
         run: |
           set -euo pipefail
-          objdump -d --no-show-raw-insn target/release/hush | awk '
-            /^[0-9a-f]+ <.+>:$/ {
-              fn = $0
-              sub(/^[0-9a-f]+ </, "", fn)
-              sub(/>:$/, "", fn)
-              next
-            }
-            # Only AVX-512 has zmm registers, opmask registers k0 to k7, and
-            # xmm16 to xmm31 or ymm16 to ymm31.
-            /%zmm|%k[0-7]|%[xy]mm(1[6-9]|2[0-9]|3[01])/ { hits[fn]++ }
-            END {
-              bad = 0
-              for (f in hits) {
-                # Rust v0 mangling, or legacy mangling with its hash
-                if (f ~ /^_R/ || f ~ /^_ZN.*17h[0-9a-f]+E(\.llvm\.[0-9]+)?$/) {
-                  printf "allowed: %d AVX-512 instructions in Rust function %s\n", hits[f], f
-                } else {
-                  printf "::error::%d AVX-512 instructions in %s\n", hits[f], f
-                  bad++
+          for file in target/release/hush target/release/lib/hush/*; do
+            case "${file##*/}" in libggml-cpu-*.so) continue ;; esac
+            echo "== $file"
+            objdump -d --no-show-raw-insn "$file" | awk '
+              /^[0-9a-f]+ <.+>:$/ {
+                fn = $0
+                sub(/^[0-9a-f]+ </, "", fn)
+                sub(/>:$/, "", fn)
+                next
+              }
+              # Only AVX-512 has zmm registers, opmask registers k0 to k7, and
+              # xmm16 to xmm31 or ymm16 to ymm31.
+              /%zmm|%k[0-7]|%[xy]mm(1[6-9]|2[0-9]|3[01])/ { hits[fn]++ }
+              END {
+                bad = 0
+                for (f in hits) {
+                  # Rust v0 mangling, or legacy mangling with its hash
+                  if (f ~ /^_R/ || f ~ /^_ZN.*17h[0-9a-f]+E(\.llvm\.[0-9]+)?$/) {
+                    printf "allowed: %d AVX-512 instructions in Rust function %s\n", hits[f], f
+                  } else {
+                    printf "::error::%d AVX-512 instructions in %s\n", hits[f], f
+                    bad++
+                  }
                 }
-              }
-              if (bad > 0) {
-                printf "::error::%d C or C++ functions use AVX-512. Build ggml with -DGGML_NATIVE=OFF and the x86-64-v3 flags in TRANSCRIBE_CMAKE_ARGS.\n", bad
-                exit 1
-              }
-              print "ok: no C or C++ function uses AVX-512"
-            }'
+                if (bad > 0) {
+                  printf "::error::%d C or C++ functions use AVX-512. Look for -march=native or a GGML_* flag in TRANSCRIBE_CMAKE_ARGS.\n", bad
+                  exit 1
+                }
+                print "ok: no C or C++ function uses AVX-512"
+              }'
+          done
 
+      # The tarball is a prefix: bin/hush finds its libraries in lib/hush
+      # through the RUNPATH $ORIGIN/../lib/hush, as /usr/bin/hush finds them in
+      # /usr/lib/hush in the .deb and the .rpm.
       - name: Build .deb, .rpm, and tarball
         run: |
           set -euo pipefail
+          # shellcheck disable=SC2016 # $ORIGIN is for the dynamic loader, not the shell.
+          want='$ORIGIN/../lib/hush'
+          runpath=$(readelf -d target/release/hush | sed -n 's/.*(RUNPATH).*\[\(.*\)\]/\1/p')
+          if [ "$runpath" != "$want" ]; then
+            echo "::error::the binary's RUNPATH is '$runpath', not '$want'"
+            exit 1
+          fi
+          # cargo-deb strips only some of the libraries, so the libraries of
+          # every package get stripped here.
+          strip --strip-unneeded --remove-section=.comment target/release/lib/hush/*
           mkdir -p target/dist
           cargo deb --no-build --output target/dist/
+          # dpkg-shlibdeps on the unpacked .deb follows $ORIGIN, skips the
+          # libraries of the package itself, and lists the system libraries.
+          deb="target/dist/hush_${VERSION}-1_amd64.deb"
+          tree="$PWD/target/deb-tree"
+          dpkg-deb -R "$deb" "$tree"
+          mkdir -p target/shlibdeps/debian
+          printf 'Source: hush\n\nPackage: hush\nArchitecture: any\n' > target/shlibdeps/debian/control
+          depends=$(cd target/shlibdeps && dpkg-shlibdeps -O -xlibgcc "$tree/usr/bin/hush" "$tree"/usr/lib/hush/*.so* \
+            | sed -n 's/^shlibs:Depends=//p')
+          awk -v depends="Depends: $depends" '/^Description:/ { print depends } !/^Depends:/' \
+            "$tree/DEBIAN/control" > target/control
+          mv target/control "$tree/DEBIAN/control"
+          dpkg-deb --build --root-owner-group -Zxz "$tree" "$deb"
+          if [ -z "$depends" ] || [ "$(dpkg-deb -f "$deb" Depends)" != "$depends" ]; then
+            echo "::error::the .deb has no Depends from dpkg-shlibdeps"
+            exit 1
+          fi
+          echo "Depends: $depends"
           cargo generate-rpm --output target/dist/
           stage="target/stage/hush-${VERSION}-x86_64-linux"
-          mkdir -p "$stage"
-          cp target/release/hush LICENSE README.md INSTALL.md \
+          mkdir -p "$stage/bin" "$stage/lib/hush"
+          cp target/release/hush "$stage/bin/"
+          cp target/release/lib/hush/* "$stage/lib/hush/"
+          cp LICENSE README.md INSTALL.md \
              packaging/io.github.andymai.hush.desktop packaging/io.github.andymai.hush.svg \
              packaging/70-hush.rules packaging/hush.service "$stage/"
+          "$stage/bin/hush" --version
           tar -C target/stage -czf "target/dist/hush-${VERSION}-x86_64-linux.tar.gz" \
              "hush-${VERSION}-x86_64-linux"
 
@@ -181,9 +215,10 @@ jobs:
           echo "$APPIMAGETOOL_SHA256  appimagetool" | sha256sum -c -
           chmod +x appimagetool
           appdir=target/AppDir
-          mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" \
+          mkdir -p "$appdir/usr/bin" "$appdir/usr/lib/hush" "$appdir/usr/share/applications" \
                    "$appdir/usr/share/icons/hicolor/scalable/apps"
           cp target/release/hush "$appdir/usr/bin/"
+          cp target/release/lib/hush/* "$appdir/usr/lib/hush/"
           cp packaging/io.github.andymai.hush.desktop "$appdir/"
           cp packaging/io.github.andymai.hush.desktop "$appdir/usr/share/applications/"
           cp packaging/io.github.andymai.hush.svg "$appdir/"

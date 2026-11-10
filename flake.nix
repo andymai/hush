@@ -70,13 +70,24 @@
         # transcribe-cpp-sys passes this to CMake, so the build never links a system BLAS.
         TRANSCRIBE_CMAKE_ARGS = "-DTRANSCRIBE_USE_SYSTEM_BLAS=OFF";
 
+        # The binary finds libtranscribe and the ggml modules in $out/lib/hush
+        # through the RUNPATH $ORIGIN/../lib/hush, and nowhere in the build tree.
+        HUSH_PACKAGE = "1";
+
         # CI runs the tests. Some of them open audio and input devices that the build sandbox does not have.
         doCheck = false;
 
         # The default fixup cuts the RUNPATH down to DT_NEEDED and would drop dlopenLibs.
         dontPatchELF = true;
 
+        # build.rs leaves libtranscribe and the ggml backend modules in
+        # target/<triple>/release/lib/hush.
         postInstall = ''
+          for bundle in target/*/release/lib/hush target/release/lib/hush; do
+            if [ -d "$bundle" ]; then
+              install -Dm644 -t $out/lib/hush "$bundle"/*
+            fi
+          done
           install -Dm644 packaging/io.github.andymai.hush.desktop -t $out/share/applications
           install -Dm644 packaging/io.github.andymai.hush.svg -t $out/share/icons/hicolor/scalable/apps
           install -Dm644 packaging/70-hush.rules -t $out/lib/udev/rules.d
