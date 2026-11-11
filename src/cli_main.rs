@@ -7,9 +7,7 @@ use std::path::PathBuf;
 #[command(about = "🤫 Hush - local voice-to-text for Linux")]
 #[command(version)]
 #[command(author = "Andy")]
-#[command(
-    long_about = "Fast, accurate voice-to-text for Linux developers using local Whisper models.\nSupports global hotkeys, multiple input methods, and UInput text insertion."
-)]
+#[command(long_about = LONG_ABOUT)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -26,6 +24,17 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub no_notifications: bool,
 }
+
+// Hard line breaks, because clap does not wrap help text without its wrap_help feature.
+const LONG_ABOUT: &str = "\
+Local voice-to-text for Linux. Hold the hotkey, speak, and release: Hush types
+the text at the cursor.
+
+By default, speech recognition runs on this machine. With the default
+llm.polish = true and llm.provider = \"auto\", Hush polishes the text with a
+reachable Ollama server. Without Ollama, it uses Anthropic when
+ANTHROPIC_API_KEY is set (in the environment or ~/.config/hush/.env). When
+neither is there, Hush makes no LLM call. The LLM gets only text, never audio.";
 
 /// A `--lang` value: a code that Whisper knows, or `auto`.
 fn language_code(code: &str) -> Result<String, String> {
