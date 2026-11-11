@@ -1,7 +1,6 @@
 //! Whether Hush uses the portals or evdev and uinput.
 
 use crate::config::settings::InputBackend;
-use std::ffi::OsStr;
 use std::path::Path;
 
 /// How Hush reads the hotkeys and types.
@@ -58,16 +57,15 @@ impl InputMode {
     }
 }
 
-/// Whether Hush runs in a Flatpak sandbox.
+/// Whether Hush runs in a Flatpak sandbox. Only the file that Flatpak puts
+/// at the root of each sandbox counts: `FLATPAK_ID` can reach a host
+/// process, such as a shell that a Flatpak editor starts on the host.
 pub fn sandboxed() -> bool {
-    sandboxed_with(
-        std::env::var_os("FLATPAK_ID").as_deref(),
-        Path::new("/.flatpak-info").exists(),
-    )
+    sandboxed_at(Path::new("/.flatpak-info"))
 }
 
-fn sandboxed_with(flatpak_id: Option<&OsStr>, info_file: bool) -> bool {
-    flatpak_id.is_some_and(|id| !id.is_empty()) || info_file
+fn sandboxed_at(info_file: &Path) -> bool {
+    info_file.exists()
 }
 
 #[cfg(test)]
@@ -103,14 +101,12 @@ mod tests {
     }
 
     #[test]
-    fn the_sandbox_shows_in_the_id_or_the_info_file() {
-        assert!(sandboxed_with(
-            Some(OsStr::new("io.github.andymai.hush")),
-            false
-        ));
-        assert!(sandboxed_with(None, true));
-        assert!(!sandboxed_with(Some(OsStr::new("")), false));
-        assert!(!sandboxed_with(None, false));
+    fn only_the_info_file_shows_the_sandbox() {
+        let root = tempfile::tempdir().unwrap();
+        let info = root.path().join(".flatpak-info");
+        assert!(!sandboxed_at(&info));
+        std::fs::write(&info, "[Application]\nname=io.github.andymai.hush\n").unwrap();
+        assert!(sandboxed_at(&info));
     }
 
     #[test]

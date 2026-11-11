@@ -1,6 +1,6 @@
 //! Typing through the RemoteDesktop portal.
 //!
-//! Each insertion opens a session with the keyboard, sends its keysyms, and
+//! Each insertion opens a session with the keyboard, sends its keys, and
 //! closes the session, because GNOME shows a sharing indicator while a
 //! session is open. The session asks for persist mode 2, and the restore
 //! token goes to a private file, so the consent dialog shows once. After a
@@ -18,7 +18,18 @@ use tracing::{debug, info, warn};
 
 /// After the consent dialog closes, the window that had the focus needs a
 /// moment to get it back before the first key.
-pub const AFTER_CONSENT: Duration = Duration::from_millis(300);
+const AFTER_CONSENT: Duration = Duration::from_millis(300);
+
+/// A session start that takes longer than this waited for a person. With
+/// no dialog, the portal answers in tens of milliseconds. A token can still
+/// bring a dialog: KDE asks again when the token is stale, and GNOME asks
+/// when the token is from another session.
+const DIALOG_SHOWN_AFTER: Duration = Duration::from_millis(500);
+
+/// Whether a session start of `took` showed the consent dialog.
+pub fn dialog_shown(took: Duration) -> bool {
+    took >= DIALOG_SHOWN_AFTER
+}
 
 /// One RemoteDesktop session for the keyboard.
 #[async_trait]
@@ -53,12 +64,7 @@ impl<P: RemoteDesktopPortal> Typist<P> {
             return Err(PortalError::Refused);
         }
         let token = self.store.load();
-        let mut all = Vec::with_capacity(steps.len() + 1);
-        if token.is_none() {
-            all.push(KeyStep::Pause(AFTER_CONSENT));
-        }
-        all.extend_from_slice(steps);
-        match self.portal.run(token.as_deref(), &all).await {
+        match self.portal.run(token.as_deref(), steps).await {
             Ok(Some(next)) => {
                 if token.as_deref() != Some(next.as_str()) {
                     if let Err(e) = self.store.save(&next) {
@@ -106,6 +112,7 @@ impl RemoteDesktopPortal for AshpdRemoteDesktop {
             .await
             .map_err(error)?;
         let result = async {
+            let asked = std::time::Instant::now();
             proxy
                 .select_devices(
                     &session,
@@ -127,14 +134,17 @@ impl RemoteDesktopPortal for AshpdRemoteDesktop {
             if !started.devices().contains(DeviceType::Keyboard) {
                 return Err(PortalError::Refused);
             }
-            for step in steps {
-                match *step {
-                    KeyStep::Press(sym) | KeyStep::Release(sym) => {
-                        let state = if matches!(step, KeyStep::Press(_)) {
-                            KeyState::Pressed
-                        } else {
-                            KeyState::Released
-                        };
+            if dialog_shown(asked.elapsed()) {
+                tokio::time::sleep(AFTER_CONSENT).await;
+            }
+            for &step in steps {
+                let state = if matches!(step, KeyStep::SymPress(_) | KeyStep::CodePress(_)) {
+                    KeyState::Pressed
+                } else {
+                    KeyState::Released
+                };
+                match step {
+                    KeyStep::SymPress(sym) | KeyStep::SymRelease(sym) => {
                         let sym = i32::try_from(sym)
                             .map_err(|_| PortalError::Failed(format!("keysym {sym:#x}")))?;
                         proxy
@@ -142,6 +152,15 @@ impl RemoteDesktopPortal for AshpdRemoteDesktop {
                             .await
                             .map_err(error)?;
                     },
+                    KeyStep::CodePress(code) | KeyStep::CodeRelease(code) => proxy
+                        .notify_keyboard_keycode(
+                            &session,
+                            i32::from(code),
+                            state,
+                            Default::default(),
+                        )
+                        .await
+                        .map_err(error)?,
                     KeyStep::Pause(delay) => tokio::time::sleep(delay).await,
                 }
             }
@@ -262,7 +281,7 @@ pub(crate) mod tests {
         (dir, store)
     }
 
-    const A: [KeyStep; 2] = [KeyStep::Press(0x61), KeyStep::Release(0x61)];
+    const A: [KeyStep; 2] = [KeyStep::SymPress(0x61), KeyStep::SymRelease(0x61)];
 
     #[tokio::test]
     async fn the_first_session_asks_and_the_next_brings_the_token() {
@@ -272,14 +291,12 @@ pub(crate) mod tests {
         typist.send(&A).await.unwrap();
         typist.send(&A).await.unwrap();
         let sessions = portal.sessions.lock().clone();
-        assert_eq!(sessions[0].0, None, "no token: the dialog shows");
         assert_eq!(
-            sessions[0].1.first(),
-            Some(&KeyStep::Pause(AFTER_CONSENT)),
-            "the focus returns before the first key"
+            sessions[0],
+            (None, A.to_vec()),
+            "no token: the dialog shows"
         );
-        assert_eq!(sessions[1].0.as_deref(), Some("t1"));
-        assert_eq!(sessions[1].1, A, "no pause with a token");
+        assert_eq!(sessions[1], (Some("t1".into()), A.to_vec()));
         assert_eq!(
             store.load().as_deref(),
             Some("t2"),
@@ -323,6 +340,17 @@ pub(crate) mod tests {
             store.load().as_deref(),
             Some("t"),
             "no new token keeps the old one"
+        );
+    }
+
+    #[test]
+    fn only_a_slow_start_waits_for_the_focus() {
+        assert!(!dialog_shown(Duration::from_millis(40)), "a kept token");
+        assert!(!dialog_shown(Duration::from_millis(499)));
+        assert!(dialog_shown(Duration::from_millis(500)));
+        assert!(
+            dialog_shown(Duration::from_secs(4)),
+            "a person read the dialog"
         );
     }
 

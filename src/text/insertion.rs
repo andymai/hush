@@ -19,17 +19,19 @@ use super::clipboard::{self, ClipboardBackend, Restore, Selection, Transcript};
 use super::clock::{Clock, SystemClock};
 use super::keymap::KeyTable;
 use super::modifiers::{self, ModifierWait, PhysicalModifiers};
-use super::typing::Resolver;
+use super::typing::{NoLeds, Resolver, Typing};
 use super::uinput_keyboard::{LineBreak, UinputKeyboard};
 use super::window::{WindowInfo, WindowProvider};
 use super::{class_matches, InsertionMethod, PasteChord};
 use crate::config::settings::InsertionConfig;
 use crate::portal::keyboard::PortalKeyboard;
-use crate::portal::{keysym, ConsentRefused, InputMode};
+use crate::portal::keysym::{self, Typeable};
+use crate::portal::{ConsentRefused, InputMode};
 use crate::text_processing::{AppKind, ProcessingContext, ProfilesConfig};
 use crate::Result;
 use anyhow::Context;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tracing::{debug, info, warn};
@@ -104,20 +106,54 @@ pub enum Chosen {
     Clipboard,
 }
 
-/// In portal mode, auto types printable ASCII through keysyms and pastes
-/// other text, because the compositor drops a keysym that the layout lacks.
-pub fn choose_portal_method(configured: InsertionMethod, text: &str) -> Chosen {
+/// In portal mode, auto types the characters that `typeable` allows and
+/// pastes other text, because the compositor drops a keysym that the layout
+/// lacks.
+pub fn choose_portal_method(
+    configured: InsertionMethod,
+    text: &str,
+    typeable: &Typeable,
+) -> Chosen {
     match configured {
         InsertionMethod::Uinput => Chosen::Uinput,
         InsertionMethod::Clipboard => Chosen::Clipboard,
         InsertionMethod::Auto
-            if crate::portal::keysym::covers(text)
-                && text.chars().count() <= PASTE_THRESHOLD_CHARS =>
+            if typeable.covers(text) && text.chars().count() <= PASTE_THRESHOLD_CHARS =>
         {
             Chosen::Uinput
         },
         InsertionMethod::Auto => Chosen::Clipboard,
     }
+}
+
+/// What portal mode types on the active layout, with a summary for the
+/// log. A sandbox cannot read the keymap, and neither can Hush on a layout
+/// with no key table, so both type only what every Latin layout has.
+fn portal_typing(typing: &mut Resolver) -> (Typeable, String) {
+    let conservative = || {
+        (
+            Typeable::Conservative,
+            "types letters, digits, and plain punctuation through the RemoteDesktop portal \
+             and pastes the rest"
+                .to_string(),
+        )
+    };
+    if crate::portal::sandboxed() {
+        return conservative();
+    }
+    let (table, layout) = match typing.resolve(&mut NoLeds) {
+        Typing::Keys { table, layout } => (table, layout),
+        Typing::UsTable { layout, .. } => (Arc::new(KeyTable::us().clone()), layout),
+        Typing::Paste { .. } => return conservative(),
+    };
+    (
+        Typeable::Keymap(table),
+        format!(
+            "types the first two levels of {} through the RemoteDesktop portal and pastes \
+             the rest",
+            layout
+        ),
+    )
 }
 
 /// `table` is the keys for the active layout, or `None` when Hush cannot
@@ -174,16 +210,17 @@ fn chord_without_primary(window: Option<&WindowInfo>, profiles: &ProfilesConfig)
 }
 
 /// The chord when the primary selection cannot take the text, or `None`
-/// when no chord pastes it. Under Shift Lock, Ctrl+V arrives as
-/// Ctrl+Shift+V, so a window that pastes the clipboard on Shift+Insert
-/// keeps Shift+Insert. A terminal pastes the primary selection on it, so
-/// no chord is left, and the take falls back to typing.
+/// when no chord pastes it. When only Shift+Insert is safe (under Shift
+/// Lock, Ctrl+V arrives as Ctrl+Shift+V; through the portal, Ctrl+V can
+/// vanish), a window that pastes the clipboard on Shift+Insert keeps it. A
+/// terminal pastes the primary selection on it, so no chord is left, and
+/// the take falls back to typing.
 fn fallback_without_primary(
     window: Option<&WindowInfo>,
     profiles: &ProfilesConfig,
-    shift_locked: bool,
+    shift_insert_only: bool,
 ) -> Option<PasteChord> {
-    if !shift_locked {
+    if !shift_insert_only {
         return Some(chord_without_primary(window, profiles));
     }
     match window {
@@ -266,7 +303,8 @@ pub fn presses_enter(origin: Origin, submit_app: bool, text: &str, sent: &Result
 enum Keys {
     /// A uinput keyboard, with the key table of the active layout.
     Uinput(UinputKeyboard),
-    /// The RemoteDesktop portal, with keysyms.
+    /// The RemoteDesktop portal: keysyms for characters, key codes for the
+    /// keys that every layout has in one place.
     Portal(PortalKeyboard),
 }
 
@@ -305,8 +343,7 @@ impl TextInserter {
             },
             InputMode::Portal => (
                 Keys::Portal(PortalKeyboard::new()?),
-                "types printable ASCII through the RemoteDesktop portal and pastes the rest"
-                    .to_string(),
+                portal_typing(&mut typing).1,
             ),
         };
         let clipboard = clipboard::open();
@@ -490,7 +527,12 @@ impl TextInserter {
         submit_app: bool,
         method: InsertionMethod,
     ) -> Result<String> {
-        match choose_portal_method(method, &text) {
+        let (typeable, summary) = portal_typing(&mut self.typing);
+        if summary != self.last_typing {
+            info!("Keyboard state changed: Hush now {}", summary);
+            self.last_typing = summary;
+        }
+        match choose_portal_method(method, &text, &typeable) {
             Chosen::Uinput => self.type_with_portal(&text, line_break, origin, submit_app)?,
             Chosen::Clipboard => {
                 let target = PasteTarget {
@@ -546,10 +588,17 @@ impl TextInserter {
             shift_locked,
         } = target;
         let clock = SystemClock;
-        let mut chord = paste_chord(
-            choose_chord(window, &self.config, &self.profiles),
-            shift_locked,
-        );
+        let portal = matches!(self.keys, Keys::Portal(_));
+        // Through the portal, only Shift+Insert goes as key codes that every
+        // layout has in one place.
+        let mut chord = if portal {
+            PasteChord::ShiftInsert
+        } else {
+            paste_chord(
+                choose_chord(window, &self.config, &self.profiles),
+                shift_locked,
+            )
+        };
         let clipboard = self
             .clipboard
             .as_deref_mut()
@@ -568,23 +617,26 @@ impl TextInserter {
                 Err(e) if selection == Selection::Clipboard => {
                     return Err(e).context("failed to set clipboard");
                 },
-                Err(e) => match fallback_without_primary(window, &self.profiles, shift_locked) {
-                    Some(fallback) => {
-                        chord = fallback;
-                        warn!(
-                            "Could not set the {} ({:#}); pasting with {} instead",
-                            selection, e, chord
-                        );
-                    },
-                    None => {
-                        no_chord = Some(anyhow::anyhow!(
-                            "could not set the {} ({:#}), and under Shift Lock no other \
-                             chord pastes in a terminal",
-                            selection,
-                            e
-                        ));
-                        break;
-                    },
+                Err(e) => {
+                    match fallback_without_primary(window, &self.profiles, shift_locked || portal) {
+                        Some(fallback) => {
+                            chord = fallback;
+                            warn!(
+                                "Could not set the {} ({:#}); pasting with {} instead",
+                                selection, e, chord
+                            );
+                        },
+                        None => {
+                            no_chord = Some(anyhow::anyhow!(
+                                "could not set the {} ({:#}), and no chord but Shift+Insert is \
+                             safe, which pastes the {} in a terminal",
+                                selection,
+                                e,
+                                selection
+                            ));
+                            break;
+                        },
+                    }
                 },
             }
         }
@@ -611,7 +663,7 @@ impl TextInserter {
                 drop(sending);
             },
             Keys::Portal(portal) => {
-                let mut steps = keysym::chord_steps(chord);
+                let mut steps = keysym::paste_steps();
                 if presses_enter(origin, submit_app, text, &Ok(())) {
                     steps.extend(keysym::enter_steps(PASTED_SUBMIT_DELAY));
                 }
@@ -772,28 +824,37 @@ mod tests {
     }
 
     #[test]
-    fn portal_mode_types_ascii_and_pastes_the_rest() {
+    fn portal_mode_types_what_the_layout_surely_has_and_pastes_the_rest() {
+        let sandbox = Typeable::Conservative;
         assert_eq!(
-            choose_portal_method(InsertionMethod::Auto, "hello, world!\n"),
+            choose_portal_method(InsertionMethod::Auto, "hello, world!\n", &sandbox),
             Chosen::Uinput
         );
+        for text in ["café", "don't", "a@b"] {
+            assert_eq!(
+                choose_portal_method(InsertionMethod::Auto, text, &sandbox),
+                Chosen::Clipboard,
+                "{text}: the compositor drops a keysym that the layout lacks"
+            );
+        }
+        let keymap = Typeable::Keymap(Arc::new(KeyTable::us().clone()));
         assert_eq!(
-            choose_portal_method(InsertionMethod::Auto, "café"),
-            Chosen::Clipboard,
-            "the compositor drops a keysym that the layout lacks"
+            choose_portal_method(InsertionMethod::Auto, "don't", &keymap),
+            Chosen::Uinput,
+            "the keymap shows the apostrophe on the first level"
         );
         let long = "a".repeat(PASTE_THRESHOLD_CHARS + 1);
         assert_eq!(
-            choose_portal_method(InsertionMethod::Auto, &long),
+            choose_portal_method(InsertionMethod::Auto, &long, &sandbox),
             Chosen::Clipboard
         );
         assert_eq!(
-            choose_portal_method(InsertionMethod::Uinput, "café"),
+            choose_portal_method(InsertionMethod::Uinput, "café", &sandbox),
             Chosen::Uinput,
             "an explicit choice types every keysym"
         );
         assert_eq!(
-            choose_portal_method(InsertionMethod::Clipboard, "abc"),
+            choose_portal_method(InsertionMethod::Clipboard, "abc", &sandbox),
             Chosen::Clipboard
         );
     }
@@ -1034,7 +1095,7 @@ mod tests {
     }
 
     #[test]
-    fn under_shift_lock_a_failed_primary_selection_keeps_shift_insert_or_types() {
+    fn with_only_shift_insert_a_failed_primary_selection_keeps_it_or_types() {
         let profiles = ProfilesConfig::defaults();
         let editor = window("firefox");
         let terminal = window("kitty");

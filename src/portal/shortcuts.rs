@@ -25,8 +25,8 @@ use tracing::{debug, info, warn};
 /// such as Right Alt cannot be a portal trigger.
 pub const DEFAULT_DICTATE: &str = "LOGO+space";
 
-/// A second `Activated` with no `Deactivated` between, sooner than this, is
-/// key repeat. Later, the desktop lost the release, so it counts as one.
+/// On a desktop that sends no `Deactivated`, a second `Activated` sooner
+/// than this is key repeat. A later one counts as the release.
 const REPEAT_GAP: Duration = Duration::from_secs(1);
 
 /// A portal timestamp further behind the clock than this is stale.
@@ -217,6 +217,10 @@ pub struct Translator {
     meanings: HashMap<String, Meaning>,
     /// The shortcuts that are down, with the time of their last signal.
     active: HashMap<String, Instant>,
+    /// Whether the desktop sent a `Deactivated` in this session. It then
+    /// sends each release, so a second `Activated` while a key is down is
+    /// key repeat, however late.
+    releases_seen: bool,
     clock: PortalClock,
 }
 
@@ -228,6 +232,7 @@ impl Translator {
                 .map(|spec| (spec.id.clone(), spec.meaning))
                 .collect(),
             active: HashMap::new(),
+            releases_seen: false,
             clock: PortalClock::default(),
         }
     }
@@ -235,7 +240,10 @@ impl Translator {
     pub fn signal(&mut self, signal: Signal, now: Instant) -> Option<Stamped> {
         let (id, stamp, pressed) = match signal {
             Signal::Activated { id, stamp } => (id, stamp, true),
-            Signal::Deactivated { id, stamp } => (id, stamp, false),
+            Signal::Deactivated { id, stamp } => {
+                self.releases_seen = true;
+                (id, stamp, false)
+            },
             Signal::Changed(_) => return None,
         };
         let Some(&meaning) = self.meanings.get(&id) else {
@@ -243,26 +251,36 @@ impl Translator {
             return None;
         };
         let at = self.clock.at(stamp, now);
-        let release = |meaning: Meaning| meaning.event(false).map(|event| Stamped { event, at });
+        let stamped = |event| Stamped { event, at };
         if !pressed {
-            return self.active.remove(&id).and_then(|_| release(meaning));
+            return self
+                .active
+                .remove(&id)
+                .and_then(|_| meaning.event(false))
+                .map(stamped);
         }
         match self.active.get(&id).copied() {
-            Some(last) if at.saturating_duration_since(last) < REPEAT_GAP => {
+            Some(last) if self.releases_seen || at.saturating_duration_since(last) < REPEAT_GAP => {
                 self.active.insert(id, at);
                 None
             },
-            Some(_) => {
-                debug!(
-                    "Portal shortcut {} came again with no release; it counts as one",
-                    id
-                );
-                self.active.remove(&id);
-                release(meaning)
+            Some(_) => match meaning.event(false) {
+                Some(release) => {
+                    debug!(
+                        "Portal shortcut {} came again with no release; it counts as one",
+                        id
+                    );
+                    self.active.remove(&id);
+                    Some(stamped(release))
+                },
+                None => {
+                    self.active.insert(id, at);
+                    meaning.event(true).map(stamped)
+                },
             },
             None => {
                 self.active.insert(id, at);
-                meaning.event(true).map(|event| Stamped { event, at })
+                meaning.event(true).map(stamped)
             },
         }
     }
@@ -733,62 +751,105 @@ mod tests {
         );
     }
 
-    #[test]
-    fn repeats_are_dropped_and_a_lost_release_is_restored() {
-        let now = Instant::now();
-        let mut translator = Translator::new(&[
+    fn activated(id: &str, at: u64) -> Signal {
+        Signal::Activated {
+            id: id.into(),
+            stamp: ms(at),
+        }
+    }
+
+    fn deactivated(id: &str, at: u64) -> Signal {
+        Signal::Deactivated {
+            id: id.into(),
+            stamp: ms(at),
+        }
+    }
+
+    fn three_shortcuts() -> Translator {
+        Translator::new(&[
             spec("dictate", Meaning::Dictate),
             spec("cancel", Meaning::Cancel),
             spec("learn", Meaning::Action(HotkeyAction::Learn)),
-        ]);
-        let activated = |id: &str, at: u64| Signal::Activated {
-            id: id.into(),
-            stamp: ms(at),
+        ])
+    }
+
+    #[test]
+    fn with_no_releases_a_late_press_stops_the_take_or_fires_again() {
+        let now = Instant::now();
+        let mut translator = three_shortcuts();
+        let mut event = |signal, after: u64| {
+            translator
+                .signal(signal, now + ms(after))
+                .map(|stamped| stamped.event)
         };
-        assert!(translator
-            .signal(activated("dictate", 1_000), now)
-            .is_some());
         assert_eq!(
-            translator.signal(activated("dictate", 1_600), now + ms(600)),
+            event(activated("dictate", 1_000), 0),
+            Some(HotkeyEvent::Pressed)
+        );
+        assert_eq!(
+            event(activated("dictate", 1_600), 600),
             None,
             "key repeat while held"
         );
-        let lost = translator
-            .signal(activated("dictate", 4_000), now + ms(3_000))
-            .unwrap();
         assert_eq!(
-            lost.event,
-            HotkeyEvent::Released,
+            event(activated("dictate", 4_000), 3_000),
+            Some(HotkeyEvent::Released),
             "a desktop that sends no release still stops the take"
         );
+        let learn = Some(HotkeyEvent::Action(HotkeyAction::Learn));
+        assert_eq!(event(activated("learn", 5_000), 4_000), learn);
+        assert_eq!(event(activated("learn", 5_300), 4_300), None);
         assert_eq!(
-            translator
-                .signal(activated("cancel", 5_000), now + ms(4_000))
-                .map(|s| s.event),
+            event(activated("learn", 8_000), 7_000),
+            learn,
+            "a shortcut with no release fires on the next press"
+        );
+        assert_eq!(
+            event(activated("cancel", 9_000), 8_000),
             Some(HotkeyEvent::Cancel)
         );
         assert_eq!(
+            event(activated("cancel", 12_000), 11_000),
+            Some(HotkeyEvent::Cancel)
+        );
+        assert_eq!(event(activated("other", 13_000), 12_000), None);
+    }
+
+    #[test]
+    fn after_one_release_a_long_hold_stays_one_press() {
+        let now = Instant::now();
+        let mut translator = three_shortcuts();
+        let mut event = |signal, after: u64| {
             translator
-                .signal(
-                    Signal::Deactivated {
-                        id: "cancel".into(),
-                        stamp: ms(5_100)
-                    },
-                    now + ms(4_100)
-                )
-                .map(|s| s.event),
+                .signal(signal, now + ms(after))
+                .map(|stamped| stamped.event)
+        };
+        assert_eq!(
+            event(activated("cancel", 500), 0),
+            Some(HotkeyEvent::Cancel)
+        );
+        assert_eq!(
+            event(deactivated("cancel", 600), 100),
             None,
             "cancel has no release"
         );
         assert_eq!(
-            translator
-                .signal(activated("learn", 6_000), now + ms(5_000))
-                .map(|s| s.event),
-            Some(HotkeyEvent::Action(HotkeyAction::Learn))
+            event(activated("dictate", 1_000), 500),
+            Some(HotkeyEvent::Pressed)
         );
         assert_eq!(
-            translator.signal(activated("other", 7_000), now + ms(6_000)),
-            None
+            event(activated("dictate", 4_000), 3_500),
+            None,
+            "the desktop sends releases, so this is key repeat"
+        );
+        assert_eq!(
+            event(deactivated("dictate", 4_500), 4_000),
+            Some(HotkeyEvent::Released)
+        );
+        assert_eq!(
+            event(deactivated("dictate", 4_600), 4_100),
+            None,
+            "a second release"
         );
     }
 

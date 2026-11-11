@@ -628,7 +628,7 @@ fn portal_lines(
         Ok(info) => Check::ok(
             "Typing",
             format!(
-                "RemoteDesktop portal version {}: types printable ASCII, pastes the rest",
+                "RemoteDesktop portal version {}: types what the layout surely has, pastes the rest",
                 info.version
             ),
         ),
@@ -1021,7 +1021,7 @@ mod tests {
         );
         assert_eq!(
             line(&checks, "Typing").detail,
-            "RemoteDesktop portal version 2: types printable ASCII, pastes the rest"
+            "RemoteDesktop portal version 2: types what the layout surely has, pastes the rest"
         );
         assert_eq!(
             line(&checks, "Keyboard consent").detail,
