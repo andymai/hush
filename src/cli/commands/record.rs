@@ -1,3 +1,4 @@
+use super::utils::print_line;
 use crate::config::settings::LlmConfig;
 use crate::config::{keys, paths};
 use crate::text_processing::llm;
@@ -20,12 +21,14 @@ use tracing::{info, warn};
 
 /// Handle the record command
 ///
-/// Records audio for a specified duration, then optionally transcribes and inserts the text.
+/// Records audio for a specified duration, transcribes it, and types or
+/// prints the text.
 ///
 /// # Arguments
 ///
 /// * `duration` - Maximum recording duration in seconds
-/// * `print_only` - If true, only print transcription without inserting text
+/// * `print_only` - If true, print the text on stdout and type nothing.
+///   The prompts and status lines then go to stderr
 /// * `save_audio` - Optional path to save the recorded audio WAV file
 ///
 /// # Examples
@@ -37,7 +40,7 @@ use tracing::{info, warn};
 /// // Record for 10 seconds and insert text
 /// handle_record(10, false, None).await?;
 ///
-/// // Record for 5 seconds, print only, save to file
+/// // Record for 5 seconds, print the text, save to file
 /// handle_record(5, true, Some(PathBuf::from("output.wav"))).await?;
 /// # Ok(())
 /// # }
@@ -48,11 +51,11 @@ use tracing::{info, warn};
 /// 1. User presses Enter to start recording
 /// 2. Records audio for up to `duration` seconds
 /// 3. Stops recording automatically or on Enter press
-/// 4. Transcribes audio (unless `print_only`)
+/// 4. Transcribes audio
 /// 5. Cleans up and polishes the text as dictation does, with the `[llm]`
 ///    settings. With `llm.polish = false` or `llm.provider = "none"`, no LLM
 ///    polishes it
-/// 6. Inserts text with 3-second delay (unless `print_only`)
+/// 6. Prints the text on stdout (`print_only`), or types it after 3 seconds
 /// 7. Optionally saves audio to file
 pub async fn handle_record(
     duration: u64,
@@ -60,21 +63,19 @@ pub async fn handle_record(
     save_audio: Option<PathBuf>,
 ) -> Result<()> {
     info!("🎙️ Starting single recording (max {}s)", duration);
+    let status = Status { print_only };
 
-    // Load configuration
     let config = Config::load()?;
     let mut audio_capture = AudioCapture::new(config.audio.device.as_deref())?;
 
-    // Wait for user to start
-    println!("Press Enter to start recording...");
+    status.say("Press Enter to start recording...");
     let mut input = String::new();
     std::io::stdin().read_line(&mut input)?;
 
-    // Start recording
-    println!(
+    status.say(&format!(
         "🎤 Recording... (will auto-stop in {}s or press Enter to stop earlier)",
         duration
-    );
+    ));
     audio_capture.start_recording()?;
 
     // Wait for either timeout or user input (Enter key)
@@ -95,86 +96,103 @@ pub async fn handle_record(
         }
     }
 
-    // Stop recording and get samples
     let audio_data = audio_capture.stop_recording()?;
-    println!("✅ Recording stopped ({} samples)", audio_data.len());
+    status.say(&format!(
+        "✅ Recording stopped ({} samples)",
+        audio_data.len()
+    ));
 
-    // Transcribe if not print-only mode
-    if !print_only {
-        println!("🗣️ Transcribing...");
-        keys::load_env_files();
-        let transcriber = SpeechToText::from_config(
-            &config.transcription,
-            &paths::models_dir(),
-            &keys::env_file(),
-        )
-        .await?;
-        info!("Transcriber: {}", transcriber.describe());
+    status.say("🗣️ Transcribing...");
+    keys::load_env_files();
+    let transcriber = SpeechToText::from_config(
+        &config.transcription,
+        &paths::models_dir(),
+        &keys::env_file(),
+    )
+    .await?;
+    info!("Transcriber: {}", transcriber.describe());
 
-        let text_processor = record_processor(
-            &config.llm,
-            &keys::env_file(),
-            Some(DomainVocabulary::default_path()),
-        )
-        .await;
+    let text_processor = record_processor(
+        &config.llm,
+        &keys::env_file(),
+        Some(DomainVocabulary::default_path()),
+    )
+    .await;
 
-        match transcriber
-            .transcribe_async(&audio_data, config.audio.sample_rate)
-            .await
-        {
-            Ok(result) => {
+    match transcriber
+        .transcribe_async(&audio_data, config.audio.sample_rate)
+        .await
+    {
+        Ok(result) => {
+            let text = process_text(text_processor.as_ref(), &result.text).await;
+            if print_only {
+                print_line(&text)?;
+            } else {
                 println!("✅ Raw transcription: '{}'", result.text);
-
-                // Apply text processing
-                let processed_text = if let Some(ref processor) = text_processor {
-                    match processor.process(&result.text).await {
-                        Ok(polished) => {
-                            if polished != result.text {
-                                println!("✨ Processed text: '{}'", polished);
-                            }
-                            polished
-                        },
-                        Err(e) => {
-                            warn!("Text processing failed: {}", e);
-                            result.text.clone()
-                        },
-                    }
-                } else {
-                    result.text.clone()
-                };
-
-                // Insert text
-                #[cfg(target_os = "linux")]
-                {
-                    let mut text_inserter = TextInserter::new()?;
-                    println!("⌨️ Inserting text (3 second delay)...");
-                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-
-                    match text_inserter.insert_text(&processed_text) {
-                        Ok(_) => println!("✅ Text inserted successfully"),
-                        Err(e) => println!("❌ Text insertion failed: {}", e),
-                    }
+                if text != result.text {
+                    println!("✨ Processed text: '{}'", text);
                 }
-
-                #[cfg(not(target_os = "linux"))]
-                {
-                    println!("ℹ️  Text insertion not available on this platform");
-                    println!(
-                        "💡 Use the trait-based adapters for platform-specific text insertion"
-                    );
-                }
-            },
-            Err(e) => println!("❌ Transcription failed: {}", e),
-        }
-    } else {
-        println!("Print-only mode: audio recorded but not transcribed");
+                insert_text(&text).await?;
+            }
+        },
+        Err(e) => status.say(&format!("❌ Transcription failed: {}", e)),
     }
 
-    // Save audio to file if requested
     if let Some(path) = save_audio {
         save_audio_to_file(&audio_data, &path, config.audio.sample_rate)?;
+        status.say(&format!("💾 Audio saved to: {}", path.display()));
     }
 
+    Ok(())
+}
+
+/// Where `hush record` writes its prompts and status lines: stdout, or
+/// stderr with `--print-only`, so that stdout has only the text.
+struct Status {
+    print_only: bool,
+}
+
+impl Status {
+    fn say(&self, line: &str) {
+        if self.print_only {
+            eprintln!("{}", line);
+        } else {
+            println!("{}", line);
+        }
+    }
+}
+
+/// The transcript after the cleanup and polish of `processor`, or the
+/// transcript as it is when there is no processor or the processing fails.
+async fn process_text(processor: Option<&TextProcessor>, raw: &str) -> String {
+    let Some(processor) = processor else {
+        return raw.to_string();
+    };
+    match processor.process(raw).await {
+        Ok(text) => text,
+        Err(e) => {
+            warn!("Text processing failed: {}", e);
+            raw.to_string()
+        },
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn insert_text(text: &str) -> Result<()> {
+    let mut text_inserter = TextInserter::new()?;
+    println!("⌨️ Inserting text (3 second delay)...");
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+    match text_inserter.insert_text(text) {
+        Ok(_) => println!("✅ Text inserted successfully"),
+        Err(e) => println!("❌ Text insertion failed: {}", e),
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn insert_text(_text: &str) -> Result<()> {
+    println!("ℹ️  Text insertion not available on this platform");
+    println!("💡 Use the trait-based adapters for platform-specific text insertion");
     Ok(())
 }
 
@@ -236,7 +254,6 @@ fn save_audio_to_file(samples: &[f32], path: &PathBuf, sample_rate: u32) -> Resu
     }
 
     writer.finalize()?;
-    println!("💾 Audio saved to: {}", path.display());
 
     Ok(())
 }
@@ -325,6 +342,41 @@ mod tests {
                 "{llm:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn the_printed_text_has_the_same_processing() {
+        let llm = LlmConfig {
+            provider: LlmSetting::None,
+            ..LlmConfig::defaults()
+        };
+        let processor = text_processor(&llm, LlmProvider::None, None);
+        assert_eq!(
+            process_text(processor.as_ref(), "um so the api works").await,
+            "So the API works."
+        );
+        assert_eq!(
+            process_text(None, "um so the api works").await,
+            "um so the api works",
+            "without a processor, the transcript as it is"
+        );
+    }
+
+    #[test]
+    fn print_only_says_it_prints_and_types_nothing() {
+        use clap::CommandFactory;
+        let mut command = crate::cli::Cli::command();
+        let record = command
+            .find_subcommand_mut("record")
+            .expect("the record command");
+        let help = record
+            .get_arguments()
+            .find(|arg| arg.get_id() == "print_only")
+            .and_then(|arg| arg.get_help())
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        assert!(help.contains("stdout"), "{help}");
+        assert!(help.contains("type nothing"), "{help}");
     }
 
     #[test]

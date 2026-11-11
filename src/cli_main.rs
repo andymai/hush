@@ -59,7 +59,7 @@ pub enum Commands {
         #[arg(short, long, default_value = "30")]
         duration: u64,
 
-        /// Don't insert text, just print to stdout
+        /// Print the text on stdout and type nothing. Prompts and status lines go to stderr
         #[arg(short, long)]
         print_only: bool,
 
