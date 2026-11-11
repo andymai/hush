@@ -383,7 +383,8 @@ pub enum SetupCommands {
 
     /// Complete system setup wizard
     Wizard {
-        /// Skip the prompts. The wizard downloads the model that Hush suggests for this machine
+        /// Skip the prompts. When the configured model is missing, the wizard downloads the model
+        /// that Hush suggests for this machine
         #[arg(long)]
         auto: bool,
     },
