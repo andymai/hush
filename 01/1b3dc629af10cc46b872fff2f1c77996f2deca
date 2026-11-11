@@ -1,0 +1,25 @@
+INSTALL.md
+  s_115995023cd6f3::t_b13f105c5617fc 228-230
+README.md
+  s_115995023cd6f3::t_df0fc589983b0c 353,355
+src/audio/wake.rs
+  s_115995023cd6f3::t_7ae0b27e652440 746-748,1393,1405-1415
+src/gui/pages/speech.rs
+  s_115995023cd6f3::t_83b9870855fa6f 992,998-1002
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "011b3dc629af10cc46b872fff2f1c77996f2deca",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
