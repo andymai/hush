@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/andymai/hush/compare/v0.31.0...v0.32.0) (2026-11-11)
+
+
+### Features
+
+* **packaging:** add a Flatpak build for Flathub ([#323](https://github.com/andymai/hush/issues/323)) ([3497564](https://github.com/andymai/hush/commit/3497564c423eb9dc507754ac919d55508cb49c2a))
+
 ## [0.31.0](https://github.com/andymai/hush/compare/v0.30.3...v0.31.0) (2026-11-11)
 
 
