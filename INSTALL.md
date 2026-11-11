@@ -225,8 +225,9 @@ and its ggml version does not match. Start Hush without that folder in
 ```
 
 **The first word gets cut off:** the microphone sleeps between recordings and
-needs time to wake. Read the `Microphone wake` line of `./hush doctor`. When it
-warns, keep that microphone awake with one WirePlumber rule:
+needs time to wake. Make one recording, then read the `Microphone wake` line of
+`./hush doctor`. It warns when a recording waited more than 200 ms for the
+microphone. Then keep that microphone awake with one WirePlumber rule:
 ```bash
 ./hush setup mic          # writes the rule; WirePlumber restarts, and sound stops for about a second
 ./hush setup mic --undo   # removes the rule again

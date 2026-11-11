@@ -743,11 +743,9 @@ pub fn finding(probe: &Probe, hush_rule: bool, delay: Option<StartDelay>) -> Fin
             FIX,
             true,
         ),
-        (Kind::Alsa, None) => Finding::warn(
-            format!("{}; no take measured its wake time yet", sleeps),
-            FIX,
-            true,
-        ),
+        (Kind::Alsa, None) => {
+            Finding::fine(format!("{}; no take measured its wake time yet", sleeps))
+        },
         (Kind::Bluetooth, Some(delay)) => Finding::warn(
             format!("{} and needs up to {} ms to wake", sleeps, delay.worst_ms),
             "Hush does not keep a Bluetooth microphone awake, because an open headset link \
@@ -1392,7 +1390,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sleeping_alsa_source_warns_when_slow_or_unmeasured() {
+    fn a_sleeping_alsa_source_warns_only_after_a_slow_measured_start() {
         let sleeps = Probe::Found(yeti_source(Sleep::After(5)));
         let slow = finding(&sleeps, false, delay(650));
         assert!(slow.warn && slow.fixable);
@@ -1404,11 +1402,17 @@ mod tests {
         assert_eq!(slow.fix.as_deref(), Some(FIX));
 
         let unknown = finding(&sleeps, false, None);
-        assert!(unknown.warn && unknown.fixable);
-        assert!(
-            unknown.detail.contains("no take measured"),
-            "{}",
-            unknown.detail
+        assert_eq!(
+            unknown,
+            Finding {
+                warn: false,
+                detail: "Yeti Stereo Microphone sleeps after 5 s without a take; no take \
+                         measured its wake time yet"
+                    .to_string(),
+                fix: None,
+                fixable: false,
+            },
+            "no warning and no fix before a measurement"
         );
 
         let quick = finding(&sleeps, false, delay(200));

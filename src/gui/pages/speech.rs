@@ -989,13 +989,17 @@ mod tests {
     }
 
     #[test]
-    fn the_wake_row_offers_keep_for_a_sleeping_source_and_release_for_a_rule() {
+    fn the_wake_row_offers_keep_after_a_slow_start_and_release_for_a_rule() {
         let mut gui = crate::gui::tests::window();
         assert_eq!(wake_offer(&gui), None, "before the first read");
         assert!(wake_finding(&gui).is_none());
 
         gui.wake.shared.lock().probe = Some(Probe::Found(slow_yeti()));
-        assert_eq!(wake_offer(&gui), Some(WakeAction::Keep), "nothing measured");
+        assert_eq!(wake_offer(&gui), None, "nothing measured, so no button");
+        assert!(
+            !wake_finding(&gui).unwrap().warn,
+            "and no caution on the microphone row"
+        );
         gui.machine.start_delay = Some(crate::audio::take::StartDelay {
             last_ms: 700,
             worst_ms: 700,

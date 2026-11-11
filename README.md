@@ -350,9 +350,9 @@ If a notification says that the microphone did not start, Hush got no audio for 
 
 If a notification says that the microphone stopped, the audio stopped for two seconds during a recording. Hush inserts what it heard until then, and opens the microphone again before the next recording.
 
-If the first word of a recording gets cut off, the microphone probably sleeps between recordings. WirePlumber, the PipeWire session manager, suspends an idle microphone after 5 seconds. Some USB microphones then need most of a second to wake. The `Microphone wake` line of `hush doctor` shows whether your microphone sleeps and how long the last recordings waited for it.
+If the first word of a recording gets cut off, the microphone probably sleeps between recordings. WirePlumber, the PipeWire session manager, suspends an idle microphone after 5 seconds. Some USB microphones then need most of a second to wake. The `Microphone wake` line of `hush doctor` shows whether your microphone sleeps and how long the last recordings waited for it. It warns only after a recording waited more than 200 ms.
 
-`hush setup mic` writes one WirePlumber rule that keeps only that microphone awake. It supports WirePlumber 0.4 and 0.5, and touches no other file. WirePlumber then restarts, so all sound stops for about a second. No app records while the microphone is awake, so the privacy indicator stays off. `hush setup mic --undo` removes the rule. The Speech page of `hush settings` has the same two buttons. Hush does not keep a Bluetooth microphone awake, because an open headset link lowers the sound quality.
+`hush setup mic` writes one WirePlumber rule that keeps only that microphone awake. It supports WirePlumber 0.4 and 0.5, and touches no other file. WirePlumber then restarts, so all sound stops for about a second. No app records while the microphone is awake, so the privacy indicator stays off. `hush setup mic --undo` removes the rule. After such a slow recording, the Speech page of `hush settings` shows the same warning, with a button for each command. Hush does not keep a Bluetooth microphone awake, because an open headset link lowers the sound quality.
 
 If `hush setup permissions` cannot run where you are (a container, an SSH session), `hush setup permissions --print` prints the udev rule to apply as root.
 
