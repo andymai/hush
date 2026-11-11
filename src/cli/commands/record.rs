@@ -1,4 +1,6 @@
+use crate::config::settings::LlmConfig;
 use crate::config::{keys, paths};
+use crate::text_processing::llm;
 use crate::text_processing::{
     DomainVocabulary, EditingMode, LlmProvider, ProcessingConfig, TextProcessor,
 };
@@ -12,7 +14,7 @@ use crate::TextInserter;
 /// Handles single audio recording with optional transcription and text insertion.
 use anyhow::Result;
 use hound;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{info, warn};
 
@@ -47,8 +49,11 @@ use tracing::{info, warn};
 /// 2. Records audio for up to `duration` seconds
 /// 3. Stops recording automatically or on Enter press
 /// 4. Transcribes audio (unless `print_only`)
-/// 5. Inserts text with 3-second delay (unless `print_only`)
-/// 6. Optionally saves audio to file
+/// 5. Cleans up and polishes the text as dictation does, with the `[llm]`
+///    settings. With `llm.polish = false` or `llm.provider = "none"`, no LLM
+///    polishes it
+/// 6. Inserts text with 3-second delay (unless `print_only`)
+/// 7. Optionally saves audio to file
 pub async fn handle_record(
     duration: u64,
     print_only: bool,
@@ -106,32 +111,12 @@ pub async fn handle_record(
         .await?;
         info!("Transcriber: {}", transcriber.describe());
 
-        // Initialize text processor
-        let text_processor = {
-            let llm_provider = if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
-                if !api_key.is_empty() {
-                    info!("Using Anthropic Claude API for text polishing");
-                    LlmProvider::Anthropic {
-                        api_key: Some(api_key),
-                        model: "claude-3-haiku-20240307".to_string(),
-                    }
-                } else {
-                    LlmProvider::None
-                }
-            } else {
-                LlmProvider::None
-            };
-
-            let processing_config = ProcessingConfig {
-                mode: EditingMode::Medium,
-                llm_provider,
-                polish: true,
-                max_tokens: 200,
-                temperature: 0.3,
-            };
-
-            TextProcessor::new(processing_config, Some(DomainVocabulary::default_path())).ok()
-        };
+        let text_processor = record_processor(
+            &config.llm,
+            &keys::env_file(),
+            Some(DomainVocabulary::default_path()),
+        )
+        .await;
 
         match transcriber
             .transcribe_async(&audio_data, config.audio.sample_rate)
@@ -193,6 +178,41 @@ pub async fn handle_record(
     Ok(())
 }
 
+/// The editing mode of a daemon that starts without `--editing-mode`.
+const EDITING_MODE: EditingMode = EditingMode::Light;
+
+/// The text processor of `hush record`, with the LLM and settings that
+/// dictation polishes with. With `llm.polish` off, no LLM is probed or used.
+async fn record_processor(
+    llm_config: &LlmConfig,
+    env_file: &Path,
+    vocabulary: Option<PathBuf>,
+) -> Option<TextProcessor> {
+    let provider = llm::resolve_polish_provider(llm_config, env_file).await;
+    text_processor(llm_config, provider, vocabulary)
+}
+
+fn text_processor(
+    llm_config: &LlmConfig,
+    provider: LlmProvider,
+    vocabulary: Option<PathBuf>,
+) -> Option<TextProcessor> {
+    let config = ProcessingConfig::from_llm(EDITING_MODE, provider, llm_config);
+    match TextProcessor::new(config, vocabulary) {
+        Ok(processor) => {
+            match processor.llm_name() {
+                Some(name) => info!("Polish: {}", name),
+                None => info!("Polish: none, rule-based cleanup only"),
+            }
+            Some(processor)
+        },
+        Err(e) => {
+            warn!("Failed to initialize text processor: {}", e);
+            None
+        },
+    }
+}
+
 /// Save audio samples to a WAV file
 ///
 /// # Arguments
@@ -224,7 +244,88 @@ fn save_audio_to_file(samples: &[f32], path: &PathBuf, sample_rate: u32) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::settings::LlmSetting;
+    use crate::text_processing::llm::choose_provider;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn the_configured_provider_and_model_reach_the_client() {
+        let llm = LlmConfig {
+            provider: LlmSetting::Anthropic,
+            anthropic_model: "claude-test-model".to_string(),
+            ..LlmConfig::defaults()
+        };
+        let provider = choose_provider(&llm, false, Some("test-key".to_string()), None);
+        let processor = text_processor(&llm, provider, None).expect("a processor");
+        assert_eq!(
+            processor.llm_name().as_deref(),
+            Some("Anthropic claude-test-model")
+        );
+
+        let llm = LlmConfig {
+            provider: LlmSetting::Ollama,
+            ollama_model: "qwen-test".to_string(),
+            ..LlmConfig::defaults()
+        };
+        let provider = choose_provider(&llm, true, None, None);
+        let processor = text_processor(&llm, provider, None).expect("a processor");
+        assert_eq!(processor.llm_name().as_deref(), Some("Ollama qwen-test"));
+    }
+
+    #[tokio::test]
+    async fn record_resolves_the_configured_server() {
+        let home = tempfile::tempdir().unwrap();
+        let llm = LlmConfig {
+            provider: LlmSetting::OpenAiCompatible,
+            server_url: "http://127.0.0.1:9/v1".to_string(),
+            server_model: "qwen3".to_string(),
+            ..LlmConfig::defaults()
+        };
+        let processor = record_processor(&llm, &home.path().join(".env"), None)
+            .await
+            .expect("a processor");
+        let name = processor.llm_name().unwrap_or_default();
+        assert!(name.starts_with("OpenAI-compatible qwen3"), "{name}");
+    }
+
+    #[tokio::test]
+    async fn no_polish_without_polish_or_a_provider() {
+        let home = tempfile::tempdir().unwrap();
+        let env_file = home.path().join(".env");
+        let server = LlmConfig {
+            provider: LlmSetting::OpenAiCompatible,
+            server_url: "http://127.0.0.1:9/v1".to_string(),
+            server_model: "qwen3".to_string(),
+            ..LlmConfig::defaults()
+        };
+        let cases = [
+            LlmConfig {
+                provider: LlmSetting::None,
+                ..server.clone()
+            },
+            LlmConfig {
+                polish: false,
+                ..server
+            },
+            LlmConfig {
+                provider: LlmSetting::Ollama,
+                ollama_url: "http://127.0.0.1:9".to_string(),
+                polish: false,
+                ..LlmConfig::defaults()
+            },
+        ];
+        for llm in cases {
+            let processor = record_processor(&llm, &env_file, None)
+                .await
+                .expect("a processor");
+            assert_eq!(processor.llm_name(), None, "{llm:?}");
+            assert_eq!(
+                processor.process("um so the api works").await.unwrap(),
+                "So the API works.",
+                "{llm:?}"
+            );
+        }
+    }
 
     #[test]
     fn test_save_audio_to_file() {

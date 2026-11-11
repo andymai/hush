@@ -363,13 +363,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             info!("No LLM: polishing is rule-based and Command Mode is off until Ollama runs or ANTHROPIC_API_KEY is set");
         }
 
-        let processing_config = ProcessingConfig {
-            mode: editing_mode,
-            llm_provider,
-            polish: config.llm.polish,
-            max_tokens: config.llm.max_tokens,
-            temperature: config.llm.temperature,
-        };
+        let processing_config = ProcessingConfig::from_llm(editing_mode, llm_provider, &config.llm);
 
         match TextProcessor::new(processing_config, Some(DomainVocabulary::default_path())) {
             Ok(processor) => {

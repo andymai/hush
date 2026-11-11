@@ -723,6 +723,15 @@ pub async fn resolve_provider(config: &LlmConfig, env_file: &Path) -> LlmProvide
     choose_provider(config, ollama_ok, key, server_key)
 }
 
+/// [`resolve_provider`] for the polish alone: `None` when `llm.polish` is
+/// off, with no probe of Ollama and no key lookup.
+pub async fn resolve_polish_provider(config: &LlmConfig, env_file: &Path) -> LlmProvider {
+    if !config.polish {
+        return LlmProvider::None;
+    }
+    resolve_provider(config, env_file).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
