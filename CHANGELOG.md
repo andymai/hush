@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.3](https://github.com/andymai/hush/compare/v0.30.2...v0.30.3) (2026-11-11)
+
+
+### Bug Fixes
+
+* **cli:** make setup, status, and record do what their help says ([#319](https://github.com/andymai/hush/issues/319)) ([e4e71e7](https://github.com/andymai/hush/commit/e4e71e7b3c72e7fd05fa7073d6007c73f3ddfa29))
+
 ## [0.30.2](https://github.com/andymai/hush/compare/v0.30.1...v0.30.2) (2026-11-10)
 
 
