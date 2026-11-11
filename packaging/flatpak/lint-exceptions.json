@@ -1,0 +1,6 @@
+{
+  "io.github.andymai.hush": {
+    "appstream-external-screenshot-url": "A build outside the Flathub pipeline does not mirror the screenshots to dl.flathub.org",
+    "appstream-remote-icon-not-mirrored": "A build outside the Flathub pipeline does not mirror the icons to dl.flathub.org"
+  }
+}

@@ -168,6 +168,27 @@ in
 
 The user service starts the daemon at login. Use it instead of `hush install --autostart`, because that entry points at a store path, and garbage collection can remove the path after an upgrade.
 
+## Flatpak
+
+`packaging/flatpak/io.github.andymai.hush.yml` builds Hush with Vulkan on the
+freedesktop 26.08 runtime. The build gets its crates offline from
+`packaging/flatpak/cargo-sources.json`. After a change to `Cargo.lock`, run
+`packaging/flatpak/update-cargo-sources.sh` (it needs `uv`).
+
+```bash
+flatpak install --user flathub org.freedesktop.Sdk//26.08 org.freedesktop.Sdk.Extension.rust-stable//26.08
+flatpak-builder --user --force-clean --state-dir=target/flatpak-builder \
+  --repo=target/flatpak-repo target/flatpak-app packaging/flatpak/io.github.andymai.hush.yml
+flatpak build-bundle target/flatpak-repo target/hush.flatpak io.github.andymai.hush
+flatpak install --user target/hush.flatpak
+flatpak run io.github.andymai.hush status --full
+```
+
+The sandbox has no `/dev/input` and no `/dev/uinput`, so the hotkey and typing
+need the desktop portals. On an NVIDIA GPU, Flatpak needs the
+`org.freedesktop.Platform.GL.nvidia-<version>` extension of the host driver
+version for Vulkan; `flatpak update` installs it.
+
 ## GPU Acceleration
 
 The Vulkan build needs `glslc`, the Vulkan headers, and the SPIR-V headers at build

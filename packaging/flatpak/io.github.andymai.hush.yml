@@ -1,0 +1,66 @@
+id: io.github.andymai.hush
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: hush
+finish-args:
+  # The settings window and the overlay: Wayland, or X11 on an X11 session
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # GPU transcription through Vulkan, and the GL of the window
+  - --device=dri
+  # The microphone (cpal through ALSA, which the runtime sends to PipeWire or PulseAudio)
+  - --socket=pulseaudio
+  # Model downloads, the opt-in update check, and opt-in LLM polishing or cloud transcription
+  - --share=network
+  # The panel icon (StatusNotifierItem)
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # Notices such as "the microphone stopped"; notify-rust speaks this interface
+  - --talk-name=org.freedesktop.Notifications
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+modules:
+  # ggml-vulkan needs the SPIR-V headers at build time, and the SDK does not ship
+  # their CMake package. Only the build uses them.
+  - name: spirv-headers
+    buildsystem: cmake-ninja
+    cleanup:
+      - '*'
+    sources:
+      - type: archive
+        url: https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz
+        sha256: 4d703067a7e06331ccb37bdfed3f9b7879cc61969a2689ae95c95db34a47ff07
+
+  - name: hush
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/hush/cargo
+        CARGO_NET_OFFLINE: 'true'
+        # No system BLAS: libtranscribe needs only the runtime's libraries.
+        TRANSCRIBE_CMAKE_ARGS: -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF
+        # The binary looks for libtranscribe and the ggml modules only in
+        # $ORIGIN/../lib/hush, which is /app/lib/hush.
+        HUSH_PACKAGE: '1'
+    build-commands:
+      - cargo --offline build --release --locked --features vulkan
+      - install -Dm755 target/release/hush -t /app/bin
+      - install -d /app/lib/hush
+      - install -m644 target/release/lib/hush/* /app/lib/hush/
+      - install -Dm644 packaging/io.github.andymai.hush.desktop -t /app/share/applications
+      - install -Dm644 packaging/io.github.andymai.hush.svg -t /app/share/icons/hicolor/scalable/apps
+      # The releases of the metainfo come from CHANGELOG.md of this source.
+      - python3 packaging/flatpak/metainfo-releases.py CHANGELOG.md packaging/io.github.andymai.hush.metainfo.xml
+      - install -Dm644 packaging/io.github.andymai.hush.metainfo.xml -t /app/share/metainfo
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - target
+          - node_modules
+          - hush
+      - cargo-sources.json
