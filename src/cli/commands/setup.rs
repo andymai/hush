@@ -924,11 +924,6 @@ mod tests {
         assert!(line.contains("opt-in"), "{line}");
         assert!(line.contains("25 European languages"), "{line}");
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn only_yes_goes_on() {
