@@ -67,7 +67,7 @@ Hold `Right Alt`, speak, release. Done.
 - **Panel icon.** A status icon shows whether Hush is idle, recording, or working, and its menu offers the same actions the hotkeys do. Turn it off with `tray.enabled = false`.
 - **A settings window.** `hush settings` opens one window for what still needs setting up and every setting. `Ctrl+K`, or Commands in the sidebar, searches every setting, page, and button action of the window. Pick a setting, and the window opens its page with the focus on its control.
 - **Saves at once.** Each change saves as you make it. A text or number field saves when you press Enter or leave it, and Escape puts back the saved value. When a change needs a daemon restart, Hush restarts it once after the changes stop, and waits until a recording ends. After you remove a word, a key, a rule, or a style, Undo in the footer puts it back for 10 seconds.
-- **A doctor.** `hush doctor` checks each part of the setup, from keyboard access and the speech model to the microphone and its wake time, hotkeys, typing, and the daemon. It prints the one command that fixes each problem.
+- **A doctor.** `hush doctor` checks each part of the setup, from keyboard access and the speech model to the microphone, hotkeys, typing, and the daemon. It also shows whether the microphone sleeps between recordings. It prints the one command that fixes each problem.
 
 ## Scope
 
@@ -352,7 +352,9 @@ If a notification says that the microphone stopped, the audio stopped for two se
 
 If the first word of a recording gets cut off, the microphone probably sleeps between recordings. WirePlumber, the PipeWire session manager, suspends an idle microphone after 5 seconds. Some USB microphones then need most of a second to wake. The `Microphone wake` line of `hush doctor` shows whether your microphone sleeps and how long the last recordings waited for it. It warns only after a recording waited more than 200 ms.
 
-`hush setup mic` writes one WirePlumber rule that keeps only that microphone awake. It supports WirePlumber 0.4 and 0.5, and touches no other file. WirePlumber then restarts, so all sound stops for about a second. No app records while the microphone is awake, so the privacy indicator stays off. `hush setup mic --undo` removes the rule. After such a slow recording, the Speech page of `hush settings` shows the same warning, with a button for each command. Hush does not keep a Bluetooth microphone awake, because an open headset link lowers the sound quality.
+`hush setup mic` writes one WirePlumber rule that keeps only that microphone awake. It supports WirePlumber 0.4 and 0.5, and touches no other file. WirePlumber then restarts, so all sound stops for about a second. No app records while the microphone is awake, so the privacy indicator stays off. `hush setup mic --undo` removes the rule.
+
+After such a slow recording, the Speech page of `hush settings` shows the same warning, with a button for each command. Hush does not keep a Bluetooth microphone awake, because an open headset link lowers the sound quality.
 
 If `hush setup permissions` cannot run where you are (a container, an SSH session), `hush setup permissions --print` prints the udev rule to apply as root.
 
