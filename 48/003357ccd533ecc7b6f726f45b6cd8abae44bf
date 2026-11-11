@@ -1,0 +1,23 @@
+src/cli/commands/listen.rs
+  s_115995023cd6f3::t_c034d9d57a3257 127-134
+src/cli_main.rs
+  s_115995023cd6f3::t_932d552a90c4bc 28-37
+  s_115995023cd6f3::t_cac67a2d7b6c5d 10
+  s_115995023cd6f3::t_915590d57ef054 38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "48003357ccd533ecc7b6f726f45b6cd8abae44bf",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
