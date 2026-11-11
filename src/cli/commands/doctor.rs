@@ -471,7 +471,7 @@ fn microphone_check(config: &Config) -> Check {
 /// Whether WirePlumber suspends the microphone between takes, with the start
 /// delay that the daemon measured.
 async fn wake_check(config: &Config, reply: Option<&crate::ipc::DaemonResponse>) -> Check {
-    if wake::sandboxed() {
+    if crate::portal::sandboxed() {
         return sandbox_wake_report();
     }
     let probe = wake::look(config.audio.device.as_deref()).await;

@@ -174,7 +174,7 @@ const RESTART_WARNING: &str =
 /// awake between takes, restart WirePlumber, and make sure that the change
 /// applies.
 async fn setup_mic(undo: bool, yes: bool) -> Result<()> {
-    if wake::sandboxed() {
+    if crate::portal::sandboxed() {
         println!("Nothing changed: {}.", wake::SANDBOX_NOTE);
         return Ok(());
     }

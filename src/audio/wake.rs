@@ -634,18 +634,6 @@ pub async fn look(device: Option<&str>) -> Probe {
 pub const SANDBOX_NOTE: &str = "inside Flatpak, Hush cannot change the WirePlumber settings of \
      the host, so the rule that keeps the microphone awake does not apply";
 
-/// Whether Hush runs in a Flatpak sandbox.
-pub fn sandboxed() -> bool {
-    sandboxed_with(
-        std::env::var_os("FLATPAK_ID").as_deref(),
-        Path::new("/.flatpak-info").exists(),
-    )
-}
-
-fn sandboxed_with(flatpak_id: Option<&std::ffi::OsStr>, info_file: bool) -> bool {
-    flatpak_id.is_some_and(|id| !id.is_empty()) || info_file
-}
-
 /// `$XDG_CONFIG_HOME`, else `~/.config`: the folder of the `wireplumber`
 /// folder.
 pub fn config_dir() -> Result<PathBuf> {
@@ -1002,18 +990,6 @@ mod tests {
     use super::*;
     use parking_lot::Mutex;
     use std::collections::VecDeque;
-
-    #[test]
-    fn a_flatpak_id_or_the_info_file_means_a_sandbox() {
-        use std::ffi::OsStr;
-        assert!(sandboxed_with(
-            Some(OsStr::new("io.github.andymai.hush")),
-            false
-        ));
-        assert!(sandboxed_with(None, true));
-        assert!(!sandboxed_with(None, false));
-        assert!(!sandboxed_with(Some(OsStr::new("")), false));
-    }
 
     const YETI: &str =
         "alsa_input.usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00.iec958-stereo";

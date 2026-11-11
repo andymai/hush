@@ -263,15 +263,6 @@ impl Drop for TrayGuard {
     }
 }
 
-/// Whether Hush runs in a Flatpak sandbox, from `FLATPAK_ID`. A sandbox may
-/// own only bus names under its app ID, not the
-/// `org.kde.StatusNotifierItem-<pid>-<n>` name of the icon, so there the icon
-/// registers with its unique bus name, which the StatusNotifierWatcher takes
-/// too.
-fn in_sandbox(flatpak_id: Option<std::ffi::OsString>) -> bool {
-    flatpak_id.is_some_and(|id| !id.is_empty())
-}
-
 /// Show the icon. Returns `None` when no panel is listening, which is normal
 /// on a bare compositor and never fatal.
 pub async fn spawn(
@@ -286,7 +277,11 @@ pub async fn spawn(
         languages,
         control,
     };
-    let sandboxed = in_sandbox(std::env::var_os("FLATPAK_ID"));
+    // A sandbox may own only bus names under its app ID, not the
+    // `org.kde.StatusNotifierItem-<pid>-<n>` name of the icon, so there the
+    // icon registers with its unique bus name, which the StatusNotifierWatcher
+    // takes too.
+    let sandboxed = crate::portal::sandboxed();
     let handle = match tray.disable_dbus_name(sandboxed).spawn().await {
         Ok(handle) => handle,
         Err(e) => {
@@ -328,13 +323,6 @@ fn worth_redrawing(before: DaemonState, after: DaemonState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn only_a_flatpak_id_means_a_sandbox() {
-        assert!(in_sandbox(Some("io.github.andymai.hush".into())));
-        assert!(!in_sandbox(None));
-        assert!(!in_sandbox(Some("".into())));
-    }
 
     fn lang(code: &str) -> Language {
         Language::parse(code).unwrap()
