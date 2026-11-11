@@ -193,7 +193,7 @@ async fn setup_mic(undo: bool, yes: bool) -> Result<()> {
         Plan::Write(change) => change,
     };
     let source = &change.source;
-    if let Sleep::After(seconds) = source.sleep {
+    if let Sleep::After(seconds) = source.suspend() {
         println!(
             "🎤 WirePlumber suspends {} after {} s without a take, and the next take waits while it wakes.",
             source.label, seconds
@@ -247,7 +247,7 @@ async fn undo_mic(config_dir: &std::path::Path, probe: wake::Probe, yes: bool) -
         Undone::Removed {
             source: Some(source),
             ..
-        } => match source.sleep {
+        } => match source.suspend() {
             Sleep::After(seconds) => println!(
                 "✅ {} sleeps again after {} s without a take.",
                 source.label, seconds

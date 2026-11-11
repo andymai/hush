@@ -16,7 +16,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::process::Command;
 
 /// The node property that WirePlumber reads to suspend an idle node.
@@ -34,8 +34,10 @@ pub const FIX: &str = "hush setup mic";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 const RESTART_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(250);
-/// After a restart, WirePlumber gets this many polls (10 s) to show the
-/// source again.
+/// After a restart, WirePlumber gets this long to show the source again. One
+/// `pw-dump` that started before the end can add [`COMMAND_TIMEOUT`].
+const COMEBACK: Duration = Duration::from_secs(10);
+/// At most this many polls, whatever the clock says.
 const POLLS: u32 = 40;
 
 /// What the wake code asks of the machine. Tests answer with a fake.
@@ -43,8 +45,10 @@ const POLLS: u32 = 40;
 pub trait System: Sync {
     /// The output of `pw-dump`.
     async fn dump(&self) -> Result<String>;
-    /// The rule format of the WirePlumber on this machine.
-    async fn wireplumber(&self) -> Option<Format>;
+    /// The output of `wireplumber --version`.
+    async fn wireplumber_version(&self) -> Option<String>;
+    /// The rule format that the installed WirePlumber files suggest.
+    fn installed_format(&self) -> Option<Format>;
     /// `systemctl --user restart wireplumber`
     async fn restart_wireplumber(&self) -> Result<()>;
     async fn pause(&self, time: Duration);
@@ -60,12 +64,14 @@ impl System for Host {
         Ok(String::from_utf8_lossy(&output).into_owned())
     }
 
-    async fn wireplumber(&self) -> Option<Format> {
-        if let Ok(output) = run("wireplumber", &["--version"], COMMAND_TIMEOUT).await {
-            if let Some(format) = Format::from_version(&String::from_utf8_lossy(&output)) {
-                return Some(format);
-            }
-        }
+    async fn wireplumber_version(&self) -> Option<String> {
+        let output = run("wireplumber", &["--version"], COMMAND_TIMEOUT)
+            .await
+            .ok()?;
+        Some(String::from_utf8_lossy(&output).into_owned())
+    }
+
+    fn installed_format(&self) -> Option<Format> {
         Format::from_system_files(Path::new("/usr/share/wireplumber"))
     }
 
@@ -123,14 +129,8 @@ pub enum Format {
 impl Format {
     pub const ALL: [Format; 2] = [Format::Conf, Format::Lua];
 
-    /// From the output of `wireplumber --version`, which names the library
-    /// that it was compiled with and the one that it linked.
-    pub fn from_version(text: &str) -> Option<Self> {
-        let linked = text
-            .lines()
-            .find(|line| line.contains("Linked with"))
-            .and_then(version_in);
-        let (major, minor) = linked.or_else(|| text.lines().find_map(version_in))?;
+    /// The format of WirePlumber `major.minor`; `None` before 0.4.
+    pub fn for_version((major, minor): (u32, u32)) -> Option<Self> {
         match (major, minor) {
             (0, 4) => Some(Format::Lua),
             (0, minor) if minor >= 5 => Some(Format::Conf),
@@ -140,12 +140,13 @@ impl Format {
     }
 
     /// From the configuration that WirePlumber installs in `share`, such as
-    /// `/usr/share/wireplumber`, when `wireplumber --version` gives no answer.
+    /// `/usr/share/wireplumber`. WirePlumber 0.4 installs `wireplumber.conf`
+    /// too, so `main.lua.d` decides first.
     pub fn from_system_files(share: &Path) -> Option<Self> {
-        if share.join("wireplumber.conf").is_file() {
-            Some(Format::Conf)
-        } else if share.join("main.lua.d").is_dir() {
+        if share.join("main.lua.d").is_dir() {
             Some(Format::Lua)
+        } else if share.join("wireplumber.conf").is_file() {
+            Some(Format::Conf)
         } else {
             None
         }
@@ -174,7 +175,7 @@ impl Format {
 
     /// The text of the rule file that keeps `source` awake.
     pub fn rule(self, source: &Source) -> Result<String> {
-        let matcher = self.matcher(source)?;
+        let matchers = self.matchers(source)?;
         let label: String = source.label.chars().filter(|c| !c.is_control()).collect();
         let notes = [
             format!("Written by `hush setup mic` for {}.", label),
@@ -183,45 +184,121 @@ impl Format {
             "`hush setup mic --undo` removes this file.".to_string(),
         ];
         let text = match self {
-            Format::Conf => format!(
-                "# {}\n# {}\n# {}\nmonitor.alsa.rules = [\n  {{\n    matches = [\n      {{\n        \
-                 {}\n      }}\n    ]\n    actions = {{\n      update-props = {{\n        {} = 0\n      \
-                 }}\n    }}\n  }}\n]\n",
-                notes[0], notes[1], notes[2], matcher, SUSPEND_KEY
-            ),
-            Format::Lua => format!(
-                "-- {}\n-- {}\n-- {}\ntable.insert(alsa_monitor.rules, {{\n  matches = {{\n    {{\n      \
-                 {}\n    }},\n  }},\n  apply_properties = {{\n    [\"{}\"] = 0,\n  }},\n}})\n",
-                notes[0], notes[1], notes[2], matcher, SUSPEND_KEY
-            ),
+            Format::Conf => {
+                let matches: String = matchers
+                    .iter()
+                    .map(|matcher| format!("      {{\n        {}\n      }}\n", matcher))
+                    .collect();
+                format!(
+                    "# {}\n# {}\n# {}\nmonitor.alsa.rules = [\n  {{\n    matches = [\n{}    ]\n    \
+                     actions = {{\n      update-props = {{\n        {} = 0\n      }}\n    }}\n  }}\n]\n",
+                    notes[0], notes[1], notes[2], matches, SUSPEND_KEY
+                )
+            },
+            Format::Lua => {
+                let matches: String = matchers
+                    .iter()
+                    .map(|matcher| format!("    {{\n      {}\n    }},\n", matcher))
+                    .collect();
+                format!(
+                    "-- {}\n-- {}\n-- {}\ntable.insert(alsa_monitor.rules, {{\n  matches = {{\n{}  }},\n  \
+                     apply_properties = {{\n    [\"{}\"] = 0,\n  }},\n}})\n",
+                    notes[0], notes[1], notes[2], matches, SUSPEND_KEY
+                )
+            },
         };
         Ok(text)
     }
 
-    /// The line of the rule that matches `source` by its node name without
-    /// the profile, so that the rule still applies after a profile change.
-    /// A name without a known profile must match as a whole.
-    fn matcher(self, source: &Source) -> Result<String> {
-        if !is_plain(&source.name) {
-            bail!(
-                "Hush writes no rule for the node name {:?}, because it has characters other \
-                 than letters, digits, '.', '_', and '-'",
-                source.name
-            );
+    /// The lines of the rule that match `source`. The first matches its node
+    /// name without the profile, so that the rule still applies after a
+    /// profile change. A name without a known profile, or a WirePlumber 0.4
+    /// name that a second identical device shares, must match as a whole.
+    /// A split PCM adds a line for its hidden hardware node, which suspends
+    /// on its own.
+    fn matchers(self, source: &Source) -> Result<Vec<String>> {
+        let names =
+            std::iter::once(&source.name).chain(source.split.iter().map(|split| &split.name));
+        for name in names {
+            if !is_plain(name) {
+                bail!(
+                    "Hush writes no rule for the node name {:?}, because it has characters other \
+                     than letters, digits, '.', '_', and '-'",
+                    name
+                );
+            }
         }
         // A bracket matches a literal dot in both regex engines that WirePlumber
-        // 0.5 can use, and needs no escape in SPA-JSON.
-        Ok(match (self, source.stem()) {
+        // 0.5 can use, and needs no escape in SPA-JSON. A profile starts with
+        // a letter, and the second identical device adds `.2` before it.
+        let first = match (self, source.stem()) {
             (Format::Conf, Some(stem)) => {
-                format!("node.name = \"~^{}[.]\"", stem.replace('.', "[.]"))
+                format!(
+                    "node.name = \"~^{}[.][[:alpha:]]\"",
+                    stem.replace('.', "[.]")
+                )
             },
-            (Format::Conf, None) => format!("node.name = \"{}\"", source.name),
-            (Format::Lua, Some(stem)) => {
+            (Format::Lua, Some(stem)) if !source.twin => {
                 format!("{{ \"node.name\", \"matches\", \"{}.*\" }},", stem)
             },
-            (Format::Lua, None) => format!("{{ \"node.name\", \"equals\", \"{}\" }},", source.name),
-        })
+            (format, _) => format.exact(&source.name),
+        };
+        Ok(std::iter::once(first)
+            .chain(source.split.iter().map(|split| self.exact(&split.name)))
+            .collect())
     }
+
+    fn exact(self, name: &str) -> String {
+        match self {
+            Format::Conf => format!("node.name = \"{}\"", name),
+            Format::Lua => format!("{{ \"node.name\", \"equals\", \"{}\" }},", name),
+        }
+    }
+}
+
+/// The version in the output of `wireplumber --version`, which names the
+/// library that it was compiled with and the one that it linked.
+fn version_of(output: &str) -> Option<(u32, u32)> {
+    let linked = output
+        .lines()
+        .find(|line| line.contains("Linked with"))
+        .and_then(version_in);
+    linked.or_else(|| output.lines().find_map(version_in))
+}
+
+/// The version of the WirePlumber that runs: `application.version` of its
+/// PipeWire client with `wireplumber.daemon = true`.
+fn daemon_version(objects: &[Value]) -> Option<(u32, u32)> {
+    objects
+        .iter()
+        .filter(|object| object["type"] == "PipeWire:Interface:Client")
+        .filter_map(|object| object["info"]["props"].as_object())
+        .filter(|props| text(props.get("wireplumber.daemon")).as_deref() == Some("true"))
+        .find_map(|props| version_in(&text(props.get("application.version"))?))
+}
+
+/// The rule format of the WirePlumber on this machine: the version of the
+/// daemon that runs, else the version of the binary on `PATH`, else the
+/// installed files. A known version decides, also when Hush does not
+/// support it.
+pub async fn wireplumber_format(system: &impl System) -> Option<Format> {
+    let running = system
+        .dump()
+        .await
+        .ok()
+        .and_then(|text| parse_dump(&text).ok())
+        .and_then(|objects| daemon_version(&objects));
+    if let Some(version) = running {
+        return Format::for_version(version);
+    }
+    let binary = system
+        .wireplumber_version()
+        .await
+        .and_then(|output| version_of(&output));
+    if let Some(version) = binary {
+        return Format::for_version(version);
+    }
+    system.installed_format()
 }
 
 /// The first number pair `major.minor` in a line, such as `0.5` in
@@ -273,15 +350,60 @@ pub struct Source {
     /// `object.serial`, new for each node that PipeWire makes
     pub serial: Option<u64>,
     pub kind: Kind,
+    /// When WirePlumber suspends this node; see [`Source::suspend`]
     pub sleep: Sleep,
+    /// The hidden hardware node behind a UCM SplitPCM source
+    pub split: Option<Split>,
+    /// `pw-dump` shows a node of a second identical device:
+    /// `<stem>.<number>.<profile>`
+    pub twin: bool,
+}
+
+/// The hidden `Audio/Source/Internal` node that opens the hardware of a UCM
+/// SplitPCM source. The visible node is a loopback, and WirePlumber suspends
+/// the hidden node on its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Split {
+    /// `api.alsa.split.name` of the visible node
+    pub name: String,
+    pub serial: Option<u64>,
+    /// `None` when `pw-dump` does not show the node
+    pub sleep: Option<Sleep>,
 }
 
 impl Source {
+    /// When the microphone suspends: the node, or the hidden hardware node of
+    /// a split PCM, whichever suspends first.
+    pub fn suspend(&self) -> Sleep {
+        match (
+            self.sleep,
+            self.split.as_ref().and_then(|split| split.sleep),
+        ) {
+            (Sleep::After(own), Some(Sleep::After(hidden))) => Sleep::After(own.min(hidden)),
+            (Sleep::Never, Some(hidden)) => hidden,
+            (own, _) => own,
+        }
+    }
+
     /// The node name without `.` and the profile, when it ends with them.
+    /// WirePlumber writes the profile into the name with every character
+    /// other than a letter, a digit, `_`, `-`, or `.` as `_`.
     fn stem(&self) -> Option<&str> {
-        let profile = self.profile.as_deref().filter(|p| !p.is_empty())?;
+        let profile: String = self
+            .profile
+            .as_deref()
+            .filter(|p| !p.is_empty())?
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.') {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
         self.name
-            .strip_suffix(profile)?
+            .strip_suffix(profile.as_str())?
             .strip_suffix('.')
             .filter(|stem| !stem.is_empty())
     }
@@ -303,12 +425,61 @@ impl Source {
         Some(Self {
             label,
             profile: text(props.get("device.profile.name")),
-            serial: text(props.get("object.serial")).and_then(|serial| serial.parse().ok()),
+            serial: serial_of(props),
             kind,
             sleep: sleep_of(props.get(SUSPEND_KEY)),
+            split: text(props.get("api.alsa.split.name"))
+                .filter(|split| !split.is_empty() && *split != name)
+                .map(|name| Split {
+                    name,
+                    serial: None,
+                    sleep: None,
+                }),
+            twin: false,
             name,
         })
     }
+
+    /// Read the hidden node of a split PCM, and look for a second identical
+    /// device, in the same dump.
+    fn with_neighbours(mut self, objects: &[Value]) -> Self {
+        if let Some(split) = self.split.as_mut() {
+            if let Some(hidden) = node_props(objects, &split.name) {
+                split.serial = serial_of(hidden);
+                split.sleep = Some(sleep_of(hidden.get(SUSPEND_KEY)));
+            }
+        }
+        if let Some(stem) = self.stem() {
+            let prefix = format!("{}.", stem);
+            self.twin = node_names(objects).any(|name| {
+                name.strip_prefix(prefix.as_str())
+                    .and_then(|rest| rest.split_once('.'))
+                    .is_some_and(|(number, _)| {
+                        !number.is_empty() && number.chars().all(|c| c.is_ascii_digit())
+                    })
+            });
+        }
+        self
+    }
+}
+
+fn serial_of(props: &Map<String, Value>) -> Option<u64> {
+    text(props.get("object.serial")).and_then(|serial| serial.parse().ok())
+}
+
+fn node_props<'a>(objects: &'a [Value], name: &str) -> Option<&'a Map<String, Value>> {
+    objects
+        .iter()
+        .filter(|object| object["type"] == "PipeWire:Interface:Node")
+        .filter_map(|object| object["info"]["props"].as_object())
+        .find(|props| text(props.get("node.name")).as_deref() == Some(name))
+}
+
+fn node_names(objects: &[Value]) -> impl Iterator<Item = &str> {
+    objects
+        .iter()
+        .filter(|object| object["type"] == "PipeWire:Interface:Node")
+        .filter_map(|object| object["info"]["props"]["node.name"].as_str())
 }
 
 /// A property value as text: pw-dump prints numbers and booleans bare.
@@ -406,6 +577,7 @@ fn find(objects: &[Value], wanted: &Wanted) -> Option<Source> {
                 None
             }
         })
+        .map(|source| source.with_neighbours(objects))
 }
 
 /// Whether Hush reads the ALSA PCM through the sound server, which picks the
@@ -478,10 +650,14 @@ pub fn rules_in(config_dir: &Path) -> Vec<PathBuf> {
 /// Whether a rule file of Hush under `config_dir` matches `source`.
 pub fn rule_names(config_dir: &Path, source: &Source) -> bool {
     Format::ALL.iter().any(|format| {
-        let Ok(matcher) = format.matcher(source) else {
+        let Ok(matchers) = format.matchers(source) else {
             return false;
         };
-        fs::read_to_string(format.rule_path(config_dir)).is_ok_and(|text| text.contains(&matcher))
+        fs::read_to_string(format.rule_path(config_dir)).is_ok_and(|text| {
+            matchers
+                .iter()
+                .all(|matcher| text.contains(matcher.as_str()))
+        })
     })
 }
 
@@ -543,7 +719,7 @@ pub fn finding(probe: &Probe, hush_rule: bool, delay: Option<StartDelay>) -> Fin
             Probe::Found(source) => source,
         };
     let label = &source.label;
-    let seconds = match source.sleep {
+    let seconds = match source.suspend() {
         Sleep::Never if hush_rule => {
             return Finding::fine(format!(
                 "{} stays awake between takes (the WirePlumber rule of Hush)",
@@ -637,11 +813,11 @@ pub async fn plan(system: &impl System, config_dir: &Path, probe: Probe) -> Resu
             SUSPEND_KEY
         ),
     }
-    if source.sleep == Sleep::Never {
+    if source.suspend() == Sleep::Never {
         let by_hush = rule_names(config_dir, &source);
         return Ok(Plan::Awake { source, by_hush });
     }
-    let format = system.wireplumber().await.context(
+    let format = wireplumber_format(system).await.context(
         "Hush finds no WirePlumber 0.4 or later, the PipeWire session manager that reads the rule",
     )?;
     let text = format.rule(&source)?;
@@ -697,10 +873,17 @@ pub async fn apply(system: &impl System, change: &Change) -> Result<Source> {
         )
     })?;
     let source = back(system, &change.source).await?;
-    if let Sleep::After(seconds) = source.sleep {
+    if let Sleep::After(seconds) = source.suspend() {
+        let node = match source.split.as_ref() {
+            Some(split) if source.sleep == Sleep::Never => {
+                format!(" (its hardware node {})", split.name)
+            },
+            _ => String::new(),
+        };
         bail!(
-            "WirePlumber restarted, but {} still sleeps after {} s. Look at {}",
+            "WirePlumber restarted, but {}{} still sleeps after {} s. Look at {}",
             source.label,
+            node,
             seconds,
             change.path.display()
         );
@@ -722,7 +905,8 @@ pub enum Undone {
 }
 
 /// Remove Hush's rule files, restart WirePlumber, and wait for the source
-/// of `probe` to come back.
+/// of `probe` to come back. Only an ALSA node comes back as a new node: a
+/// filter or a loopback keeps its node, so the restart is the end.
 pub async fn undo(system: &impl System, config_dir: &Path, probe: Probe) -> Result<Undone> {
     let files = rules_in(config_dir);
     if files.is_empty() {
@@ -736,32 +920,53 @@ pub async fn undo(system: &impl System, config_dir: &Path, probe: Probe) -> Resu
          systemctl --user restart wireplumber",
     )?;
     let source = match probe {
-        Probe::Found(before) => Some(back(system, &before).await?),
+        Probe::Found(before) if before.kind == Kind::Alsa => Some(
+            back(system, &before)
+                .await
+                .context("Hush removed its rule, and WirePlumber restarted")?,
+        ),
         _ => None,
     };
     Ok(Undone::Removed { files, source })
 }
 
 /// The node of `before` after a WirePlumber restart: the same name with a
-/// new serial, because the old node can still show for a moment.
+/// new serial, because the old node can still show for a moment. The hidden
+/// node of a split PCM must be new too.
 async fn back(system: &impl System, before: &Source) -> Result<Source> {
     let wanted = Wanted::Named(before.name.clone());
+    let started = Instant::now();
     for _ in 0..POLLS {
+        if started.elapsed() >= COMEBACK {
+            break;
+        }
         system.pause(POLL).await;
         let Ok(objects) = system.dump().await.and_then(|text| parse_dump(&text)) else {
             continue;
         };
-        if let Some(now) = find(&objects, &wanted) {
-            if before.serial.is_none() || now.serial != before.serial {
-                return Ok(now);
-            }
+        if let Some(now) = find(&objects, &wanted).filter(|now| renewed(before, now)) {
+            return Ok(now);
         }
     }
     bail!(
-        "{} did not come back in {} s after WirePlumber restarted",
+        "{} did not come back in the {} s after WirePlumber restarted",
         before.label,
-        (POLL * POLLS).as_secs()
+        started.elapsed().as_secs_f64().ceil()
     )
+}
+
+/// `now` is the node that WirePlumber made after the restart, not the old
+/// one, and so is its hidden hardware node, when Hush saw one before.
+fn renewed(before: &Source, now: &Source) -> bool {
+    let new = |old: Option<u64>, new: Option<u64>| old.is_none() || (new.is_some() && new != old);
+    let hidden = match (&before.split, &now.split) {
+        (Some(old), Some(now)) if old.sleep.is_some() => {
+            now.sleep.is_some() && new(old.serial, now.serial)
+        },
+        (Some(old), None) => old.sleep.is_none(),
+        _ => true,
+    };
+    new(before.serial, now.serial) && hidden
 }
 
 fn write_rule(path: &Path, text: &str) -> Result<()> {
@@ -834,9 +1039,11 @@ mod tests {
     }
 
     /// A machine with a script of `pw-dump` outputs; the last one repeats.
+    /// `wireplumber --version` names 0.5 unless a test changes it.
     struct Fake {
         dumps: Mutex<VecDeque<Result<String, String>>>,
-        format: Option<Format>,
+        version: Option<String>,
+        installed: Option<Format>,
         restart: Result<(), String>,
         restarts: Mutex<u32>,
     }
@@ -845,7 +1052,8 @@ mod tests {
         fn new(dumps: Vec<Result<String, String>>) -> Self {
             Self {
                 dumps: Mutex::new(dumps.into()),
-                format: Some(Format::Conf),
+                version: Some("Linked with libwireplumber 0.5.19".to_string()),
+                installed: None,
                 restart: Ok(()),
                 restarts: Mutex::new(0),
             }
@@ -869,8 +1077,12 @@ mod tests {
                 .map_err(|e| anyhow!(e))
         }
 
-        async fn wireplumber(&self) -> Option<Format> {
-            self.format
+        async fn wireplumber_version(&self) -> Option<String> {
+            self.version.clone()
+        }
+
+        fn installed_format(&self) -> Option<Format> {
+            self.installed
         }
 
         async fn restart_wireplumber(&self) -> Result<()> {
@@ -1004,34 +1216,88 @@ mod tests {
         assert_eq!(default_source(&objects).as_deref(), Some(YETI));
     }
 
+    fn format_of(text: &str) -> Option<Format> {
+        Format::for_version(version_of(text)?)
+    }
+
     #[test]
     fn the_version_picks_the_rule_format() {
         let new =
             "wireplumber\nCompiled with libwireplumber 0.5.19\nLinked with libwireplumber 0.5.19\n";
-        assert_eq!(Format::from_version(new), Some(Format::Conf));
+        assert_eq!(format_of(new), Some(Format::Conf));
         let old =
             "wireplumber\nCompiled with libwireplumber 0.4.17\nLinked with libwireplumber 0.4.17\n";
-        assert_eq!(Format::from_version(old), Some(Format::Lua));
+        assert_eq!(format_of(old), Some(Format::Lua));
         let mixed =
             "wireplumber\nCompiled with libwireplumber 0.4.17\nLinked with libwireplumber 0.5.2\n";
         assert_eq!(
-            Format::from_version(mixed),
+            format_of(mixed),
             Some(Format::Conf),
             "the linked library counts"
         );
-        assert_eq!(
-            Format::from_version("wireplumber 1.0.1"),
-            Some(Format::Conf)
-        );
-        assert_eq!(Format::from_version("libwireplumber 0.3.96"), None);
-        assert_eq!(Format::from_version("Unknown option --version"), None);
+        assert_eq!(format_of("wireplumber 1.0.1"), Some(Format::Conf));
+        assert_eq!(format_of("libwireplumber 0.3.96"), None);
+        assert_eq!(format_of("Unknown option --version"), None);
+    }
 
+    #[test]
+    fn the_lua_folder_decides_before_wireplumber_conf() {
         let share = tempfile::tempdir().unwrap();
         assert_eq!(Format::from_system_files(share.path()), None);
-        fs::create_dir(share.path().join("main.lua.d")).unwrap();
-        assert_eq!(Format::from_system_files(share.path()), Some(Format::Lua));
         fs::write(share.path().join("wireplumber.conf"), "").unwrap();
         assert_eq!(Format::from_system_files(share.path()), Some(Format::Conf));
+        fs::create_dir(share.path().join("main.lua.d")).unwrap();
+        assert_eq!(
+            Format::from_system_files(share.path()),
+            Some(Format::Lua),
+            "WirePlumber 0.4 installs wireplumber.conf too"
+        );
+    }
+
+    fn wireplumber_client(version: &str) -> Value {
+        serde_json::json!({
+            "id": 71,
+            "type": "PipeWire:Interface:Client",
+            "info": { "props": {
+                "application.name": "WirePlumber",
+                "application.version": version,
+                "wireplumber.daemon": true,
+            } },
+        })
+    }
+
+    #[tokio::test]
+    async fn the_running_daemon_decides_the_format_before_the_binary_and_the_files() {
+        let mut fake = Fake::new(vec![Ok(dump(vec![wireplumber_client("0.4.17")]))]);
+        fake.installed = Some(Format::Conf);
+        assert_eq!(
+            wireplumber_format(&fake).await,
+            Some(Format::Lua),
+            "the daemon runs 0.4 while the binary on PATH is 0.5"
+        );
+
+        let mut fake = Fake::new(vec![Ok(dump(vec![yeti(1, None)]))]);
+        fake.version = Some("Linked with libwireplumber 0.4.17".into());
+        fake.installed = Some(Format::Conf);
+        assert_eq!(
+            wireplumber_format(&fake).await,
+            Some(Format::Lua),
+            "a version from the binary skips the files"
+        );
+
+        fake.version = Some("Linked with libwireplumber 0.3.96".into());
+        assert_eq!(
+            wireplumber_format(&fake).await,
+            None,
+            "a known version that Hush does not support decides too"
+        );
+
+        let mut fake = Fake::new(vec![Err("Connection refused".into())]);
+        fake.version = None;
+        fake.installed = Some(Format::Lua);
+        assert_eq!(wireplumber_format(&fake).await, Some(Format::Lua));
+        fake.installed = None;
+        assert_eq!(wireplumber_format(&fake).await, None);
     }
 
     fn yeti_source(sleep: Sleep) -> Source {
@@ -1042,6 +1308,8 @@ mod tests {
             serial: Some(8356),
             kind: Kind::Alsa,
             sleep,
+            split: None,
+            twin: false,
         }
     }
 
@@ -1055,7 +1323,7 @@ mod tests {
              # WirePlumber does not suspend this microphone, so a take keeps its first word.\n\
              # `hush setup mic --undo` removes this file.\n\
              monitor.alsa.rules = [\n  {\n    matches = [\n      {\n        \
-             node.name = \"~^alsa_input[.]usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00[.]\"\n      \
+             node.name = \"~^alsa_input[.]usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00[.][[:alpha:]]\"\n      \
              }\n    ]\n    actions = {\n      update-props = {\n        \
              session.suspend-timeout-seconds = 0\n      }\n    }\n  }\n]\n"
         );
@@ -1078,7 +1346,7 @@ mod tests {
         assert!(Format::Conf
             .rule(&pci)
             .unwrap()
-            .contains("\"~^alsa_input[.]pci-0000_00_1f[.]3[.]\""));
+            .contains("\"~^alsa_input[.]pci-0000_00_1f[.]3[.][[:alpha:]]\""));
 
         let no_profile = Source {
             profile: None,
@@ -1173,6 +1441,8 @@ mod tests {
             serial: None,
             kind: Kind::Bluetooth,
             sleep: Sleep::After(5),
+            split: None,
+            twin: false,
         };
         let slow = finding(&Probe::Found(headset.clone()), false, delay(1500));
         assert!(slow.warn && !slow.fixable);
@@ -1287,7 +1557,10 @@ mod tests {
 
         let gone = Fake::new(vec![Ok(dump(vec![yeti(100, None)]))]);
         let error = apply(&gone, &change).await.unwrap_err().to_string();
-        assert!(error.contains("did not come back in 10 s"), "{error}");
+        assert!(
+            error.contains("did not come back in the 1 s after WirePlumber restarted"),
+            "the real time, with the poll cap in a test: {error}"
+        );
 
         let mut broken = Fake::new(vec![Ok(dump(vec![yeti(100, None)]))]);
         broken.restart = Err("Unit wireplumber.service not found.".into());
@@ -1343,7 +1616,7 @@ mod tests {
         assert!(error.contains("not an ALSA device"), "{error}");
 
         let mut no_wireplumber = Fake::new(vec![Ok(dump(vec![yeti(1, None), defaults(YETI)]))]);
-        no_wireplumber.format = None;
+        no_wireplumber.version = None;
         let probe_any = probe(&no_wireplumber, Some("default"), None).await;
         assert!(plan(&no_wireplumber, config.path(), probe_any)
             .await
@@ -1393,6 +1666,185 @@ mod tests {
         assert_eq!(source.unwrap().sleep, Sleep::After(5));
         assert!(!ours.exists());
         assert!(theirs.exists(), "a file of the user stays");
+        assert_eq!(fake.restarts(), 1);
+    }
+
+    fn split_mic(
+        serial: u64,
+        hidden_serial: u64,
+        own: Option<Value>,
+        hidden: Option<Value>,
+    ) -> Vec<Value> {
+        let mut visible = serde_json::json!({
+            "device.api": "alsa",
+            "device.profile.name": "HiFi: hw:sofhdadsp,6: source",
+            "node.nick": "Digital Microphone",
+            "api.alsa.split.name": "alsa_input.hw_sofhdadsp_6",
+        });
+        if let (Some(visible), Some(own)) = (visible.as_object_mut(), own) {
+            visible.insert(SUSPEND_KEY.to_string(), own);
+        }
+        let mut internal = serde_json::json!({
+            "device.api": "alsa",
+            "media.class": "Audio/Source/Internal",
+            "api.alsa.split.parent": true,
+        });
+        if let (Some(internal), Some(hidden)) = (internal.as_object_mut(), hidden) {
+            internal.insert(SUSPEND_KEY.to_string(), hidden);
+        }
+        vec![
+            node(
+                60,
+                serial,
+                "alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__hw_sofhdadsp_6__source",
+                visible,
+            ),
+            node(61, hidden_serial, "alsa_input.hw_sofhdadsp_6", internal),
+            defaults(
+                "alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__hw_sofhdadsp_6__source",
+            ),
+        ]
+    }
+
+    #[tokio::test]
+    async fn a_split_pcm_counts_and_matches_its_hidden_hardware_node() {
+        let config = tempfile::tempdir().unwrap();
+        let only_visible = Fake::new(vec![Ok(dump(split_mic(
+            200,
+            201,
+            Some(serde_json::json!(0)),
+            None,
+        )))]);
+        let source = found(probe(&only_visible, Some("default"), None).await);
+        assert_eq!(source.sleep, Sleep::Never, "the visible loopback");
+        assert_eq!(
+            source.suspend(),
+            Sleep::After(5),
+            "the hidden node still suspends"
+        );
+        assert_eq!(
+            source.stem(),
+            Some("alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic"),
+            "the UCM profile in its written form"
+        );
+        let warned = finding(&Probe::Found(source.clone()), false, delay(700));
+        assert!(warned.warn && warned.fixable, "{warned:?}");
+
+        let rule = Format::Conf.rule(&source).unwrap();
+        assert!(
+            rule.contains(
+                "      {\n        node.name = \"~^alsa_input[.]pci-0000_00_1f[.]3-platform-skl_hda_dsp_generic[.][[:alpha:]]\"\n      }\n      \
+                 {\n        node.name = \"alsa_input.hw_sofhdadsp_6\"\n      }\n"
+            ),
+            "{rule}"
+        );
+        assert!(Format::Lua
+            .rule(&source)
+            .unwrap()
+            .contains("{ \"node.name\", \"equals\", \"alsa_input.hw_sofhdadsp_6\" },"));
+
+        // The probe and the version lookup of the plan read one dump each.
+        let fake = Fake::new(vec![
+            Ok(dump(split_mic(200, 201, None, None))),
+            Ok(dump(split_mic(200, 201, None, None))),
+            Ok(dump(split_mic(210, 201, Some(serde_json::json!(0)), None))),
+            Ok(dump(split_mic(
+                210,
+                211,
+                Some(serde_json::json!(0)),
+                Some(serde_json::json!(0)),
+            ))),
+        ]);
+        let before = probe(&fake, Some("default"), None).await;
+        let Plan::Write(change) = plan(&fake, config.path(), before).await.unwrap() else {
+            panic!("the source sleeps");
+        };
+        let after = apply(&fake, &change).await.unwrap();
+        assert_eq!(after.suspend(), Sleep::Never);
+        assert_eq!(
+            after.split.as_ref().and_then(|split| split.serial),
+            Some(211),
+            "the wait skips the old hidden node"
+        );
+        assert!(rule_names(config.path(), &after));
+
+        let half = Fake::new(vec![
+            Ok(dump(split_mic(200, 201, None, None))),
+            Ok(dump(split_mic(210, 211, Some(serde_json::json!(0)), None))),
+        ]);
+        let before = probe(&half, Some("default"), None).await;
+        let Plan::Write(change) = plan(&half, config.path(), before).await.unwrap() else {
+            panic!("the source sleeps");
+        };
+        let error = apply(&half, &change).await.unwrap_err().to_string();
+        assert!(
+            error.contains("(its hardware node alsa_input.hw_sofhdadsp_6) still sleeps"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_second_identical_device_stays_out_of_the_rule() {
+        let twin = node(
+            86,
+            8400,
+            "alsa_input.usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00.2.iec958-stereo",
+            serde_json::json!({"device.api": "alsa", "device.profile.name": "iec958-stereo"}),
+        );
+        let fake = Fake::new(vec![Ok(dump(vec![yeti(1, None), twin, defaults(YETI)]))]);
+        let source = found(probe(&fake, Some("default"), None).await);
+        assert!(source.twin);
+        assert!(
+            Format::Lua
+                .rule(&source)
+                .unwrap()
+                .contains(&format!("{{ \"node.name\", \"equals\", \"{YETI}\" }},")),
+            "a glob would match the twin, so 0.4 matches the whole name"
+        );
+        assert!(
+            Format::Conf
+                .rule(&source)
+                .unwrap()
+                .contains("REV8-00[.][[:alpha:]]"),
+            "the twin's `.2` is no letter, so the 0.5 pattern skips it"
+        );
+
+        let alone = Fake::new(vec![Ok(dump(vec![yeti(1, None), defaults(YETI)]))]);
+        let source = found(probe(&alone, Some("default"), None).await);
+        assert!(!source.twin);
+        assert!(Format::Lua.rule(&source).unwrap().contains(
+            "{ \"node.name\", \"matches\", \"alsa_input.usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00.*\" },"
+        ));
+    }
+
+    #[tokio::test]
+    async fn undo_waits_only_for_a_node_that_wireplumber_makes_again() {
+        let config = tempfile::tempdir().unwrap();
+        let ours = Format::Conf.rule_path(config.path());
+        fs::create_dir_all(ours.parent().unwrap()).unwrap();
+        fs::write(&ours, "# old rule\n").unwrap();
+        let filter = node(
+            9,
+            90,
+            "effect_output.rnnoise",
+            serde_json::json!({"node.description": "Noise Canceling source"}),
+        );
+        let fake = Fake::new(vec![Ok(dump(vec![
+            filter,
+            defaults("effect_output.rnnoise"),
+        ]))]);
+        let before = probe(&fake, Some("default"), None).await;
+        assert_eq!(found(before.clone()).kind, Kind::Other);
+        let undone = undo(&fake, config.path(), before).await.unwrap();
+        assert_eq!(
+            undone,
+            Undone::Removed {
+                files: vec![ours.clone()],
+                source: None
+            },
+            "the filter keeps its serial, so there is nothing to wait for"
+        );
+        assert!(!ours.exists());
         assert_eq!(fake.restarts(), 1);
     }
 }

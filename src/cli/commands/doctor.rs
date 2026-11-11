@@ -1273,6 +1273,8 @@ mod tests {
             serial: Some(1),
             kind: wake::Kind::Alsa,
             sleep: wake::Sleep::After(5),
+            split: None,
+            twin: false,
         };
         let slow = StartDelay {
             last_ms: 30,

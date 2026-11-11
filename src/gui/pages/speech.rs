@@ -725,7 +725,7 @@ async fn let_sleep(device: Option<&str>) -> anyhow::Result<String> {
         Undone::Removed {
             source: Some(source),
             ..
-        } if source.sleep == Sleep::Never => format!(
+        } if source.suspend() == Sleep::Never => format!(
             "The rule of Hush is gone. Another WirePlumber rule keeps {} awake.",
             source.label
         ),
@@ -746,6 +746,8 @@ pub fn finish_wake(gui: &mut Gui) {
             return;
         };
         shared.probe = None;
+        shared.hush_rule = false;
+        shared.any_rule = false;
         message
     };
     gui.say(message);
@@ -981,6 +983,8 @@ mod tests {
             serial: Some(1),
             kind: wake::Kind::Alsa,
             sleep: Sleep::After(5),
+            split: None,
+            twin: false,
         }
     }
 
@@ -1016,6 +1020,12 @@ mod tests {
     fn the_wake_row_draws_each_offer_and_its_second_click() {
         let mut gui = crate::gui::tests::window();
         gui.wake.shared.lock().probe = Some(Probe::Found(slow_yeti()));
+        gui.machine.start_delay = Some(crate::audio::take::StartDelay {
+            last_ms: 650,
+            worst_ms: 650,
+            takes: 1,
+        });
+        assert_eq!(wake_offer(&gui), Some(WakeAction::Keep));
         let ctx = egui::Context::default();
         crate::gui::theme::install(&ctx);
         let draw = |gui: &mut Gui| {
@@ -1050,8 +1060,14 @@ mod tests {
         let mut gui = crate::gui::tests::window();
         gui.wake.asked = Some((Instant::now(), None));
         gui.meter_error = Some("busy".to_string());
-        gui.wake.shared.lock().finished =
-            Some("Yeti Stereo Microphone stays awake between takes now.".to_string());
+        {
+            let mut shared = gui.wake.shared.lock();
+            shared.probe = Some(Probe::Found(slow_yeti()));
+            shared.hush_rule = true;
+            shared.any_rule = true;
+            shared.finished =
+                Some("Yeti Stereo Microphone stays awake between takes now.".to_string());
+        }
         finish_wake(&mut gui);
         assert_eq!(
             gui.toast.as_ref().map(|(message, _)| message.as_str()),
@@ -1059,6 +1075,11 @@ mod tests {
         );
         assert!(gui.wake.asked.is_none(), "the next frame reads again");
         assert!(wake_finding(&gui).is_none(), "the old read is gone");
+        assert_eq!(
+            wake_offer(&gui),
+            None,
+            "no Let it sleep again from the old read of the rule files"
+        );
         assert!(gui.meter_error.is_none(), "the meter opens again");
         finish_wake(&mut gui);
     }
