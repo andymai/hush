@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2025-2026 Andy Aragon -->
+<component type="desktop-application">
+  <id>io.github.andymai.hush</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Hush</name>
+  <summary>Dictate into any app, locally</summary>
+  <developer id="io.github.andymai">
+    <name>Andy Aragon</name>
+  </developer>
+
+  <description>
+    <p>
+      Hush turns speech into text on the Linux desktop. Hold a key, speak, and
+      let go: the words appear at the cursor. Hush runs OpenAI's Whisper models
+      or NVIDIA's Parakeet on your computer, on the GPU through Vulkan when one
+      is present, so your audio stays on your computer.
+    </p>
+    <ul>
+      <li>Hold to talk, or tap twice for hands-free recording that transcribes in parts while you speak</li>
+      <li>Any language that Whisper knows, with an optional key for each language</li>
+      <li>Text that fits the application: casual in chat, full sentences in mail, no line breaks in a terminal</li>
+      <li>Your own words: teach Hush a name once, and it spells the name your way</li>
+      <li>Optional polish of the text by a local or cloud language model, which gets text and never audio</li>
+      <li>A history of your transcripts that only you can read, and recovery of a failed take</li>
+      <li>A settings window and a panel icon</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.andymai.hush.desktop</launchable>
+  <provides>
+    <binary>hush</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/andymai/hush</url>
+  <url type="bugtracker">https://github.com/andymai/hush/issues</url>
+  <url type="vcs-browser">https://github.com/andymai/hush</url>
+
+  <content_rating type="oars-1.1"/>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#d7d2fa</color>
+    <color type="primary" scheme_preference="dark">#2e2670</color>
+  </branding>
+
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <keywords>
+    <keyword>dictation</keyword>
+    <keyword>speech to text</keyword>
+    <keyword>voice typing</keyword>
+    <keyword>transcription</keyword>
+    <keyword>whisper</keyword>
+  </keywords>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>The overview of what is set up</caption>
+      <image>https://raw.githubusercontent.com/andymai/hush/72bfece4e025d5d024cdaf651da72c1761aa6b2f/docs/screenshots/settings/overview.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The speech model, the languages, and the microphone</caption>
+      <image>https://raw.githubusercontent.com/andymai/hush/72bfece4e025d5d024cdaf651da72c1761aa6b2f/docs/screenshots/settings/speech.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The hotkeys for dictation, languages, and styles</caption>
+      <image>https://raw.githubusercontent.com/andymai/hush/72bfece4e025d5d024cdaf651da72c1761aa6b2f/docs/screenshots/settings/hotkeys.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The history of transcripts</caption>
+      <image>https://raw.githubusercontent.com/andymai/hush/72bfece4e025d5d024cdaf651da72c1761aa6b2f/docs/screenshots/settings/history-light.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The command palette</caption>
+      <image>https://raw.githubusercontent.com/andymai/hush/72bfece4e025d5d024cdaf651da72c1761aa6b2f/docs/screenshots/settings/palette.png</image>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="0.30.2" date="2026-11-10" type="stable">
+      <description>
+        <p>Bug Fixes</p>
+        <ul>
+          <li>Type the right case with Caps Lock on</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.30.1" date="2026-11-10" type="stable">
+      <description>
+        <p>Bug Fixes</p>
+        <ul>
+          <li>Write the GPU failure record atomically, and check more CPU modules for AVX-512</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.30.0" date="2026-11-10" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>Load the ggml backends at run time from one package</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.29.0" date="2026-11-10" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>Add a Ctrl+K command palette to the settings window</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.28.0" date="2026-11-10" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>Save each settings change at once</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.27.0" date="2026-11-10" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>Add Parakeet TDT 0.6B v3 as an opt-in model</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.26.0" date="2026-11-10" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>Restyle the settings window with light and dark themes</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.25.0" date="2026-11-10" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>Make modifier names in hotkey chords follow the keymap</li>
+          <li>Run Whisper through transcribe.cpp</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.24.2" date="2026-11-10" type="stable">
+      <description>
+        <p>Bug Fixes</p>
+        <ul>
+          <li>Stop a bare Alt or Super hotkey from opening app menus</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.24.1" date="2026-11-10" type="stable">
+      <description>
+        <p>Bug Fixes</p>
+        <ul>
+          <li>Scroll the vocabulary with the page, and filter long lists</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+</component>

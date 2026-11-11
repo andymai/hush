@@ -1,0 +1,73 @@
+name: Flatpak
+
+# Builds the Flatpak of packaging/flatpak/io.github.andymai.hush.yml in the
+# Flathub build image, keeps the bundle as an artifact, and runs
+# flatpak-builder-lint on the manifest, the AppStream file, and the build. It is
+# not a required check.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - packaging/**
+      - Cargo.lock
+      - build.rs
+      - .github/workflows/flatpak.yml
+  workflow_dispatch:
+
+concurrency:
+  group: flatpak-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  flatpak:
+    name: Build and lint the Flatpak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    container:
+      # freedesktop-26.08, by digest
+      image: ghcr.io/flathub-infra/flatpak-github-actions@sha256:6d1b8ebf93a5ea4bcfa94123fabab57b3c40af5df2a52d93aa5892e464104f5a
+      options: --privileged
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Dependabot changes Cargo.lock without cargo-sources.json, so the build
+      # takes the crates of the Cargo.lock that it builds, and an old copy in the
+      # repository only warns.
+      - name: Write the offline crate sources from Cargo.lock
+        run: |
+          cp packaging/flatpak/cargo-sources.json /tmp/cargo-sources.committed.json
+          packaging/flatpak/update-cargo-sources.sh
+          if ! cmp -s /tmp/cargo-sources.committed.json packaging/flatpak/cargo-sources.json; then
+            echo "::warning::packaging/flatpak/cargo-sources.json does not match Cargo.lock. Run packaging/flatpak/update-cargo-sources.sh."
+          fi
+
+      - name: Lint the manifest and the AppStream file
+        run: |
+          flatpak-builder-lint manifest packaging/flatpak/io.github.andymai.hush.yml
+          flatpak-builder-lint appstream packaging/io.github.andymai.hush.metainfo.xml
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
+        with:
+          manifest-path: packaging/flatpak/io.github.andymai.hush.yml
+          bundle: hush.flatpak
+          cache-key: flatpak-builder-${{ hashFiles('packaging/flatpak/**', 'Cargo.lock') }}
+          build-dir: flatpak_app
+          repo-dir: repo
+          keep-build-dirs: true
+          upload-artifact: true
+          mirror-screenshots-url: https://dl.flathub.org/media/
+
+      # Only the Flathub pipeline uploads the screenshots and icons to
+      # dl.flathub.org, so lint-exceptions.json lets the two checks of that pass.
+      - name: Lint the build
+        run: |
+          flatpak-builder-lint --exceptions --user-exceptions packaging/flatpak/lint-exceptions.json builddir flatpak_app
+          flatpak-builder-lint --exceptions --user-exceptions packaging/flatpak/lint-exceptions.json repo repo
