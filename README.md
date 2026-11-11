@@ -42,7 +42,7 @@ hush daemon start             # runs in the background
 
 Hold `Right Alt`, speak, release. Done.
 
-`hush setup init` asks for the model, the GPU, and the hotkey, and writes `~/.config/hush/config.toml`. The model defaults to base. The Speech page of `hush settings` names the model that suits your hardware. `hush install --autostart` starts the daemon at login.
+`hush setup init` asks for the GPU, the model, and the hotkey, and writes `~/.config/hush/config.toml`. The model defaults to the model that suits your hardware, which the Speech page of `hush settings` also names. `hush setup init --defaults` writes base without a prompt. `hush install --autostart` starts the daemon at login.
 
 ## Features
 
@@ -91,7 +91,7 @@ Everyday dictation:
 | `hush start --style casual` / `hush toggle --style casual` | Start a recording in that writing style: `verbatim`, or a style under `[styles]`. An unknown style exits with code 2 |
 | `hush stop --print [--json]` | Stop, wait for the text, and print it instead of typing it |
 | `hush listen` | Run a dictation session attached to the terminal |
-| `hush record [-d secs]` | Record for N seconds (default 30) and transcribe |
+| `hush record [-d secs] [-p]` | Record for N seconds (default 30), transcribe, and type the text. `-p` prints the text on stdout and types nothing |
 | `hush learn [words…]` | Add the selection, or the given words, to the vocabulary |
 | `hush rewrite <style>` | Rewrite the selected text with the prompt of a style. The style needs polish on and a prompt. Another style exits with code 2 |
 | `hush paste-last` | Re-type the last transcript |
@@ -131,7 +131,8 @@ Diagnostics and lifecycle:
 
 | Command | Does |
 |---|---|
-| `hush status [--full] [--devices] [--config]` | Daemon state, settings, and microphones. `--full` adds the `hush doctor` report |
+| `hush status [--full]` | Daemon state, settings, and microphones. `--full` adds the `hush doctor` report |
+| `hush status --devices` / `--config` | Only the microphones, or only the settings. Use both flags to get both. They need no daemon |
 | `hush status --json [--follow]` | Daemon state and setup as JSON; `--follow` prints a Waybar line for each change |
 | `hush test audio\|transcription\|text-insertion\|hotkeys\|window\|pipeline\|all` | Targeted self-tests |
 | `hush install [--autostart] [--desktop] [--system]` | Set up autostart and the desktop entry |
@@ -141,7 +142,7 @@ Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another co
 
 ## Scripts
 
-`hush toggle`, `hush start`, `hush stop`, `hush cancel`, `hush status`, `hush paste-last`, and `hush rewrite` use fixed exit codes:
+`hush toggle`, `hush start`, `hush stop`, `hush cancel`, `hush status`, `hush paste-last`, and `hush rewrite` use fixed exit codes. `hush status --devices` and `hush status --config` do not ask the daemon, so they do not exit with 3:
 
 | Code | Meaning |
 |---|---|

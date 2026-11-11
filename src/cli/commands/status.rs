@@ -1,4 +1,4 @@
-use super::utils::{print_line, show_config_status, show_device_status, show_system_info};
+use super::utils::{config_section, device_section, print_line, show_system_info};
 use crate::cli::exit::{Exit, ExitStatus};
 use crate::config::settings::TranscriptionBackend;
 use crate::ipc::{DaemonResponse, DaemonState, ModelState};
@@ -15,14 +15,12 @@ use std::path::Path;
 ///
 /// # Arguments
 ///
-/// * `_config` - Reserved for future use to show only configuration details
-/// * `_devices` - Reserved for future use to show only device details
+/// * `config` - Print only the Configuration section
+/// * `devices` - Print only the Audio Devices section
 /// * `full` - Follow with the `hush doctor` report
 ///
-/// # Note
-///
-/// Currently, config and device status are always shown. The `_config` and `_devices`
-/// parameters are reserved for future enhancement to allow selective display.
+/// With `config` or `devices`, the report has only those sections, without
+/// the daemon state, and the exit code does not depend on the daemon.
 ///
 /// # Examples
 ///
@@ -32,12 +30,30 @@ use std::path::Path;
 /// // Basic status
 /// handle_status(false, false, false).await?;
 ///
+/// // Only the input devices
+/// handle_status(false, true, false).await?;
+///
 /// // Followed by the doctor report
 /// handle_status(false, false, true).await?;
 /// # Ok(())
 /// # }
 /// ```
-pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<()> {
+pub async fn handle_status(config: bool, devices: bool, full: bool) -> Result<()> {
+    if config || devices {
+        print!(
+            "{}",
+            only_sections(
+                config.then(Config::load),
+                devices.then(AudioCapture::list_devices),
+            )
+        );
+        if full {
+            println!();
+            super::doctor::handle_doctor().await?;
+        }
+        return Ok(());
+    }
+
     println!("🤫 Hush System Status");
     println!();
 
@@ -61,12 +77,11 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
     }
     println!();
 
-    // Always show basic status
     show_system_info().await?;
     println!();
-    show_config_status().await?;
+    print!("{}", config_section(Config::load()));
     println!();
-    show_device_status().await?;
+    print!("{}", device_section(AudioCapture::list_devices()));
 
     if full {
         println!();
@@ -78,6 +93,16 @@ pub async fn handle_status(_config: bool, _devices: bool, full: bool) -> Result<
     } else {
         Exit::quiet_result(ExitStatus::NoDaemon)
     }
+}
+
+/// The sections that `--config` and `--devices` ask for, in the order of
+/// the full report, with a blank line between them.
+fn only_sections(config: Option<Result<Config>>, devices: Option<Result<Vec<String>>>) -> String {
+    [config.map(config_section), devices.map(device_section)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// What `hush status --json` prints. Every key is present; unknown values
@@ -283,6 +308,80 @@ mod tests {
         assert_eq!(report.backend, None);
         assert_eq!(report.language, None);
         assert_eq!(report.config_error.as_deref(), Some("bad toml"));
+    }
+
+    #[test]
+    fn devices_prints_only_the_input_devices() {
+        let devices = vec!["Built-in Microphone".to_string(), "USB Mic".to_string()];
+        let text = only_sections(None, Some(Ok(devices)));
+        assert_eq!(
+            text,
+            "🎤 Audio Devices:\n  1. Built-in Microphone\n  2. USB Mic\n"
+        );
+
+        let text = only_sections(None, Some(Ok(vec![])));
+        assert_eq!(text, "🎤 Audio Devices:\n  ⚠️ No audio devices found\n");
+    }
+
+    #[test]
+    fn config_prints_only_the_settings() {
+        let text = only_sections(Some(Config::defaults()), None);
+        assert!(text.starts_with("📋 Configuration:\n"), "{text}");
+        assert!(text.contains("  Hotkey: RightAlt\n"), "{text}");
+        assert!(
+            text.contains("  LLM: auto (Ollama, else Anthropic)\n"),
+            "{text}"
+        );
+        for other in [
+            "Audio Devices",
+            "System Information",
+            "Daemon",
+            "Hush System Status",
+        ] {
+            assert!(!text.contains(other), "{other} in:\n{text}");
+        }
+
+        let text = only_sections(Some(Err(anyhow::anyhow!("bad toml"))), None);
+        assert_eq!(
+            text,
+            "📋 Configuration:\n  ❌ Failed to load config: bad toml\n"
+        );
+    }
+
+    #[test]
+    fn config_and_devices_print_both_in_report_order() {
+        let text = only_sections(
+            Some(Config::defaults()),
+            Some(Ok(vec!["Built-in Microphone".to_string()])),
+        );
+        let settings = text.find("📋 Configuration:").expect("the settings");
+        let devices = text
+            .find("\n\n🎤 Audio Devices:")
+            .expect("a blank line, then the devices");
+        assert!(settings < devices, "{text}");
+        assert!(!text.contains("System Information"), "{text}");
+    }
+
+    #[test]
+    fn json_takes_neither_config_nor_devices() {
+        use clap::Parser;
+        for args in [
+            &["hush", "status", "--json", "--config"][..],
+            &["hush", "status", "--json", "--devices"],
+            &["hush", "status", "--json", "--follow", "--devices"],
+        ] {
+            let error = match crate::cli::Cli::try_parse_from(args) {
+                Ok(_) => panic!("{args:?} must fail"),
+                Err(error) => error,
+            };
+            assert_eq!(error.exit_code(), 2, "{args:?} is a usage error");
+        }
+        for args in [
+            &["hush", "status", "--config", "--devices"][..],
+            &["hush", "status", "--devices", "--full"],
+        ] {
+            assert!(crate::cli::Cli::try_parse_from(args).is_ok(), "{args:?}");
+        }
     }
 
     #[tokio::test]

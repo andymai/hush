@@ -124,10 +124,14 @@ struct CommandTarget {
 ///
 /// # Privacy
 ///
-/// - All processing is local-first
-/// - LLM calls only if ANTHROPIC_API_KEY is set
-/// - Audio never leaves device unless LLM enabled
-/// - No telemetry or external connections (except optional LLM and the opt-in update check)
+/// - Speech recognition runs on this machine, unless `transcription.backend`
+///   names a cloud service or an OpenAI-compatible server
+/// - With the default `llm.polish = true` and `llm.provider = "auto"`, the
+///   polish uses Ollama when it answers at `llm.ollama_url`, else Anthropic
+///   when `ANTHROPIC_API_KEY` is set (in the environment or
+///   `~/.config/hush/.env`). When neither is there, Hush makes no LLM call
+/// - The LLM gets only text, never audio
+/// - No telemetry, and the update check is opt-in
 pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let SessionOptions {
         editing_mode: editing_mode_str,
@@ -360,16 +364,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let text_processor = if !no_processing {
         let llm_provider = llm::resolve_provider(&config.llm, &keys::env_file()).await;
         if matches!(llm_provider, LlmProvider::None) {
-            info!("No LLM: polishing is rule-based and Command Mode is off until Ollama runs or ANTHROPIC_API_KEY is set");
+            info!("{}", llm::no_llm_message(&config.llm));
         }
 
-        let processing_config = ProcessingConfig {
-            mode: editing_mode,
-            llm_provider,
-            polish: config.llm.polish,
-            max_tokens: config.llm.max_tokens,
-            temperature: config.llm.temperature,
-        };
+        let processing_config = ProcessingConfig::from_llm(editing_mode, llm_provider, &config.llm);
 
         match TextProcessor::new(processing_config, Some(DomainVocabulary::default_path())) {
             Ok(processor) => {

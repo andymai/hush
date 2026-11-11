@@ -207,18 +207,32 @@ impl std::fmt::Display for ModelSize {
 pub fn recommended_model() -> ModelSize {
     static RECOMMENDED: OnceLock<ModelSize> = OnceLock::new();
     *RECOMMENDED.get_or_init(|| {
-        let gpu = crate::transcription::device::GpuAvailability::detect().available;
-        let memory_gb = sysinfo::System::new().map_or(0, |mut system| {
-            system.refresh_memory();
-            system.total_memory() / 1024 / 1024 / 1024
-        });
-        match (gpu, memory_gb) {
-            (true, 16..) => ModelSize::Medium,
-            (true, _) => ModelSize::Small,
-            (false, 16..) => ModelSize::Base,
-            (false, _) => ModelSize::Tiny,
-        }
+        recommended_model_for(crate::transcription::device::GpuAvailability::detect().available)
     })
+}
+
+/// [`recommended_model`] for this machine's memory, with the GPU in use or not.
+pub fn recommended_model_for(gpu: bool) -> ModelSize {
+    let memory_gb = sysinfo::System::new().map_or(0, |mut system| {
+        system.refresh_memory();
+        system.total_memory() / 1024 / 1024 / 1024
+    });
+    suggestion(gpu, memory_gb)
+}
+
+fn suggestion(gpu: bool, memory_gb: u64) -> ModelSize {
+    match (gpu, memory_gb) {
+        (true, 16..) => ModelSize::Medium,
+        (true, _) => ModelSize::Small,
+        (false, 16..) => ModelSize::Base,
+        (false, _) => ModelSize::Tiny,
+    }
+}
+
+/// The catalogue entry of `size`, without the models directory that
+/// [`ModelManager::new`] creates.
+pub fn catalogue_entry(size: ModelSize) -> Option<ModelInfo> {
+    ModelManager::init_available_models().remove(&size)
 }
 
 /// The most header bytes [`file_architecture`] reads.
@@ -837,6 +851,32 @@ mod tests {
         assert_eq!("tiny".parse::<ModelSize>().unwrap(), ModelSize::Tiny);
         assert_eq!("LARGE".parse::<ModelSize>().unwrap(), ModelSize::Large);
         assert_eq!("large-v3".parse::<ModelSize>().unwrap(), ModelSize::LargeV3);
+    }
+
+    #[test]
+    fn the_suggestion_follows_the_gpu_and_the_memory() {
+        assert_eq!(suggestion(true, 32), ModelSize::Medium);
+        assert_eq!(suggestion(true, 8), ModelSize::Small);
+        assert_eq!(suggestion(false, 32), ModelSize::Base);
+        assert_eq!(suggestion(false, 8), ModelSize::Tiny);
+        assert!(matches!(
+            recommended_model_for(false),
+            ModelSize::Base | ModelSize::Tiny
+        ));
+    }
+
+    #[test]
+    fn every_model_has_a_catalogue_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ModelManager::new(temp_dir.path()).unwrap();
+        for size in crate::gui::MODEL_ORDER {
+            let entry = catalogue_entry(size).expect("a catalogue entry");
+            assert_eq!(entry.filename, size.filename());
+            assert_eq!(
+                Some(entry.expected_size),
+                manager.get_model_info(&size).map(|info| info.expected_size)
+            );
+        }
     }
 
     #[test]

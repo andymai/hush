@@ -1,4 +1,5 @@
 /// Configuration for text processing
+use crate::config::settings::LlmConfig;
 use serde::{Deserialize, Serialize};
 
 /// LLM provider for text polishing
@@ -8,7 +9,7 @@ pub enum LlmProvider {
     Anthropic {
         /// API key (read from env var if None)
         api_key: Option<String>,
-        /// Model to use (default: claude-3-haiku-20240307)
+        /// Model to use, from `llm.anthropic_model`
         model: String,
     },
     /// A local Ollama server
@@ -85,6 +86,18 @@ impl Default for ProcessingConfig {
 }
 
 impl ProcessingConfig {
+    /// The text processing of dictation: `mode`, the LLM in `provider`, and
+    /// the polish, token, and temperature settings of `[llm]`.
+    pub fn from_llm(mode: EditingMode, provider: LlmProvider, llm: &LlmConfig) -> Self {
+        Self {
+            mode,
+            llm_provider: provider,
+            polish: llm.polish,
+            max_tokens: llm.max_tokens,
+            temperature: llm.temperature,
+        }
+    }
+
     /// Create a light processing config (fast, minimal edits)
     pub fn light() -> Self {
         Self {
@@ -121,5 +134,26 @@ impl ProcessingConfig {
     pub fn without_llm(mut self) -> Self {
         self.llm_provider = LlmProvider::None;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dictation_settings_come_from_the_llm_section() {
+        let llm = LlmConfig {
+            polish: false,
+            max_tokens: 123,
+            temperature: 0.7,
+            ..LlmConfig::defaults()
+        };
+        let config = ProcessingConfig::from_llm(EditingMode::Light, LlmProvider::None, &llm);
+        assert_eq!(config.mode, EditingMode::Light);
+        assert_eq!(config.llm_provider, LlmProvider::None);
+        assert!(!config.polish);
+        assert_eq!(config.max_tokens, 123);
+        assert_eq!(config.temperature, 0.7);
     }
 }
