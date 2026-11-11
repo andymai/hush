@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/andymai/hush/compare/v0.32.0...v0.33.0) (2026-11-11)
+
+
+### Features
+
+* **input:** type and read the hotkeys through the desktop portals ([#325](https://github.com/andymai/hush/issues/325)) ([6de5919](https://github.com/andymai/hush/commit/6de5919654d9b086e4aa2c1381c5c7f8f7fce571))
+
 ## [0.32.0](https://github.com/andymai/hush/compare/v0.31.0...v0.32.0) (2026-11-11)
 
 
