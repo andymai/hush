@@ -324,7 +324,8 @@ pub enum ConfigCommands {
 pub enum SetupCommands {
     /// Initialize configuration file
     Init {
-        /// Use defaults without prompting
+        /// Write the built-in defaults without prompting. The model is base, not the model that
+        /// Hush suggests for this machine
         #[arg(long)]
         defaults: bool,
 
@@ -382,7 +383,7 @@ pub enum SetupCommands {
 
     /// Complete system setup wizard
     Wizard {
-        /// Skip interactive prompts and use defaults
+        /// Skip the prompts. The wizard downloads the model that Hush suggests for this machine
         #[arg(long)]
         auto: bool,
     },

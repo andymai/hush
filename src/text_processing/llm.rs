@@ -723,6 +723,25 @@ pub async fn resolve_provider(config: &LlmConfig, env_file: &Path) -> LlmProvide
     choose_provider(config, ollama_ok, key, server_key)
 }
 
+/// Why the daemon has no LLM after [`resolve_provider`], and what gives it one.
+pub fn no_llm_message(config: &LlmConfig) -> String {
+    const OFF: &str = "No LLM: polishing is rule-based and Command Mode is off";
+    let need = match config.provider {
+        LlmSetting::None => return format!("{OFF}, because llm.provider is \"none\""),
+        LlmSetting::Auto => format!(
+            "Ollama answers at {} or ANTHROPIC_API_KEY is set",
+            config.ollama_url
+        ),
+        LlmSetting::Ollama => format!("Ollama answers at {}", config.ollama_url),
+        LlmSetting::Anthropic => "ANTHROPIC_API_KEY is set".to_string(),
+        LlmSetting::OpenAiCompatible => match config.server_key_var() {
+            Some(var) => format!("llm.server_url has a valid server address and {var} is set"),
+            None => "llm.server_url has a valid server address".to_string(),
+        },
+    };
+    format!("{OFF} until {need}")
+}
+
 /// [`resolve_provider`] for the polish alone: `None` when `llm.polish` is
 /// off, with no probe of Ollama and no key lookup.
 pub async fn resolve_polish_provider(config: &LlmConfig, env_file: &Path) -> LlmProvider {
@@ -968,6 +987,42 @@ mod tests {
         assert_eq!(
             choose_provider(&off, true, Some("k".into()), None),
             LlmProvider::None
+        );
+    }
+
+    #[test]
+    fn the_no_llm_message_names_what_each_provider_needs() {
+        let with = |provider| LlmConfig {
+            provider,
+            ollama_url: "http://ollama.test:11434".to_string(),
+            ..LlmConfig::defaults()
+        };
+        let off = "No LLM: polishing is rule-based and Command Mode is off";
+        assert_eq!(
+            no_llm_message(&with(LlmSetting::None)),
+            format!("{off}, because llm.provider is \"none\"")
+        );
+        assert_eq!(
+            no_llm_message(&with(LlmSetting::Auto)),
+            format!(
+                "{off} until Ollama answers at http://ollama.test:11434 or ANTHROPIC_API_KEY is set"
+            )
+        );
+        assert_eq!(
+            no_llm_message(&with(LlmSetting::Ollama)),
+            format!("{off} until Ollama answers at http://ollama.test:11434")
+        );
+        assert_eq!(
+            no_llm_message(&with(LlmSetting::Anthropic)),
+            format!("{off} until ANTHROPIC_API_KEY is set")
+        );
+        assert_eq!(
+            no_llm_message(&server_config("", "")),
+            format!("{off} until llm.server_url has a valid server address")
+        );
+        assert_eq!(
+            no_llm_message(&server_config("", "LLM_KEY")),
+            format!("{off} until llm.server_url has a valid server address and LLM_KEY is set")
         );
     }
 

@@ -364,7 +364,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let text_processor = if !no_processing {
         let llm_provider = llm::resolve_provider(&config.llm, &keys::env_file()).await;
         if matches!(llm_provider, LlmProvider::None) {
-            info!("No LLM: polishing is rule-based and Command Mode is off until Ollama runs or ANTHROPIC_API_KEY is set");
+            info!("{}", llm::no_llm_message(&config.llm));
         }
 
         let processing_config = ProcessingConfig::from_llm(editing_mode, llm_provider, &config.llm);

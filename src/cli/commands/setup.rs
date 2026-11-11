@@ -241,7 +241,8 @@ async fn setup_hotkeys(test: Option<String>, list: bool) -> Result<()> {
 /// # Workflow
 ///
 /// 1. **UInput Setup**: Configure text insertion permissions
-/// 2. **Model Download**: Download recommended Whisper model
+/// 2. **Model Download**: Download the model that [`recommended_model`]
+///    suggests for this machine, and make it the active model
 /// 3. **System Test**: Verify all components are working
 ///
 /// The wizard will pause for user confirmation at each step unless
@@ -273,10 +274,10 @@ async fn run_setup_wizard(auto: bool) -> Result<()> {
         }
     }
 
-    // Step 2: Model download
     println!("\n📋 Step 2: Model Download");
-    println!("Downloading recommended model (base)...");
-    super::models::download_model("base", false).await?;
+    let suggested = recommended_model();
+    println!("{}", suggestion_line(suggested));
+    super::models::set_model(size_key(suggested)).await?;
 
     // Step 3: Test systems
     println!("\n📋 Step 3: System Test");
@@ -294,7 +295,8 @@ async fn run_setup_wizard(auto: bool) -> Result<()> {
 ///
 /// # Arguments
 ///
-/// * `defaults` - If true, use defaults without prompting
+/// * `defaults` - If true, write the built-in defaults without prompting.
+///   The model is base, not the model that [`recommended_model`] suggests
 /// * `force` - If true, overwrite existing config file
 async fn init_config(defaults: bool, force: bool) -> Result<()> {
     let config_path = Config::path();
@@ -364,6 +366,14 @@ async fn init_config(defaults: bool, force: bool) -> Result<()> {
     println!("   3. Start listening:   ./hush listen");
 
     Ok(())
+}
+
+/// What the wizard says before it downloads `suggested`.
+fn suggestion_line(suggested: ModelSize) -> String {
+    format!(
+        "Hush suggests {} for this machine. Hush downloads it and makes it the active model.",
+        size_key(suggested)
+    )
 }
 
 /// Collect user settings interactively. `recommended` is the default model.
@@ -504,6 +514,15 @@ mod tests {
                 suggested[0].contains(&format!(" {} ", size_key(recommended))),
                 "{menu}"
             );
+        }
+    }
+
+    #[test]
+    fn the_wizard_names_the_suggested_model() {
+        for size in [ModelSize::Tiny, ModelSize::Medium, recommended_model()] {
+            let line = suggestion_line(size);
+            assert!(line.contains(&format!(" {} ", size_key(size))), "{line}");
+            assert!(!line.contains("(base)"), "{line}");
         }
     }
 

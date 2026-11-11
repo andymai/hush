@@ -64,22 +64,12 @@ pub async fn handle_models(model_command: ModelCommands) -> Result<()> {
     }
 }
 
-/// List available Whisper models
-///
-/// Displays all supported Whisper model sizes with their download status.
+/// List the speech models of the catalogue with their download status
 ///
 /// # Arguments
 ///
 /// * `downloaded` - If true, only show models that are already downloaded
-/// * `details` - If true, show additional details like expected and actual file sizes
-///
-/// # Model Sizes
-///
-/// - **tiny**: ~39 MB - Fastest, lowest accuracy
-/// - **base**: ~142 MB - Good balance for quick transcription
-/// - **small**: ~466 MB - Better accuracy
-/// - **medium**: ~1.5 GB - High accuracy
-/// - **large**: ~2.9 GB - Best accuracy, slower
+/// * `details` - If true, show the download size of each model, from the catalogue
 async fn list_models(downloaded: bool, details: bool) -> Result<()> {
     use crate::transcription::models::{ModelManager, ModelSize};
     use crate::Config;
@@ -130,24 +120,29 @@ async fn list_models(downloaded: bool, details: bool) -> Result<()> {
         }
 
         if details {
-            let size = match model {
-                "tiny" => "~78 MB",
-                "base" => "~147 MB",
-                "small" => "~488 MB",
-                "medium" => "~1.5 GB",
-                "large" => "~3.1 GB",
-                "large-v2" => "~3.1 GB",
-                "large-v3" => "~3.1 GB",
-                "parakeet-v3" => "~740 MB, NVIDIA Parakeet, 25 European languages, no prompt",
-                _ => "Unknown",
-            };
-            print!(" ({})", size);
+            let note = model_size.map_or_else(|| "Unknown".to_string(), model_details);
+            print!(" ({})", note);
         }
 
         println!();
     }
 
     Ok(())
+}
+
+/// The `--details` note of a model: its download size from the catalogue.
+fn model_details(size: crate::transcription::ModelSize) -> String {
+    let bytes = crate::transcription::models::catalogue_entry(size)
+        .map(|info| crate::gui::megabytes(info.expected_size))
+        .unwrap_or_else(|| "Unknown".to_string());
+    if size.is_parakeet() {
+        format!(
+            "{}, NVIDIA Parakeet, 25 European languages, no prompt",
+            bytes
+        )
+    } else {
+        bytes
+    }
 }
 
 /// Download a speech model, the voice activity detection model when it is
@@ -481,4 +476,27 @@ async fn verify_models(model_size: Option<&str>, fix: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcription::models::catalogue_entry;
+    use crate::transcription::ModelSize;
+
+    #[test]
+    fn details_show_the_catalogue_size() {
+        for size in crate::gui::MODEL_ORDER {
+            let info = catalogue_entry(size).expect("a catalogue entry");
+            assert!(
+                model_details(size).starts_with(&crate::gui::megabytes(info.expected_size)),
+                "{size}"
+            );
+        }
+        assert_eq!(model_details(ModelSize::Tiny), "78 MB");
+        assert_eq!(
+            model_details(ModelSize::ParakeetV3),
+            "740 MB, NVIDIA Parakeet, 25 European languages, no prompt"
+        );
+    }
 }
