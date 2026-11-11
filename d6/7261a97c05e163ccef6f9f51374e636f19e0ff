@@ -1,0 +1,92 @@
+src/portal/keyboard.rs
+  s_115995023cd6f3::t_aa91af7c059d2b 1-321
+  s_115995023cd6f3::t_ba15b3e2e67079 322-339
+src/portal/background.rs
+  s_115995023cd6f3::t_a81a7915dee35f 1-141
+  s_115995023cd6f3::t_703c7db0c844ca 142-147
+src/portal/probe.rs
+  s_115995023cd6f3::t_cbb6eabfde4dfb 1-48
+src/portal/token.rs
+  s_115995023cd6f3::t_d9a472bb72c347 1-100
+src/portal/keysym.rs
+  s_115995023cd6f3::t_18a5d250e8863c 1-221
+  s_115995023cd6f3::t_bca465777543ba 222-246
+src/portal/mode.rs
+  s_115995023cd6f3::t_67bd4caed2b541 1-148
+  s_115995023cd6f3::t_e5f44df434e2c7 149-151
+src/portal/mod.rs
+  s_115995023cd6f3::t_45fdf1b92718f5 1-81
+src/portal/shortcuts.rs
+  s_115995023cd6f3::t_3273fb9f8ffc92 1-869,872-873
+  s_115995023cd6f3::t_2ccca3d03716db 870-871,874-906
+Cargo.lock
+  s_115995023cd6f3::t_22f8ccdba99ce3 218-232,2006,2051
+Cargo.toml
+  s_115995023cd6f3::t_7cad75d5e3234f 223-235
+INSTALL.md
+  s_115995023cd6f3::t_6275bbc3a3565a 139-168
+README.md
+  s_115995023cd6f3::t_5081fa49b444fe 98,260,314-327
+config/default.toml
+  s_115995023cd6f3::t_9b7c9de50354aa 203-210
+src/adapters/hotkey/hotkey_adapter.rs
+  s_115995023cd6f3::t_eeb42f5fccaf9f 3,39,44-45
+src/cli/commands/daemon.rs
+  s_115995023cd6f3::t_33d4dea057f8ee 148-188,448-465
+src/cli/commands/doctor.rs
+  s_115995023cd6f3::t_f5cafb35e9bad7 10-13,119-127,178-188,582-709,884-886,923,977-1108
+src/cli/commands/listen.rs
+  s_115995023cd6f3::t_31bd0b43131f5f 26,32,264-268,283-297,308,310-316,344-345,415,471-475,750-753,1580-1612,2075-2101
+src/cli/commands/mod.rs
+  s_115995023cd6f3::t_5e212ef19040c5 41-42
+src/cli/commands/setup.rs
+  s_115995023cd6f3::t_700040741c2646 112-118
+src/cli/dispatcher.rs
+  s_115995023cd6f3::t_74090c40f4719b 4-6,43,152,522,524,701-708,799-806
+src/cli_main.rs
+  s_115995023cd6f3::t_4ceeb964fa18a6 144-151
+src/config/settings.rs
+  s_115995023cd6f3::t_31c5fcc23edaa5 53-75
+src/desktop.rs
+  s_115995023cd6f3::t_2978f8941ff785 55-64
+src/gui/mod.rs
+  s_115995023cd6f3::t_180b7ba4abdfcd 28,89-91,130,141,171-176,254-256,408,1300,1313-1323
+src/gui/pages/hotkeys.rs
+  s_115995023cd6f3::t_8b74ddd2efc127 20-23,27,244-341,343-346
+src/gui/pages/overview.rs
+  s_115995023cd6f3::t_0375e71a6b1e23 90-99,227
+src/hotkey/combination.rs
+  s_115995023cd6f3::t_c4f1daa921a460 98-102,203-248
+src/hotkey/evdev.rs
+  s_115995023cd6f3::t_2dd6daf6f851d6 8,404,416,524,597,659
+src/hotkey/mod.rs
+  s_115995023cd6f3::t_99d5bcc37c9e1d 5-8,15-16,43,68-84,247-248,258,277,314-341,346-347,355-356,368-369
+src/hotkey/x11.rs
+  s_115995023cd6f3::t_3353437bf84f54 6,20,24,88,97
+src/ipc/protocol.rs
+  s_115995023cd6f3::t_392938e028d62f 64-78,214-216,232,248,252-256
+src/ipc/server.rs
+  s_115995023cd6f3::t_a2971c5b235807 10,103-104,127,131-139,414-416,423-443,623-625,634-647
+src/lib.rs
+  s_115995023cd6f3::t_6c00987807339c 47-50
+src/text/insertion.rs
+  s_115995023cd6f3::t_1e20738b99540b 22,27-28,107-122,265-272,274,285,287-292,294-311,323,345-347,412-432,467-469,472-473,475,482-535,600-620,653-664,774-800
+src/updates.rs
+  s_115995023cd6f3::t_d847172ed8d22e 33-34,59-62,69,76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d67261a97c05e163ccef6f9f51374e636f19e0ff",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
