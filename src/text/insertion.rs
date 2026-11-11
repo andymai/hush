@@ -629,7 +629,7 @@ impl TextInserter {
                         None => {
                             no_chord = Some(anyhow::anyhow!(
                                 "could not set the {} ({:#}), and no chord but Shift+Insert is \
-                             safe, which pastes the {} in a terminal",
+                                 safe, which pastes the {} in a terminal",
                                 selection,
                                 e,
                                 selection
