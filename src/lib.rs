@@ -10,7 +10,7 @@ pub mod hotkey;
 pub mod text;
 pub mod transcription;
 
-// Overlay module (Wispr Flow-style floating window)
+// Floating window that shows the recording, transcription, and insertion state
 pub mod overlay;
 
 // Text processing module (intelligent auto-editing)

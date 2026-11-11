@@ -219,10 +219,8 @@ mod tests {
     fn test_custom_entities() {
         let mut recognizer = EntityRecognizer::new();
         recognizer.add_custom_entity("hush".to_string(), "Hush".to_string());
-        recognizer.add_custom_entity("wisprflow".to_string(), "WisprFlow".to_string());
 
         assert_eq!(recognizer.capitalize("hush"), "Hush");
-        assert_eq!(recognizer.capitalize("wisprflow"), "WisprFlow");
     }
 
     #[test]
