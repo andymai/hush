@@ -242,9 +242,10 @@ async fn setup_hotkeys(test: Option<String>, list: bool) -> Result<()> {
 /// # Workflow
 ///
 /// 1. **UInput Setup**: Configure text insertion permissions
-/// 2. **Model Download**: Keep the configured model when it is there.
-///    Otherwise download the model that [`recommended_model`] suggests for
-///    this machine, and make it the active model
+/// 2. **Model Download**: Keep a valid configured model, and download a
+///    configured model again when it is missing or fails its check. Only
+///    without a config file, download the model that [`recommended_model`]
+///    suggests and make it the active model. A cloud backend needs no model
 /// 3. **System Test**: Verify all components are working
 ///
 /// The wizard will pause for user confirmation at each step unless
@@ -288,10 +289,21 @@ async fn run_setup_wizard(auto: bool) -> Result<()> {
             .and_then(|info| manager.valid_path(info))
             .is_some()
     };
-    let step = wizard_model(&transcription, downloaded, suggested);
+    let step = wizard_model(
+        &transcription,
+        Config::path().exists(),
+        downloaded,
+        suggested,
+    );
     println!("{}", wizard_model_message(&step, suggested));
-    if let WizardModel::Install(size) = step {
-        super::models::set_model(size_key(size)).await?;
+    match step {
+        WizardModel::Repair(size) => {
+            super::models::download_model(size_key(size), false).await?;
+        },
+        WizardModel::Install(model) | WizardModel::Replace { model, .. } => {
+            super::models::set_model(size_key(model)).await?;
+        },
+        WizardModel::Cloud(_) | WizardModel::KeepPath(_) | WizardModel::Keep(_) => {},
     }
 
     // Step 3: Test systems
@@ -386,45 +398,94 @@ async fn init_config(defaults: bool, force: bool) -> Result<()> {
 /// What the wizard does about the speech model.
 #[derive(Debug, PartialEq, Eq)]
 enum WizardModel {
-    /// The configured model is there and stays: its name or its path.
-    Keep(String),
-    /// The configured model is missing, so the wizard downloads this model
-    /// and makes it the active model.
+    /// A service transcribes the speech, so no local model is needed.
+    Cloud(&'static str),
+    /// The file that `model_path` names stays.
+    KeepPath(String),
+    /// The configured catalogue model is valid and stays.
+    Keep(ModelSize),
+    /// The configured catalogue model is missing or fails its size or
+    /// SHA-256 check, so the wizard downloads it again.
+    Repair(ModelSize),
+    /// No config file names a model, so the wizard downloads this one and
+    /// makes it the active model.
     Install(ModelSize),
+    /// The configured name is not a catalogue model, so the wizard installs
+    /// the suggestion in its place.
+    Replace { unknown: String, model: ModelSize },
 }
 
-/// A `model_path` set by hand, or a catalogue model whose file `downloaded`
-/// finds valid, stays. Otherwise the wizard installs `suggested`.
+/// What the wizard does for `transcription`. `config_exists` says whether
+/// the user has a config file, and `downloaded` whether a catalogue model's
+/// file is there and valid.
 fn wizard_model(
     transcription: &TranscriptionConfig,
+    config_exists: bool,
     downloaded: impl Fn(ModelSize) -> bool,
     suggested: ModelSize,
 ) -> WizardModel {
+    if transcription.backend.is_cloud() {
+        return WizardModel::Cloud(transcription.backend.name());
+    }
     if let Some(path) = &transcription.model_path {
-        return WizardModel::Keep(path.display().to_string());
+        return WizardModel::KeepPath(path.display().to_string());
+    }
+    if !config_exists {
+        return WizardModel::Install(suggested);
     }
     match transcription.model_size.parse::<ModelSize>() {
-        Ok(size) if downloaded(size) => WizardModel::Keep(size_key(size).to_string()),
-        _ => WizardModel::Install(suggested),
+        Ok(size) if downloaded(size) => WizardModel::Keep(size),
+        Ok(size) => WizardModel::Repair(size),
+        Err(_) => WizardModel::Replace {
+            unknown: transcription.model_size.clone(),
+            model: suggested,
+        },
     }
 }
 
 fn wizard_model_message(step: &WizardModel, suggested: ModelSize) -> String {
-    let suggested = size_key(suggested);
+    let hint = |kept: Option<ModelSize>| {
+        if kept == Some(suggested) {
+            " It is also the suggestion for this machine.".to_string()
+        } else {
+            format!(
+                " Hush suggests {0} for this machine. To use it, run: hush models set {0}",
+                size_key(suggested)
+            )
+        }
+    };
     match step {
-        WizardModel::Keep(model) if model == suggested => format!(
-            "Hush keeps the configured model, {}, which is also the suggestion for this machine.",
-            model
+        WizardModel::Cloud(name) => format!(
+            "{} transcribes the speech (transcription.backend), so the wizard downloads no \
+             local model.",
+            name
         ),
-        WizardModel::Keep(model) => format!(
-            "Hush keeps the configured model, {}. Hush suggests {} for this machine. \
-             To use it, run: hush models set {}",
-            model, suggested, suggested
+        WizardModel::KeepPath(path) => format!(
+            "Hush keeps the model file that model_path names: {}.{}",
+            path,
+            hint(None)
+        ),
+        WizardModel::Keep(size) => format!(
+            "Hush keeps the configured model, {}.{}",
+            size_key(*size),
+            hint(Some(*size))
+        ),
+        WizardModel::Repair(size) => format!(
+            "The configured model, {}, is missing or fails its check, so Hush downloads it \
+             again.{}",
+            size_key(*size),
+            hint(Some(*size))
         ),
         WizardModel::Install(size) => format!(
-            "The configured model is not downloaded. Hush downloads {}, the suggestion for \
-             this machine, and makes it the active model.",
+            "No configuration file names a model. Hush downloads {}, the suggestion for this \
+             machine, and makes it the active model.",
             size_key(*size)
+        ),
+        WizardModel::Replace { unknown, model } => format!(
+            "'{}' is not a model that Hush knows. Hush downloads {}, the suggestion for this \
+             machine, and makes it the active model.",
+            unknown,
+            size_key(*model)
         ),
     }
 }
@@ -578,11 +639,16 @@ mod tests {
     }
 
     #[test]
-    fn the_wizard_keeps_a_chosen_model_and_only_hints_the_suggestion() {
+    fn the_wizard_keeps_a_valid_chosen_model_and_only_hints_the_suggestion() {
         let only_small = |size: ModelSize| size == ModelSize::Small;
 
-        let step = wizard_model(&transcription("small", None), only_small, ModelSize::Medium);
-        assert_eq!(step, WizardModel::Keep("small".to_string()));
+        let step = wizard_model(
+            &transcription("small", None),
+            true,
+            only_small,
+            ModelSize::Medium,
+        );
+        assert_eq!(step, WizardModel::Keep(ModelSize::Small));
         let message = wizard_model_message(&step, ModelSize::Medium);
         assert!(
             message.contains("keeps the configured model, small"),
@@ -592,34 +658,96 @@ mod tests {
         assert!(!message.contains("downloads"), "{message}");
 
         let by_hand = transcription("medium", Some("/models/custom.bin"));
-        let step = wizard_model(&by_hand, |_| false, ModelSize::Medium);
-        assert_eq!(step, WizardModel::Keep("/models/custom.bin".to_string()));
+        let step = wizard_model(&by_hand, true, |_| false, ModelSize::Medium);
+        assert_eq!(
+            step,
+            WizardModel::KeepPath("/models/custom.bin".to_string())
+        );
         let message = wizard_model_message(&step, ModelSize::Medium);
         assert!(message.contains("/models/custom.bin"), "{message}");
         assert!(message.contains("hush models set medium"), "{message}");
 
-        let step = wizard_model(&transcription("medium", None), |_| true, ModelSize::Medium);
+        let step = wizard_model(
+            &transcription("medium", None),
+            true,
+            |_| true,
+            ModelSize::Medium,
+        );
         let message = wizard_model_message(&step, ModelSize::Medium);
         assert!(message.contains("also the suggestion"), "{message}");
         assert!(!message.contains("hush models set"), "{message}");
     }
 
     #[test]
-    fn the_wizard_installs_the_suggestion_only_for_a_missing_model() {
-        for model_size in ["base", "large-v3", "not-a-model"] {
+    fn the_wizard_downloads_a_chosen_model_again_when_it_is_missing() {
+        for model_size in ["large-v3", "parakeet-v3", "tiny"] {
             let step = wizard_model(
                 &transcription(model_size, None),
+                true,
                 |_| false,
-                ModelSize::Small,
+                ModelSize::Medium,
             );
-            assert_eq!(step, WizardModel::Install(ModelSize::Small), "{model_size}");
+            let size = model_size.parse().unwrap();
+            assert_eq!(step, WizardModel::Repair(size), "{model_size}");
+            let message = wizard_model_message(&step, ModelSize::Medium);
+            assert!(
+                message.contains(&format!("{model_size}, is missing")),
+                "{message}"
+            );
+            assert!(message.contains("hush models set medium"), "{message}");
         }
-        let step = wizard_model(&transcription("base", None), |_| false, recommended_model());
+    }
+
+    #[test]
+    fn the_wizard_installs_the_suggestion_only_without_a_config_file() {
+        for model_size in ["base", "large-v3"] {
+            for downloaded in [true, false] {
+                let step = wizard_model(
+                    &transcription(model_size, None),
+                    false,
+                    |_| downloaded,
+                    ModelSize::Small,
+                );
+                assert_eq!(step, WizardModel::Install(ModelSize::Small), "{model_size}");
+            }
+        }
+        let step = wizard_model(
+            &transcription("base", None),
+            false,
+            |_| false,
+            recommended_model(),
+        );
         let message = wizard_model_message(&step, recommended_model());
         assert!(
             message.contains(&format!("downloads {},", size_key(recommended_model()))),
             "{message}"
         );
+
+        let step = wizard_model(
+            &transcription("huge", None),
+            true,
+            |_| false,
+            ModelSize::Small,
+        );
+        assert_eq!(
+            step,
+            WizardModel::Replace {
+                unknown: "huge".to_string(),
+                model: ModelSize::Small
+            }
+        );
+    }
+
+    #[test]
+    fn a_cloud_backend_needs_no_local_model() {
+        let mut cloud = transcription("large-v3", None);
+        cloud.backend = crate::config::settings::TranscriptionBackend::Groq;
+        for config_exists in [true, false] {
+            let step = wizard_model(&cloud, config_exists, |_| false, ModelSize::Small);
+            assert_eq!(step, WizardModel::Cloud("Groq"));
+            let message = wizard_model_message(&step, ModelSize::Small);
+            assert!(message.contains("downloads no local model"), "{message}");
+        }
     }
 
     #[test]
