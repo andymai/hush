@@ -23,12 +23,13 @@ use crate::config::settings::{HistoryConfig, TranscriptionConfig};
 use crate::config::{keys, paths, Config};
 use crate::hotkey::{
     GestureAction, GestureDetector, HotkeyAction, HotkeyBindings, HotkeyEvent, HotkeyManager,
-    HotkeyMode,
+    HotkeyMode, Stamped,
 };
 use crate::ipc::protocol::{DaemonState, ModelState, NO_TAKE};
 use crate::ipc::{SessionCommand, TakeResult, TakeWaiter};
 use crate::notify::{notify, NoticeKind};
 use crate::overlay::{OverlayState, OverlayWindowBuilder};
+use crate::portal::{ConsentRefused, InputMode};
 use crate::text::WindowInfo;
 use crate::text_processing::styles::{self, StyleName, TakeStyle};
 use crate::text_processing::transcripts::{self, Transcript};
@@ -260,6 +261,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         });
     }
 
+    let input_mode = InputMode::detect(config.input.backend);
+    info!(
+        "Input: {}",
+        input_mode.describe(config.input.backend, crate::portal::sandboxed())
+    );
     let (hotkey_manager, hotkey_rx) = if config.hotkey.enabled {
         let mut bindings = HotkeyBindings::parse(&hotkey_combination, Some(&config.hotkey.cancel))?
             .with_action(HotkeyAction::PasteLast, &config.hotkey.paste_last)?
@@ -274,12 +280,21 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         for (style, chord) in config.hotkey.rewrite_keys() {
             bindings = bindings.with_action(HotkeyAction::Rewrite(style), chord)?;
         }
-        let (manager, receiver) = HotkeyManager::with_backend(
-            bindings,
-            config.hotkey.backend,
-            config.hotkey.exclusive,
-            config.hotkey.mask_menu,
-        )?;
+        let (manager, receiver) = if input_mode.is_portal() {
+            let specs = crate::portal::shortcuts::specs(&config.hotkey);
+            let (manager, receiver) = HotkeyManager::portal(bindings.primary.clone(), specs)?;
+            if let Some(handle) = manager.portal_shortcuts() {
+                shared.set_shortcuts(Some(handle));
+            }
+            (manager, receiver)
+        } else {
+            HotkeyManager::with_backend(
+                bindings,
+                config.hotkey.backend,
+                config.hotkey.exclusive,
+                config.hotkey.mask_menu,
+            )?
+        };
         manager.start_listening()?;
         info!(
             "✅ Hotkey '{}' registered via {}",
@@ -290,8 +305,15 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     } else {
         info!("Hotkeys are off (hotkey.enabled = false); the socket and the tray control Hush");
         // The sender drops at once, so the hotkey thread ends at once.
-        (None, mpsc::channel::<HotkeyEvent>().1)
+        (None, mpsc::channel::<Stamped>().1)
     };
+    // In portal mode, the desktop's key starts a dictation, not the config chord.
+    let hotkey_combination = hotkey_manager
+        .as_ref()
+        .and_then(HotkeyManager::portal_shortcuts)
+        .map_or(hotkey_combination, |handle| {
+            dictation_label(&handle.bindings())
+        });
     let feedback = if config.feedback.audio_enabled {
         AudioFeedback::default()
     } else {
@@ -319,7 +341,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         None
     };
 
-    if config.updates.check {
+    // Flathub updates a sandboxed install.
+    if config.updates.check && !input_mode.is_portal() {
         tokio::spawn(crate::updates::run(crate::updates::InstallKind::current()));
     }
 
@@ -389,7 +412,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     // Initialize text inserter
     #[cfg(target_os = "linux")]
-    let text_inserter = match TextInserter::new() {
+    let text_inserter = match TextInserter::with_mode(input_mode) {
         Ok(mut inserter) => {
             inserter.configure(&config.insertion);
             inserter.set_profiles(&config.profiles);
@@ -445,12 +468,13 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 .deadline()
                 .map(|deadline| deadline.saturating_duration_since(std::time::Instant::now()))
                 .unwrap_or(std::time::Duration::from_secs(3600));
-            let event = match hotkey_rx.recv_timeout(timeout) {
-                Ok(event) => Some(event),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+            let (event, now) = match hotkey_rx.recv_timeout(timeout) {
+                Ok(stamped) => (Some(stamped.event), stamped.at),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    (None, std::time::Instant::now())
+                },
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             };
-            let now = std::time::Instant::now();
             if let Some(HotkeyEvent::Command(pressed)) = event {
                 let command = if pressed {
                     SessionCommand::StartCommand
@@ -723,11 +747,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             Err(e) => {
                                 error!("Text insertion failed: {}", e);
                                 let _ = feedback.play_error();
-                                let body = match inserter.copy_to_clipboard(&processed_text) {
-                                    Ok(()) => "The text is on the clipboard. `hush paste-last` types it again.",
-                                    Err(_) => "`hush paste-last` types it again.",
-                                };
-                                notify(NoticeKind::Problem, "Hush could not insert the text", body);
+                                let on_clipboard =
+                                    inserter.copy_to_clipboard(&processed_text).is_ok();
+                                let (title, body) = insertion_notice(&e, on_clipboard);
+                                notify(NoticeKind::Problem, title, &body);
                             },
                         }
                     }
@@ -1554,6 +1577,39 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 const RECOVER_HINT: &str = "Hush kept the audio. Run `hush recover` to transcribe it again.";
 
 /// Tell the user that some parts of a take are missing from its text.
+/// What the overlay and the tray call the dictation key in portal mode: the
+/// key the desktop bound, or a hint where to set one.
+fn dictation_label(bindings: &[crate::ipc::protocol::PortalShortcut]) -> String {
+    bindings
+        .iter()
+        .find(|binding| binding.id == "dictate" && !binding.trigger.is_empty())
+        .map_or_else(
+            || "the dictation shortcut (set it in the desktop settings)".to_string(),
+            |binding| binding.trigger.clone(),
+        )
+}
+
+/// The notice for an insertion that failed. A refused portal consent says
+/// how to get the dialog again.
+fn insertion_notice(error: &anyhow::Error, on_clipboard: bool) -> (&'static str, String) {
+    let again = if on_clipboard {
+        "The text is on the clipboard. `hush paste-last` types it again."
+    } else {
+        "`hush paste-last` types it again."
+    };
+    if error.downcast_ref::<ConsentRefused>().is_some() {
+        (
+            "The desktop did not let Hush type",
+            format!(
+                "{} To type, run `hush daemon restart` and allow keyboard access in the dialog.",
+                again
+            ),
+        )
+    } else {
+        ("Hush could not insert the text", again.to_string())
+    }
+}
+
 fn report_failed_parts(failed: usize, count: usize) {
     notify(
         NoticeKind::Problem,
@@ -2015,6 +2071,33 @@ fn run_style_rewrite(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_overlay_names_the_desktop_key_in_portal_mode() {
+        use crate::ipc::protocol::PortalShortcut;
+        let shortcut = |id: &str, trigger: &str| PortalShortcut {
+            id: id.into(),
+            description: String::new(),
+            trigger: trigger.into(),
+        };
+        assert_eq!(
+            dictation_label(&[shortcut("cancel", "Esc"), shortcut("dictate", "Meta+Space")]),
+            "Meta+Space"
+        );
+        assert!(dictation_label(&[shortcut("dictate", "")]).contains("desktop settings"));
+    }
+
+    #[test]
+    fn a_refused_consent_says_how_to_get_the_dialog_again() {
+        let refused = anyhow::Error::new(ConsentRefused);
+        let (title, body) = insertion_notice(&refused, true);
+        assert_eq!(title, "The desktop did not let Hush type");
+        assert!(body.starts_with("The text is on the clipboard."), "{body}");
+        assert!(body.contains("hush daemon restart"), "{body}");
+        let (title, body) = insertion_notice(&anyhow!("uinput write failed"), false);
+        assert_eq!(title, "Hush could not insert the text");
+        assert_eq!(body, "`hush paste-last` types it again.");
+    }
 
     fn audio_dirs(root: &Path) -> AudioDirs {
         AudioDirs {

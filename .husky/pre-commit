@@ -11,7 +11,9 @@ cargo clippy --all-targets -- -D warnings &
 CLIPPY_PID=$!
 
 if command -v taplo &>/dev/null; then
-  taplo fmt --check &
+  # Only the tracked files: a Flatpak build in target/ links var/run to /run,
+  # and a bare taplo follows the link and walks the host.
+  git ls-files -z -- '*.toml' | xargs -0 taplo fmt --check &
   TAPLO_PID=$!
 else
   TAPLO_PID=""

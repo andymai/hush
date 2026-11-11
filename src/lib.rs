@@ -44,6 +44,10 @@ pub mod gui;
 /// Launcher and autostart entries
 pub mod desktop;
 
+/// Desktop portals for a sandboxed Hush
+#[cfg(target_os = "linux")]
+pub mod portal;
+
 #[cfg(test)]
 mod test_support;
 

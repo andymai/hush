@@ -95,6 +95,7 @@ Everyday dictation:
 | `hush learn [words…]` | Add the selection, or the given words, to the vocabulary |
 | `hush rewrite <style>` | Rewrite the selected text with the prompt of a style. The style needs polish on and a prompt. Another style exits with code 2 |
 | `hush paste-last` | Re-type the last transcript |
+| `hush shortcuts [--configure]` | In portal mode, show the keys that the desktop binds to the shortcuts of Hush. `--configure` opens the shortcut settings of the desktop |
 | `hush transcribe <file>` | Print the text of a WAV or FLAC file, with the daemon's model when the daemon runs |
 | `hush recover [--all] [--list] [--type]` | Transcribe the newest take that failed (or `--all` of them), print or type the text, and delete its audio. `--list` only lists them |
 | `hush settings` | Open the setup and settings window |
@@ -256,6 +257,7 @@ Hotkey chords name keys in two ways. Ctrl, Shift, Alt, and Super in a chord mean
 | `tray.enabled` | Status icon on the desktop panel | true |
 | `updates.check` | Ask GitHub once a day whether a newer release exists. AppImage, tarball, and source installs check. A package manager updates its own installs, so those never check | false |
 | `gui.appearance` | The colors of the settings window: `system` follows the light or dark preference of the desktop and changes with it, and `light` or `dark` keeps one. When the desktop has no preference, the window is light | system |
+| `input.backend` | `auto` uses the desktop portals in a Flatpak sandbox, and evdev and uinput everywhere else. `portal` uses the portals also outside a sandbox. `evdev` uses evdev and uinput also in a sandbox. See [Flatpak and desktop portals](#flatpak-and-desktop-portals) | auto |
 
 Point at a different file with `hush -c other.toml …` or `HUSH_CONFIG=other.toml`.
 
@@ -308,6 +310,25 @@ esac
 ```
 
 The daemon runs with the PATH of your login session, so use absolute paths. `hush doctor` shows whether the command resolves.
+
+## Flatpak and desktop portals
+
+A Flatpak sandbox gives Hush no access to `/dev/uinput` or `/dev/input`. In a sandbox, Hush uses the desktop portals:
+
+- The RemoteDesktop portal types the text. At the first dictation, the desktop asks you to allow keyboard access. Hush keeps the answer in `remote-desktop-token` in its data folder, a file that only you can read, so the desktop does not ask again.
+- The GlobalShortcuts portal reads the hotkeys. Hush asks for one shortcut for each action and proposes Meta+Space for dictation. You set the other keys in the shortcut settings of the desktop. `hush shortcuts` shows the keys, and `hush shortcuts --configure` opens the shortcut settings.
+- The Background portal starts Hush at login. Run `hush install --autostart`, or turn on the switch in `hush settings`.
+
+Hold to talk, the double-tap lock, and toggle mode work as with evdev. The compositor drops a character that the active layout does not have, so Hush types only the characters that the layout surely has, and pastes other text:
+
+- In a sandbox, Hush cannot read the keymap. It types letters, digits, spaces, and `. , ; : ! ? - ( )`, and pastes other text, such as quotes, accents, and emoji.
+- Outside a sandbox, Hush reads the keymap and types the characters on the first two levels of the active layout, with no dead key.
+
+The paste chord is Shift+Insert, because Shift and Insert have the same place on every layout. Each take opens a RemoteDesktop session and closes it after the text, so GNOME shows its sharing indicator only during the take. In a sandbox, Hush has no update check, because Flathub updates it.
+
+Portal mode needs KDE Plasma 6 or GNOME 48, or a later version. xdg-desktop-portal-wlr, -gtk, and -hyprland have no RemoteDesktop portal. On Sway, Hyprland, and other wlroots compositors, install Hush from a package instead. `hush doctor` shows which portals the desktop has.
+
+If you refuse keyboard access, Hush puts the text on the clipboard and does not ask again. Run `hush daemon restart`, and the desktop asks at the next dictation. To try portal mode outside a sandbox, set `backend = "portal"` under `[input]` and restart the daemon.
 
 ## Models
 

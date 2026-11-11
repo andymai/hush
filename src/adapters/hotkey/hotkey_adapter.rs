@@ -1,6 +1,6 @@
 use crate::core::traits::{InputTrigger, TriggerEvent};
 /// Adapter for HotkeyManager to implement InputTrigger trait
-use crate::hotkey::{HotkeyEvent, HotkeyManager};
+use crate::hotkey::{HotkeyEvent, HotkeyManager, Stamped};
 use crate::Result;
 use async_trait::async_trait;
 use std::sync::mpsc;
@@ -36,13 +36,13 @@ impl HotkeyTriggerAdapter {
 
     /// Bridge events from sync mpsc to async tokio channel
     fn bridge_sync_to_async(
-        sync_rx: mpsc::Receiver<HotkeyEvent>,
+        sync_rx: mpsc::Receiver<Stamped>,
         async_tx: tokio_mpsc::UnboundedSender<HotkeyEvent>,
     ) {
         // Block on sync channel and forward to async channel
         // This thread sleeps when waiting for events (no busy-wait)
-        while let Ok(event) = sync_rx.recv() {
-            if async_tx.send(event).is_err() {
+        while let Ok(stamped) = sync_rx.recv() {
+            if async_tx.send(stamped.event).is_err() {
                 // Receiver dropped, exit bridge
                 break;
             }

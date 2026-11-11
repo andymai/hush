@@ -25,6 +25,7 @@ use crate::config::Config;
 use crate::hotkey::keymap::ModifierKeys;
 use crate::hotkey::Role;
 use crate::ipc::client::{self, Probe};
+use crate::ipc::protocol::PortalShortcut;
 use crate::ipc::DaemonState;
 use crate::permissions::PermissionStatus;
 use crate::text::layout::Layout;
@@ -85,6 +86,9 @@ pub struct Download {
 /// What the window shows about the machine, refreshed on a timer.
 pub struct Machine {
     pub permissions: PermissionStatus,
+    /// Hush types and reads the hotkeys through the desktop portals, so it
+    /// needs no device access.
+    pub portal: bool,
     pub daemon: Option<DaemonState>,
     /// The status answer the state came from: a daemon that gave none in
     /// time shows as not running, but may be busy
@@ -123,6 +127,7 @@ impl Machine {
         let start_delay = reply.as_ref().and_then(|reply| reply.start_delay);
         Self {
             permissions: crate::permissions::status(),
+            portal: crate::portal::InputMode::current().is_portal(),
             daemon: match probe {
                 Probe::State(state) => Some(state),
                 Probe::NotRunning | Probe::NoAnswer => None,
@@ -133,7 +138,7 @@ impl Machine {
             config_loads: Config::load().is_ok(),
             installed_models,
             vad_installed,
-            autostart: crate::desktop::autostart_installed(),
+            autostart: crate::desktop::starts_at_login(),
             cloud_keys: TranscriptionBackend::ALL
                 .iter()
                 .filter_map(|backend| backend.key_var())
@@ -163,7 +168,12 @@ impl Machine {
                 self.has_key(transcription)
             },
         };
-        self.permissions.ready() && speech
+        self.can_type() && speech
+    }
+
+    /// Device access, or no need for it in portal mode.
+    pub fn can_type(&self) -> bool {
+        self.portal || self.permissions.ready()
     }
 
     pub fn running(&self) -> bool {
@@ -241,6 +251,9 @@ pub struct Gui {
     pub focus_editor: bool,
     /// The keyboard layout when the window opened.
     pub layout: Option<Layout>,
+    /// In portal mode, the shortcuts the daemon bound, and when the page
+    /// asked for them.
+    pub portal_shortcuts: Option<(Instant, Result<Vec<PortalShortcut>, String>)>,
     /// What the modifier keys type when the window opened.
     pub modifier_keys: ModifierKeys,
     pub meter: Option<Meter>,
@@ -392,6 +405,7 @@ impl Gui {
             editing_key: None,
             focus_editor: false,
             layout: None,
+            portal_shortcuts: None,
             modifier_keys: ModifierKeys::physical(),
             meter: None,
             meter_error: None,
@@ -1283,6 +1297,7 @@ mod tests {
                 readable_event_nodes: 4,
                 in_input_group: true,
             },
+            portal: false,
             daemon: Some(DaemonState::Idle),
             probe: Probe::State(DaemonState::Idle),
             safe_mode: None,
@@ -1293,6 +1308,17 @@ mod tests {
             autostart: false,
             cloud_keys: Vec::new(),
         }
+    }
+
+    #[test]
+    fn portal_mode_needs_no_device_access() {
+        let transcription = Config::defaults().unwrap().transcription;
+        let mut sandboxed = ready_machine();
+        sandboxed.permissions.uinput_writable = false;
+        sandboxed.permissions.readable_event_nodes = 0;
+        assert!(!sandboxed.ready(&transcription));
+        sandboxed.portal = true;
+        assert!(sandboxed.ready(&transcription));
     }
 
     #[test]

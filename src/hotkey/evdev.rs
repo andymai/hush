@@ -5,7 +5,7 @@
 use super::combination::KeyCombination;
 use super::keymap::{KeymapWatch, ModifierKeys};
 use super::menu_mask::MenuMask;
-use super::{HotkeyAction, HotkeyBindings, HotkeyEvent};
+use super::{HotkeyAction, HotkeyBindings, HotkeyEvent, Stamped};
 use crate::text_processing::StyleName;
 use crate::transcription::Language;
 use anyhow::{anyhow, Result};
@@ -401,7 +401,7 @@ pub struct EvdevHotkey {
     matcher: Arc<Mutex<Matchers>>,
     mask: SharedMask,
     watch: Mutex<Option<Box<KeymapWatch>>>,
-    sender: mpsc::Sender<HotkeyEvent>,
+    sender: mpsc::Sender<Stamped>,
 }
 
 impl EvdevHotkey {
@@ -413,7 +413,7 @@ impl EvdevHotkey {
         bindings: HotkeyBindings,
         exclusive: bool,
         mask_menu: bool,
-    ) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
+    ) -> Result<(Self, mpsc::Receiver<Stamped>)> {
         let combination = &bindings.primary;
         let found = devices_for(&bindings);
         if found.is_empty()
@@ -521,7 +521,7 @@ fn supervise(
     matcher: Arc<Mutex<Matchers>>,
     mask: SharedMask,
     mut watch: KeymapWatch,
-    sender: mpsc::Sender<HotkeyEvent>,
+    sender: mpsc::Sender<Stamped>,
     bindings: HotkeyBindings,
     exclusive: bool,
 ) {
@@ -594,7 +594,7 @@ fn read_device(
     running: Arc<AtomicBool>,
     matcher: Arc<Mutex<Matchers>>,
     mask: SharedMask,
-    sender: mpsc::Sender<HotkeyEvent>,
+    sender: mpsc::Sender<Stamped>,
     grab: bool,
 ) {
     let mut proxy = if grab {
@@ -656,7 +656,7 @@ fn read_device(
                     }
                     if let Some(hotkey_event) = processed.event {
                         debug!("Hotkey {:?} from {}", hotkey_event, path.display());
-                        if sender.send(hotkey_event).is_err() {
+                        if sender.send(Stamped::now(hotkey_event)).is_err() {
                             running.store(false, Ordering::Release);
                             return;
                         }

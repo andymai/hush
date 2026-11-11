@@ -87,6 +87,16 @@ pub fn safe_mode_text(reason: &str) -> String {
 
 fn access(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Keyboard access");
+    if gui.machine.portal {
+        row("overview.access", "The desktop types for Hush")
+            .status(true)
+            .describe(
+                "Hush types and reads its shortcuts through the desktop portals. The \
+                 desktop asks once for keyboard access, at the first dictation.",
+            )
+            .show(ui, |_| {});
+        return;
+    }
     let status = &gui.machine.permissions;
     let ready = status.ready();
     let description = if ready {
@@ -214,7 +224,7 @@ fn try_it(gui: &mut Gui, ui: &mut egui::Ui) {
                 Some(DaemonState::Inserting) => widgets::busy(ui, "Typing…"),
                 Some(DaemonState::Stopping) => widgets::busy(ui, "Stopping…"),
                 Some(DaemonState::Idle) => {
-                    if gui.machine.permissions.ready() {
+                    if gui.machine.can_type() {
                         widgets::status(ui, icons::CIRCLE_CHECK, colours.good, "Ready.");
                     } else {
                         widgets::status(

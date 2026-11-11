@@ -95,6 +95,11 @@ const KEYS: &[KeyDef] = keys![
     ["menu"] => KEY_COMPOSE / ContextMenu, ["numlock"] => KEY_NUMLOCK / NumLock,
 ];
 
+const FUNCTION_KEYS: [&str; 24] = [
+    "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "F13", "F14", "F15",
+    "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24",
+];
+
 /// Mouse buttons: "mouse4" is the side (back) button, "mouse5" the extra
 /// (forward) button. Pair them with `hotkey.exclusive` so browsers never see them.
 const MOUSE_BUTTONS: &[KeyDef] = &[
@@ -193,6 +198,52 @@ impl KeyCombination {
     pub fn types_character(&self) -> bool {
         let name = self.key.names[0];
         name.chars().count() == 1 || matches!(name, "space" | "enter")
+    }
+
+    /// The main key's keysym name for an XDG shortcut trigger, such as
+    /// `space` or `F9`, or `None` for a modifier, a lock key, or a mouse
+    /// button, which no portal trigger takes.
+    pub fn xdg_key_name(&self) -> Option<&'static str> {
+        let name = self.key.names[0];
+        let mapped = match name {
+            "space" => "space",
+            "enter" => "Return",
+            "escape" => "Escape",
+            "backspace" => "BackSpace",
+            "delete" => "Delete",
+            "tab" => "Tab",
+            "home" => "Home",
+            "end" => "End",
+            "pageup" => "Page_Up",
+            "pagedown" => "Page_Down",
+            "insert" => "Insert",
+            "up" => "Up",
+            "down" => "Down",
+            "left" => "Left",
+            "right" => "Right",
+            "," => "comma",
+            "." => "period",
+            "/" => "slash",
+            ";" => "semicolon",
+            "'" => "apostrophe",
+            "[" => "bracketleft",
+            "]" => "bracketright",
+            "\\" => "backslash",
+            "-" => "minus",
+            "=" => "equal",
+            "`" => "grave",
+            "pause" => "Pause",
+            "printscreen" => "Print",
+            "menu" => "Menu",
+            _ if name.len() == 1 => name,
+            _ => {
+                return FUNCTION_KEYS
+                    .iter()
+                    .find(|key| key.eq_ignore_ascii_case(name))
+                    .copied()
+            },
+        };
+        Some(mapped)
     }
 
     /// Whether the chord needs a keyboard for its modifiers.

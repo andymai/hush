@@ -220,6 +220,19 @@ xkbcommon-dl = "0.4"
 # Every clipboard format through Wayland data-control, for the paste restore
 wl-clipboard-rs = "0.9"
 
+# Desktop portals for a sandboxed Hush (Flatpak): RemoteDesktop types,
+# GlobalShortcuts reads the hotkeys, Background starts the daemon at login
+# (remote_desktop needs the screencast types; screencast pulls in no PipeWire)
+ashpd = { version = "0.13", default-features = false, features = [
+  "tokio",
+  "remote_desktop",
+  "screencast",
+  "global_shortcuts",
+  "background",
+] }
+# The keysym of a character, as xkb_utf32_to_keysym gives it, for the portal
+xkeysym = "0.2"
+
 
 [profile.release]
 opt-level = 3

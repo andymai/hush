@@ -1,9 +1,9 @@
 use crate::cli::commands::{
     handle_client_command, handle_config, handle_daemon_restart, handle_daemon_start,
     handle_daemon_status, handle_daemon_stop, handle_doctor, handle_listen, handle_manual,
-    handle_models, handle_record, handle_recover, handle_rewrite, handle_setup, handle_start,
-    handle_status, handle_status_follow, handle_status_json, handle_stop, handle_test,
-    handle_transcribe, SessionOptions,
+    handle_models, handle_record, handle_recover, handle_rewrite, handle_setup, handle_shortcuts,
+    handle_start, handle_status, handle_status_follow, handle_status_json, handle_stop,
+    handle_test, handle_transcribe, SessionOptions,
 };
 use crate::cli::{Commands, DaemonCommands};
 use crate::ipc::DaemonCommand;
@@ -40,6 +40,7 @@ impl CommandDispatcher {
             Commands::Doctor => "doctor",
             Commands::Settings => "settings",
             Commands::PasteLast => "paste-last",
+            Commands::Shortcuts { .. } => "shortcuts",
             Commands::Learn { .. } => "learn",
             Commands::Transcribe { .. } => "transcribe",
             Commands::Recover { .. } => "recover",
@@ -148,6 +149,7 @@ impl CommandDispatcher {
             // async context panics unless the thread leaves the runtime first.
             Commands::Settings => tokio::task::block_in_place(crate::gui::run),
             Commands::PasteLast => handle_client_command(DaemonCommand::PasteLast).await,
+            Commands::Shortcuts { configure } => handle_shortcuts(configure).await,
             Commands::Learn { text } => {
                 let text = (!text.is_empty()).then(|| text.join(" "));
                 handle_client_command(DaemonCommand::Learn { text }).await
@@ -517,9 +519,9 @@ pub async fn test_hotkey_system(combination: Option<String>, duration: u64) -> R
                 let mut events = 0;
 
                 while start.elapsed() < timeout {
-                    if let Ok(event) = receiver.try_recv() {
+                    if let Ok(stamped) = receiver.try_recv() {
                         events += 1;
-                        match event {
+                        match stamped.event {
                             crate::hotkey::HotkeyEvent::Pressed => {
                                 println!("🎯 Hotkey pressed detected!");
                             },
@@ -696,6 +698,14 @@ pub async fn run_all_tests(benchmarks: bool, output: Option<PathBuf>) -> Result<
 
 // Installation functions
 async fn install_autostart() -> Result<()> {
+    if crate::portal::InputMode::current().is_portal() {
+        println!("📥 Asking the desktop to start Hush at login...");
+        tokio::task::spawn_blocking(|| crate::portal::background::set_autostart(true))
+            .await
+            .context("the Background portal request stopped")??;
+        println!("   ✅ The desktop starts Hush when you log in");
+        return Ok(());
+    }
     println!("📥 Installing autostart entry...");
     let dir = crate::desktop::autostart_dir();
     fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;
@@ -786,6 +796,14 @@ async fn install_system_wide() -> Result<()> {
 }
 
 async fn remove_autostart() -> Result<()> {
+    if crate::portal::InputMode::current().is_portal() {
+        println!("🗑️  Asking the desktop not to start Hush at login...");
+        tokio::task::spawn_blocking(|| crate::portal::background::set_autostart(false))
+            .await
+            .context("the Background portal request stopped")??;
+        println!("   ✅ Hush no longer starts at login");
+        return Ok(());
+    }
     println!("🗑️  Removing autostart entry...");
     let dir = crate::desktop::autostart_dir();
     let mut removed = false;

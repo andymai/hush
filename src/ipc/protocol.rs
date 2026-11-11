@@ -61,6 +61,21 @@ pub enum DaemonCommand {
     Rewrite {
         style: String,
     },
+    /// In portal mode, the shortcuts and the keys the desktop binds them
+    /// to; with `configure`, open the desktop's shortcut dialog first
+    Shortcuts {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        configure: bool,
+    },
+}
+
+/// A GlobalShortcuts portal shortcut as the desktop reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortalShortcut {
+    pub id: String,
+    pub description: String,
+    /// What the desktop shows, such as `Meta+Space`, or empty for none.
+    pub trigger: String,
 }
 
 /// What the daemon is doing right now.
@@ -196,6 +211,9 @@ pub struct DaemonResponse {
     /// from the microphone, `None` before the first take
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_delay: Option<StartDelay>,
+    /// In a shortcuts reply: the portal shortcuts
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortcuts: Option<Vec<PortalShortcut>>,
 }
 
 impl DaemonResponse {
@@ -211,6 +229,7 @@ impl DaemonResponse {
             style: None,
             safe_mode: None,
             start_delay: None,
+            shortcuts: None,
         }
     }
 
@@ -226,7 +245,13 @@ impl DaemonResponse {
             style: None,
             safe_mode: None,
             start_delay: None,
+            shortcuts: None,
         }
+    }
+
+    pub fn with_shortcuts(mut self, shortcuts: Vec<PortalShortcut>) -> Self {
+        self.shortcuts = Some(shortcuts);
+        self
     }
 
     pub fn with_safe_mode(mut self, safe_mode: Option<String>) -> Self {

@@ -7,6 +7,10 @@ use crate::config::settings::{LlmSetting, TranscriptionBackend, TranscriptionCon
 use crate::config::{keys, paths, Config};
 use crate::hotkey::keymap::ModifierKeys;
 use crate::hotkey::{warnings, HotkeyBindings};
+use crate::ipc::protocol::PortalShortcut;
+use crate::portal::probe::PortalReport;
+use crate::portal::token::TokenStore;
+use crate::portal::{InputMode, PortalError};
 use crate::text::layout::Layout;
 use crate::text::typing::{NoLeds, Resolver, Typing};
 use crate::text::WindowProvider;
@@ -112,7 +116,15 @@ pub async fn checks() -> Vec<Check> {
 
     let models_dir = paths::models_dir();
     let env_file = keys::env_file();
-    checks.push(permissions_check());
+    let portal = InputMode::detect(config.input.backend).is_portal();
+    if portal {
+        checks.push(Check::ok(
+            "Input",
+            InputMode::Portal.describe(config.input.backend, crate::portal::sandboxed()),
+        ));
+    } else {
+        checks.push(permissions_check());
+    }
     if config.transcription.backend.is_cloud() {
         let key_present = config
             .transcription
@@ -163,13 +175,17 @@ pub async fn checks() -> Vec<Check> {
     if config.audio.pause_media {
         checks.push(media_report(crate::audio::media::probe().await));
     }
-    checks.push(hotkey_check(&config));
-    checks.extend(hotkeys_checks(
-        &config,
-        crate::text::layout::current().as_ref(),
-        &ModifierKeys::session(),
-    ));
-    checks.push(typing_check(&Resolver::new().resolve(&mut NoLeds)));
+    if portal {
+        checks.extend(portal_checks(&config).await);
+    } else {
+        checks.push(hotkey_check(&config));
+        checks.extend(hotkeys_checks(
+            &config,
+            crate::text::layout::current().as_ref(),
+            &ModifierKeys::session(),
+        ));
+        checks.push(typing_check(&Resolver::new().resolve(&mut NoLeds)));
+    }
     checks.push(window_check());
     checks.push(clipboard_check(crate::text::clipboard::support()));
     checks.push(llm_check(&config, &env_file).await);
@@ -455,7 +471,7 @@ fn microphone_check(config: &Config) -> Check {
 /// Whether WirePlumber suspends the microphone between takes, with the start
 /// delay that the daemon measured.
 async fn wake_check(config: &Config, reply: Option<&crate::ipc::DaemonResponse>) -> Check {
-    if wake::sandboxed() {
+    if crate::portal::sandboxed() {
         return sandbox_wake_report();
     }
     let probe = wake::look(config.audio.device.as_deref()).await;
@@ -561,6 +577,134 @@ fn hotkeys_checks(config: &Config, layout: Option<&Layout>, keys: &ModifierKeys)
         checks.push(Check::ok(NAME, "each action has its own chord"));
     }
     checks
+}
+
+/// The portal lines take the place of the device, hotkey, and typing lines.
+async fn portal_checks(config: &Config) -> Vec<Check> {
+    use crate::ipc::DaemonCommand;
+    let report = crate::portal::probe::probe().await;
+    let consent = TokenStore::new(TokenStore::default_path()).load().is_some();
+    let shortcuts = crate::ipc::client::send(DaemonCommand::Shortcuts { configure: false })
+        .await
+        .ok()
+        .filter(|reply| reply.ok)
+        .and_then(|reply| reply.shortcuts);
+    portal_lines(
+        &report,
+        consent,
+        shortcuts.as_deref(),
+        config.hotkey.enabled,
+    )
+}
+
+const FIX_PORTAL_DESKTOP: &str =
+    "use a KDE Plasma or GNOME session, or install Hush from a package outside Flatpak";
+
+fn portal_lines(
+    report: &PortalReport,
+    consent: bool,
+    shortcuts: Option<&[PortalShortcut]>,
+    hotkeys_on: bool,
+) -> Vec<Check> {
+    let mut checks = Vec::new();
+    checks.push(match &report.remote_desktop {
+        Ok(info) if !info.keyboard => Check::fail(
+            "Typing",
+            format!(
+                "the RemoteDesktop portal (version {}) offers no keyboard",
+                info.version
+            ),
+            FIX_PORTAL_DESKTOP,
+        ),
+        Ok(info) if info.version < 2 => Check::warn(
+            "Typing",
+            format!(
+                "RemoteDesktop portal version {} keeps no consent, so the desktop asks at \
+                 each take",
+                info.version
+            ),
+            "update xdg-desktop-portal and the portal of the desktop",
+        ),
+        Ok(info) => Check::ok(
+            "Typing",
+            format!(
+                "RemoteDesktop portal version {}: types what the layout surely has, pastes the rest",
+                info.version
+            ),
+        ),
+        Err(PortalError::Unavailable(_)) => Check::fail(
+            "Typing",
+            "no RemoteDesktop portal (xdg-desktop-portal-wlr, -gtk, and -hyprland have \
+             none), so Hush cannot type",
+            FIX_PORTAL_DESKTOP,
+        ),
+        Err(e) => Check::fail("Typing", e.to_string(), FIX_PORTAL_DESKTOP),
+    });
+    checks.push(Check::ok(
+        "Keyboard consent",
+        if consent {
+            "given; the desktop does not ask again"
+        } else {
+            "not given yet; the desktop asks at the first dictation"
+        },
+    ));
+    if hotkeys_on {
+        checks.push(match &report.global_shortcuts {
+            Ok(version) if *version < 2 => Check::ok(
+                "Hotkeys",
+                format!(
+                    "GlobalShortcuts portal version {}; set the keys in the settings of the \
+                     desktop",
+                    version
+                ),
+            ),
+            Ok(version) => Check::ok(
+                "Hotkeys",
+                format!("GlobalShortcuts portal version {}", version),
+            ),
+            Err(PortalError::Unavailable(_)) => Check::fail(
+                "Hotkeys",
+                "no GlobalShortcuts portal, so no key starts a dictation",
+                "use KDE Plasma 6 or GNOME 48, or bind `hush toggle` to a key in the desktop \
+                 settings",
+            ),
+            Err(e) => Check::fail("Hotkeys", e.to_string(), FIX_PORTAL_DESKTOP),
+        });
+        checks.push(shortcuts_line(shortcuts));
+    }
+    if let Err(e) = &report.background {
+        checks.push(Check::warn(
+            "Background",
+            e.to_string(),
+            "Hush cannot start at login; start it with `hush daemon start`",
+        ));
+    }
+    checks
+}
+
+fn shortcuts_line(shortcuts: Option<&[PortalShortcut]>) -> Check {
+    let Some(shortcuts) = shortcuts else {
+        return Check::ok(
+            "Shortcuts",
+            "the daemon binds them when it starts (hush daemon start)",
+        );
+    };
+    let each: Vec<String> = shortcuts
+        .iter()
+        .filter(|shortcut| !shortcut.trigger.is_empty())
+        .map(|shortcut| format!("{} = {}", shortcut.id, shortcut.trigger))
+        .collect();
+    let dictate_set = shortcuts
+        .iter()
+        .any(|shortcut| shortcut.id == "dictate" && !shortcut.trigger.is_empty());
+    if !dictate_set {
+        return Check::warn(
+            "Shortcuts",
+            "the dictation shortcut has no key",
+            "hush shortcuts --configure, or set it in the shortcut settings of the desktop",
+        );
+    }
+    Check::ok("Shortcuts", each.join(", "))
 }
 
 fn typing_check(typing: &Typing) -> Check {
@@ -737,6 +881,9 @@ fn updates_report(
     state: &crate::updates::UpdateState,
 ) -> Check {
     use crate::updates::CURRENT_VERSION;
+    if kind == crate::updates::InstallKind::Flatpak {
+        return Check::ok("Updates", "Flathub or the Flatpak remote updates Hush");
+    }
     if !kind.checks() {
         return Check::ok("Updates", "your package manager handles updates");
     }
@@ -773,7 +920,7 @@ fn updates_report(
 }
 
 fn autostart_check() -> Check {
-    if crate::desktop::autostart_installed() {
+    if crate::desktop::starts_at_login() {
         Check::ok("Starts at login", "yes")
     } else {
         Check::warn("Starts at login", "no", "hush install --autostart")
@@ -827,6 +974,138 @@ pub async fn handle_doctor() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::portal::probe::RemoteDesktopInfo;
+
+    fn report(
+        remote_desktop: Result<RemoteDesktopInfo, PortalError>,
+        global_shortcuts: Result<u32, PortalError>,
+    ) -> PortalReport {
+        PortalReport {
+            remote_desktop,
+            global_shortcuts,
+            background: Ok(1),
+        }
+    }
+
+    fn shortcut(id: &str, trigger: &str) -> PortalShortcut {
+        PortalShortcut {
+            id: id.into(),
+            description: String::new(),
+            trigger: trigger.into(),
+        }
+    }
+
+    fn line<'a>(checks: &'a [Check], name: &str) -> &'a Check {
+        checks
+            .iter()
+            .find(|check| check.name == name)
+            .unwrap_or_else(|| panic!("no {name} line"))
+    }
+
+    #[test]
+    fn plasma_with_both_portals_is_all_ok() {
+        let keyboard = RemoteDesktopInfo {
+            version: 2,
+            keyboard: true,
+        };
+        let bound = [shortcut("dictate", "Meta+Space"), shortcut("cancel", "")];
+        let checks = portal_lines(&report(Ok(keyboard), Ok(2)), true, Some(&bound), true);
+        assert!(
+            checks.iter().all(|check| check.level == Level::Ok),
+            "{}",
+            checks
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        assert_eq!(
+            line(&checks, "Typing").detail,
+            "RemoteDesktop portal version 2: types what the layout surely has, pastes the rest"
+        );
+        assert_eq!(
+            line(&checks, "Keyboard consent").detail,
+            "given; the desktop does not ask again"
+        );
+        assert_eq!(
+            line(&checks, "Hotkeys").detail,
+            "GlobalShortcuts portal version 2"
+        );
+        assert_eq!(line(&checks, "Shortcuts").detail, "dictate = Meta+Space");
+        assert!(!checks.iter().any(|check| check.name == "Background"));
+    }
+
+    #[test]
+    fn a_wlroots_desktop_fails_the_typing_and_the_hotkeys() {
+        let missing = |name: &str| PortalError::Unavailable(name.into());
+        let checks = portal_lines(
+            &PortalReport {
+                remote_desktop: Err(missing("RemoteDesktop")),
+                global_shortcuts: Err(missing("GlobalShortcuts")),
+                background: Err(missing("Background")),
+            },
+            false,
+            None,
+            true,
+        );
+        let typing = line(&checks, "Typing");
+        assert_eq!(typing.level, Level::Fail);
+        assert!(typing.detail.contains("xdg-desktop-portal-wlr"), "{typing}");
+        assert_eq!(line(&checks, "Hotkeys").level, Level::Fail);
+        assert_eq!(line(&checks, "Background").level, Level::Warn);
+        assert_eq!(
+            line(&checks, "Keyboard consent").detail,
+            "not given yet; the desktop asks at the first dictation"
+        );
+    }
+
+    #[test]
+    fn an_old_portal_or_an_unset_key_warns() {
+        let old = RemoteDesktopInfo {
+            version: 1,
+            keyboard: true,
+        };
+        let checks = portal_lines(
+            &report(Ok(old), Ok(1)),
+            false,
+            Some(&[shortcut("dictate", "")]),
+            true,
+        );
+        assert_eq!(line(&checks, "Typing").level, Level::Warn);
+        assert!(line(&checks, "Hotkeys")
+            .detail
+            .contains("settings of the desktop"));
+        let shortcuts = line(&checks, "Shortcuts");
+        assert_eq!(shortcuts.level, Level::Warn);
+        assert_eq!(
+            shortcuts
+                .fix
+                .as_deref()
+                .map(|fix| fix.starts_with("hush shortcuts --configure")),
+            Some(true)
+        );
+        assert_eq!(
+            shortcuts_line(None).detail,
+            "the daemon binds them when it starts (hush daemon start)"
+        );
+        let no_keyboard = RemoteDesktopInfo {
+            version: 2,
+            keyboard: false,
+        };
+        let checks = portal_lines(&report(Ok(no_keyboard), Ok(2)), true, None, false);
+        assert_eq!(line(&checks, "Typing").level, Level::Fail);
+        assert!(
+            !checks.iter().any(|check| check.name == "Hotkeys"),
+            "hotkey.enabled = false hides the hotkey lines"
+        );
+    }
+
+    #[test]
+    fn a_flatpak_leaves_updates_to_its_remote() {
+        let empty = crate::updates::UpdateState::default();
+        let check = updates_report(true, crate::updates::InstallKind::Flatpak, &empty);
+        assert_eq!(check.detail, "Flathub or the Flatpak remote updates Hush");
+    }
 
     #[test]
     fn a_daemon_in_safe_mode_is_a_warning_with_its_reason() {

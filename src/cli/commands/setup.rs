@@ -109,6 +109,13 @@ fn print_uinput_quick_setup() {
 
 /// Install, print, or check the udev rule that grants device access.
 fn setup_permissions(check: bool, print: bool) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    if crate::portal::InputMode::current().is_portal() {
+        println!("Hush uses the desktop portals, so it needs no device access.");
+        println!("The desktop asks you once for keyboard access, at the first dictation.");
+        println!("To use evdev and uinput instead, set backend = \"evdev\" under [input].");
+        return Ok(());
+    }
     let status = permissions::status();
 
     if print {
@@ -167,7 +174,7 @@ const RESTART_WARNING: &str =
 /// awake between takes, restart WirePlumber, and make sure that the change
 /// applies.
 async fn setup_mic(undo: bool, yes: bool) -> Result<()> {
-    if wake::sandboxed() {
+    if crate::portal::sandboxed() {
         println!("Nothing changed: {}.", wake::SANDBOX_NOTE);
         return Ok(());
     }

@@ -50,6 +50,29 @@ pub struct Config {
     /// The settings window
     #[serde(default)]
     pub gui: GuiConfig,
+    /// Which system reads the hotkeys and types the text
+    #[serde(default)]
+    pub input: InputConfig,
+}
+
+/// Which system reads the hotkeys and types the text.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct InputConfig {
+    pub backend: InputBackend,
+}
+
+/// Where Hush reads the hotkeys and how it types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum InputBackend {
+    /// Portals in a Flatpak sandbox, else evdev and uinput.
+    #[default]
+    Auto,
+    /// The RemoteDesktop, GlobalShortcuts, and Background portals.
+    Portal,
+    /// evdev for the hotkeys and uinput for typing, also in a sandbox.
+    Evdev,
 }
 
 /// Settings window settings
