@@ -455,6 +455,9 @@ fn microphone_check(config: &Config) -> Check {
 /// Whether WirePlumber suspends the microphone between takes, with the start
 /// delay that the daemon measured.
 async fn wake_check(config: &Config, reply: Option<&crate::ipc::DaemonResponse>) -> Check {
+    if wake::sandboxed() {
+        return sandbox_wake_report();
+    }
     let probe = wake::look(config.audio.device.as_deref()).await;
     let hush_rule = match (&probe, wake::config_dir()) {
         (wake::Probe::Found(source), Ok(dir)) => wake::rule_names(&dir, source),
@@ -465,6 +468,11 @@ async fn wake_check(config: &Config, reply: Option<&crate::ipc::DaemonResponse>)
         hush_rule,
         reply.and_then(|reply| reply.start_delay),
     ))
+}
+
+/// Inside Flatpak, one sentence and no fix: `hush setup mic` cannot work there.
+fn sandbox_wake_report() -> Check {
+    Check::ok("Microphone wake", wake::SANDBOX_NOTE)
 }
 
 fn wake_report(finding: wake::Finding) -> Check {
@@ -1260,6 +1268,15 @@ mod tests {
         let shown = hook_report(&long, Program::Absolute("/x".into())).detail;
         assert_eq!(shown.chars().count(), 60);
         assert!(shown.ends_with('…'));
+    }
+
+    #[test]
+    fn inside_flatpak_the_wake_line_has_no_fix() {
+        let check = sandbox_wake_report();
+        assert_eq!(check.level, Level::Ok);
+        assert!(check.fix.is_none());
+        assert!(check.detail.contains("inside Flatpak"), "{}", check.detail);
+        assert!(check.detail.contains("does not apply"), "{}", check.detail);
     }
 
     #[test]

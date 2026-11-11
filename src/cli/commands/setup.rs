@@ -167,6 +167,10 @@ const RESTART_WARNING: &str =
 /// awake between takes, restart WirePlumber, and make sure that the change
 /// applies.
 async fn setup_mic(undo: bool, yes: bool) -> Result<()> {
+    if wake::sandboxed() {
+        println!("Nothing changed: {}.", wake::SANDBOX_NOTE);
+        return Ok(());
+    }
     let config_dir = wake::config_dir()?;
     let config = Config::load();
     if undo {
