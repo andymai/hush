@@ -19,6 +19,7 @@ mod widgets;
 
 pub use pages::speech::size_key;
 
+use crate::audio::take::StartDelay;
 use crate::config::settings::{Appearance, TranscriptionBackend, TranscriptionConfig};
 use crate::config::Config;
 use crate::hotkey::keymap::ModifierKeys;
@@ -38,6 +39,7 @@ use capture::{Capture, Outcome};
 use meter::Meter;
 use pages::history::HistoryView;
 use pages::hotkeys::KeyTarget;
+use pages::speech::WakeView;
 use pages::text::{StyleDraft, TermEdit};
 use pages::Page;
 use parking_lot::Mutex;
@@ -89,6 +91,8 @@ pub struct Machine {
     pub probe: Probe,
     /// Why the daemon runs in safe mode, when it does
     pub safe_mode: Option<String>,
+    /// How long recent takes waited for the first audio, from the daemon
+    pub start_delay: Option<StartDelay>,
     /// The configuration file loads now
     pub config_loads: bool,
     pub installed_models: Vec<ModelSize>,
@@ -116,6 +120,7 @@ impl Machine {
             })
             .unwrap_or_default();
         let (probe, reply) = client::reply_blocking(STATUS_TIMEOUT);
+        let start_delay = reply.as_ref().and_then(|reply| reply.start_delay);
         Self {
             permissions: crate::permissions::status(),
             daemon: match probe {
@@ -124,6 +129,7 @@ impl Machine {
             },
             probe,
             safe_mode: reply.and_then(|reply| reply.safe_mode),
+            start_delay,
             config_loads: Config::load().is_ok(),
             installed_models,
             vad_installed,
@@ -255,6 +261,8 @@ pub struct Gui {
     pub new_uinput_app: String,
     pub new_clipboard_app: String,
     pub history: HistoryView,
+    /// Whether the microphone sleeps between takes, and Keep it awake
+    pub wake: WakeView,
     pub try_text: String,
     /// The desktop's light or dark preference, for the System appearance
     desktop: DesktopScheme,
@@ -398,6 +406,7 @@ impl Gui {
             new_uinput_app: String::new(),
             new_clipboard_app: String::new(),
             history: HistoryView::default(),
+            wake: WakeView::default(),
             try_text: String::new(),
             desktop: DesktopScheme::default(),
             appearance_override: None,
@@ -455,6 +464,7 @@ impl Gui {
         self.confirm_reset = false;
         self.confirm_replace = false;
         self.history.disarm();
+        self.wake.confirm = None;
     }
 
     /// Put a change into the window's settings, which save at the end of the
@@ -1127,6 +1137,7 @@ impl eframe::App for Gui {
         }
         self.take_refresh();
         self.finish_download(ctx);
+        pages::speech::finish_wake(self);
         self.finish_capture();
         self.palette.keys(ctx, self.capture.is_some());
         if self.palette.is_open() {
@@ -1275,6 +1286,7 @@ mod tests {
             daemon: Some(DaemonState::Idle),
             probe: Probe::State(DaemonState::Idle),
             safe_mode: None,
+            start_delay: None,
             config_loads: true,
             installed_models: vec![ModelSize::Base],
             vad_installed: true,
@@ -1396,7 +1408,7 @@ mod tests {
 
     /// A window on the defaults that reads nothing of this machine. Its
     /// files are in a folder that nothing writes.
-    fn window() -> Gui {
+    pub(super) fn window() -> Gui {
         let folder = std::env::temp_dir().join("hush-gui-test-never-written");
         let files = Files::at(folder.join("config.toml"), folder.join("vocabulary.json"));
         let runtime = tokio::runtime::Builder::new_current_thread()

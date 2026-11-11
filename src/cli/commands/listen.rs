@@ -876,6 +876,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     Some(StartEvent::Live { delay }) => {
                         let delay_ms = delay.as_millis() as u64;
                         debug!(delay_ms, "First audio frame arrived");
+                        shared.record_start_delay(delay);
                         if is_slow_start(delay) {
                             warn!(
                                 delay_ms,

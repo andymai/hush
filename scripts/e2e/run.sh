@@ -715,6 +715,34 @@ case_print_types_nothing() {
   assert_log_lacks "Pressed Enter"
 }
 
+# The daemon keeps how long each take waited for its first audio. The doctor
+# line finds the virtual microphone through PIPEWIRE_NODE and names that delay.
+case_start_delay() {
+  local status worst label line
+  start_daemon
+  status=$(hush_cli status --json) || fail "hush status --json failed"
+  assert_eq null "$(jq -c '.start_delay' <<<"$status")" "the start delay before a take"
+  record_clip "$SAMPLES/jfk.wav"
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  status=$(hush_cli status --json) || fail "hush status --json failed"
+  log "status --json: $(jq -c '.start_delay' <<<"$status")"
+  assert_eq 1 "$(jq -r '.start_delay.takes' <<<"$status")" "the measured takes"
+  jq -e '.start_delay.last_ms == .start_delay.worst_ms' <<<"$status" >/dev/null ||
+    fail "one take gives one delay: $status"
+  worst=$(jq -r '.start_delay.worst_ms' <<<"$status")
+  label=$(pw_json | jq -r --arg name "$MIC" \
+    'first(.[] | select(.type == "PipeWire:Interface:Node" and .info.props["node.name"] == $name)
+      | .info.props["node.nick"] // .info.props["node.description"] // $name)')
+  line=$(hush_cli doctor 2>/dev/null | grep 'Microphone wake' | head -n 1) ||
+    fail "hush doctor printed no Microphone wake line"
+  log "doctor: $line"
+  case "$line" in
+    *"$label sleeps after "*" s without a take"*"$worst ms"*) ;;
+    *) fail "the Microphone wake line does not name $label and $worst ms: $line" ;;
+  esac
+}
+
 # --- Runner -----------------------------------------------------------------
 
 all_cases() { compgen -A function case_ | sed 's/^case_//'; }

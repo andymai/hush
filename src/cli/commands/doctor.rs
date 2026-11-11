@@ -1,6 +1,7 @@
 //! `hush doctor`: everything that has to be true for dictation to work, each
 //! with the one command that fixes it.
 
+use crate::audio::wake;
 use crate::config::server::{self, Sends};
 use crate::config::settings::{LlmSetting, TranscriptionBackend, TranscriptionConfig};
 use crate::config::{keys, paths, Config};
@@ -157,6 +158,8 @@ pub async fn checks() -> Vec<Check> {
         ));
     }
     checks.push(microphone_check(&config));
+    let reply = crate::ipc::client::status_reply().await;
+    checks.push(wake_check(&config, reply.as_ref()).await);
     if config.audio.pause_media {
         checks.push(media_report(crate::audio::media::probe().await));
     }
@@ -174,7 +177,7 @@ pub async fn checks() -> Vec<Check> {
     checks.push(tray_check(&config));
     checks.push(updates_check(&config));
     checks.push(autostart_check());
-    checks.push(daemon_check().await);
+    checks.push(daemon_line(reply.as_ref()));
     checks
 }
 
@@ -446,6 +449,29 @@ fn microphone_check(config: &Config) -> Check {
             e.to_string(),
             "hush status --devices lists what is available",
         ),
+    }
+}
+
+/// Whether WirePlumber suspends the microphone between takes, with the start
+/// delay that the daemon measured.
+async fn wake_check(config: &Config, reply: Option<&crate::ipc::DaemonResponse>) -> Check {
+    let probe = wake::look(config.audio.device.as_deref()).await;
+    let hush_rule = match (&probe, wake::config_dir()) {
+        (wake::Probe::Found(source), Ok(dir)) => wake::rule_names(&dir, source),
+        _ => false,
+    };
+    wake_report(wake::finding(
+        &probe,
+        hush_rule,
+        reply.and_then(|reply| reply.start_delay),
+    ))
+}
+
+fn wake_report(finding: wake::Finding) -> Check {
+    const NAME: &str = "Microphone wake";
+    match finding.fix {
+        Some(fix) if finding.warn => Check::warn(NAME, finding.detail, fix),
+        _ => Check::ok(NAME, finding.detail),
     }
 }
 
@@ -744,10 +770,6 @@ fn autostart_check() -> Check {
     } else {
         Check::warn("Starts at login", "no", "hush install --autostart")
     }
-}
-
-async fn daemon_check() -> Check {
-    daemon_line(crate::ipc::client::status_reply().await.as_ref())
 }
 
 /// The doctor line for the daemon's status reply, `None` when none runs.
@@ -1238,6 +1260,48 @@ mod tests {
         let shown = hook_report(&long, Program::Absolute("/x".into())).detail;
         assert_eq!(shown.chars().count(), 60);
         assert!(shown.ends_with('…'));
+    }
+
+    #[test]
+    fn the_wake_line_warns_with_the_setup_command() {
+        use crate::audio::take::StartDelay;
+        let source = wake::Source {
+            name: "alsa_input.usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00.iec958-stereo"
+                .to_string(),
+            label: "Yeti Stereo Microphone".to_string(),
+            profile: Some("iec958-stereo".to_string()),
+            serial: Some(1),
+            kind: wake::Kind::Alsa,
+            sleep: wake::Sleep::After(5),
+            split: None,
+            twin: false,
+        };
+        let slow = StartDelay {
+            last_ms: 30,
+            worst_ms: 650,
+            takes: 4,
+        };
+        let line = wake_report(wake::finding(
+            &wake::Probe::Found(source.clone()),
+            false,
+            Some(slow),
+        ));
+        assert_eq!(line.level, Level::Warn);
+        assert_eq!(line.name, "Microphone wake");
+        assert_eq!(line.fix.as_deref(), Some("hush setup mic"));
+        assert!(line.detail.contains("650 ms"), "{}", line.detail);
+
+        let awake = wake::Source {
+            sleep: wake::Sleep::Never,
+            ..source
+        };
+        let line = wake_report(wake::finding(&wake::Probe::Found(awake), true, Some(slow)));
+        assert_eq!(line.level, Level::Ok);
+        assert!(line.fix.is_none());
+
+        let skipped = wake_report(wake::finding(&wake::Probe::NoPipeWire, false, None));
+        assert_eq!(skipped.level, Level::Ok);
+        assert!(skipped.detail.contains("PulseAudio"), "{}", skipped.detail);
     }
 
     #[test]

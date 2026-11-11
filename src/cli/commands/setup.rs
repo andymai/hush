@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::io::{self, Write};
 
+use crate::audio::wake::{self, Plan, Sleep, Undone};
 use crate::cli::SetupCommands;
 use crate::config::settings::TranscriptionConfig;
 use crate::gui::{megabytes, size_key, MODEL_ORDER};
@@ -23,6 +24,9 @@ use crate::Config;
 ///   - `--quick`: Print quick setup commands
 ///   - `--auto-fix`: Attempt automatic setup (not yet implemented)
 /// * `DiagnoseUinput` - Diagnose UInput permission issues
+/// * `Mic` - Keep the microphone awake between takes with a WirePlumber rule
+///   - `--undo`: Remove the rule
+///   - `--yes`: Restart WirePlumber without a question
 /// * `Audio` - Configure and test audio devices
 ///   - `--list`: List available audio input devices
 ///   - `--test <device>`: Test a specific audio device
@@ -89,6 +93,7 @@ pub async fn handle_setup(setup_command: SetupCommands) -> Result<()> {
                 Ok(())
             }
         },
+        SetupCommands::Mic { undo, yes } => setup_mic(undo, yes).await,
         SetupCommands::Audio { list, test } => setup_audio(list, test).await,
         SetupCommands::Hotkeys { test, list } => setup_hotkeys(test, list).await,
         SetupCommands::Wizard { auto } => run_setup_wizard(auto).await,
@@ -152,6 +157,125 @@ fn setup_permissions(check: bool, print: bool) -> Result<()> {
         println!("   `sudo usermod -a -G input $USER` and a re-login grants access group-wide.");
     }
     Ok(())
+}
+
+/// What a restart of WirePlumber does to the sound, before the question.
+const RESTART_WARNING: &str =
+    "WirePlumber restarts to read the change, so all sound stops for about a second.";
+
+/// Write or remove the WirePlumber rule that keeps the microphone of Hush
+/// awake between takes, restart WirePlumber, and make sure that the change
+/// applies.
+async fn setup_mic(undo: bool, yes: bool) -> Result<()> {
+    let config_dir = wake::config_dir()?;
+    let config = Config::load();
+    if undo {
+        let device = config.ok().and_then(|config| config.audio.device);
+        let probe = wake::look(device.as_deref()).await;
+        return undo_mic(&config_dir, probe, yes).await;
+    }
+    let config = config
+        .context("The configuration does not load, so Hush cannot tell which microphone it uses")?;
+    let probe = wake::look(config.audio.device.as_deref()).await;
+    let change = match wake::plan(&wake::Host, &config_dir, probe).await? {
+        Plan::Awake { source, by_hush } => {
+            let by = if by_hush {
+                "the rule of Hush. `hush setup mic --undo` lets it sleep again".to_string()
+            } else {
+                "a WirePlumber rule that Hush did not write, so Hush changes nothing".to_string()
+            };
+            println!(
+                "✅ {} stays awake between takes, because of {}.",
+                source.label, by
+            );
+            return Ok(());
+        },
+        Plan::Write(change) => change,
+    };
+    let source = &change.source;
+    if let Sleep::After(seconds) = source.suspend() {
+        println!(
+            "🎤 WirePlumber suspends {} after {} s without a take, and the next take waits while it wakes.",
+            source.label, seconds
+        );
+    }
+    println!("   Node: {}", source.name);
+    println!();
+    println!(
+        "Hush writes this rule for {} to {}:",
+        change.format.name(),
+        change.path.display()
+    );
+    println!();
+    print!("{}", change.text);
+    for stale in &change.stale {
+        println!("Hush removes its old rule {}.", stale.display());
+    }
+    println!();
+    println!("The rule keeps only this microphone awake. No app records while it is awake.");
+    if !yes && !ask(RESTART_WARNING)? {
+        println!("Nothing changed. Add --yes to skip the question.");
+        return Ok(());
+    }
+    println!("WirePlumber restarts…");
+    let after = wake::apply(&wake::Host, &change).await?;
+    println!();
+    println!("✅ {} stays awake between takes now.", after.label);
+    println!("   `hush setup mic --undo` lets it sleep again.");
+    Ok(())
+}
+
+async fn undo_mic(config_dir: &std::path::Path, probe: wake::Probe, yes: bool) -> Result<()> {
+    let files = wake::rules_in(config_dir);
+    if files.is_empty() {
+        println!("Hush wrote no WirePlumber rule, so nothing changed.");
+        return Ok(());
+    }
+    for file in &files {
+        println!("Hush removes {}.", file.display());
+    }
+    if !yes && !ask(RESTART_WARNING)? {
+        println!("Nothing changed. Add --yes to skip the question.");
+        return Ok(());
+    }
+    println!("WirePlumber restarts…");
+    match wake::undo(&wake::Host, config_dir, probe).await? {
+        Undone::Nothing => println!("Hush wrote no WirePlumber rule, so nothing changed."),
+        Undone::Removed { source: None, .. } => {
+            println!("✅ The rule of Hush is gone, and WirePlumber restarted.")
+        },
+        Undone::Removed {
+            source: Some(source),
+            ..
+        } => match source.suspend() {
+            Sleep::After(seconds) => println!(
+                "✅ {} sleeps again after {} s without a take.",
+                source.label, seconds
+            ),
+            Sleep::Never => println!(
+                "✅ The rule of Hush is gone. {} still stays awake, because another WirePlumber rule keeps it awake.",
+                source.label
+            ),
+        },
+    }
+    Ok(())
+}
+
+/// Print `warning`, ask whether to go on, and read the answer. Only `y` or
+/// `yes` goes on; an empty answer or the end of the input does not.
+fn ask(warning: &str) -> Result<bool> {
+    println!("{}", warning);
+    print!("Go on? [y/N] ");
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .context("Failed to read the answer")?;
+    Ok(is_yes(&input))
+}
+
+fn is_yes(answer: &str) -> bool {
+    matches!(answer.trim().to_lowercase().as_str(), "y" | "yes")
 }
 
 /// Setup and test audio devices
@@ -799,5 +923,15 @@ mod tests {
             .expect("a parakeet-v3 line");
         assert!(line.contains("opt-in"), "{line}");
         assert!(line.contains("25 European languages"), "{line}");
+    }
+
+    #[test]
+    fn only_yes_goes_on() {
+        for answer in ["y\n", "Y", " yes \n", "YES"] {
+            assert!(is_yes(answer), "{answer:?}");
+        }
+        for answer in ["", "\n", "n", "no", "yep", "sure"] {
+            assert!(!is_yes(answer), "{answer:?}");
+        }
     }
 }

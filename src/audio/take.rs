@@ -5,6 +5,8 @@
 //! audio frame: the start cue, the recording look, and every timer that
 //! measures the take wait for that frame.
 
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 /// A take that gets no audio frame in this time fails.
@@ -18,6 +20,52 @@ pub const SLOW_START: Duration = Duration::from_millis(200);
 
 pub fn is_slow_start(delay: Duration) -> bool {
     delay > SLOW_START
+}
+
+/// How many recent takes the daemon keeps the start delay of.
+pub const START_DELAYS_KEPT: usize = 10;
+
+/// The start delay of recent takes: the time from the start of the input
+/// stream to its first audio frame. The status reply carries it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartDelay {
+    /// The latest take
+    pub last_ms: u64,
+    /// The slowest of the kept takes
+    pub worst_ms: u64,
+    /// The number of takes, at most [`START_DELAYS_KEPT`]
+    pub takes: u32,
+}
+
+impl StartDelay {
+    /// One of the kept takes started slowly.
+    pub fn is_slow(&self) -> bool {
+        is_slow_start(Duration::from_millis(self.worst_ms))
+    }
+}
+
+/// The start delays of the last [`START_DELAYS_KEPT`] takes that went live.
+#[derive(Debug, Default, Clone)]
+pub struct StartDelays(VecDeque<u64>);
+
+impl StartDelays {
+    pub fn record(&mut self, delay: Duration) {
+        if self.0.len() == START_DELAYS_KEPT {
+            self.0.pop_front();
+        }
+        self.0
+            .push_back(u64::try_from(delay.as_millis()).unwrap_or(u64::MAX));
+    }
+
+    /// `None` before the first take.
+    pub fn summary(&self) -> Option<StartDelay> {
+        let last_ms = *self.0.back()?;
+        Some(StartDelay {
+            last_ms,
+            worst_ms: self.0.iter().copied().max().unwrap_or(last_ms),
+            takes: u32::try_from(self.0.len()).unwrap_or(u32::MAX),
+        })
+    }
 }
 
 /// The stream of a live take stopped: its last frame is [`STALL_TIMEOUT`] old
@@ -284,6 +332,36 @@ mod tests {
         assert!(!is_slow_start(Duration::from_millis(200)));
         assert!(is_slow_start(Duration::from_millis(201)));
         assert!(is_slow_start(Duration::from_secs(4)));
+    }
+
+    #[test]
+    fn start_delays_keep_the_last_ten_takes() {
+        let mut delays = StartDelays::default();
+        assert_eq!(delays.summary(), None, "no take yet");
+        delays.record(Duration::from_millis(650));
+        assert_eq!(
+            delays.summary(),
+            Some(StartDelay {
+                last_ms: 650,
+                worst_ms: 650,
+                takes: 1
+            })
+        );
+        for _ in 0..START_DELAYS_KEPT - 1 {
+            delays.record(Duration::from_millis(12));
+        }
+        let full = delays.summary().unwrap();
+        assert_eq!((full.last_ms, full.worst_ms, full.takes), (12, 650, 10));
+        assert!(full.is_slow());
+
+        delays.record(Duration::from_millis(30));
+        let moved = delays.summary().unwrap();
+        assert_eq!(
+            (moved.last_ms, moved.worst_ms, moved.takes),
+            (30, 30, 10),
+            "the slow take left the window"
+        );
+        assert!(!moved.is_slow());
     }
 
     #[test]

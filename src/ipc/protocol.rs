@@ -1,3 +1,4 @@
+use crate::audio::take::StartDelay;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
@@ -191,6 +192,10 @@ pub struct DaemonResponse {
     /// and deletes nothing in the history or the kept audio
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub safe_mode: Option<String>,
+    /// In a status reply: how long recent takes waited for the first audio
+    /// from the microphone, `None` before the first take
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_delay: Option<StartDelay>,
 }
 
 impl DaemonResponse {
@@ -205,6 +210,7 @@ impl DaemonResponse {
             language: None,
             style: None,
             safe_mode: None,
+            start_delay: None,
         }
     }
 
@@ -219,11 +225,17 @@ impl DaemonResponse {
             language: None,
             style: None,
             safe_mode: None,
+            start_delay: None,
         }
     }
 
     pub fn with_safe_mode(mut self, safe_mode: Option<String>) -> Self {
         self.safe_mode = safe_mode;
+        self
+    }
+
+    pub fn with_start_delay(mut self, start_delay: Option<StartDelay>) -> Self {
+        self.start_delay = start_delay;
         self
     }
 
@@ -598,6 +610,35 @@ mod tests {
             old.model_state, None,
             "an older daemon sends no model state"
         );
+    }
+
+    #[test]
+    fn status_replies_carry_the_start_delay_and_old_ones_parse() {
+        let delay = StartDelay {
+            last_ms: 40,
+            worst_ms: 650,
+            takes: 3,
+        };
+        let reply = DaemonResponse::ok(DaemonState::Idle).with_start_delay(Some(delay));
+        let json = serde_json::to_string(&reply).unwrap();
+        assert_eq!(
+            json,
+            r#"{"ok":true,"state":{"state":"idle"},"start_delay":{"last_ms":40,"worst_ms":650,"takes":3}}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonResponse>(&json).unwrap(),
+            reply
+        );
+        let old: DaemonResponse =
+            serde_json::from_str(r#"{"ok":true,"state":{"state":"idle"}}"#).unwrap();
+        assert_eq!(old.start_delay, None, "an older daemon measures nothing");
+
+        #[derive(Debug, Deserialize)]
+        struct OldReply {
+            ok: bool,
+        }
+        let older: OldReply = serde_json::from_str(&json).unwrap();
+        assert!(older.ok, "an older client ignores the new key");
     }
 
     #[test]

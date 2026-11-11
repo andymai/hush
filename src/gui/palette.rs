@@ -588,6 +588,8 @@ pub enum Action {
     GrantAccess,
     Download,
     FindMicrophones,
+    KeepMicAwake,
+    LetMicSleep,
     OpenConfigFile,
     Reset,
     ImportWords,
@@ -599,13 +601,15 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 14] = [
+    pub const ALL: [Action; 16] = [
         Action::StartHush,
         Action::RestartHush,
         Action::StopHush,
         Action::GrantAccess,
         Action::Download,
         Action::FindMicrophones,
+        Action::KeepMicAwake,
+        Action::LetMicSleep,
         Action::OpenConfigFile,
         Action::Reset,
         Action::ImportWords,
@@ -626,6 +630,7 @@ impl Action {
             Action::GrantAccess => ("overview.access", Some(Page::Overview)),
             Action::Download => ("speech.download", Some(Page::Speech)),
             Action::FindMicrophones => ("speech.microphone", Some(Page::Speech)),
+            Action::KeepMicAwake | Action::LetMicSleep => ("speech.wake", Some(Page::Speech)),
             Action::OpenConfigFile => ("desktop.config_file", Some(Page::Desktop)),
             Action::Reset => ("desktop.reset", Some(Page::Desktop)),
             Action::ImportWords | Action::ExportWords => {
@@ -644,7 +649,7 @@ impl Action {
             Action::StartHush | Action::RestartHush | Action::StopHush => "Status",
             Action::GrantAccess => "Keyboard access",
             Action::Download => "Model",
-            Action::FindMicrophones => "Microphone",
+            Action::FindMicrophones | Action::KeepMicAwake | Action::LetMicSleep => "Microphone",
             Action::OpenConfigFile | Action::Reset => "Configuration file",
             Action::ImportWords | Action::ExportWords => "Vocabulary",
             Action::ClearHistory => "Transcripts",
@@ -661,13 +666,16 @@ impl Action {
             Action::GrantAccess => icons::SHIELD_CHECK,
             Action::Download => icons::DOWNLOAD,
             Action::FindMicrophones => icons::REFRESH_CW,
+            Action::KeepMicAwake => icons::MIC,
             Action::OpenConfigFile => icons::FILE_TEXT,
             Action::ImportWords => icons::FILE_INPUT,
             Action::ExportWords => icons::FILE_OUTPUT,
             Action::ClearHistory => icons::TRASH,
-            Action::Reset | Action::ReplaceConfig | Action::ReplaceVocabulary | Action::Undo => {
-                icons::ROTATE_CCW
-            },
+            Action::Reset
+            | Action::LetMicSleep
+            | Action::ReplaceConfig
+            | Action::ReplaceVocabulary
+            | Action::Undo => icons::ROTATE_CCW,
         }
     }
 
@@ -679,6 +687,10 @@ impl Action {
             Action::GrantAccess => "permissions udev uinput input group keyboard",
             Action::Download => "model whisper fetch install voice detection vad",
             Action::FindMicrophones => "refresh microphones input devices rescan",
+            Action::KeepMicAwake => {
+                "wake sleep suspend wireplumber pipewire first word cut off slow"
+            },
+            Action::LetMicSleep => "wake sleep suspend wireplumber pipewire rule remove",
             Action::OpenConfigFile => "config toml edit editor",
             Action::Reset => "defaults restore settings",
             Action::ImportWords => "vocabulary words file load",
@@ -705,6 +717,8 @@ impl Action {
                 }
             },
             Action::FindMicrophones => "Look for microphones again",
+            Action::KeepMicAwake => "Keep the microphone awake",
+            Action::LetMicSleep => "Let the microphone sleep again",
             Action::OpenConfigFile => "Open the configuration file",
             Action::Reset => "Reset everything",
             Action::ImportWords => "Import the word list",
@@ -725,6 +739,8 @@ impl Action {
             Action::GrantAccess => !gui.machine.permissions.ready(),
             Action::Download => speech::download_offer(gui).is_some(),
             Action::FindMicrophones | Action::OpenConfigFile | Action::Reset => true,
+            Action::KeepMicAwake => speech::wake_offer(gui) == Some(speech::WakeAction::Keep),
+            Action::LetMicSleep => speech::wake_offer(gui) == Some(speech::WakeAction::Release),
             Action::ImportWords => text::can_import(gui),
             Action::ExportWords => text::can_export(gui),
             Action::ClearHistory => gui.history.has_entries(),
@@ -774,6 +790,14 @@ impl Action {
             Action::FindMicrophones => {
                 gui.microphones = meter::input_devices();
                 self.show_row(gui, ctx);
+            },
+            Action::KeepMicAwake => {
+                self.show_row(gui, ctx);
+                gui.wake.confirm = Some(speech::WakeAction::Keep);
+            },
+            Action::LetMicSleep => {
+                self.show_row(gui, ctx);
+                gui.wake.confirm = Some(speech::WakeAction::Release);
             },
             Action::OpenConfigFile => desktop::open_config_file(gui),
             Action::Reset => {

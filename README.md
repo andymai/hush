@@ -48,7 +48,7 @@ Hold `Right Alt`, speak, release. Done.
 
 - **Hold to talk, or lock hands-free.** Holding the hotkey while you speak is the default. Double-tap it to keep recording hands-free, then press once to stop; a lone tap records nothing. `Esc` discards a recording, and hands-free recording stops on its own after ten minutes, with a warning a minute before. Set `mode = "toggle"` under `[hotkey]` to lock on a single tap instead.
 - **Long recordings in parts.** A hands-free recording (locked, toggle mode, `hush toggle`, or the panel icon) transcribes in parts while you speak. Hush cuts the audio at each pause of about 0.8 seconds, or after about 30 seconds without one, and transcribes each part in the background. Each part continues from the text before it, so sentences keep their case and punctuation. With `detect_languages`, the first part with speech detects the language, and the other parts keep it. When you stop, only the last part still needs transcription, so Hush polishes the joined text once and types it soon. A held recording stays one pass.
-- **Speak at the tone.** Hush plays the start tone and shows the overlay when the microphone first sends audio, not when you press the key. A microphone that sleeps between recordings can need a moment to wake, and the tone tells you that Hush hears you. If no audio arrives in five seconds, Hush discards the recording and shows a notification.
+- **Speak at the tone.** Hush plays the start tone and shows the overlay when the microphone first sends audio, not when you press the key. A microphone that sleeps between recordings can need a moment to wake, and the tone tells you that Hush hears you. If no audio arrives in five seconds, Hush discards the recording and shows a notification. `hush setup mic` keeps a slow microphone awake (see [Troubleshooting](#troubleshooting)).
 - **Bind any key to it.** `hush toggle`, `hush start`, `hush stop`, and `hush cancel` talk to the daemon over a socket, so any compositor keybind can drive dictation. Hyprland: `bind = , F9, exec, hush toggle`. Sway: `bindsym F9 exec hush toggle`.
 - **Tone by application.** Text fits the focused app: lowercase and unpunctuated in terminals and editors, casual in chat, full sentences in mail and documents. In a terminal, each line break becomes a space, so dictated text cannot run a command. In chat, Hush types a line break as Shift+Enter, so a line break does not send the message. Add a window class to `insertion.submit_apps`, and Hush presses Enter after the text. The window title and your learned terms also prime Whisper, so names come out spelled your way. Works on X11, Hyprland, Sway, and KDE Plasma on Wayland.
 - **Any language Whisper knows.** Set `language = "auto"` under `[transcription]` to detect what you speak, or pick one in the settings window. With `detect_languages = ["en", "de"]`, a small language-ID model picks among only the languages you speak, and local Whisper writes in that language.
@@ -67,7 +67,7 @@ Hold `Right Alt`, speak, release. Done.
 - **Panel icon.** A status icon shows whether Hush is idle, recording, or working, and its menu offers the same actions the hotkeys do. Turn it off with `tray.enabled = false`.
 - **A settings window.** `hush settings` opens one window for what still needs setting up and every setting. `Ctrl+K`, or Commands in the sidebar, searches every setting, page, and button action of the window. Pick a setting, and the window opens its page with the focus on its control.
 - **Saves at once.** Each change saves as you make it. A text or number field saves when you press Enter or leave it, and Escape puts back the saved value. When a change needs a daemon restart, Hush restarts it once after the changes stop, and waits until a recording ends. After you remove a word, a key, a rule, or a style, Undo in the footer puts it back for 10 seconds.
-- **A doctor.** `hush doctor` checks each part of the setup, from keyboard access and the speech model to the microphone, hotkeys, typing, and the daemon. It prints the one command that fixes each problem.
+- **A doctor.** `hush doctor` checks each part of the setup, from keyboard access and the speech model to the microphone, hotkeys, typing, and the daemon. It also shows whether the microphone sleeps between recordings. It prints the one command that fixes each problem.
 
 ## Scope
 
@@ -122,6 +122,7 @@ Setup:
 | Command | Does |
 |---|---|
 | `hush setup permissions [--check] [--print]` | Grant keyboard and uinput access (one polkit prompt) |
+| `hush setup mic [--undo] [--yes]` | Keep the microphone awake between recordings with one WirePlumber rule. `--undo` removes the rule, and `--yes` skips the question before WirePlumber restarts |
 | `hush setup init [--defaults] [-f]` | Guided config: model, GPU, hotkey |
 | `hush setup wizard [--auto]` | Full interactive setup |
 | `hush setup audio` / `hotkeys` / `uinput` / `diagnose-uinput` | Configure or diagnose one subsystem |
@@ -183,6 +184,7 @@ text="$(hush stop --print)" && notify-send "Hush heard" "$text"
 | `os`, `arch` | Operating system and CPU architecture |
 | `config_error` | Why the configuration did not load, else `null` |
 | `safe_mode` | Why the daemon runs in safe mode, else `null`. A daemon that started while the configuration did not load dictates on the defaults and writes and deletes nothing in the history and the kept audio |
+| `start_delay` | How long the last 10 recordings waited for the first audio from the microphone: `{"last_ms": 40, "worst_ms": 650, "takes": 10}`. `null` when no daemon runs or before the first recording |
 
 ### Waybar
 
@@ -347,6 +349,12 @@ hush -vv daemon start --foreground
 If a notification says that the microphone did not start, Hush got no audio for five seconds. Hush opens the microphone again before the next recording. If the problem stays, run `hush test audio -d 3` to test the microphone, or set `audio.device` to a different one from `hush status --devices`.
 
 If a notification says that the microphone stopped, the audio stopped for two seconds during a recording. Hush inserts what it heard until then, and opens the microphone again before the next recording.
+
+If the first word of a recording gets cut off, the microphone probably sleeps between recordings. WirePlumber, the PipeWire session manager, suspends an idle microphone after 5 seconds. Some USB microphones then need most of a second to wake. The `Microphone wake` line of `hush doctor` shows whether your microphone sleeps and how long the last recordings waited for it. It warns only after a recording waited more than 200 ms.
+
+`hush setup mic` writes one WirePlumber rule that keeps only that microphone awake. It supports WirePlumber 0.4 and 0.5, and touches no other file. WirePlumber then restarts, so all sound stops for about a second. No app records while the microphone is awake, so the privacy indicator stays off. `hush setup mic --undo` removes the rule.
+
+After such a slow recording, the Speech page of `hush settings` shows the same warning, with a button for each command. Hush does not keep a Bluetooth microphone awake, because an open headset link lowers the sound quality.
 
 If `hush setup permissions` cannot run where you are (a container, an SSH session), `hush setup permissions --print` prints the udev rule to apply as root.
 
