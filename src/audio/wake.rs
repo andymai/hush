@@ -212,8 +212,9 @@ impl Format {
 
     /// The lines of the rule that match `source`. The first matches its node
     /// name without the profile, so that the rule still applies after a
-    /// profile change. A name without a known profile, or a WirePlumber 0.4
-    /// name that a second identical device shares, must match as a whole.
+    /// profile change. A name without an ACP profile (see [`Source::stem`]),
+    /// or a WirePlumber 0.4 name that a second identical device shares, must
+    /// match as a whole.
     /// A split PCM adds a line for its hidden hardware node, which suspends
     /// on its own.
     fn matchers(self, source: &Source) -> Result<Vec<String>> {
@@ -385,25 +386,20 @@ impl Source {
         }
     }
 
-    /// The node name without `.` and the profile, when it ends with them.
-    /// WirePlumber writes the profile into the name with every character
-    /// other than a letter, a digit, `_`, `-`, or `.` as `_`.
+    /// The node name without `.` and the profile, when the profile is an ACP
+    /// profile that the name holds as it is, such as `analog-stereo` or
+    /// `pro-input-0`. Another profile of the card is the same input in
+    /// another form. A UCM profile, such as `HiFi: hw:sofhdadsp,6: source`,
+    /// names one input of the card, so a rule for the card would keep its
+    /// other inputs awake too. A profile must start with a letter, as the
+    /// pattern after the stem expects.
     fn stem(&self) -> Option<&str> {
-        let profile: String = self
-            .profile
-            .as_deref()
-            .filter(|p| !p.is_empty())?
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.') {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
+        let profile = self.profile.as_deref()?;
+        if !is_plain(profile) || !profile.starts_with(|c: char| c.is_ascii_alphabetic()) {
+            return None;
+        }
         self.name
-            .strip_suffix(profile.as_str())?
+            .strip_suffix(profile)?
             .strip_suffix('.')
             .filter(|stem| !stem.is_empty())
     }
@@ -954,14 +950,15 @@ async fn back(system: &impl System, before: &Source) -> Result<Source> {
 }
 
 /// `now` is the node that WirePlumber made after the restart, not the old
-/// one, and so is its hidden hardware node, when Hush saw one before.
+/// one, and so is its hidden hardware node, when Hush saw one before. A
+/// node that is no split PCM after the restart has no hidden node to wait
+/// for: [`apply`] then checks the suspend of the node alone.
 fn renewed(before: &Source, now: &Source) -> bool {
     let new = |old: Option<u64>, new: Option<u64>| old.is_none() || (new.is_some() && new != old);
     let hidden = match (&before.split, &now.split) {
         (Some(old), Some(now)) if old.sleep.is_some() => {
             now.sleep.is_some() && new(old.serial, now.serial)
         },
-        (Some(old), None) => old.sleep.is_none(),
         _ => true,
     };
     new(before.serial, now.serial) && hidden
@@ -1728,8 +1725,8 @@ mod tests {
         );
         assert_eq!(
             source.stem(),
-            Some("alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic"),
-            "the UCM profile in its written form"
+            None,
+            "a UCM profile names one input of the card"
         );
         let warned = finding(&Probe::Found(source.clone()), false, delay(700));
         assert!(warned.warn && warned.fixable, "{warned:?}");
@@ -1737,7 +1734,7 @@ mod tests {
         let rule = Format::Conf.rule(&source).unwrap();
         assert!(
             rule.contains(
-                "      {\n        node.name = \"~^alsa_input[.]pci-0000_00_1f[.]3-platform-skl_hda_dsp_generic[.][[:alpha:]]\"\n      }\n      \
+                "      {\n        node.name = \"alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__hw_sofhdadsp_6__source\"\n      }\n      \
                  {\n        node.name = \"alsa_input.hw_sofhdadsp_6\"\n      }\n"
             ),
             "{rule}"
@@ -1850,5 +1847,101 @@ mod tests {
         );
         assert!(!ours.exists());
         assert_eq!(fake.restarts(), 1);
+    }
+
+    #[test]
+    fn only_a_plain_acp_profile_that_starts_with_a_letter_gives_a_pattern() {
+        let headset = Source {
+            name: "alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__hw_sofhdadsp__source"
+                .to_string(),
+            label: "Headset Microphone".to_string(),
+            profile: Some("HiFi: hw:sofhdadsp: source".to_string()),
+            ..yeti_source(Sleep::After(5))
+        };
+        assert_eq!(headset.stem(), None);
+        for format in Format::ALL {
+            let rule = format.rule(&headset).unwrap();
+            assert!(
+                rule.contains(&format.exact(&headset.name)),
+                "the UCM input matches alone: {rule}"
+            );
+            assert!(
+                !rule.contains("[[:alpha:]]") && !rule.contains(".*"),
+                "{rule}"
+            );
+        }
+
+        let pro = Source {
+            name: "alsa_input.usb-Audient_EVO4-00.pro-input-0".to_string(),
+            profile: Some("pro-input-0".to_string()),
+            ..yeti_source(Sleep::After(5))
+        };
+        assert_eq!(pro.stem(), Some("alsa_input.usb-Audient_EVO4-00"));
+
+        let digit = Source {
+            name: "alsa_input.usb-Foo-00.2ch-input".to_string(),
+            profile: Some("2ch-input".to_string()),
+            ..yeti_source(Sleep::After(5))
+        };
+        assert_eq!(
+            digit.stem(),
+            None,
+            "the pattern after the stem expects a letter"
+        );
+        assert!(Format::Conf
+            .rule(&digit)
+            .unwrap()
+            .contains("node.name = \"alsa_input.usb-Foo-00.2ch-input\""));
+    }
+
+    #[tokio::test]
+    async fn a_split_that_is_gone_after_the_restart_leaves_only_the_node_to_check() {
+        let config = tempfile::tempdir().unwrap();
+        let plain = |serial: u64, suspend: Option<Value>| {
+            let mut props = serde_json::json!({
+                "device.api": "alsa",
+                "device.profile.name": "HiFi: hw:sofhdadsp,6: source",
+                "node.nick": "Digital Microphone",
+            });
+            if let (Some(props), Some(suspend)) = (props.as_object_mut(), suspend) {
+                props.insert(SUSPEND_KEY.to_string(), suspend);
+            }
+            node(
+                60,
+                serial,
+                "alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__hw_sofhdadsp_6__source",
+                props,
+            )
+        };
+
+        let awake = Fake::new(vec![
+            Ok(dump(split_mic(200, 201, None, None))),
+            Ok(dump(split_mic(200, 201, None, None))),
+            Ok(dump(vec![plain(210, Some(serde_json::json!(0)))])),
+        ]);
+        let before = probe(&awake, Some("default"), None).await;
+        let Plan::Write(change) = plan(&awake, config.path(), before).await.unwrap() else {
+            panic!("the source sleeps");
+        };
+        let after = apply(&awake, &change).await.unwrap();
+        assert_eq!(
+            (after.serial, after.split.is_none(), after.suspend()),
+            (Some(210), true, Sleep::Never)
+        );
+
+        let asleep = Fake::new(vec![
+            Ok(dump(split_mic(200, 201, None, None))),
+            Ok(dump(vec![plain(210, None)])),
+        ]);
+        let before = probe(&asleep, Some("default"), None).await;
+        let undone = undo(&asleep, config.path(), before).await.unwrap();
+        let Undone::Removed { source, .. } = undone else {
+            panic!("the rule was there");
+        };
+        assert_eq!(
+            source.map(|source| (source.serial, source.suspend())),
+            Some((Some(210), Sleep::After(5))),
+            "undo does not wait for a hidden node that is gone"
+        );
     }
 }
