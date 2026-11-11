@@ -5,7 +5,7 @@ use crate::cli::SetupCommands;
 use crate::config::settings::TranscriptionConfig;
 use crate::gui::{megabytes, size_key, MODEL_ORDER};
 use crate::permissions;
-use crate::transcription::models::{catalogue_entry, recommended_model};
+use crate::transcription::models::{catalogue_entry, recommended_model, recommended_model_for};
 use crate::transcription::{GpuAvailability, ModelManager, ModelSize};
 use crate::Config;
 
@@ -353,7 +353,7 @@ async fn init_config(defaults: bool, force: bool) -> Result<()> {
     let (model, use_gpu, hotkey) = if defaults {
         (ModelSize::Base, gpu.available, "RightAlt".to_string())
     } else {
-        collect_user_settings(gpu, recommended_model())?
+        collect_user_settings(gpu)?
     };
     let model_size = size_key(model);
 
@@ -490,15 +490,31 @@ fn wizard_model_message(step: &WizardModel, suggested: ModelSize) -> String {
     }
 }
 
-/// Collect user settings interactively. `recommended` is the default model.
-fn collect_user_settings(
-    gpu: &GpuAvailability,
-    recommended: ModelSize,
-) -> Result<(ModelSize, bool, String)> {
+/// Collect user settings interactively. The GPU answer comes first, so the
+/// default model suits the device that runs it.
+fn collect_user_settings(gpu: &GpuAvailability) -> Result<(ModelSize, bool, String)> {
+    let mut input = String::new();
+    let use_gpu = if gpu.available {
+        println!(
+            "🎮 GPU detected: {}. Enable GPU acceleration?",
+            gpu.device_name
+        );
+        print!("Use GPU? [Y/n]: ");
+        io::stdout().flush()?;
+
+        io::stdin().read_line(&mut input)?;
+        !input.trim().eq_ignore_ascii_case("n")
+    } else {
+        println!("💻 No GPU backend available. Using CPU mode.");
+        false
+    };
+
+    let recommended = recommended_model_for(use_gpu);
+    println!();
     print!("{}", model_menu(recommended));
     io::stdout().flush()?;
 
-    let mut input = String::new();
+    input.clear();
     io::stdin().read_line(&mut input)?;
     let model = pick_model(&input, recommended).unwrap_or_else(|| {
         println!(
@@ -508,22 +524,6 @@ fn collect_user_settings(
         );
         recommended
     });
-
-    let use_gpu = if gpu.available {
-        println!(
-            "\n🎮 GPU detected: {}. Enable GPU acceleration?",
-            gpu.device_name
-        );
-        print!("Use GPU? [Y/n]: ");
-        io::stdout().flush()?;
-
-        input.clear();
-        io::stdin().read_line(&mut input)?;
-        !input.trim().eq_ignore_ascii_case("n")
-    } else {
-        println!("\n💻 No GPU backend available. Using CPU mode.");
-        false
-    };
 
     // Hotkey
     println!("\n⌨️  Configure hotkey (press and hold to record):");
