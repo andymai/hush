@@ -136,36 +136,6 @@ binary, which then cannot start. `make install` puts `lib/hush` next to the
 ./hush status --full          # Verify
 ```
 
-## Flatpak
-
-A Flatpak build of Hush uses the desktop portals, so its manifest needs no
-`--device` permission. The RemoteDesktop portal types the text, the
-GlobalShortcuts portal reads the hotkeys, and the Background portal starts
-Hush at login. `hush setup permissions` is not necessary in a sandbox. See
-[Flatpak and desktop portals](README.md#flatpak-and-desktop-portals) in the
-README for what works and on which desktops.
-
-To try portal mode with a native build on KDE Plasma 6 or GNOME 48, put
-these lines in `~/.config/hush/config.toml`. If the file has an `[input]`
-section, change its `backend` line instead.
-
-```toml
-[input]
-backend = "portal"
-```
-
-Then:
-
-```bash
-hush daemon restart           # The desktop asks to bind the shortcuts
-hush doctor                   # Typing and Hotkeys lines show the portals
-hush shortcuts                # The keys the desktop bound
-```
-
-At the first dictation, the desktop asks you to allow keyboard access. To go
-back to evdev and uinput, set `backend = "auto"` and run
-`hush daemon restart`.
-
 ## Nix and NixOS
 
 The flake builds Hush with Vulkan:
@@ -214,10 +184,37 @@ flatpak install --user target/hush.flatpak
 flatpak run io.github.andymai.hush status --full
 ```
 
-The sandbox has no `/dev/input` and no `/dev/uinput`, so the hotkey and typing
-need the desktop portals. On an NVIDIA GPU, Flatpak needs the
+A Flatpak build of Hush uses the desktop portals, so its manifest needs no
+`--device` permission. The RemoteDesktop portal types the text, the
+GlobalShortcuts portal reads the hotkeys, and the Background portal starts
+Hush at login. `hush setup permissions` is not necessary in a sandbox. See
+[Flatpak and desktop portals](README.md#flatpak-and-desktop-portals) in the
+README for what works and on which desktops.
+
+On an NVIDIA GPU, Flatpak needs the
 `org.freedesktop.Platform.GL.nvidia-<version>` extension of the host driver
 version for Vulkan; `flatpak update` installs it.
+
+To try portal mode with a native build on KDE Plasma 6 or GNOME 48, put
+these lines in `~/.config/hush/config.toml`. If the file has an `[input]`
+section, change its `backend` line instead.
+
+```toml
+[input]
+backend = "portal"
+```
+
+Then:
+
+```bash
+hush daemon restart           # The desktop asks to bind the shortcuts
+hush doctor                   # Typing and Hotkeys lines show the portals
+hush shortcuts                # The keys the desktop bound
+```
+
+At the first dictation, the desktop asks you to allow keyboard access. To go
+back to evdev and uinput, set `backend = "auto"` and run
+`hush daemon restart`.
 
 ## GPU Acceleration
 
