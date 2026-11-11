@@ -1,0 +1,19 @@
+src/audio/wake.rs
+  s_115995023cd6f3::t_27183746155b80 215-217,389-395,397-400,402,953-955,1728-1729,1737,1851-1946
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e79cb39537cebd52dd3bc0ab40ee4be947fff148",
+  "prompts": {},
+  "sessions": {
+    "s_115995023cd6f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b38bfe5-1fb9-4eb9-bf9a-d715f60c0de4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
