@@ -3,7 +3,7 @@
 //! `/dev/input` is not readable and an X11 display is available.
 
 use super::combination::KeyCombination;
-use super::{HotkeyBindings, HotkeyEvent};
+use super::{HotkeyBindings, HotkeyEvent, Stamped};
 use crate::Result;
 use global_hotkey::{hotkey::HotKey, GlobalHotKeyManager};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,11 +17,11 @@ pub struct X11Hotkey {
     hotkey: HotKey,
     combination: KeyCombination,
     running: Arc<AtomicBool>,
-    sender: mpsc::Sender<HotkeyEvent>,
+    sender: mpsc::Sender<Stamped>,
 }
 
 impl X11Hotkey {
-    pub fn new(bindings: HotkeyBindings) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
+    pub fn new(bindings: HotkeyBindings) -> Result<(Self, mpsc::Receiver<Stamped>)> {
         let combination = bindings.primary;
         if bindings.cancel.is_some()
             || !bindings.actions.is_empty()
@@ -85,7 +85,7 @@ impl X11Hotkey {
     }
 }
 
-fn event_loop(running: Arc<AtomicBool>, combination: String, sender: mpsc::Sender<HotkeyEvent>) {
+fn event_loop(running: Arc<AtomicBool>, combination: String, sender: mpsc::Sender<Stamped>) {
     let receiver = global_hotkey::GlobalHotKeyEvent::receiver();
     while running.load(Ordering::Acquire) {
         match receiver.recv_timeout(Duration::from_millis(100)) {
@@ -94,7 +94,7 @@ fn event_loop(running: Arc<AtomicBool>, combination: String, sender: mpsc::Sende
                     global_hotkey::HotKeyState::Pressed => HotkeyEvent::Pressed,
                     global_hotkey::HotKeyState::Released => HotkeyEvent::Released,
                 };
-                if sender.send(hotkey_event).is_err() {
+                if sender.send(Stamped::now(hotkey_event)).is_err() {
                     warn!("Hotkey receiver dropped; stopping '{}'", combination);
                     break;
                 }

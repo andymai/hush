@@ -19,11 +19,13 @@ use super::clipboard::{self, ClipboardBackend, Restore, Selection, Transcript};
 use super::clock::{Clock, SystemClock};
 use super::keymap::KeyTable;
 use super::modifiers::{self, ModifierWait, PhysicalModifiers};
-use super::typing::{Resolver, Typing};
+use super::typing::Resolver;
 use super::uinput_keyboard::{LineBreak, UinputKeyboard};
 use super::window::{WindowInfo, WindowProvider};
 use super::{class_matches, InsertionMethod, PasteChord};
 use crate::config::settings::InsertionConfig;
+use crate::portal::keyboard::PortalKeyboard;
+use crate::portal::{keysym, ConsentRefused, InputMode};
 use crate::text_processing::{AppKind, ProcessingContext, ProfilesConfig};
 use crate::Result;
 use anyhow::Context;
@@ -100,6 +102,22 @@ const SHIFT_INSERT_CLASSES: [&str; 11] = [
 pub enum Chosen {
     Uinput,
     Clipboard,
+}
+
+/// In portal mode, auto types printable ASCII through keysyms and pastes
+/// other text, because the compositor drops a keysym that the layout lacks.
+pub fn choose_portal_method(configured: InsertionMethod, text: &str) -> Chosen {
+    match configured {
+        InsertionMethod::Uinput => Chosen::Uinput,
+        InsertionMethod::Clipboard => Chosen::Clipboard,
+        InsertionMethod::Auto
+            if crate::portal::keysym::covers(text)
+                && text.chars().count() <= PASTE_THRESHOLD_CHARS =>
+        {
+            Chosen::Uinput
+        },
+        InsertionMethod::Auto => Chosen::Clipboard,
+    }
 }
 
 /// `table` is the keys for the active layout, or `None` when Hush cannot
@@ -244,8 +262,16 @@ pub fn presses_enter(origin: Origin, submit_app: bool, text: &str, sent: &Result
     origin == Origin::Dictation && submit_app && sent.is_ok() && !text.trim().is_empty()
 }
 
+/// How keys reach the focused window.
+enum Keys {
+    /// A uinput keyboard, with the key table of the active layout.
+    Uinput(UinputKeyboard),
+    /// The RemoteDesktop portal, with keysyms.
+    Portal(PortalKeyboard),
+}
+
 pub struct TextInserter {
-    uinput: UinputKeyboard,
+    keys: Keys,
     clipboard: Option<Box<dyn ClipboardBackend>>,
     windows: WindowProvider,
     config: InsertionConfig,
@@ -256,19 +282,35 @@ pub struct TextInserter {
 }
 
 impl TextInserter {
-    /// Needs a working uinput device; both paths type through it.
+    /// In the input mode of the user's configuration.
     pub fn new() -> Result<Self> {
+        Self::with_mode(InputMode::current())
+    }
+
+    /// Native mode needs a working uinput device; both paths type through
+    /// it. Portal mode types through the RemoteDesktop portal.
+    pub fn with_mode(mode: InputMode) -> Result<Self> {
         info!("Initializing text insertion");
-        let mut uinput = UinputKeyboard::new()?;
-        if !uinput.is_ready() {
-            return Err(anyhow::anyhow!(
-                "uinput is not available; run `hush setup permissions` and try again"
-            ));
-        }
+        let mut typing = Resolver::new();
+        let (keys, last_typing) = match mode {
+            InputMode::Native => {
+                let mut uinput = UinputKeyboard::new()?;
+                if !uinput.is_ready() {
+                    return Err(anyhow::anyhow!(
+                        "uinput is not available; run `hush setup permissions` and try again"
+                    ));
+                }
+                let typing = typing.resolve(&mut uinput).to_string();
+                (Keys::Uinput(uinput), typing)
+            },
+            InputMode::Portal => (
+                Keys::Portal(PortalKeyboard::new()?),
+                "types printable ASCII through the RemoteDesktop portal and pastes the rest"
+                    .to_string(),
+            ),
+        };
         let clipboard = clipboard::open();
         let windows = WindowProvider::detect();
-        let mut typing = Resolver::new();
-        let last_typing = typing.resolve(&mut uinput).to_string();
         info!(
             "Text insertion ready: {}, clipboard restore {}, window detection via {}",
             last_typing,
@@ -278,7 +320,7 @@ impl TextInserter {
             windows.name()
         );
         Ok(Self {
-            uinput,
+            keys,
             clipboard,
             windows,
             config: InsertionConfig::default(),
@@ -298,21 +340,11 @@ impl TextInserter {
         self.typing.reserve(keys);
     }
 
-    /// The typing for the active layout and the Caps Lock state of now. A
-    /// change since the last take is logged once.
-    fn current_typing(&mut self) -> Typing {
-        let typing = self.typing.resolve(&mut self.uinput);
-        let summary = typing.to_string();
-        if summary != self.last_typing {
-            info!("Keyboard state changed: Hush now {}", summary);
-            self.last_typing = summary;
-        }
-        typing
-    }
-
     pub fn configure(&mut self, config: &InsertionConfig) {
         self.config = config.clone();
-        self.uinput.set_typing_delay(config.typing_delay_ms);
+        if let Keys::Uinput(uinput) = &mut self.keys {
+            uinput.set_typing_delay(config.typing_delay_ms);
+        }
     }
 
     /// The profiles' window classes. Terminals paste with Ctrl+Shift+V and
@@ -377,7 +409,27 @@ impl TextInserter {
             None => self.config.method,
         };
 
-        let typing = self.current_typing();
+        if matches!(self.keys, Keys::Portal(_)) {
+            return self.insert_with_portal(
+                text,
+                window.as_ref(),
+                line_break,
+                origin,
+                submit_app,
+                method,
+            );
+        }
+        let typing = match &mut self.keys {
+            Keys::Uinput(uinput) => self.typing.resolve(uinput),
+            Keys::Portal(_) => return Err(anyhow::anyhow!("uinput is off in portal mode")),
+        };
+        // The typing for the active layout and the Caps Lock state of now. A
+        // change since the last take is logged once.
+        let summary = typing.to_string();
+        if summary != self.last_typing {
+            info!("Keyboard state changed: Hush now {}", summary);
+            self.last_typing = summary;
+        }
         let shift_locked = self.typing.shift_locked();
         let submit_app = submits(submit_app, shift_locked);
         // An explicit uinput choice, and a failed paste, type even when no
@@ -412,15 +464,72 @@ impl TextInserter {
         origin: Origin,
         submit_app: bool,
     ) -> Result<()> {
+        let Keys::Uinput(uinput) = &mut self.keys else {
+            return Err(anyhow::anyhow!("uinput is off in portal mode"));
+        };
         wait_for_modifiers();
         let _sending = Sending::start();
-        self.uinput.set_typing_delay(self.config.typing_delay_ms);
-        let typed = self.uinput.type_text(text, table, line_break);
+        uinput.set_typing_delay(self.config.typing_delay_ms);
+        let typed = uinput.type_text(text, table, line_break);
         if presses_enter(origin, submit_app, text, &typed) {
-            press_enter(&mut self.uinput, &SystemClock, TYPED_SUBMIT_DELAY);
+            press_enter(uinput, &SystemClock, TYPED_SUBMIT_DELAY);
         }
         typed?;
         info!("Text inserted via uinput ({} chars)", text.chars().count());
+        Ok(())
+    }
+
+    /// Portal mode: one RemoteDesktop session types the text, or pastes it,
+    /// and presses the submit Enter.
+    fn insert_with_portal(
+        &mut self,
+        text: String,
+        window: Option<&WindowInfo>,
+        line_break: LineBreak,
+        origin: Origin,
+        submit_app: bool,
+        method: InsertionMethod,
+    ) -> Result<String> {
+        match choose_portal_method(method, &text) {
+            Chosen::Uinput => self.type_with_portal(&text, line_break, origin, submit_app)?,
+            Chosen::Clipboard => {
+                let target = PasteTarget {
+                    window,
+                    table: None,
+                    shift_locked: false,
+                };
+                if let Err(e) = self.paste(&text, target, origin, submit_app) {
+                    if e.downcast_ref::<ConsentRefused>().is_some() {
+                        return Err(e);
+                    }
+                    warn!("Paste failed ({}); typing what the portal can", e);
+                    self.type_with_portal(&text, line_break, origin, false)?;
+                }
+            },
+        }
+        Ok(text)
+    }
+
+    fn type_with_portal(
+        &mut self,
+        text: &str,
+        line_break: LineBreak,
+        origin: Origin,
+        submit_app: bool,
+    ) -> Result<()> {
+        let Keys::Portal(portal) = &self.keys else {
+            return Err(anyhow::anyhow!("the portal is off in native mode"));
+        };
+        let delay = Duration::from_millis(self.config.typing_delay_ms);
+        let mut steps = keysym::text_steps(text, line_break, delay);
+        if presses_enter(origin, submit_app, text, &Ok(())) {
+            steps.extend(keysym::enter_steps(TYPED_SUBMIT_DELAY));
+        }
+        portal.send(steps)?;
+        info!(
+            "Text inserted via the RemoteDesktop portal ({} chars)",
+            text.chars().count()
+        );
         Ok(())
     }
 
@@ -487,17 +596,29 @@ impl TextInserter {
             }
             return Err(e);
         }
-        wait_for_modifiers();
         debug!("Pasting with {}", chord);
-        let sending = Sending::start();
-        let sent = self
-            .uinput
-            .send_paste_shortcut(chord, table, self.typing.chords());
-        let pasted_at = clock.now();
-        if presses_enter(origin, submit_app, text, &sent) {
-            press_enter(&mut self.uinput, &clock, PASTED_SUBMIT_DELAY);
+        let sent;
+        let pasted_at;
+        match &mut self.keys {
+            Keys::Uinput(uinput) => {
+                wait_for_modifiers();
+                let sending = Sending::start();
+                sent = uinput.send_paste_shortcut(chord, table, self.typing.chords());
+                pasted_at = clock.now();
+                if presses_enter(origin, submit_app, text, &sent) {
+                    press_enter(uinput, &clock, PASTED_SUBMIT_DELAY);
+                }
+                drop(sending);
+            },
+            Keys::Portal(portal) => {
+                let mut steps = keysym::chord_steps(chord);
+                if presses_enter(origin, submit_app, text, &Ok(())) {
+                    steps.extend(keysym::enter_steps(PASTED_SUBMIT_DELAY));
+                }
+                sent = portal.send(steps);
+                pasted_at = clock.now();
+            },
         }
-        drop(sending);
         if sent.is_ok() {
             let waited = clock.now().saturating_duration_since(pasted_at);
             clock.sleep(AFTER_PASTE.saturating_sub(waited));
@@ -529,13 +650,19 @@ impl TextInserter {
     /// Undo the last insertion by sending backspaces.
     pub fn undo_last_insertion(&mut self, char_count: usize) -> Result<()> {
         info!("Undoing last insertion ({} chars)", char_count);
-        wait_for_modifiers();
-        let _sending = Sending::start();
-        for _ in 0..char_count {
-            self.uinput.send_backspace()?;
-            thread::sleep(Duration::from_millis(self.config.typing_delay_ms));
+        let delay = Duration::from_millis(self.config.typing_delay_ms);
+        match &mut self.keys {
+            Keys::Uinput(uinput) => {
+                wait_for_modifiers();
+                let _sending = Sending::start();
+                for _ in 0..char_count {
+                    uinput.send_backspace()?;
+                    thread::sleep(delay);
+                }
+                Ok(())
+            },
+            Keys::Portal(portal) => portal.send(keysym::backspace_steps(char_count, delay)),
         }
-        Ok(())
     }
 
     pub fn test_insertion(&mut self) -> Result<()> {
@@ -640,6 +767,33 @@ mod tests {
         let long = "a".repeat(PASTE_THRESHOLD_CHARS + 1);
         assert_eq!(
             choose_method(InsertionMethod::Auto, &long, us()),
+            Chosen::Clipboard
+        );
+    }
+
+    #[test]
+    fn portal_mode_types_ascii_and_pastes_the_rest() {
+        assert_eq!(
+            choose_portal_method(InsertionMethod::Auto, "hello, world!\n"),
+            Chosen::Uinput
+        );
+        assert_eq!(
+            choose_portal_method(InsertionMethod::Auto, "café"),
+            Chosen::Clipboard,
+            "the compositor drops a keysym that the layout lacks"
+        );
+        let long = "a".repeat(PASTE_THRESHOLD_CHARS + 1);
+        assert_eq!(
+            choose_portal_method(InsertionMethod::Auto, &long),
+            Chosen::Clipboard
+        );
+        assert_eq!(
+            choose_portal_method(InsertionMethod::Uinput, "café"),
+            Chosen::Uinput,
+            "an explicit choice types every keysym"
+        );
+        assert_eq!(
+            choose_portal_method(InsertionMethod::Clipboard, "abc"),
             Chosen::Clipboard
         );
     }

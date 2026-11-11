@@ -141,6 +141,14 @@ pub enum Commands {
     /// Type the last transcript again (talks to the daemon)
     PasteLast,
 
+    /// In portal mode, show the keys the desktop binds to Hush's shortcuts
+    /// (talks to the daemon)
+    Shortcuts {
+        /// Open the desktop's dialog to change the keys
+        #[arg(long)]
+        configure: bool,
+    },
+
     /// Add the selected text to the vocabulary with its exact spelling (talks to the daemon)
     Learn {
         /// Words to learn instead of the current selection

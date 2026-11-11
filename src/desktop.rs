@@ -52,6 +52,16 @@ pub fn autostart_path() -> PathBuf {
     autostart_dir().join(ENTRY_FILE)
 }
 
+/// Whether Hush starts at login: in portal mode, the last answer of the
+/// Background portal; else the entry file.
+pub fn starts_at_login() -> bool {
+    #[cfg(target_os = "linux")]
+    if crate::portal::InputMode::current().is_portal() {
+        return crate::portal::background::autostart_on();
+    }
+    autostart_installed()
+}
+
 /// Both names count, so an entry written by an older version still reads as on.
 pub fn autostart_installed() -> bool {
     let dir = autostart_dir();

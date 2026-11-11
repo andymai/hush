@@ -200,3 +200,11 @@ check = false
 # light or dark preference of the desktop, and changes when the desktop
 # changes. When the desktop has no preference, the window is light.
 appearance = "system" # system, light, dark
+
+[input]
+# Which system reads the hotkeys and types the text. auto uses the desktop
+# portals in a Flatpak sandbox, and evdev and uinput everywhere else. portal
+# uses the RemoteDesktop, GlobalShortcuts, and Background portals also outside
+# a sandbox (KDE Plasma and GNOME have them). evdev uses evdev and uinput also
+# in a sandbox that gives device access.
+backend = "auto" # auto, portal, evdev

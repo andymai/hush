@@ -7,6 +7,7 @@ use super::protocol::{
     DaemonCommand, DaemonResponse, DaemonState, ModelState, TakeResult, FILE_TIMEOUT, PRINT_TIMEOUT,
 };
 use crate::audio::take::{StartDelay, StartDelays};
+use crate::portal::shortcuts::ShortcutsHandle;
 use crate::text_processing::styles::{self, StyleName};
 use crate::text_processing::{learn, Trigger};
 use crate::transcription::language::{self, Language};
@@ -99,6 +100,8 @@ pub struct SharedState {
     changes: watch::Sender<()>,
     safe_mode: Mutex<Option<String>>,
     start_delays: Mutex<StartDelays>,
+    /// The GlobalShortcuts session, in portal mode.
+    shortcuts: Mutex<Option<ShortcutsHandle>>,
 }
 
 impl Default for SharedState {
@@ -121,7 +124,17 @@ impl SharedState {
             changes: watch::channel(()).0,
             safe_mode: Mutex::new(None),
             start_delays: Mutex::new(StartDelays::default()),
+            shortcuts: Mutex::new(None),
         }
+    }
+
+    /// The portal's shortcuts, for `hush shortcuts` and the settings window.
+    pub fn set_shortcuts(&self, handle: Option<ShortcutsHandle>) {
+        *self.shortcuts.lock() = handle;
+    }
+
+    fn shortcuts(&self) -> Option<ShortcutsHandle> {
+        self.shortcuts.lock().clone()
     }
 
     /// The daemon runs in safe mode for `reason`; status replies say so.
@@ -398,10 +411,34 @@ async fn handle_client(
         Ok(DaemonCommand::Transcribe { path }) => {
             transcribe_file(shared, control, path, FILE_TIMEOUT).await
         },
+        Ok(DaemonCommand::Shortcuts { configure }) => {
+            portal_shortcuts(shared.shortcuts(), shared.snapshot(), configure).await
+        },
         Ok(command) => respond(command, shared, control),
         Err(e) => DaemonResponse::error(format!("Invalid command: {}", e)),
     };
     write_response(&mut writer, &response).await
+}
+
+/// The portal shortcuts, after the desktop's dialog when `configure` asks
+/// for it. The dialog opens on its own, and a change comes back later as a
+/// new binding.
+async fn portal_shortcuts(
+    handle: Option<ShortcutsHandle>,
+    state: DaemonState,
+    configure: bool,
+) -> DaemonResponse {
+    let Some(handle) = handle else {
+        return DaemonResponse::error(
+            "the daemon reads the hotkeys with evdev, not the GlobalShortcuts portal",
+        );
+    };
+    if configure {
+        if let Err(e) = handle.configure().await {
+            return DaemonResponse::error(format!("cannot open the shortcut settings: {}", e));
+        }
+    }
+    DaemonResponse::ok(state).with_shortcuts(handle.bindings())
 }
 
 async fn write_response(writer: &mut OwnedWriteHalf, response: &DaemonResponse) -> Result<()> {
@@ -583,6 +620,9 @@ pub fn respond(
         DaemonCommand::Transcribe { .. } => {
             DaemonResponse::error("A transcription waits for its reply; send it over the socket")
         },
+        DaemonCommand::Shortcuts { .. } => DaemonResponse::error(
+            "The shortcut reply waits for the portal; send it over the socket",
+        ),
     }
 }
 
@@ -590,6 +630,20 @@ pub fn respond(
 mod tests {
     use super::*;
     use crate::ipc::client;
+
+    #[tokio::test]
+    async fn the_shortcuts_reply_needs_portal_mode() {
+        let reply = portal_shortcuts(None, DaemonState::Idle, false).await;
+        assert!(!reply.ok);
+        assert!(reply.error.unwrap_or_default().contains("evdev"));
+        let command: DaemonCommand =
+            serde_json::from_str(r#"{"command":"shortcuts","configure":true}"#).unwrap();
+        assert_eq!(command, DaemonCommand::Shortcuts { configure: true });
+        assert_eq!(
+            serde_json::to_string(&DaemonCommand::Shortcuts { configure: false }).unwrap(),
+            r#"{"command":"shortcuts"}"#
+        );
+    }
 
     #[test]
     fn toggle_follows_the_take() {

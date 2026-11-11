@@ -38,7 +38,8 @@ pub mod utils;
 pub use config::handle_config;
 pub use daemon::{
     handle_client_command, handle_daemon_restart, handle_daemon_start, handle_daemon_status,
-    handle_daemon_stop, handle_rewrite, handle_start, handle_stop, SessionOptions,
+    handle_daemon_stop, handle_rewrite, handle_shortcuts, handle_start, handle_stop,
+    SessionOptions,
 };
 pub use doctor::handle_doctor;
 pub use follow::handle_status_follow;

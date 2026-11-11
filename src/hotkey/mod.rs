@@ -2,17 +2,18 @@
 //!
 //! [`HotkeyManager`] picks a backend: evdev reads `/dev/input` directly and
 //! works on every session type; X11 hotkeys are the fallback when the event
-//! devices are not readable but an X11 display is. Both report raw
-//! [`HotkeyEvent`]s; [`GestureDetector`] turns them into recording actions
-//! according to the [`HotkeyMode`].
+//! devices are not readable but an X11 display is. In portal mode, the
+//! GlobalShortcuts portal takes their place. Each reports raw
+//! [`HotkeyEvent`]s with the time the key moved; [`GestureDetector`] turns
+//! them into recording actions according to the [`HotkeyMode`].
 //!
 //! ```no_run
 //! use hush::hotkey::{HotkeyEvent, HotkeyManager};
 //!
 //! let (manager, events) = HotkeyManager::new("Ctrl+Shift+Space")?;
 //! manager.start_listening()?;
-//! while let Ok(event) = events.recv() {
-//!     match event {
+//! while let Ok(stamped) = events.recv() {
+//!     match stamped.event {
 //!         HotkeyEvent::Pressed => println!("recording"),
 //!         HotkeyEvent::Released => println!("stopped"),
 //!         HotkeyEvent::Cancel => println!("discarded"),
@@ -39,6 +40,7 @@ use crate::transcription::Language;
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc;
+use std::time::Instant;
 use tracing::warn;
 
 pub use combination::KeyCombination;
@@ -61,6 +63,23 @@ pub enum HotkeyEvent {
     /// A style chord went down (`true`) or up (`false`). It works like the
     /// dictation hotkey, for a take in that style.
     Style(StyleName, bool),
+}
+
+/// A hotkey event with the time the key moved. evdev and X11 stamp the
+/// time they read the event; the portal stamps the desktop's time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stamped {
+    pub event: HotkeyEvent,
+    pub at: Instant,
+}
+
+impl Stamped {
+    pub fn now(event: HotkeyEvent) -> Self {
+        Self {
+            event,
+            at: Instant::now(),
+        }
+    }
 }
 
 /// Secondary chords that run a daemon command.
@@ -225,6 +244,8 @@ pub enum HotkeyBackend {
 enum Backend {
     Evdev(evdev::EvdevHotkey),
     X11(x11::X11Hotkey),
+    #[cfg(target_os = "linux")]
+    Portal(crate::portal::shortcuts::ShortcutsHandle),
 }
 
 pub struct HotkeyManager {
@@ -234,7 +255,7 @@ pub struct HotkeyManager {
 
 impl HotkeyManager {
     /// Parse the combination and pick the backend automatically.
-    pub fn new(combination: &str) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
+    pub fn new(combination: &str) -> Result<(Self, mpsc::Receiver<Stamped>)> {
         Self::with_backend(
             HotkeyBindings::parse(combination, None)?,
             HotkeyBackend::Auto,
@@ -253,7 +274,7 @@ impl HotkeyManager {
         choice: HotkeyBackend,
         exclusive: bool,
         mask_menu: bool,
-    ) -> Result<(Self, mpsc::Receiver<HotkeyEvent>)> {
+    ) -> Result<(Self, mpsc::Receiver<Stamped>)> {
         let combination = bindings.primary.clone();
         let open_evdev = |bindings| evdev::EvdevHotkey::new(bindings, exclusive, mask_menu);
         let (backend, receiver) = match choice {
@@ -290,10 +311,40 @@ impl HotkeyManager {
         ))
     }
 
+    /// The shortcuts of the GlobalShortcuts portal, in place of evdev and
+    /// X11. The desktop owns the triggers, so `primary` names the chord in
+    /// logs only.
+    #[cfg(target_os = "linux")]
+    pub fn portal(
+        primary: KeyCombination,
+        specs: Vec<crate::portal::shortcuts::ShortcutSpec>,
+    ) -> Result<(Self, mpsc::Receiver<Stamped>)> {
+        use crate::portal::shortcuts::{self, AshpdShortcuts};
+        let (handle, receiver) = shortcuts::start(AshpdShortcuts::connect, specs)?;
+        Ok((
+            Self {
+                backend: Backend::Portal(handle),
+                combination: primary,
+            },
+            receiver,
+        ))
+    }
+
+    /// The portal's shortcut handle, in portal mode.
+    #[cfg(target_os = "linux")]
+    pub fn portal_shortcuts(&self) -> Option<crate::portal::shortcuts::ShortcutsHandle> {
+        match &self.backend {
+            Backend::Portal(handle) => Some(handle.clone()),
+            _ => None,
+        }
+    }
+
     pub fn start_listening(&self) -> Result<()> {
         match &self.backend {
             Backend::Evdev(hotkey) => hotkey.start_listening(),
             Backend::X11(hotkey) => hotkey.start_listening(),
+            #[cfg(target_os = "linux")]
+            Backend::Portal(_) => Ok(()),
         }
     }
 
@@ -301,6 +352,8 @@ impl HotkeyManager {
         match &self.backend {
             Backend::Evdev(hotkey) => hotkey.stop_listening(),
             Backend::X11(hotkey) => hotkey.stop_listening(),
+            #[cfg(target_os = "linux")]
+            Backend::Portal(_) => Ok(()),
         }
     }
 
@@ -312,6 +365,8 @@ impl HotkeyManager {
         match self.backend {
             Backend::Evdev(_) => "evdev",
             Backend::X11(_) => "x11",
+            #[cfg(target_os = "linux")]
+            Backend::Portal(_) => "the GlobalShortcuts portal",
         }
     }
 

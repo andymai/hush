@@ -145,6 +145,47 @@ pub async fn handle_client_command(command: DaemonCommand) -> Result<()> {
     Ok(())
 }
 
+/// `hush shortcuts [--configure]`: each portal shortcut and its key.
+pub async fn handle_shortcuts(configure: bool) -> Result<()> {
+    let response = client::send(DaemonCommand::Shortcuts { configure }).await?;
+    if !response.ok {
+        return Err(anyhow!(rejection(response)));
+    }
+    if configure {
+        println!("The desktop opened its shortcut settings.");
+    }
+    print!(
+        "{}",
+        shortcut_lines(response.shortcuts.as_deref().unwrap_or_default())
+    );
+    Ok(())
+}
+
+/// `Dictate: hold to talk  Meta+Space`, one line for each shortcut.
+pub fn shortcut_lines(shortcuts: &[crate::ipc::protocol::PortalShortcut]) -> String {
+    let width = shortcuts
+        .iter()
+        .map(|shortcut| shortcut.description.chars().count())
+        .max()
+        .unwrap_or(0);
+    shortcuts
+        .iter()
+        .map(|shortcut| {
+            let trigger = if shortcut.trigger.is_empty() {
+                "not set"
+            } else {
+                shortcut.trigger.as_str()
+            };
+            format!(
+                "{:<width$}  {}\n",
+                shortcut.description,
+                trigger,
+                width = width
+            )
+        })
+        .collect()
+}
+
 /// `hush start [--lang CODE] [--style NAME]` and `hush toggle [--lang CODE]
 /// [--style NAME]`.
 pub async fn handle_start(toggle: bool, lang: Option<&str>, style: Option<&str>) -> Result<()> {
@@ -403,6 +444,24 @@ mod tests {
     use super::*;
     use crate::ipc::client::NotRunning;
     use crate::ipc::protocol::NO_TAKE;
+
+    #[test]
+    fn shortcut_lines_align_and_name_an_unset_key() {
+        use crate::ipc::protocol::PortalShortcut;
+        let shortcut = |description: &str, trigger: &str| PortalShortcut {
+            id: String::new(),
+            description: description.into(),
+            trigger: trigger.into(),
+        };
+        assert_eq!(
+            shortcut_lines(&[
+                shortcut("Dictate", "Meta+Space"),
+                shortcut("Learn a word", "")
+            ]),
+            "Dictate       Meta+Space\nLearn a word  not set\n"
+        );
+        assert_eq!(shortcut_lines(&[]), "");
+    }
 
     fn printed(take: TakeResult) -> StopReport {
         StopReport::from_reply(

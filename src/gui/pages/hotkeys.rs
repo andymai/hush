@@ -17,9 +17,14 @@ use crate::gui::widgets::{
 use crate::gui::Gui;
 use crate::hotkey::warnings;
 use crate::hotkey::{HotkeyBackend, HotkeyMode, KeyCombination, Role};
+use crate::ipc::client;
+use crate::ipc::protocol::PortalShortcut;
+use crate::ipc::DaemonCommand;
+use crate::portal::InputMode;
 use crate::text_processing::styles::{self, StyleName};
 use crate::transcription::Language;
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 /// A table under `[hotkey]` that gives each chord a value: a language code
 /// or a style name.
@@ -236,7 +241,109 @@ fn reaches_the_app(chord: &KeyCombination) -> String {
     )
 }
 
+/// How long the page keeps the daemon's answer before it asks again.
+const SHORTCUTS_REFRESH: Duration = Duration::from_secs(2);
+const DAEMON_ANSWER: Duration = Duration::from_millis(500);
+
+/// What the page shows for a shortcut with no key.
+pub fn trigger_label(trigger: &str) -> &str {
+    if trigger.is_empty() {
+        "Not set"
+    } else {
+        trigger
+    }
+}
+
+/// In portal mode, the desktop owns the keys: the page lists the keys it
+/// bound and opens its shortcut settings. No key capture, because Hush
+/// reads no keyboard in the sandbox.
+fn portal_show(gui: &mut Gui, ui: &mut egui::Ui) {
+    section(ui, "Dictation");
+    intro(
+        ui,
+        "The desktop owns these keys. Hush asks it for one shortcut for each action, \
+         and you set or change the keys in the shortcut settings of the desktop.",
+    );
+    match portal_shortcuts(gui) {
+        Ok(shortcuts) => {
+            for shortcut in &shortcuts {
+                row(&shortcut.id, &shortcut.description).show(ui, |ui| {
+                    ui.label(trigger_label(&shortcut.trigger));
+                });
+            }
+        },
+        Err(why) => {
+            let muted = palette(ui.ctx()).muted;
+            notice(ui, icons::INFO, muted, &why);
+        },
+    }
+    // Portal mode only, so the command palette, which lists the rows of
+    // both modes, has no entry for it.
+    row("portal-configure", "Change the keys")
+        .describe("Opens the shortcut settings of the desktop.")
+        .show(ui, |ui| {
+            if ui.button("Open").clicked() {
+                configure_shortcuts(gui);
+            }
+        });
+    row("hotkeys.mode", "Mode")
+        .describe("Hold to talk, or tap to start and tap to stop.")
+        .reserve(250.0)
+        .show(ui, |ui| {
+            let options =
+                [HotkeyMode::Hold, HotkeyMode::Toggle].map(|mode| (mode, mode_name(mode)));
+            segmented(ui, &mut gui.config.hotkey.mode, &options);
+        });
+}
+
+fn ask_daemon(gui: &Gui, configure: bool) -> Result<Vec<PortalShortcut>, String> {
+    let reply = gui.runtime.block_on(async move {
+        tokio::time::timeout(
+            DAEMON_ANSWER,
+            client::send(DaemonCommand::Shortcuts { configure }),
+        )
+        .await
+    });
+    match reply {
+        Ok(Ok(reply)) if reply.ok => Ok(reply.shortcuts.unwrap_or_default()),
+        Ok(Ok(reply)) => Err(reply.error.unwrap_or_default()),
+        Ok(Err(_)) | Err(_) => Err(
+            "Start Hush (hush daemon start), and it asks the desktop for its shortcuts."
+                .to_string(),
+        ),
+    }
+}
+
+fn portal_shortcuts(gui: &mut Gui) -> Result<Vec<PortalShortcut>, String> {
+    let fresh = gui
+        .portal_shortcuts
+        .as_ref()
+        .is_some_and(|(asked, _)| asked.elapsed() < SHORTCUTS_REFRESH);
+    if !fresh {
+        let answer = ask_daemon(gui, false);
+        gui.portal_shortcuts = Some((Instant::now(), answer));
+    }
+    gui.portal_shortcuts
+        .as_ref()
+        .map(|(_, answer)| answer.clone())
+        .unwrap_or_else(|| Ok(Vec::new()))
+}
+
+fn configure_shortcuts(gui: &mut Gui) {
+    match ask_daemon(gui, true) {
+        Ok(shortcuts) => {
+            gui.portal_shortcuts = Some((Instant::now(), Ok(shortcuts)));
+            gui.say("The desktop opened its shortcut settings.");
+        },
+        Err(why) => gui.say(why),
+    }
+}
+
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
+    if InputMode::detect(gui.config.input.backend).is_portal() {
+        portal_show(gui, ui);
+        return;
+    }
     section(ui, "Dictation");
     intro(
         ui,

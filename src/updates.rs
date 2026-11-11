@@ -30,6 +30,8 @@ const MAX_SLEEP: Duration = Duration::from_secs(3600);
 pub enum InstallKind {
     AppImage,
     PackageManager,
+    /// A Flatpak, which Flathub or another remote updates.
+    Flatpak,
     /// The install script's tarball, a source build, or anything else that
     /// no package manager updates.
     SelfManaged,
@@ -54,19 +56,24 @@ impl InstallKind {
     pub fn current() -> Self {
         static KIND: OnceLock<InstallKind> = OnceLock::new();
         *KIND.get_or_init(|| {
+            #[cfg(target_os = "linux")]
+            if crate::portal::sandboxed() {
+                return InstallKind::Flatpak;
+            }
             let exe = std::env::current_exe().unwrap_or_default();
             Self::detect(&exe, std::env::var_os("APPIMAGE").as_deref())
         })
     }
 
     pub fn checks(self) -> bool {
-        self != InstallKind::PackageManager
+        !matches!(self, InstallKind::PackageManager | InstallKind::Flatpak)
     }
 
     pub fn describe(self) -> &'static str {
         match self {
             InstallKind::AppImage => "AppImage",
             InstallKind::PackageManager => "package manager",
+            InstallKind::Flatpak => "Flatpak",
             InstallKind::SelfManaged => "tarball or source build",
         }
     }
