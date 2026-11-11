@@ -192,11 +192,11 @@ pub enum Commands {
 
     /// Show application status and configuration
     Status {
-        /// Show detailed configuration
+        /// Print only the effective settings (with --devices, also the input devices)
         #[arg(long)]
         config: bool,
 
-        /// Show device information
+        /// Print only the input devices (with --config, also the settings)
         #[arg(long)]
         devices: bool,
 
@@ -204,8 +204,9 @@ pub enum Commands {
         #[arg(long, conflicts_with = "json")]
         full: bool,
 
-        /// Print one JSON object for scripts
-        #[arg(long)]
+        /// Print one JSON object for scripts. It has the main settings and the input devices, so
+        /// --config and --devices do not apply
+        #[arg(long, conflicts_with_all = ["config", "devices"])]
         json: bool,
 
         /// With --json, print one Waybar line at once and on each state change

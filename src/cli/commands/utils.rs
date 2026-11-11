@@ -20,11 +20,12 @@ pub fn print_line(line: &str) -> Result<()> {
     }
 }
 
-/// Display configuration status information
-pub async fn show_config_status() -> Result<()> {
-    println!("📋 Configuration:");
+/// The Configuration section of `hush status`: the effective settings, or
+/// why they did not load.
+pub fn config_section(config: Result<Config>) -> String {
+    let mut lines = vec!["📋 Configuration:".to_string()];
 
-    match Config::load() {
+    match config {
         Ok(config) => {
             let transcription = &config.transcription;
             let key = transcription
@@ -35,36 +36,36 @@ pub async fn show_config_status() -> Result<()> {
                 });
             match transcription.backend {
                 TranscriptionBackend::Local => {
-                    println!("  Transcription: local");
-                    println!("  Model: {}", transcription.model_path().display());
-                    println!("  Use GPU: {}", transcription.use_gpu);
+                    lines.push("  Transcription: local".to_string());
+                    lines.push(format!("  Model: {}", transcription.model_path().display()));
+                    lines.push(format!("  Use GPU: {}", transcription.use_gpu));
                 },
                 TranscriptionBackend::OpenAiCompatible => {
-                    println!(
+                    lines.push(format!(
                         "  Transcription: {} ({})",
                         transcription.describe_server(),
                         key.as_deref().unwrap_or("no key")
-                    );
+                    ));
                 },
                 backend => {
-                    println!(
+                    lines.push(format!(
                         "  Transcription: {} {} (cloud, audio leaves this machine; {})",
                         backend.name(),
                         transcription.cloud_model().unwrap_or_default(),
                         key.unwrap_or_default()
-                    );
+                    ));
                 },
             }
-            println!("  LLM: {}", llm_summary(&config.llm));
-            println!("  Sample Rate: {}Hz", config.audio.sample_rate);
-            println!("  Hotkey: {}", config.hotkey.combination);
+            lines.push(format!("  LLM: {}", llm_summary(&config.llm)));
+            lines.push(format!("  Sample Rate: {}Hz", config.audio.sample_rate));
+            lines.push(format!("  Hotkey: {}", config.hotkey.combination));
         },
         Err(e) => {
-            println!("  ❌ Failed to load config: {}", e);
+            lines.push(format!("  ❌ Failed to load config: {}", e));
         },
     }
 
-    Ok(())
+    lines.join("\n") + "\n"
 }
 
 /// The LLM setting as written, without a probe of Ollama or the server.
@@ -105,26 +106,26 @@ pub async fn show_system_info() -> Result<()> {
     Ok(())
 }
 
-/// Display audio device status information
-pub async fn show_device_status() -> Result<()> {
-    println!("🎤 Audio Devices:");
+/// The Audio Devices section of `hush status`: the input devices, or why
+/// they could not be listed.
+pub fn device_section(devices: Result<Vec<String>>) -> String {
+    let mut lines = vec!["🎤 Audio Devices:".to_string()];
 
-    match AudioCapture::list_devices() {
+    match devices {
+        Ok(devices) if devices.is_empty() => {
+            lines.push("  ⚠️ No audio devices found".to_string());
+        },
         Ok(devices) => {
-            if devices.is_empty() {
-                println!("  ⚠️ No audio devices found");
-            } else {
-                for (i, device) in devices.iter().enumerate() {
-                    println!("  {}. {}", i + 1, device);
-                }
+            for (i, device) in devices.iter().enumerate() {
+                lines.push(format!("  {}. {}", i + 1, device));
             }
         },
         Err(e) => {
-            println!("  ❌ Failed to list devices: {}", e);
+            lines.push(format!("  ❌ Failed to list devices: {}", e));
         },
     }
 
-    Ok(())
+    lines.join("\n") + "\n"
 }
 
 /// Print the commands `hush setup permissions` runs as root
