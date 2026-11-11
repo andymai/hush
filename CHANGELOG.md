@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/andymai/hush/compare/v0.30.3...v0.31.0) (2026-11-11)
+
+
+### Features
+
+* **audio:** keep a sleeping microphone awake between takes ([#321](https://github.com/andymai/hush/issues/321)) ([6703fa6](https://github.com/andymai/hush/commit/6703fa6a7e822fd64c7cd9fb8ce01a5ad8c2cb2f))
+
 ## [0.30.3](https://github.com/andymai/hush/compare/v0.30.2...v0.30.3) (2026-11-11)
 
 
