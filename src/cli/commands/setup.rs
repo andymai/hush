@@ -2,8 +2,10 @@ use anyhow::{Context, Result};
 use std::io::{self, Write};
 
 use crate::cli::SetupCommands;
+use crate::gui::{megabytes, size_key, MODEL_ORDER};
 use crate::permissions;
-use crate::transcription::GpuAvailability;
+use crate::transcription::models::{catalogue_entry, recommended_model};
+use crate::transcription::{GpuAvailability, ModelSize};
 use crate::Config;
 
 /// Handle the setup command
@@ -319,14 +321,15 @@ async fn init_config(defaults: bool, force: bool) -> Result<()> {
 
     let gpu = GpuAvailability::detect();
 
-    let (model_size, use_gpu, hotkey) = if defaults {
-        ("base".to_string(), gpu.available, "RightAlt".to_string())
+    let (model, use_gpu, hotkey) = if defaults {
+        (ModelSize::Base, gpu.available, "RightAlt".to_string())
     } else {
-        collect_user_settings(gpu)?
+        collect_user_settings(gpu, recommended_model())?
     };
+    let model_size = size_key(model);
 
     let mut config = Config::defaults()?;
-    config.transcription.model_size = model_size.clone();
+    config.transcription.select_model(model);
     config.transcription.use_gpu = use_gpu;
     config.hotkey.combination = hotkey.clone();
     config.save().context("Failed to write config file")?;
@@ -363,29 +366,24 @@ async fn init_config(defaults: bool, force: bool) -> Result<()> {
     Ok(())
 }
 
-/// Collect user settings interactively
-fn collect_user_settings(gpu: &GpuAvailability) -> Result<(String, bool, String)> {
-    // Model size
-    println!("📦 Select Whisper model size:");
-    println!("   1. tiny   (75 MB)  - Fastest, lower accuracy");
-    println!("   2. base   (145 MB) - Recommended balance");
-    println!("   3. small  (466 MB) - Better accuracy");
-    println!("   4. medium (1.5 GB) - High accuracy");
-    println!("   5. large  (2.9 GB) - Best accuracy");
-    print!("\nChoice [2]: ");
+/// Collect user settings interactively. `recommended` is the default model.
+fn collect_user_settings(
+    gpu: &GpuAvailability,
+    recommended: ModelSize,
+) -> Result<(ModelSize, bool, String)> {
+    print!("{}", model_menu(recommended));
     io::stdout().flush()?;
 
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
-    let model_size = match input.trim() {
-        "1" | "tiny" => "tiny",
-        "" | "2" | "base" => "base",
-        "3" | "small" => "small",
-        "4" | "medium" => "medium",
-        "5" | "large" => "large",
-        _ => "base",
-    }
-    .to_string();
+    let model = pick_model(&input, recommended).unwrap_or_else(|| {
+        println!(
+            "'{}' is not on the list. Hush uses {}.",
+            input.trim(),
+            size_key(recommended)
+        );
+        recommended
+    });
 
     let use_gpu = if gpu.available {
         println!(
@@ -417,5 +415,146 @@ fn collect_user_settings(gpu: &GpuAvailability) -> Result<(String, bool, String)
         input.trim().to_string()
     };
 
-    Ok((model_size, use_gpu, hotkey))
+    Ok((model, use_gpu, hotkey))
+}
+
+/// The model list of `hush setup init`: the models of the Speech page, in
+/// its order, with download sizes from the catalogue. `recommended` is the
+/// default.
+fn model_menu(recommended: ModelSize) -> String {
+    let mut menu = String::from("📦 Select a speech model:\n");
+    for (number, size) in MODEL_ORDER.into_iter().enumerate() {
+        let bytes = catalogue_entry(size)
+            .map(|info| megabytes(info.expected_size))
+            .unwrap_or_default();
+        let suggested = if size == recommended {
+            " (suggested for this machine)"
+        } else {
+            ""
+        };
+        menu.push_str(&format!(
+            "   {}. {:<11} {:>7}  {}{}\n",
+            number + 1,
+            size_key(size),
+            bytes,
+            model_note(size),
+            suggested
+        ));
+    }
+    menu.push_str(&format!("\nChoice [{}]: ", size_key(recommended)));
+    menu
+}
+
+fn model_note(size: ModelSize) -> &'static str {
+    match size {
+        ModelSize::Tiny => "fastest, least accurate",
+        ModelSize::Base => "fast",
+        ModelSize::Small => "more accurate",
+        ModelSize::Medium => "high accuracy",
+        ModelSize::Large | ModelSize::LargeV2 | ModelSize::LargeV3 => "most accurate, slowest",
+        ModelSize::ParakeetV3 => {
+            "opt-in: 25 European languages only, picks the language itself, reads no prompt"
+        },
+    }
+}
+
+/// The model for an answer to [`model_menu`]: a number from the list, a
+/// model name, or nothing for `recommended`. `None` when the answer is
+/// neither.
+fn pick_model(input: &str, recommended: ModelSize) -> Option<ModelSize> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Some(recommended);
+    }
+    match input.parse::<usize>() {
+        Ok(number) => number
+            .checked_sub(1)
+            .and_then(|index| MODEL_ORDER.get(index))
+            .copied(),
+        Err(_) => input.parse().ok(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_model_is_the_one_for_this_machine() {
+        for recommended in [
+            ModelSize::Tiny,
+            ModelSize::Base,
+            ModelSize::Medium,
+            recommended_model(),
+        ] {
+            assert_eq!(pick_model("", recommended), Some(recommended));
+            assert_eq!(pick_model("  \n", recommended), Some(recommended));
+
+            let menu = model_menu(recommended);
+            assert!(
+                menu.ends_with(&format!("Choice [{}]: ", size_key(recommended))),
+                "{menu}"
+            );
+            let suggested: Vec<&str> = menu
+                .lines()
+                .filter(|line| line.contains("suggested for this machine"))
+                .collect();
+            assert_eq!(suggested.len(), 1, "{menu}");
+            assert!(
+                suggested[0].contains(&format!(" {} ", size_key(recommended))),
+                "{menu}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_number_or_a_name_picks_a_model() {
+        assert_eq!(pick_model("1", ModelSize::Medium), Some(ModelSize::Tiny));
+        assert_eq!(pick_model("2\n", ModelSize::Medium), Some(ModelSize::Base));
+        assert_eq!(
+            pick_model("8", ModelSize::Medium),
+            Some(ModelSize::ParakeetV3)
+        );
+        assert_eq!(
+            pick_model("large-v3", ModelSize::Tiny),
+            Some(ModelSize::LargeV3)
+        );
+        assert_eq!(
+            pick_model("parakeet-v3", ModelSize::Tiny),
+            Some(ModelSize::ParakeetV3)
+        );
+        for bad in ["0", "9", "huge", "-1"] {
+            assert_eq!(pick_model(bad, ModelSize::Base), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_menu_sizes_come_from_the_catalogue() {
+        let menu = model_menu(ModelSize::Base);
+        for (number, size) in MODEL_ORDER.into_iter().enumerate() {
+            let info = catalogue_entry(size).expect("every listed model is in the catalogue");
+            let line = menu
+                .lines()
+                .find(|line| line.trim_start().starts_with(&format!("{}. ", number + 1)))
+                .expect("one line for each model");
+            assert!(line.contains(size_key(size)), "{line}");
+            assert!(line.contains(&megabytes(info.expected_size)), "{line}");
+        }
+        assert!(menu.contains(" 78 MB"), "tiny is 77.7 MB:\n{menu}");
+        assert!(menu.contains("740 MB"), "parakeet-v3 is 739.5 MB:\n{menu}");
+        for stale in ["75 MB", "145 MB", "466 MB", "2.9 GB"] {
+            assert!(!menu.contains(stale), "{stale} in:\n{menu}");
+        }
+    }
+
+    #[test]
+    fn parakeet_is_listed_as_opt_in_with_its_limits() {
+        let menu = model_menu(ModelSize::Base);
+        let line = menu
+            .lines()
+            .find(|line| line.contains("parakeet-v3"))
+            .expect("a parakeet-v3 line");
+        assert!(line.contains("opt-in"), "{line}");
+        assert!(line.contains("25 European languages"), "{line}");
+    }
 }
