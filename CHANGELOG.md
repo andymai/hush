@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.1](https://github.com/andymai/hush/compare/v0.33.0...v0.33.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **deps:** update quinn-udp to 0.5.16 for RUSTSEC-2026-0538 ([#328](https://github.com/andymai/hush/issues/328)) ([d522d63](https://github.com/andymai/hush/commit/d522d63c5f16e94343093f73fa2d4da313a11fc0))
+
 ## [0.33.0](https://github.com/andymai/hush/compare/v0.32.0...v0.33.0) (2026-11-11)
 
 
