@@ -9,6 +9,11 @@
 # stand-in answers the window's status question as an idle daemon. The
 # models folder of the user is linked in, so the Overview page shows an
 # installed model.
+#
+# The window is 1000x700, the largest size that the Flathub quality
+# guidelines accept. Each frame gets rounded corners and a soft shadow, which
+# the guidelines also ask for: the headless frame has neither, and app stores
+# add no shadow of their own. HUSH_SETTINGS_SIZE sets another window size.
 
 set -euo pipefail
 
@@ -24,6 +29,15 @@ for tool in weston python3; do
     exit 1
   }
 done
+if command -v magick >/dev/null; then
+  im=(magick)
+elif command -v convert >/dev/null; then
+  im=(convert)
+else
+  echo "ImageMagick is missing" >&2
+  exit 1
+fi
+export HUSH_SETTINGS_SIZE="${HUSH_SETTINGS_SIZE:-1000x700}"
 mkdir -p "$out"
 
 models="${XDG_DATA_HOME:-$HOME/.local/share}/hush/models"
@@ -93,6 +107,20 @@ done
 }
 export WAYLAND_DISPLAY=hush-shots
 
+# frame FILE: round the corners of the frame, then put a shadow under it on
+# a transparent ground.
+frame() {
+  local r=12
+  "${im[@]}" "$1" \
+    \( +clone -alpha extract \
+    -draw "fill black polygon 0,0 0,$r $r,0 fill white circle $r,$r $r,0" \
+    \( +clone -flip \) -compose Multiply -composite \
+    \( +clone -flop \) -compose Multiply -composite \) \
+    -alpha off -compose CopyOpacity -composite \
+    \( +clone -background black -shadow 38x14+0+6 \) +swap \
+    -background none -compose Over -layers merge +repage "$1"
+}
+
 # shot NAME SCHEME [VARIABLE=VALUE...]: save one frame as NAME.png, or as
 # NAME-light.png in the light scheme.
 shot() {
@@ -105,6 +133,7 @@ shot() {
     echo "No frame for $name" >&2
     exit 1
   }
+  frame "$out/$name.png"
   echo "$out/$name.png"
 }
 
