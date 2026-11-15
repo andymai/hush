@@ -11,10 +11,10 @@ Hold a key, speak, release; your words land at the cursor, in any app.
 [![CI](https://github.com/andymai/hush/actions/workflows/ci.yml/badge.svg)](https://github.com/andymai/hush/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/andymai/hush?label=release)](https://github.com/andymai/hush/releases/latest)
 [![Commit activity](https://img.shields.io/github/commit-activity/m/andymai/hush?label=commits%2Fmonth)](https://github.com/andymai/hush/commits/main)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/andymai/hush/blob/main/LICENSE)
 [![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org/)
 
-**[Features](#features)** · **[Install](#install)** · **[Setup](#setup)** · **[Docs](#docs)** · **[Contributing](CONTRIBUTING.md)**
+**[Features](#features)** · **[Install](#install)** · **[Setup](#setup)** · **[Docs](#docs)** · **[Contributing](https://github.com/andymai/hush/blob/main/CONTRIBUTING.md)**
 
 <br>
 
@@ -60,7 +60,7 @@ Hush runs OpenAI's Whisper models, or the opt-in NVIDIA Parakeet model, on your 
 - **A panel icon.** It shows whether Hush is idle, recording, or working, and its menu has the actions of the hotkeys.
 - **A doctor.** `hush doctor` checks each part of the setup and prints the one command that fixes each problem.
 
-The [feature guide](docs/features.md) has the details of each feature.
+The [feature guide](https://github.com/andymai/hush/blob/main/docs/features.md) has the details of each feature.
 
 ## Install
 
@@ -68,11 +68,11 @@ The [feature guide](docs/features.md) has the details of each feature.
 |---|---|
 | Install script (Ubuntu, Debian, Fedora, openSUSE, Arch, and most others) | `curl -fsSL https://raw.githubusercontent.com/andymai/hush/main/install.sh \| sh` |
 | Fedora (COPR) | `sudo dnf copr enable veroz/hush && sudo dnf install hush` |
-| Release files | Download the `.deb`, `.rpm`, `AppImage`, or tarball from the [latest release](https://github.com/andymai/hush/releases/latest), and see [INSTALL.md](INSTALL.md#release-files) |
-| NixOS (flake) | `nix profile install github:andymai/hush`, and see [INSTALL.md](INSTALL.md#nix-and-nixos) for the system module |
-| Source | `make install`, and see [INSTALL.md](INSTALL.md#build) |
+| Release files | Download the `.deb`, `.rpm`, `AppImage`, or tarball from the [latest release](https://github.com/andymai/hush/releases/latest), and see [INSTALL.md](https://github.com/andymai/hush/blob/main/INSTALL.md#release-files) |
+| NixOS (flake) | `nix profile install github:andymai/hush`, and see [INSTALL.md](https://github.com/andymai/hush/blob/main/INSTALL.md#nix-and-nixos) for the system module |
+| Source | `make install`, and see [INSTALL.md](https://github.com/andymai/hush/blob/main/INSTALL.md#build) |
 
-The script detects your distribution and checks the checksum of the download. It also checks the [build provenance](INSTALL.md#verify-a-download) when your system has GitHub CLI 2.49 or later and you logged in to it. Debian and Ubuntu get the `.deb`, and Fedora, RHEL, and openSUSE get the `.rpm`. Both install through your package manager, so removal is a normal `apt remove hush` or `dnf remove hush`. Every other distribution, Arch included, gets the tarball under `~/.local`.
+The script detects your distribution and checks the checksum of the download. It also checks the [build provenance](https://github.com/andymai/hush/blob/main/INSTALL.md#verify-a-download) when your system has GitHub CLI 2.49 or later and you logged in to it. Debian and Ubuntu get the `.deb`, and Fedora, RHEL, and openSUSE get the `.rpm`. Both install through your package manager, so removal is a normal `apt remove hush` or `dnf remove hush`. Every other distribution, Arch included, gets the tarball under `~/.local`.
 
 The prebuilt packages are for x86-64 Linux. They need only your usual graphics driver: NVIDIA, AMD, and Intel all work through Vulkan, with a CPU fallback everywhere else.
 
@@ -100,21 +100,21 @@ Hush deliberately does not:
 
 ## Docs
 
-- [Features](docs/features.md): each feature in detail.
-- [Commands](docs/commands.md): every command, the exit codes and JSON output for scripts, and a Waybar module.
-- [Configuration](docs/configuration.md): every key of `config.toml`, how to move your setup, and the transcript hook.
-- [Models](docs/models.md): the sizes, the opt-in Parakeet model, and the helper models with their licenses.
-- [Flatpak and desktop portals](docs/portals.md): what works in a sandbox, and on which desktops.
-- [Troubleshooting](docs/troubleshooting.md): the microphone, keyboard access, and the GPU.
-- [Privacy and security](docs/privacy.md): what goes over the network, and when Hush writes audio to disk.
-- [INSTALL.md](INSTALL.md): release files, download checks, Nix, Flatpak builds, and builds from source.
+- [Features](https://github.com/andymai/hush/blob/main/docs/features.md): each feature in detail.
+- [Commands](https://github.com/andymai/hush/blob/main/docs/commands.md): every command, the exit codes and JSON output for scripts, and a Waybar module.
+- [Configuration](https://github.com/andymai/hush/blob/main/docs/configuration.md): every key of `config.toml`, how to move your setup, and the transcript hook.
+- [Models](https://github.com/andymai/hush/blob/main/docs/models.md): the sizes, the opt-in Parakeet model, and the helper models with their licenses.
+- [Flatpak and desktop portals](https://github.com/andymai/hush/blob/main/docs/portals.md): what works in a sandbox, and on which desktops.
+- [Troubleshooting](https://github.com/andymai/hush/blob/main/docs/troubleshooting.md): the microphone, keyboard access, and the GPU.
+- [Privacy and security](https://github.com/andymai/hush/blob/main/docs/privacy.md): what goes over the network, and when Hush writes audio to disk.
+- [INSTALL.md](https://github.com/andymai/hush/blob/main/INSTALL.md): release files, download checks, Nix, Flatpak builds, and builds from source.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Hush is MIT licensed and runs its speech models through transcribe.cpp and its [transcribe-cpp](https://crates.io/crates/transcribe-cpp) bindings, on [ggml](https://github.com/ggml-org/ggml). Release notes live in [CHANGELOG.md](CHANGELOG.md).
+See [CONTRIBUTING.md](https://github.com/andymai/hush/blob/main/CONTRIBUTING.md) and the [Code of Conduct](https://github.com/andymai/hush/blob/main/CODE_OF_CONDUCT.md). Hush is MIT licensed and runs its speech models through transcribe.cpp and its [transcribe-cpp](https://crates.io/crates/transcribe-cpp) bindings, on [ggml](https://github.com/ggml-org/ggml). Release notes live in [CHANGELOG.md](https://github.com/andymai/hush/blob/main/CHANGELOG.md).
 
 ## License
 
-[MIT](LICENSE).
+[MIT](https://github.com/andymai/hush/blob/main/LICENSE).
 
-The settings window embeds the [Geist and Geist Mono](https://github.com/vercel/geist-font) fonts under the SIL Open Font License 1.1 ([OFL.txt](src/gui/fonts/OFL.txt)). It also embeds icons from [Lucide](https://lucide.dev) under the ISC License ([LICENSE-lucide.txt](src/gui/fonts/LICENSE-lucide.txt)).
+The settings window embeds the [Geist and Geist Mono](https://github.com/vercel/geist-font) fonts under the SIL Open Font License 1.1 ([OFL.txt](https://github.com/andymai/hush/blob/main/src/gui/fonts/OFL.txt)). It also embeds icons from [Lucide](https://lucide.dev) under the ISC License ([LICENSE-lucide.txt](https://github.com/andymai/hush/blob/main/src/gui/fonts/LICENSE-lucide.txt)).
