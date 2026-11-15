@@ -93,9 +93,12 @@ pub const DARK: Palette = Palette {
     bad: hex(0xF4736B),
 };
 
-/// The two ends of the gradient on the Hush mark's tile.
-pub const MARK_FROM: Color32 = hex(0x5B4BDB);
-pub const MARK_TO: Color32 = hex(0x8B3EE0);
+/// The colours of the Hush mark, from the application icon: the face of the
+/// plate from top to bottom, its darker edge, and the text cursor.
+pub const MARK_FACE_TOP: Color32 = hex(0x7666F1);
+pub const MARK_FACE_BOTTOM: Color32 = hex(0x5141D5);
+pub const MARK_EDGE: Color32 = hex(0x37299A);
+pub const MARK_CURSOR: Color32 = hex(0xFFC247);
 
 pub fn palette(ctx: &Context) -> &'static Palette {
     match ctx.theme() {

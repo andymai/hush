@@ -16,20 +16,33 @@ use egui::{
     ResizeDirection, Sense, Stroke, Ui, Vec2, ViewportCommand,
 };
 
-/// Bar heights of the mark, as fractions of its tile, centre bar tallest.
-const BARS: [f32; 5] = [0.204, 0.367, 0.530, 0.367, 0.204];
-const BAR_WIDTH: f32 = 0.068;
-const BAR_STEP: f32 = 0.119;
-const TILE_ROUNDING: f32 = 0.219;
 const MARK_SIZE: f32 = 22.0;
 /// The square at each corner of the window that resizes it.
 const CORNER: f32 = 8.0;
 const EDGE: f32 = theme::EDGE_CLEARANCE;
 
-/// The Hush mark: the five-bar waveform on a violet tile.
+/// The Hush mark: the bars and the cursor of the application icon on its
+/// violet plate. `rect` is the plate, edge included.
 pub fn mark(ui: &Ui, rect: Rect) {
-    let size = rect.width();
-    let tile = RectShape::filled(rect, size * TILE_ROUNDING, Color32::WHITE);
+    let [left, top, right, _] = crate::mark::PLATE;
+    let scale = rect.width() / (right - left);
+    let at = |x: f32, y: f32| {
+        Pos2::new(
+            rect.left() + (x - left) * scale,
+            rect.top() + (y - top) * scale,
+        )
+    };
+    let rounding = crate::mark::PLATE_ROUNDING * scale;
+    let painter = ui.painter();
+    painter.rect_filled(rect, rounding, theme::MARK_EDGE);
+
+    let face = Rect::from_min_max(
+        rect.min,
+        Pos2::new(
+            rect.right(),
+            rect.bottom() - crate::mark::PLATE_EDGE * scale,
+        ),
+    );
     let fonts = ui.fonts(|fonts| fonts.font_image_size());
     let mut tessellator = Tessellator::new(
         ui.ctx().pixels_per_point(),
@@ -38,22 +51,29 @@ pub fn mark(ui: &Ui, rect: Rect) {
         Vec::new(),
     );
     let mut mesh = Mesh::default();
-    tessellator.tessellate_rect(&tile, &mut mesh);
+    tessellator.tessellate_rect(
+        &RectShape::filled(face, rounding, Color32::WHITE),
+        &mut mesh,
+    );
     for vertex in &mut mesh.vertices {
-        let along = ((vertex.pos.x - rect.left()) + (vertex.pos.y - rect.top()))
-            / (rect.width() + rect.height());
-        let colour = theme::MARK_FROM.lerp_to_gamma(theme::MARK_TO, along.clamp(0.0, 1.0));
+        let along = ((vertex.pos.y - face.top()) / face.height()).clamp(0.0, 1.0);
+        let colour = theme::MARK_FACE_TOP.lerp_to_gamma(theme::MARK_FACE_BOTTOM, along);
         vertex.color = colour.linear_multiply(f32::from(vertex.color.a()) / 255.0);
     }
-    ui.painter().add(mesh);
-    let first = rect.center().x - 2.0 * BAR_STEP * size;
-    for (index, height) in BARS.iter().enumerate() {
-        let bar = Rect::from_center_size(
-            Pos2::new(first + index as f32 * BAR_STEP * size, rect.center().y),
-            Vec2::new(BAR_WIDTH * size, height * size),
+    painter.add(mesh);
+
+    let pill = |pill: &crate::mark::Pill, colour: Color32| {
+        let shape = Rect::from_center_size(
+            at(pill.x, pill.y),
+            Vec2::new(pill.width, pill.height) * scale,
         );
-        ui.painter()
-            .rect_filled(bar, BAR_WIDTH * size / 2.0, Color32::WHITE);
+        painter.rect_filled(shape, pill.radius() * scale, colour);
+    };
+    for bar in &crate::mark::BARS {
+        pill(bar, Color32::WHITE);
+    }
+    for part in &crate::mark::CURSOR {
+        pill(part, theme::MARK_CURSOR);
     }
 }
 
@@ -509,15 +529,5 @@ mod tests {
             None,
             "the middle is the page"
         );
-    }
-
-    #[test]
-    fn the_mark_bars_are_symmetric_and_inside_the_tile() {
-        for (left, right) in BARS.iter().zip(BARS.iter().rev()) {
-            assert_eq!(left, right);
-        }
-        let span = 4.0 * BAR_STEP + BAR_WIDTH;
-        assert!(span < 1.0 - TILE_ROUNDING);
-        assert!(BARS.iter().all(|height| *height < 1.0));
     }
 }
