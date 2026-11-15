@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.0](https://github.com/andymai/hush/compare/v0.34.0...v1.0.0) (2026-11-15)
+
+
+### Bug Fixes
+
+* link the README to GitHub, so the links work in an installed copy ([#334](https://github.com/andymai/hush/issues/334)) ([bc32cdf](https://github.com/andymai/hush/commit/bc32cdf1ebfdce2a6d781cf74d8365deb7e4e1ba))
+
 ## [0.34.0](https://github.com/andymai/hush/compare/v0.33.1...v0.34.0) (2026-11-15)
 
 
