@@ -188,8 +188,8 @@ A Flatpak build of Hush uses the desktop portals, so its manifest needs no
 `--device` permission. The RemoteDesktop portal types the text, the
 GlobalShortcuts portal reads the hotkeys, and the Background portal starts
 Hush at login. `hush setup permissions` is not necessary in a sandbox. See
-[Flatpak and desktop portals](README.md#flatpak-and-desktop-portals) in the
-README for what works and on which desktops.
+[Flatpak and desktop portals](docs/portals.md) for
+what works and on which desktops.
 
 On an NVIDIA GPU, Flatpak needs the
 `org.freedesktop.Platform.GL.nvidia-<version>` extension of the host driver

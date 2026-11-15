@@ -110,7 +110,7 @@ fn only_sections(config: Option<Result<Config>>, devices: Option<Result<Vec<Stri
 }
 
 /// What `hush status --json` prints. Every key is present; unknown values
-/// are null. The README lists the keys.
+/// are null. docs/commands.md lists the keys.
 #[derive(Debug, PartialEq, Serialize)]
 pub struct StatusReport {
     pub state: &'static str,
