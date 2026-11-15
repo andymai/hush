@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/andymai/hush/compare/v0.33.1...v0.34.0) (2026-11-15)
+
+
+### Features
+
+* **brand:** draw the Hush mark as sound that ends in a text cursor ([#327](https://github.com/andymai/hush/issues/327)) ([0acc2bb](https://github.com/andymai/hush/commit/0acc2bbee1eeebaebba5926e6bab1f0222b4bed9))
+
 ## [0.33.1](https://github.com/andymai/hush/compare/v0.33.0...v0.33.1) (2026-11-15)
 
 
