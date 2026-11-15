@@ -1,19 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- The Hush mark: the five-bar waveform the overlay animates while recording,
-     which the tray icon draws in code at small sizes. -->
+<!-- The Hush mark: three bars of sound that end in a text cursor. src/mark.rs
+     holds the same numbers, so the tray icon and the settings sidebar draw
+     this shape in code. -->
 <svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="hush-ground" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#5b4bdb"/>
-      <stop offset="1" stop-color="#8b3ee0"/>
+    <linearGradient id="hush-face" x1="0" y1="12" x2="0" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7666f1"/>
+      <stop offset="1" stop-color="#5141d5"/>
     </linearGradient>
   </defs>
-  <rect width="128" height="128" rx="28" fill="url(#hush-ground)"/>
+  <rect x="12" y="18" width="104" height="98" rx="24" fill="#37299a"/>
+  <rect x="12" y="12" width="104" height="98" rx="24" fill="url(#hush-face)"/>
   <g fill="#ffffff">
-    <rect x="29.18" y="50.94" width="8.70" height="26.11" rx="4.35"/>
-    <rect x="44.41" y="40.50" width="8.70" height="47.00" rx="4.35"/>
-    <rect x="59.65" y="30.06" width="8.70" height="67.89" rx="4.35"/>
-    <rect x="74.88" y="40.50" width="8.70" height="47.00" rx="4.35"/>
-    <rect x="90.11" y="50.94" width="8.70" height="26.11" rx="4.35"/>
+    <rect x="28" y="47" width="10" height="28" rx="5"/>
+    <rect x="45" y="36" width="10" height="50" rx="5"/>
+    <rect x="62" y="44" width="10" height="34" rx="5"/>
+  </g>
+  <g fill="#ffc247">
+    <rect x="85" y="28" width="8" height="66" rx="4"/>
+    <rect x="79" y="28" width="20" height="7" rx="3.5"/>
+    <rect x="79" y="87" width="20" height="7" rx="3.5"/>
   </g>
 </svg>

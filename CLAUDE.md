@@ -64,7 +64,7 @@ as `-march=native`. Only the AVX-512 CPU modules, and Rust functions that a runt
 ./hush settings               # Setup and settings window
 ./hush doctor                 # Check everything and print the fix for each problem
 ./hush status --full          # System diagnostics
-scripts/screenshots.sh target/debug/hush docs/screenshots/settings  # Redraw the settings screenshots under a headless Weston
+scripts/screenshots.sh target/debug/hush docs/screenshots/settings  # Redraw the settings screenshots under a headless Weston, from a --features vulkan build
 ```
 
 ## Architecture

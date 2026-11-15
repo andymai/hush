@@ -1,6 +1,11 @@
 <div align="center">
 
-# Hush
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/hush-lockup-dark.svg">
+    <img src="docs/brand/hush-lockup-light.svg" alt="Hush" height="80">
+  </picture>
+</h1>
 
 Local voice-to-text for Linux. Hold a key, speak, release; your words land at the cursor, in any app.
 
@@ -11,6 +16,13 @@ Local voice-to-text for Linux. Hold a key, speak, release; your words land at th
 [![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org/)
 
 **[Install](#install)** · **[Setup](#setup)** · **[Features](#features)** · **[Commands](#commands)** · **[Configure](#configure)** · **[Models](#models)** · **[Troubleshooting](#troubleshooting)**
+
+<br>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/settings/overview.png">
+  <img src="docs/screenshots/settings/overview-light.png" alt="The Overview page of the Hush settings window" width="720">
+</picture>
 
 </div>
 

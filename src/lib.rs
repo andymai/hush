@@ -35,6 +35,9 @@ pub mod notify;
 /// Opt-in check for a newer release
 pub mod updates;
 
+/// The shape of the Hush mark, shared by the tray icon and the settings window
+pub mod mark;
+
 /// Panel status icon
 pub mod tray;
 

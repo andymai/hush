@@ -1,21 +1,19 @@
 //! The Hush mark, drawn in code so the tray looks the same whether Hush was
 //! installed from a package or run from a checkout.
 //!
-//! The mark is the five-bar waveform the overlay animates while recording, so
-//! the tray, the overlay, and the application icon read as one thing. The fill
-//! carries the state, in mid tones that hold their own against light and dark
-//! panels alike; a contrasting outline is not an option because at 22 pixels
-//! it closes the gaps between the bars.
+//! The tray draws the bars and the cursor of the application icon without the
+//! plate. The fill carries the state, in mid tones that hold their own against
+//! light and dark panels alike; a contrasting outline is not an option because
+//! at 22 pixels it closes the gaps between the bars.
 
+use crate::mark;
 use ksni::Icon;
 
 const SIZES: [i32; 4] = [22, 24, 32, 48];
 const SAMPLES: i32 = 3;
 
-/// Bar heights as a fraction of the icon, centre bar tallest.
-const BARS: [f32; 5] = [0.30, 0.54, 0.78, 0.54, 0.30];
-const BAR_WIDTH: f32 = 0.095;
-const BAR_GAP: f32 = 0.085;
+/// The share of the icon width that the mark fills.
+const SPAN: f32 = 0.875;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconState {
@@ -34,32 +32,26 @@ impl IconState {
     }
 }
 
-/// Distance from `p` to the segment `a`-`b`, minus `r`.
-fn capsule(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32, r: f32) -> f32 {
-    let (pax, pay) = (px - ax, py - ay);
-    let (bax, bay) = (bx - ax, by - ay);
-    let denom = bax * bax + bay * bay;
-    let h = if denom == 0.0 {
-        0.0
-    } else {
-        ((pax * bax + pay * bay) / denom).clamp(0.0, 1.0)
-    };
-    let (dx, dy) = (pax - bax * h, pay - bay * h);
-    (dx * dx + dy * dy).sqrt() - r
+/// Mark units across the whole icon.
+fn scale() -> f32 {
+    let [left, _, right, _] = mark::GLYPH;
+    (right - left) / SPAN
 }
 
-/// Signed distance to the waveform in a unit square.
-fn waveform(x: f32, y: f32) -> f32 {
-    let radius = BAR_WIDTH / 2.0;
-    let span = BARS.len() as f32 * BAR_WIDTH + (BARS.len() - 1) as f32 * BAR_GAP;
-    let left = (1.0 - span) / 2.0 + radius;
-    let mut d = f32::MAX;
-    for (i, height) in BARS.iter().enumerate() {
-        let cx = left + i as f32 * (BAR_WIDTH + BAR_GAP);
-        let half = (height / 2.0 - radius).max(0.0);
-        d = d.min(capsule(x, y, cx, 0.5 - half, cx, 0.5 + half, radius));
-    }
-    d
+/// The point of the unit square, in mark units, with the glyph centred.
+fn to_mark(x: f32, y: f32) -> (f32, f32) {
+    let [left, top, right, bottom] = mark::GLYPH;
+    let scale = scale();
+    (
+        (left + right) / 2.0 + (x - 0.5) * scale,
+        (top + bottom) / 2.0 + (y - 0.5) * scale,
+    )
+}
+
+/// Signed distance to the mark in a unit square.
+fn glyph(x: f32, y: f32) -> f32 {
+    let (mx, my) = to_mark(x, y);
+    mark::glyph_distance(mx, my) / scale()
 }
 
 fn render(size: i32, state: IconState) -> Icon {
@@ -72,7 +64,7 @@ fn render(size: i32, state: IconState) -> Icon {
                 for sx in 0..SAMPLES {
                     let fx = (x as f32 + (sx as f32 + 0.5) / SAMPLES as f32) / size as f32;
                     let fy = (y as f32 + (sy as f32 + 0.5) / SAMPLES as f32) / size as f32;
-                    if waveform(fx, fy) < 0.0 {
+                    if glyph(fx, fy) < 0.0 {
                         covered += 1;
                     }
                 }
@@ -119,51 +111,54 @@ mod tests {
         }
     }
 
-    /// Opaque pixels in the column through the centre of bar `index`.
-    fn bar_height(icon: &Icon, index: usize) -> usize {
-        let centre = BARS.len() as f32 * BAR_WIDTH + (BARS.len() - 1) as f32 * BAR_GAP;
-        let left = (1.0 - centre) / 2.0 + BAR_WIDTH / 2.0;
-        let x = ((left + index as f32 * (BAR_WIDTH + BAR_GAP)) * icon.width as f32) as i32;
+    /// Opaque pixels in the column through the centre of `part`.
+    fn column_height(icon: &Icon, part: &mark::Pill) -> usize {
+        let [left, _, right, _] = mark::GLYPH;
+        let fx = 0.5 + (part.x - (left + right) / 2.0) / scale();
+        let x = (fx * icon.width as f32) as i32;
         (0..icon.height)
             .filter(|y| alpha_at(icon, x, *y) > 200)
             .count()
     }
 
     #[test]
-    fn bars_rise_towards_the_centre_and_the_edges_stay_clear() {
+    fn the_cursor_is_tallest_and_the_edges_stay_clear() {
         let icon = &pixmaps(IconState::Recording)[3];
-        let heights: Vec<usize> = (0..BARS.len()).map(|i| bar_height(icon, i)).collect();
-        assert!(heights[0] > 0, "every bar is drawn: {:?}", heights);
-        assert!(heights[1] > heights[0], "bars grow inwards: {:?}", heights);
+        let bars: Vec<usize> = mark::BARS
+            .iter()
+            .map(|bar| column_height(icon, bar))
+            .collect();
+        let cursor = column_height(icon, &mark::CURSOR[0]);
+        assert!(bars.iter().all(|h| *h > 0), "every bar is drawn: {bars:?}");
         assert!(
-            heights[2] > heights[1],
-            "the centre is tallest: {:?}",
-            heights
+            bars[1] > bars[0] && bars[1] > bars[2],
+            "the middle bar is the tallest bar: {bars:?}"
+        );
+        assert!(
+            bars.iter().all(|h| *h < cursor),
+            "the cursor is taller than the bars: {bars:?} < {cursor}"
         );
 
         let size = icon.width;
-        for x in 0..size {
-            assert_eq!(alpha_at(icon, x, 0), 0, "the top row is clear at {x}");
-            assert_eq!(
-                alpha_at(icon, x, size - 1),
-                0,
-                "the bottom row is clear at {x}"
-            );
+        for i in 0..size {
+            for (x, y) in [(i, 0), (i, size - 1), (0, i), (size - 1, i)] {
+                assert_eq!(alpha_at(icon, x, y), 0, "the edge is clear at ({x}, {y})");
+            }
         }
-        assert_eq!(alpha_at(icon, 0, size / 2), 0, "the left edge is clear");
     }
 
     #[test]
-    fn the_mark_is_symmetric() {
-        let icon = &pixmaps(IconState::Idle)[2];
-        let size = icon.width;
-        for y in 0..size {
-            for x in 0..size {
-                assert_eq!(
-                    alpha_at(icon, x, y),
-                    alpha_at(icon, size - 1 - x, y),
-                    "mirrored at ({x}, {y})"
-                );
+    fn the_mark_is_symmetric_top_to_bottom() {
+        for icon in pixmaps(IconState::Idle) {
+            let size = icon.width;
+            for y in 0..size {
+                for x in 0..size {
+                    assert_eq!(
+                        alpha_at(&icon, x, y),
+                        alpha_at(&icon, x, size - 1 - y),
+                        "mirrored at ({x}, {y}) in the {size} pixel icon"
+                    );
+                }
             }
         }
     }

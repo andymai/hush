@@ -4,11 +4,21 @@
 #
 #   scripts/screenshots.sh target/debug/hush docs/screenshots/settings
 #
+# Use a GPU build (cargo build --features vulkan). A CPU-only build makes the
+# Speech page say that no GPU was found.
+#
 # The window gets its own runtime folder, configuration, data, and session
 # bus, so it reads nothing of the desktop session and opens no microphone. A
 # stand-in answers the window's status question as an idle daemon. The
 # models folder of the user is linked in, so the Overview page shows an
-# installed model.
+# installed model. So is the Vulkan folder of the user, because a driver file
+# there can be the only one that finds the GPU, as in a distrobox whose host
+# driver file names a library path of the host.
+#
+# The window is 1000x700, the largest size that the Flathub quality
+# guidelines accept. Each frame gets rounded corners and a soft shadow, which
+# the guidelines also ask for: the headless frame has neither, and app stores
+# add no shadow of their own. HUSH_SETTINGS_SIZE sets another window size.
 
 set -euo pipefail
 
@@ -24,9 +34,19 @@ for tool in weston python3; do
     exit 1
   }
 done
+if command -v magick >/dev/null; then
+  im=(magick)
+elif command -v convert >/dev/null; then
+  im=(convert)
+else
+  echo "ImageMagick is missing" >&2
+  exit 1
+fi
+export HUSH_SETTINGS_SIZE="${HUSH_SETTINGS_SIZE:-1000x700}"
 mkdir -p "$out"
 
 models="${XDG_DATA_HOME:-$HOME/.local/share}/hush/models"
+vulkan="${XDG_DATA_HOME:-$HOME/.local/share}/vulkan"
 work=$(mktemp -d "${TMPDIR:-/tmp}/hush-shots.XXXXXX")
 PIDS=()
 cleanup() {
@@ -47,6 +67,7 @@ unset DISPLAY WAYLAND_DISPLAY HUSH_CONFIG
 mkdir -p -m 700 "$XDG_RUNTIME_DIR/hush"
 mkdir -p "$XDG_CONFIG_HOME/hush" "$XDG_DATA_HOME/hush"
 [ -d "$models" ] && ln -s "$models" "$XDG_DATA_HOME/hush/models"
+[ -d "$vulkan" ] && ln -s "$vulkan" "$XDG_DATA_HOME/vulkan"
 
 cat >"$XDG_CONFIG_HOME/hush/config.toml" <<'TOML'
 [hotkey]
@@ -93,18 +114,37 @@ done
 }
 export WAYLAND_DISPLAY=hush-shots
 
+# frame FILE: round the corners of the frame, then put a shadow under it on
+# a transparent ground.
+frame() {
+  local r=12
+  "${im[@]}" "$1" \
+    \( +clone -alpha extract \
+    -draw "fill black polygon 0,0 0,$r $r,0 fill white circle $r,$r $r,0" \
+    \( +clone -flip \) -compose Multiply -composite \
+    \( +clone -flop \) -compose Multiply -composite \) \
+    -alpha off -compose CopyOpacity -composite \
+    \( +clone -background black -shadow 38x14+0+6 \) +swap \
+    -background none -compose Over -layers merge +repage -strip "$1"
+}
+
 # shot NAME SCHEME [VARIABLE=VALUE...]: save one frame as NAME.png, or as
 # NAME-light.png in the light scheme.
 shot() {
   local name=$1 scheme=$2
   shift 2
   [ "$scheme" = light ] && name="$name-light"
+  rm -f "$out/$name.png"
+  # With Mesa EGL for the window, as under this Weston, the exit handler of
+  # the NVIDIA Vulkan driver can crash the process after it saves the frame.
+  # The fresh frame decides.
   env "$@" HUSH_SETTINGS_APPEARANCE="$scheme" HUSH_SETTINGS_SCREENSHOT="$out/$name.png" \
-    timeout 60 "$hush" settings >>"$work/hush.log" 2>&1
+    timeout 60 "$hush" settings >>"$work/hush.log" 2>&1 || true
   [ -s "$out/$name.png" ] || {
     echo "No frame for $name" >&2
     exit 1
   }
+  frame "$out/$name.png"
   echo "$out/$name.png"
 }
 
