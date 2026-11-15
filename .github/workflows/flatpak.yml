@@ -31,7 +31,7 @@ jobs:
       contents: read
     container:
       # freedesktop-26.08, by digest
-      image: ghcr.io/flathub-infra/flatpak-github-actions@sha256:6d1b8ebf93a5ea4bcfa94123fabab57b3c40af5df2a52d93aa5892e464104f5a
+      image: ghcr.io/flathub-infra/flatpak-github-actions@sha256:6ed6921bb5a9e1a916989971844f159b854b7b225880c381fa34f7a158863039
       options: --privileged
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
