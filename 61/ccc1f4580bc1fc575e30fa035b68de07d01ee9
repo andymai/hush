@@ -1,0 +1,26 @@
+scripts/screenshots.sh
+  s_8c6cd90d228c32::t_fb1478e56e8378 49
+  s_8c6cd90d228c32::t_79cd4b3a780198 14-16
+  s_8c6cd90d228c32::t_bdae6b9d579679 70
+  s_8c6cd90d228c32::t_572e23deaf3676 137-140,142
+  s_8c6cd90d228c32::t_3d9af95023e9f4 128
+  s_8c6cd90d228c32::t_d0c6c534bf192e 7-9
+CLAUDE.md
+  s_8c6cd90d228c32::t_4b5ad5b9f18461 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "61ccc1f4580bc1fc575e30fa035b68de07d01ee9",
+  "prompts": {},
+  "sessions": {
+    "s_8c6cd90d228c32": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d1625416-0ed4-4976-a835-7742a84d2430",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": null
+    }
+  }
+}
