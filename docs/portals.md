@@ -11,7 +11,7 @@ Hold to talk, the double-tap lock, and toggle mode work as with evdev. The compo
 - In a sandbox, Hush cannot read the keymap. It types letters, digits, spaces, and `. , ; : ! ? - ( )`, and pastes other text, such as quotes, accents, and emoji.
 - Outside a sandbox, Hush reads the keymap and types the characters on the first two levels of the active layout, with no dead key.
 
-The paste chord is Shift+Insert, because Shift and Insert have the same place on every layout. Each take opens a RemoteDesktop session and closes it after the text, so GNOME shows its sharing indicator only during the take. In a sandbox, Hush has no update check, because Flathub updates it.
+The paste chord is Shift+Insert, because Shift and Insert have the same place on every layout. Each take opens a RemoteDesktop session and closes it after the text, so GNOME shows its sharing indicator only during the take. In a sandbox, Hush has no update check, because Flatpak updates it.
 
 Portal mode needs KDE Plasma 6 or GNOME 48, or a later version. xdg-desktop-portal-wlr, -gtk, and -hyprland have no RemoteDesktop portal. On Sway, Hyprland, and other wlroots compositors, install Hush from a package instead. `hush doctor` shows which portals the desktop has.
 

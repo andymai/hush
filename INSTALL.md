@@ -13,7 +13,10 @@ Each release has four packages for x86-64 Linux and a `SHA256SUMS` file. The
 | `hush-<version>-x86_64-linux.tar.gz` | Extract it, and keep `bin/hush` and `lib/hush` together |
 | `hush-<version>-x86_64.AppImage` | `chmod +x` the file, then run it |
 
-Three other ways install Hush:
+Each release also has a Flatpak bundle, `hush-<version>-x86_64.flatpak`. See
+[Flatpak](#flatpak).
+
+Four other ways install Hush:
 
 - `install.sh` picks the `.deb` on Debian and Ubuntu, the `.rpm` on Fedora,
   RHEL, and openSUSE, and the tarball on every other distribution. The tarball
@@ -22,6 +25,8 @@ Three other ways install Hush:
 - COPR builds an `.rpm` from the release tarball. Run
   `sudo dnf copr enable veroz/hush && sudo dnf install hush`.
 - The [Nix flake](#nix-and-nixos) builds Hush from source.
+- Hush's [Flatpak repository](#flatpak) gets each release, and Bazaar and
+  other Flatpak stores list Hush from it.
 
 To build from source, see [Build](#build).
 
@@ -60,7 +65,8 @@ other layout.
 ## Verify a download
 
 The release workflow attests the build provenance of each release file: the
-tarball, the `.deb`, the `.rpm`, the AppImage, and `SHA256SUMS`. An attestation
+tarball, the `.deb`, the `.rpm`, the AppImage, and `SHA256SUMS`. The Flatpak
+workflow attests the Flatpak bundle. An attestation
 is a Sigstore-signed record. It ties the SHA-256 digest of a file to the
 workflow run that built the file. Releases from 0.17.0 have attestations.
 
@@ -170,19 +176,24 @@ The user service starts the daemon at login. Use it instead of `hush install --a
 
 ## Flatpak
 
-`packaging/flatpak/io.github.andymai.hush.yml` builds Hush with Vulkan on the
-freedesktop 26.08 runtime. The build gets its crates offline from
-`packaging/flatpak/cargo-sources.json`. After a change to `Cargo.lock`, run
-`packaging/flatpak/update-cargo-sources.sh` (it needs `uv`).
+Hush has its own signed Flatpak repository, and each release adds its version
+there. Add the repository once, then install Hush. It uses the freedesktop
+26.08 runtime from Flathub.
 
 ```bash
-flatpak install --user flathub org.freedesktop.Sdk//26.08 org.freedesktop.Sdk.Extension.rust-stable//26.08
-flatpak-builder --user --force-clean --state-dir=target/flatpak-builder \
-  --repo=target/flatpak-repo target/flatpak-app packaging/flatpak/io.github.andymai.hush.yml
-flatpak build-bundle target/flatpak-repo target/hush.flatpak io.github.andymai.hush
-flatpak install --user target/hush.flatpak
-flatpak run io.github.andymai.hush status --full
+flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak remote-add --if-not-exists hush https://andymai.github.io/hush/hush.flatpakrepo
+flatpak install hush io.github.andymai.hush
 ```
+
+The `remote-add` asks for your password, because it changes the whole system.
+After that, Bazaar and other Flatpak stores list Hush, and `flatpak update`
+keeps it current. A store
+can also install it from
+[`io.github.andymai.hush.flatpakref`](https://andymai.github.io/hush/io.github.andymai.hush.flatpakref).
+
+Each release also has the bundle `hush-<version>-x86_64.flatpak`, for an
+install without the repository. A bundle does not update.
 
 A Flatpak build of Hush uses the desktop portals, so its manifest needs no
 `--device` permission. The RemoteDesktop portal types the text, the
@@ -215,6 +226,25 @@ hush shortcuts                # The keys the desktop bound
 At the first dictation, the desktop asks you to allow keyboard access. To go
 back to evdev and uinput, set `backend = "auto"` and run
 `hush daemon restart`.
+
+### Build the Flatpak
+
+`packaging/flatpak/io.github.andymai.hush.yml` builds Hush with Vulkan on the
+freedesktop 26.08 runtime. The build gets its crates offline from
+`packaging/flatpak/cargo-sources.json`. After a change to `Cargo.lock`, run
+`packaging/flatpak/update-cargo-sources.sh` (it needs `uv`).
+
+```bash
+flatpak install --user flathub org.freedesktop.Sdk//26.08 org.freedesktop.Sdk.Extension.rust-stable//26.08
+flatpak-builder --user --force-clean --state-dir=target/flatpak-builder \
+  --repo=target/flatpak-repo target/flatpak-app packaging/flatpak/io.github.andymai.hush.yml
+flatpak build-bundle target/flatpak-repo target/hush.flatpak io.github.andymai.hush
+flatpak install --user target/hush.flatpak
+flatpak run io.github.andymai.hush status --full
+```
+
+[packaging/flatpak/README.md](packaging/flatpak/README.md) describes the
+repository's signing key and the release jobs that publish it.
 
 ## GPU Acceleration
 

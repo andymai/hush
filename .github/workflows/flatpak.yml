@@ -1,9 +1,11 @@
 name: Flatpak
 
 # Builds the Flatpak of packaging/flatpak/io.github.andymai.hush.yml in the
-# Flathub build image, keeps the bundle as an artifact, and runs
-# flatpak-builder-lint on the manifest, the AppStream file, and the build. It is
-# not a required check.
+# Flathub build image, runs flatpak-builder-lint on the manifest, the AppStream
+# file, and the build, and builds Hush's Flatpak repository from the bundle. A
+# run with a release tag also uploads the bundle to the release and publishes
+# the repository on GitHub Pages. release.yml starts that run on main, because
+# only main may deploy to GitHub Pages. It is not a required check.
 
 on:
   push:
@@ -15,12 +17,22 @@ on:
       - build.rs
       - .github/workflows/flatpak.yml
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and publish, e.g. v1.0.0. Empty builds and tests only."
+        type: string
+        default: ""
 
+# Each publish puts its commit on top of the published repository, so two
+# publishes never run at once, and a publish is never cancelled.
 concurrency:
-  group: flatpak-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ inputs.tag && 'flatpak-publish' || format('flatpak-{0}', github.ref) }}
+  cancel-in-progress: ${{ !inputs.tag }}
 
 permissions: {}
+
+env:
+  SITE_URL: https://andymai.github.io/hush
 
 jobs:
   flatpak:
@@ -33,10 +45,18 @@ jobs:
       # freedesktop-26.08, by digest
       image: ghcr.io/flathub-infra/flatpak-github-actions@sha256:6d1b8ebf93a5ea4bcfa94123fabab57b3c40af5df2a52d93aa5892e464104f5a
       options: --privileged
+      # flatpak-builder updates the runtime and the SDK that the image has, and
+      # Flatpak then renames the old folder. On some runner images, Docker's
+      # overlay refuses to rename a folder of an image layer ("Invalid
+      # cross-device link"). Docker fills a new volume from the image's folder,
+      # so the renames happen on one plain file system.
+      volumes:
+        - /var/lib/flatpak
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
 
       # Dependabot changes Cargo.lock without cargo-sources.json, so the build
       # takes the crates of the Cargo.lock that it builds, and an old copy in the
@@ -49,25 +69,143 @@ jobs:
             echo "::warning::packaging/flatpak/cargo-sources.json does not match Cargo.lock. Run packaging/flatpak/update-cargo-sources.sh."
           fi
 
+      # A release builds its tag, and the tag can have older lint exceptions
+      # than this workflow. Pull requests and main lint the same files.
       - name: Lint the manifest and the AppStream file
+        if: ${{ !inputs.tag }}
         run: |
           flatpak-builder-lint manifest packaging/flatpak/io.github.andymai.hush.yml
           flatpak-builder-lint appstream packaging/io.github.andymai.hush.metainfo.xml
 
+      # No mirror-screenshots-url: it points the screenshots and icons of the
+      # AppStream data at dl.flathub.org, and only the Flathub pipeline uploads
+      # them there. Hush's own repository keeps the URLs of the metainfo.
       - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
         with:
           manifest-path: packaging/flatpak/io.github.andymai.hush.yml
           bundle: hush.flatpak
-          cache-key: flatpak-builder-${{ hashFiles('packaging/flatpak/**', 'Cargo.lock') }}
+          cache-key: flatpak-builder-${{ hashFiles('packaging/flatpak/io.github.andymai.hush.yml', 'packaging/flatpak/cargo-sources.json', 'Cargo.lock') }}
           build-dir: flatpak_app
           repo-dir: repo
           keep-build-dirs: true
           upload-artifact: true
-          mirror-screenshots-url: https://dl.flathub.org/media/
 
       # Only the Flathub pipeline uploads the screenshots and icons to
-      # dl.flathub.org, so lint-exceptions.json lets the two checks of that pass.
+      # dl.flathub.org, so lint-exceptions.json lets the checks of that pass.
       - name: Lint the build
+        if: ${{ !inputs.tag }}
         run: |
           flatpak-builder-lint --exceptions --user-exceptions packaging/flatpak/lint-exceptions.json builddir flatpak_app
           flatpak-builder-lint --exceptions --user-exceptions packaging/flatpak/lint-exceptions.json repo repo
+
+  upload:
+    name: Attest and upload the bundle
+    needs: flatpak
+    if: inputs.tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      # flatpak-builder's own artifact name
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hush-x86_64.flatpak
+          path: bundle
+      - name: Name the bundle after the release
+        env:
+          TAG: ${{ inputs.tag }}
+        run: mv bundle/hush.flatpak "bundle/hush-${TAG#v}-x86_64.flatpak"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: bundle/*.flatpak
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release upload "$TAG" bundle/*.flatpak --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Hush's own Flatpak repository on GitHub Pages: after one `flatpak remote-add`,
+  # Bazaar and other Flatpak stores list Hush and update it. A job of its own, so
+  # the build's cargo code never runs where the signing key is. It checks out
+  # the workflow's ref, not the tag, for the current scripts and public key.
+  repo:
+    name: Build the Flatpak repository
+    needs: flatpak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hush-x86_64.flatpak
+          path: bundle
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends flatpak ostree
+      # A release signs with Hush's key, the one in hush-repo.asc: with another
+      # key, every client that added the remote would refuse the update. Other
+      # runs sign with a throwaway key and publish nothing.
+      - name: Import the signing key
+        env:
+          TAG: ${{ inputs.tag }}
+          KEY: ${{ inputs.tag && secrets.FLATPAK_SIGNING_KEY || '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAG" ]; then
+            gpg --batch --passphrase '' --quick-gen-key "Hush test key" rsa4096 sign never
+            exit 0
+          fi
+          [ -n "$KEY" ] || { echo "::error::FLATPAK_SIGNING_KEY is empty"; exit 1; }
+          printf '%s\n' "$KEY" | gpg --batch --import
+          want=$(gpg --batch --show-keys --with-colons packaging/flatpak/hush-repo.asc | awk -F: '$1 == "fpr" { print $10; exit }')
+          gpg --batch --list-secret-keys --with-colons | grep -q "^fpr:*:$want:" ||
+            { echo "::error::FLATPAK_SIGNING_KEY is not the key in packaging/flatpak/hush-repo.asc"; exit 1; }
+      - run: packaging/flatpak/repo.sh bundle/hush.flatpak site "$SITE_URL"
+      - run: packaging/flatpak/repo-check.sh site "$SITE_URL"
+      # The last two releases through the scripts, as two releases in a row
+      # would go. Two releases always differ, at least in the version.
+      - name: Test an update from one release to the next
+        if: ${{ !inputs.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A new release exists before its bundle is up, so take the newest two that have one.
+          mapfile -t tags < <(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=20" --jq '[.[]
+            | select((.draft or .prerelease) | not)
+            | select(any(.assets[]; .name | test("^hush-.*-x86_64\\.flatpak$")))
+            | .tag_name][:2][]')
+          if [ "${#tags[@]}" -lt 2 ]; then
+            echo "::notice::${#tags[@]} releases have a Flatpak bundle, and the update test needs two"
+            exit 0
+          fi
+          for tag in "${tags[@]}"; do
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+              --pattern 'hush-*-x86_64.flatpak' --dir "releases/$tag"
+          done
+          packaging/flatpak/repo-test.sh "releases/${tags[1]}"/*.flatpak "releases/${tags[0]}"/*.flatpak
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: inputs.tag
+        with:
+          path: site
+
+  pages:
+    name: Publish the Flatpak repository
+    needs: [repo, upload]
+    if: inputs.tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write # the deployment
+      id-token: write # the token that proves the deployment comes from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        id: deploy

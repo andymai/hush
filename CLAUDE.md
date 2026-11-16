@@ -142,6 +142,8 @@ Commit messages and PR titles follow Conventional Commits (commitlint locally, `
 
 A published release runs `.github/workflows/release.yml`. It builds the `.deb`, `.rpm`, tarball, and AppImage with `--features vulkan`, attests them, and uploads them with `SHA256SUMS`. It then submits a source RPM that repackages the tarball (`packaging/hush.spec.template`) to COPR. The AUR job (`packaging/aur/PKGBUILD.template`) runs only when the repository variable `AUR_PUBLISH` is `true`. `install.sh` downloads the release files, and `flake.nix` builds from source.
 
+`release.yml` also starts `flatpak.yml` on `main` with the tag. That run uploads the Flatpak bundle and publishes Hush's signed Flatpak repository on GitHub Pages, which Bazaar reads after a `flatpak remote-add`. The `FLATPAK_SIGNING_KEY` secret signs it, and only `main` may deploy. `packaging/flatpak/README.md` has the jobs and the key. Flathub's policy bars agents from the Flathub manifest and the Flathub submission, so `packaging/flatpak/io.github.andymai.hush.yml` serves only this repository.
+
 ## Platform
 
 Linux-only. Uses `#[cfg(target_os = "linux")]` for platform-specific code. Hotkeys read `/dev/input` through evdev on any session type, with an X11 grab as fallback. Keyboard emulation uses uinput. Window detection uses X11, Hyprland, Sway, or KWin.

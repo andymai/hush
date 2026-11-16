@@ -68,6 +68,7 @@ The [feature guide](https://github.com/andymai/hush/blob/main/docs/features.md) 
 |---|---|
 | Install script (Ubuntu, Debian, Fedora, openSUSE, Arch, and most others) | `curl -fsSL https://raw.githubusercontent.com/andymai/hush/main/install.sh \| sh` |
 | Fedora (COPR) | `sudo dnf copr enable veroz/hush && sudo dnf install hush` |
+| Flatpak (Bazaar and other Flatpak stores) | `flatpak remote-add --if-not-exists hush https://andymai.github.io/hush/hush.flatpakrepo && flatpak install hush io.github.andymai.hush`, and see [INSTALL.md](https://github.com/andymai/hush/blob/main/INSTALL.md#flatpak) |
 | Release files | Download the `.deb`, `.rpm`, `AppImage`, or tarball from the [latest release](https://github.com/andymai/hush/releases/latest), and see [INSTALL.md](https://github.com/andymai/hush/blob/main/INSTALL.md#release-files) |
 | NixOS (flake) | `nix profile install github:andymai/hush`, and see [INSTALL.md](https://github.com/andymai/hush/blob/main/INSTALL.md#nix-and-nixos) for the system module |
 | Source | `make install`, and see [INSTALL.md](https://github.com/andymai/hush/blob/main/INSTALL.md#build) |
