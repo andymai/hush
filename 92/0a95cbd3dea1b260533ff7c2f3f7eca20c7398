@@ -1,0 +1,19 @@
+src/logging.rs
+  s_b0a510843bf7e8::t_98c9f6a47be93c 278
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "920a95cbd3dea1b260533ff7c2f3f7eca20c7398",
+  "prompts": {},
+  "sessions": {
+    "s_b0a510843bf7e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d842cab6-b89f-4046-9045-7d612517e0b8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
