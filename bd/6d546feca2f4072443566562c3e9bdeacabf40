@@ -1,0 +1,19 @@
+packaging/flatpak/lint-exceptions.json
+  s_7831f2d6d7ac2b::t_83224dd69b19fc 4-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bd6d546feca2f4072443566562c3e9bdeacabf40",
+  "prompts": {},
+  "sessions": {
+    "s_7831f2d6d7ac2b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f93347d-21cf-475e-b4f2-2be6e3090610",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
