@@ -74,7 +74,7 @@ jobs:
       - name: Lint the manifest and the AppStream file
         if: ${{ !inputs.tag }}
         run: |
-          flatpak-builder-lint manifest packaging/flatpak/io.github.andymai.hush.yml
+          flatpak-builder-lint --exceptions --user-exceptions packaging/flatpak/lint-exceptions.json manifest packaging/flatpak/io.github.andymai.hush.yml
           flatpak-builder-lint appstream packaging/io.github.andymai.hush.metainfo.xml
 
       # No mirror-screenshots-url: it points the screenshots and icons of the
