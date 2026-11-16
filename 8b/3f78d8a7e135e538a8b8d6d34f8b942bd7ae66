@@ -1,0 +1,56 @@
+packaging/flatpak/hush-repo.asc
+  s_7831f2d6d7ac2b::t_755b60c6771833 1-29
+docs/portals.md
+  s_7831f2d6d7ac2b::t_dd9d884450f589 14
+packaging/flatpak/repo-check.sh
+  s_7831f2d6d7ac2b::t_626a639a4181ba 1-48
+.github/workflows/flatpak.yml
+  s_7831f2d6d7ac2b::t_0eb6f268889f99 4-8,20-24,26-27,29-30,34-36,48-54,59,72-73,75,80-82,87,94,96,100-211
+.github/workflows/release.yml
+  s_7831f2d6d7ac2b::t_aafa6c1ba9cec3 316-331
+  s_7831f2d6d7ac2b::t_4c78cecd618962 26
+src/cli/commands/listen.rs
+  s_7831f2d6d7ac2b::t_24663256ab7333 344
+packaging/flatpak/repo-test.sh
+  s_7831f2d6d7ac2b::t_b926bb2c1e3bc8 1-52
+packaging/flatpak/README.md
+  s_7831f2d6d7ac2b::t_2ad26f2c1a07ed 1-61
+CLAUDE.md
+  s_7831f2d6d7ac2b::t_a0b67a6edb4239 145-146
+packaging/flatpak/repo.sh
+  s_7831f2d6d7ac2b::t_f0926875a50980 1-83
+INSTALL.md
+  s_7831f2d6d7ac2b::t_9a3369efc68699 179-181,184-186,189,192-196
+  s_7831f2d6d7ac2b::t_edb5f5b77ecd3c 190-191
+  s_7831f2d6d7ac2b::t_1aaaa69806afc1 16-19
+  s_7831f2d6d7ac2b::t_ca386b5d8595de 28-29
+  s_7831f2d6d7ac2b::t_e932912c656c5a 68-69
+  s_7831f2d6d7ac2b::t_43a4770da7c96a 230-248
+  s_8e26ce757a4a72::t_1eef0e3a738659 197
+README.md
+  s_7831f2d6d7ac2b::t_dcf6aebc760206 71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8b3f78d8a7e135e538a8b8d6d34f8b942bd7ae66",
+  "prompts": {},
+  "sessions": {
+    "s_7831f2d6d7ac2b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f93347d-21cf-475e-b4f2-2be6e3090610",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    },
+    "s_8e26ce757a4a72": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e2a2abb-96e7-41bf-9f42-70cf1b42e7a4",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
