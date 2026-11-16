@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.1](https://github.com/andymai/hush/compare/v1.1.0...v1.1.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **audio:** start the stream once, so a take gets no old audio ([#339](https://github.com/andymai/hush/issues/339)) ([e613be5](https://github.com/andymai/hush/commit/e613be5b7981ada91567fb7a731db6be99577a3f))
+* **logging:** write the logs to the XDG data folder ([#340](https://github.com/andymai/hush/issues/340)) ([2b8e760](https://github.com/andymai/hush/commit/2b8e7600f5ec692c7fc4e9e5215d84df98e618d5))
+* start the Flatpak daemon on a Wayland session ([#338](https://github.com/andymai/hush/issues/338)) ([da0c66a](https://github.com/andymai/hush/commit/da0c66a663b5f977185f21678e73bbe8385a5d6f))
+
 ## [1.1.0](https://github.com/andymai/hush/compare/v1.0.0...v1.1.0) (2026-11-16)
 
 
