@@ -61,6 +61,30 @@ fn device_name_of(device: &Device) -> Option<String> {
 }
 
 fn open_stream(device: &Device, config: StreamConfig, sink: &Sink) -> Result<Stream> {
+    let stream = build_stream(device, config, sink)?;
+    settle(&stream)?;
+    Ok(stream)
+}
+
+/// Starts a new stream, then pauses it. A stream that cannot pause keeps
+/// running, and the callback drops its audio between takes. Left unstarted,
+/// such a stream (ALSA's PulseAudio plugin, which the Flatpak runtime uses)
+/// lets the server queue up to 4 MiB of audio, about a minute, and the next
+/// take starts with that old audio.
+fn settle(stream: &Stream) -> Result<()> {
+    stream
+        .play()
+        .map_err(|e| anyhow::anyhow!("Failed to start audio stream: {}", e))?;
+    if let Err(e) = stream.pause() {
+        info!(
+            "The input stream cannot pause ({}), so it runs between takes",
+            e
+        );
+    }
+    Ok(())
+}
+
+fn build_stream(device: &Device, config: StreamConfig, sink: &Sink) -> Result<Stream> {
     let sink = sink.clone();
     device
         .build_input_stream(
