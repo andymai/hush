@@ -1,0 +1,19 @@
+packaging/flatpak/io.github.andymai.hush.yml
+  s_b0a510843bf7e8::t_7df3f9595f8e5e 9-11,13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f3133f35d292cde88b4a8f666a20538aba718e16",
+  "prompts": {},
+  "sessions": {
+    "s_b0a510843bf7e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d842cab6-b89f-4046-9045-7d612517e0b8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
