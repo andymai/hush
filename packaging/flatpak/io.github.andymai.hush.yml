@@ -6,9 +6,11 @@ sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: hush
 finish-args:
-  # The settings window and the overlay: Wayland, or X11 on an X11 session
+  # The settings window uses Wayland. The overlay draws through GLFW on X11, so
+  # it needs X11 also on a Wayland session (Xwayland): without DISPLAY, GLFW
+  # panics and the daemon aborts.
   - --socket=wayland
-  - --socket=fallback-x11
+  - --socket=x11
   - --share=ipc
   # GPU transcription through Vulkan, and the GL of the window
   - --device=dri
