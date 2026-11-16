@@ -23,7 +23,7 @@ on:
         type: boolean
         default: true
       publish_repos:
-        description: "Publish the release to AUR and COPR"
+        description: "Publish the release to AUR, COPR, and the Flatpak repository"
         type: boolean
         default: false
 
@@ -312,6 +312,22 @@ jobs:
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: Update to ${{ env.VERSION }}
           ssh_keyscan_types: ed25519
+
+  # Starts flatpak.yml on main for the tag. That run builds the Flatpak,
+  # uploads the bundle, and publishes Hush's Flatpak repository on GitHub
+  # Pages, where only main may deploy. A dispatch with GITHUB_TOKEN starts a
+  # run, unlike the other events of GITHUB_TOKEN.
+  flatpak:
+    name: Publish the Flatpak
+    if: github.event_name == 'release' || inputs.publish_repos
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run flatpak.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$TAG"
 
   # Submits a source RPM that repackages the release tarball to COPR once
   # COPR_API_LOGIN, COPR_API_USERNAME, and COPR_API_TOKEN exist.

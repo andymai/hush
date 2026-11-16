@@ -341,7 +341,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         None
     };
 
-    // Flathub updates a sandboxed install.
+    // The Flatpak remote updates a sandboxed install.
     if config.updates.check && !input_mode.is_portal() {
         tokio::spawn(crate::updates::run(crate::updates::InstallKind::current()));
     }

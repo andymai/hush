@@ -1,6 +1,7 @@
 {
   "io.github.andymai.hush": {
     "appstream-external-screenshot-url": "A build outside the Flathub pipeline does not mirror the screenshots to dl.flathub.org",
-    "appstream-remote-icon-not-mirrored": "A build outside the Flathub pipeline does not mirror the icons to dl.flathub.org"
+    "appstream-remote-icon-not-mirrored": "A build outside the Flathub pipeline does not mirror the icons to dl.flathub.org",
+    "appstream-screenshots-not-mirrored-in-ostree": "Hush's own Flatpak repository keeps the screenshot URLs of the metainfo, and only the Flathub pipeline mirrors screenshots into OSTree"
   }
 }
