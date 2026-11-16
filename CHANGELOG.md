@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/andymai/hush/compare/v1.0.0...v1.1.0) (2026-11-16)
+
+
+### Features
+
+* **packaging:** publish a signed Flatpak repository for Bazaar ([#336](https://github.com/andymai/hush/issues/336)) ([f8386fb](https://github.com/andymai/hush/commit/f8386fb5fc4a1080b3f492a88644745992f5f474))
+
 ## [1.0.0](https://github.com/andymai/hush/compare/v0.34.0...v1.0.0) (2026-11-15)
 
 
