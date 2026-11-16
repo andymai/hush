@@ -832,9 +832,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         }
     });
 
-    // GLFW aborts the whole process when it finds no display.
-    let has_display =
-        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
+    // GLFW draws the overlay on X11 and aborts the whole process without
+    // DISPLAY. A Flatpak without X11, or Wayland without Xwayland, has only
+    // WAYLAND_DISPLAY.
+    let has_display = std::env::var_os("DISPLAY").is_some();
     let overlay_thread = if has_display {
         Some(thread::spawn(move || {
             let _ = overlay.run();
