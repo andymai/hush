@@ -275,9 +275,7 @@ pub struct LoggingConfig {
 
 impl Default for LoggingConfig {
     fn default() -> Self {
-        let log_dir = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join(".local/share/hush/logs");
+        let log_dir = crate::config::paths::data_dir().join("logs");
 
         Self {
             log_dir,
