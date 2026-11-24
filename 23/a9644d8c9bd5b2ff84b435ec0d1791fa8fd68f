@@ -1,0 +1,23 @@
+deny.toml
+  s_45c87034741aa0::t_3c4216d42569b1 9-11
+osv-scanner.toml
+  s_45c87034741aa0::t_099a7253fb25c4 47-103
+Cargo.lock
+  s_45c87034741aa0::t_451628c809c5bf 1422,1424,4813,4815
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "23a9644d8c9bd5b2ff84b435ec0d1791fa8fd68f",
+  "prompts": {},
+  "sessions": {
+    "s_45c87034741aa0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7bcdcf35-a5eb-4a4d-8975-876872da7fe5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
