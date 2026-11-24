@@ -93,10 +93,10 @@ jobs:
           pkg-config --modversion vulkan
       # The cache key includes TRANSCRIBE_CMAKE_ARGS, so a change to the ggml
       # flags never reuses a build made with other flags.
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           env-vars: TRANSCRIBE HUSH
-      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.62.30
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.62.30
         with:
           tool: cargo-deb@3.8.0
       - run: cargo install --locked cargo-generate-rpm@0.21.0
