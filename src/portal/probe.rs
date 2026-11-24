@@ -28,7 +28,7 @@ pub async fn probe() -> PortalReport {
         let types = proxy.available_device_types().await.map_err(error)?;
         Ok(RemoteDesktopInfo {
             version: proxy.version(),
-            keyboard: types.contains(DeviceType::Keyboard),
+            keyboard: types.contains(DeviceType::KEYBOARD),
         })
     }
     .await;
