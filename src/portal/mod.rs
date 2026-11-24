@@ -41,7 +41,7 @@ impl PortalError {
             ashpd::Error::PortalNotFound(_) | ashpd::Error::RequiresVersion(..) => {
                 Self::Unavailable(portal.to_string())
             },
-            ashpd::Error::Zbus(zbus::Error::MethodError(name, ..))
+            ashpd::Error::Zbus(ashpd::zbus::Error::MethodError(name, ..))
                 if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod"
                     || name.as_str() == "org.freedesktop.DBus.Error.ServiceUnknown" =>
             {

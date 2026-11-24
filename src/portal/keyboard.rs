@@ -117,7 +117,7 @@ impl RemoteDesktopPortal for AshpdRemoteDesktop {
                 .select_devices(
                     &session,
                     SelectDevicesOptions::default()
-                        .set_devices(ashpd::enumflags2::BitFlags::from(DeviceType::Keyboard))
+                        .set_devices(DeviceType::KEYBOARD)
                         .set_persist_mode(PersistMode::ExplicitlyRevoked)
                         .set_restore_token(token),
                 )
@@ -131,7 +131,7 @@ impl RemoteDesktopPortal for AshpdRemoteDesktop {
                 .map_err(error)?
                 .response()
                 .map_err(error)?;
-            if !started.devices().contains(DeviceType::Keyboard) {
+            if !started.devices().contains(DeviceType::KEYBOARD) {
                 return Err(PortalError::Refused);
             }
             if dialog_shown(asked.elapsed()) {
