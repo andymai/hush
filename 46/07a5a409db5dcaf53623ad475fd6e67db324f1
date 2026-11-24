@@ -1,0 +1,28 @@
+src/portal/mod.rs
+  s_45c87034741aa0::t_131e9546414a81 44
+src/portal/probe.rs
+  s_45c87034741aa0::t_f793ea0022613a 31
+src/portal/keyboard.rs
+  s_45c87034741aa0::t_de59ddde9bd317 134
+  s_45c87034741aa0::t_f9c0469748cbc0 120
+Cargo.toml
+  s_45c87034741aa0::t_78590ca6b189a6 226
+Cargo.lock
+  s_45c87034741aa0::t_571ef8361a8906 220,222,224,230,5777
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4607a5a409db5dcaf53623ad475fd6e67db324f1",
+  "prompts": {},
+  "sessions": {
+    "s_45c87034741aa0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7bcdcf35-a5eb-4a4d-8975-876872da7fe5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
