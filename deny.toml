@@ -6,7 +6,9 @@ targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
 [advisories]
 unmaintained = "workspace"
 yanked = "warn"
-ignore = []
+ignore = [
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained chrono, a direct dependency for DateTime<Utc> timestamps; no fixed release; removed when hush moves off chrono" },
+]
 
 [licenses]
 # OFL-1.1 and LicenseRef-UFL-1.0 cover the fonts bundled by epaint_default_fonts.

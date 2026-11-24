@@ -44,3 +44,60 @@ reason = "unmaintained zbus_names via zbus 5, merged into zbus 6; removed when h
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0372"
 reason = "unmaintained zvariant_derive via zbus 5, merged into zbus 6; removed when hush, ksni and notify-rust move to zbus 6"
+
+# chrono: hush uses it directly for DateTime<Utc> timestamps, and no fixed
+# release exists. It leaves when hush moves off chrono.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+reason = "unmaintained chrono, a direct dependency for DateTime<Utc> timestamps; no fixed release; removed when hush moves off chrono"
+
+# heapless 0.8: pulled by flacenc 0.5.1, the latest release, which requires
+# heapless ^0.8.0, so the 0.9.4 fix is out of range. flacenc uses only
+# heapless::Vec, of u8, i32 and f32/f64 (LpcFloat), which have no Drop. The
+# advisories cover FindMutView, Spsc, IndexMap, SortedLinkedList, Deque, the
+# treiber pool, and dropping elements whose Drop panics. They leave when
+# flacenc moves to heapless 0.9.4.
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0574"
+ignoreUntil = 2027-03-01
+reason = "heapless 0.8 FindMutView::pop via flacenc 0.5.1, which uses only heapless::Vec; removed when flacenc moves to heapless 0.9.4"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0575"
+ignoreUntil = 2027-03-01
+reason = "heapless 0.8 Spsc::peek via flacenc 0.5.1, which uses only heapless::Vec; removed when flacenc moves to heapless 0.9.4"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0576"
+ignoreUntil = 2027-03-01
+reason = "heapless 0.8 IndexMap::truncate via flacenc 0.5.1, which uses only heapless::Vec; removed when flacenc moves to heapless 0.9.4"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0577"
+ignoreUntil = 2027-03-01
+reason = "heapless 0.8 panicking Drop via flacenc 0.5.1, whose heapless::Vec elements are u8, i32 and floats, which have no Drop; removed when flacenc moves to heapless 0.9.4"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0578"
+ignoreUntil = 2027-03-01
+reason = "heapless 0.8 SortedLinkedList::zeroize via flacenc 0.5.1, which uses only heapless::Vec; removed when flacenc moves to heapless 0.9.4"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0579"
+ignoreUntil = 2027-03-01
+reason = "heapless 0.8 Deque TryFrom via flacenc 0.5.1, which uses only heapless::Vec; removed when flacenc moves to heapless 0.9.4"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0580"
+ignoreUntil = 2027-03-01
+reason = "heapless 0.8 treiber stack pool via flacenc 0.5.1, which uses only heapless::Vec; removed when flacenc moves to heapless 0.9.4"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0581"
+ignoreUntil = 2027-03-01
+reason = "heapless 0.8 Deque::make_contiguous via flacenc 0.5.1, which uses only heapless::Vec; removed when flacenc moves to heapless 0.9.4"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0582"
+ignoreUntil = 2027-03-01
+reason = "heapless 0.8 IndexMap::insert via flacenc 0.5.1, which uses only heapless::Vec; removed when flacenc moves to heapless 0.9.4"
