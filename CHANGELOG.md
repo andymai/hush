@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/andymai/hush/compare/v1.8.0...v1.9.0) (2026-11-26)
+
+
+### Features
+
+* **overlay:** a click on the pill stops the take, a right-click discards it ([#371](https://github.com/andymai/hush/issues/371)) ([ef5c9b2](https://github.com/andymai/hush/commit/ef5c9b2ce8dcf8bc09ccec3585452971df240a4b))
+
 ## [1.8.0](https://github.com/andymai/hush/compare/v1.7.0...v1.8.0) (2026-11-26)
 
 
