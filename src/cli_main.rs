@@ -516,7 +516,8 @@ pub enum ModelCommands {
 
     /// Download a speech model: Whisper, or the opt-in Parakeet
     Download {
-        /// Model name (tiny, base, small, medium, large, large-v2, large-v3, parakeet-v3)
+        /// Model name (tiny, base, small, medium, large, large-v2, large-v3, large-v3-turbo,
+        /// parakeet-v3)
         model_size: String,
 
         /// Force re-download even if model exists
@@ -536,7 +537,7 @@ pub enum ModelCommands {
 
     /// Set the active model (downloads if needed and updates config)
     Set {
-        /// Model to set as active (tiny, base, small, medium, large, large-v2, large-v3,
+        /// Model to set as active (tiny, base, small, medium, large, large-v2, large-v3, large-v3-turbo,
         /// parakeet-v3)
         model_size: String,
     },
