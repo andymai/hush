@@ -54,6 +54,39 @@ pub fn private_dir(dir: &Path) -> Result<()> {
 }
 
 /// Save a take recorded at 16 kHz in `dir`, named for `at`. Returns the path.
+/// The take that `hush tune` measures, in the runtime folder that only the
+/// user can open. It lives until the next take, a daemon start, or
+/// [`TUNE_TAKE_LIFETIME`], whichever comes first.
+pub fn tune_take_path() -> PathBuf {
+    crate::ipc::paths::runtime_dir().join("tune-take.flac")
+}
+
+pub const TUNE_TAKE_LIFETIME: std::time::Duration = std::time::Duration::from_secs(600);
+
+pub fn save_tune_take(samples: &[f32]) -> Result<PathBuf> {
+    let path = tune_take_path();
+    remove_tune_take();
+    file::write_flac(&path, samples, WHISPER_SAMPLE_RATE)?;
+    Ok(path)
+}
+
+pub fn remove_tune_take() {
+    let _ = std::fs::remove_file(tune_take_path());
+}
+
+/// Remove the kept take once it is older than [`TUNE_TAKE_LIFETIME`].
+pub fn expire_tune_take() {
+    let path = tune_take_path();
+    let old = std::fs::metadata(&path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|written| written.elapsed().ok())
+        .is_some_and(|age| age >= TUNE_TAKE_LIFETIME);
+    if old {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 pub fn save(dir: &Path, samples: &[f32], at: DateTime<Utc>) -> Result<PathBuf> {
     save_as(dir, &stem(at), samples)
 }

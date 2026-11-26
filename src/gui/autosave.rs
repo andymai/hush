@@ -42,11 +42,14 @@ impl Daemon {
     /// restart that a change needs. While the configuration file does not
     /// load, a running daemon is held as busy: restarted, it would run on
     /// the defaults.
-    pub fn of(probe: Probe, restarting: bool, file_loads: bool) -> Self {
+    ///
+    /// A daemon that waits to keep the next take is busy too: a restart
+    /// would drop the request.
+    pub fn of(probe: Probe, restarting: bool, file_loads: bool, keep_next: bool) -> Self {
         match probe {
             _ if restarting => Daemon::Busy,
             Probe::NotRunning => Daemon::Stopped,
-            _ if !file_loads => Daemon::Busy,
+            _ if !file_loads || keep_next => Daemon::Busy,
             Probe::NoAnswer => Daemon::Busy,
             Probe::State(DaemonState::Idle) => Daemon::Idle,
             Probe::State(_) => Daemon::Busy,
@@ -969,25 +972,36 @@ mod tests {
     #[test]
     fn the_daemon_state_says_whether_a_restart_cuts_something() {
         let idle = Probe::State(DaemonState::Idle);
-        assert_eq!(Daemon::of(Probe::NotRunning, false, true), Daemon::Stopped);
-        assert_eq!(Daemon::of(idle, false, true), Daemon::Idle);
-        assert_eq!(Daemon::of(idle, true, true), Daemon::Busy);
         assert_eq!(
-            Daemon::of(Probe::NotRunning, true, true),
+            Daemon::of(Probe::NotRunning, false, true, false),
+            Daemon::Stopped
+        );
+        assert_eq!(Daemon::of(idle, false, true, false), Daemon::Idle);
+        assert_eq!(Daemon::of(idle, true, true, false), Daemon::Busy);
+        assert_eq!(
+            Daemon::of(Probe::NotRunning, true, true, false),
             Daemon::Busy,
             "a restarting daemon is down for a moment, not stopped"
         );
         assert_eq!(
-            Daemon::of(Probe::NoAnswer, false, true),
+            Daemon::of(Probe::NoAnswer, false, true, false),
             Daemon::Busy,
             "a slow answer keeps the restart"
         );
         assert_eq!(
-            Daemon::of(idle, false, false),
+            Daemon::of(idle, false, false, false),
             Daemon::Busy,
             "no restart onto a file that does not load"
         );
-        assert_eq!(Daemon::of(Probe::NotRunning, false, false), Daemon::Stopped);
+        assert_eq!(
+            Daemon::of(Probe::NotRunning, false, false, false),
+            Daemon::Stopped
+        );
+        assert_eq!(
+            Daemon::of(idle, false, true, true),
+            Daemon::Busy,
+            "a restart would drop the request to keep the next take"
+        );
         for state in [
             DaemonState::Starting,
             DaemonState::recording(5),
@@ -996,7 +1010,7 @@ mod tests {
             DaemonState::Stopping,
         ] {
             assert_eq!(
-                Daemon::of(Probe::State(state), false, true),
+                Daemon::of(Probe::State(state), false, true, false),
                 Daemon::Busy,
                 "{state:?}"
             );

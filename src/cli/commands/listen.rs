@@ -227,6 +227,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     shared.set_safe_mode(storage.safe_mode.clone());
     // After the claim, so that no other daemon still uses these parts.
     recover_leftover_parts();
+    // A take kept for the tune lives only as long as the daemon that kept it.
+    store::remove_tune_take();
     let config_language = Language::parse(&config.transcription.language).unwrap_or(Language::AUTO);
     shared.set_config_language(config_language);
     let chosen_language =
@@ -816,6 +818,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let amplitude_stop_signal = Arc::new(AtomicBool::new(false));
 
     let mut take: Option<TakeClock> = None;
+    let mut last_expiry = Instant::now();
     let mut take_parts: Option<TakeParts<SpeechToText>> = None;
     let cap = LengthCap::new(config.audio.max_recording_secs);
     let mut cap_warned = false;
@@ -840,6 +843,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             Ok(cmd) => cmd,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
+                if now.duration_since(last_expiry) >= Duration::from_secs(60) {
+                    last_expiry = now;
+                    store::expire_tune_take();
+                }
                 model.settle();
                 if idle.poll(take.is_some() || !shared.is_idle(), now) && model.unload() {
                     info!(
@@ -1163,6 +1170,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     shared.report_error("Failed to start recording");
                 } else {
                     take = Some(TakeClock::new(stream_started));
+                    store::remove_tune_take();
                     if let Some(parts) = take_parts.take() {
                         parts.discard();
                     }
@@ -1354,6 +1362,13 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     shared.set_idle();
                     finish(printer, TakeResult::NoSpeech);
                     continue;
+                }
+
+                if shared.take_keep_next(Instant::now()) {
+                    match store::save_tune_take(&audio_data) {
+                        Ok(path) => info!("Kept the take for the tune: {}", path.display()),
+                        Err(e) => warn!("Could not keep the take for the tune: {:#}", e),
+                    }
                 }
 
                 let window = current_window.take();

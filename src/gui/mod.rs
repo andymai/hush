@@ -104,6 +104,8 @@ pub struct Machine {
     /// The Silero voice activity detection model is downloaded.
     pub vad_installed: bool,
     pub autostart: bool,
+    /// The daemon waits to keep the next take for the tune
+    pub keep_next: bool,
     /// A compositor that runs no autostart entries and must start Hush
     /// from its own config
     pub startup_compositor: Option<crate::service::Compositor>,
@@ -138,6 +140,7 @@ impl Machine {
                 Probe::NotRunning | Probe::NoAnswer => None,
             },
             probe,
+            keep_next: reply.as_ref().is_some_and(|reply| reply.keep_next),
             safe_mode: reply.and_then(|reply| reply.safe_mode),
             start_delay,
             config_loads: Config::load().is_ok(),
@@ -813,6 +816,7 @@ impl Gui {
             self.machine.probe,
             self.restart.is_some() || self.attempting,
             self.files.config_error.is_none(),
+            self.machine.keep_next,
         );
         if self.debounce.fire(now, daemon) {
             self.attempt_restart(ctx);
@@ -1313,6 +1317,7 @@ mod tests {
             installed_models: vec![ModelSize::Base],
             vad_installed: true,
             autostart: false,
+            keep_next: false,
             startup_compositor: None,
             cloud_keys: Vec::new(),
         }

@@ -70,6 +70,9 @@ enum Phase {
     Stopping,
 }
 
+/// How long a request to keep the next take waits for that take.
+pub const KEEP_NEXT_FOR: Duration = Duration::from_secs(120);
+
 /// How many events a slow watch can fall behind before it misses some.
 const EVENT_BACKLOG: usize = 16;
 
@@ -117,6 +120,8 @@ pub struct SharedState {
     level: watch::Sender<f32>,
     events: broadcast::Sender<WatchEvent>,
     overlay: Mutex<Option<OverlayStatus>>,
+    /// Until when the next take's audio is kept
+    keep_next: Mutex<Option<Instant>>,
     safe_mode: Mutex<Option<String>>,
     start_delays: Mutex<StartDelays>,
     /// The GlobalShortcuts session, in portal mode.
@@ -144,6 +149,7 @@ impl SharedState {
             level: watch::channel(0.0).0,
             events: broadcast::channel(EVENT_BACKLOG).0,
             overlay: Mutex::new(None),
+            keep_next: Mutex::new(None),
             safe_mode: Mutex::new(None),
             start_delays: Mutex::new(StartDelays::default()),
             shortcuts: Mutex::new(None),
@@ -285,6 +291,33 @@ impl SharedState {
         }
     }
 
+    /// Keep the next take's audio, if it starts within [`KEEP_NEXT_FOR`].
+    /// Safe mode writes no audio, so it refuses.
+    pub fn request_keep_next(&self, now: Instant) -> std::result::Result<(), &'static str> {
+        if self.safe_mode.lock().is_some() {
+            return Err("Hush runs in safe mode, which keeps no audio");
+        }
+        *self.keep_next.lock() = Some(now + KEEP_NEXT_FOR);
+        self.changes.send_replace(());
+        Ok(())
+    }
+
+    /// The take that ends now keeps its audio: true once per request, and
+    /// only before the request expires.
+    pub fn take_keep_next(&self, now: Instant) -> bool {
+        let Some(until) = self.keep_next.lock().take() else {
+            return false;
+        };
+        self.changes.send_replace(());
+        now < until
+    }
+
+    fn keep_next_pending(&self) -> bool {
+        self.keep_next
+            .lock()
+            .is_some_and(|until| Instant::now() < until)
+    }
+
     /// Watchers hear only a change.
     pub fn set_overlay(&self, status: OverlayStatus) {
         let changed = self.overlay.lock().replace(status) != Some(status);
@@ -407,6 +440,7 @@ impl SharedState {
             .with_start_delay(self.start_delay())
             .with_version(env!("CARGO_PKG_VERSION"))
             .with_overlay(*self.overlay.lock())
+            .with_keep_next(self.keep_next_pending())
     }
 
     /// The style that the start of the take in progress asked for.
@@ -731,6 +765,10 @@ pub fn respond(
         DaemonCommand::Start { language, style } => start(language, style),
         DaemonCommand::Stop { .. } => forward(SessionCommand::StopRecording, after_stop),
         DaemonCommand::Cancel => forward(SessionCommand::CancelRecording, DaemonState::Idle),
+        DaemonCommand::KeepNext => match shared.request_keep_next(Instant::now()) {
+            Ok(()) => shared.status(),
+            Err(reason) => DaemonResponse::error(reason),
+        },
         DaemonCommand::Quit => forward(SessionCommand::Quit, DaemonState::Stopping),
         DaemonCommand::PasteLast => {
             if shared.last_text().is_none() {
@@ -1286,6 +1324,28 @@ mod tests {
             "a plain watch got neither the level nor the error"
         );
         drop(guard);
+    }
+
+    #[test]
+    fn keep_next_holds_for_one_take_within_its_time() {
+        let shared = SharedState::new();
+        let now = Instant::now();
+        assert!(!shared.take_keep_next(now), "no request");
+        shared.request_keep_next(now).unwrap();
+        assert!(shared.status().keep_next);
+        assert!(shared.take_keep_next(now + Duration::from_secs(5)));
+        assert!(!shared.take_keep_next(now), "one take only");
+        assert!(!shared.status().keep_next);
+
+        shared.request_keep_next(now).unwrap();
+        assert!(
+            !shared.take_keep_next(now + KEEP_NEXT_FOR + Duration::from_secs(1)),
+            "a request expires"
+        );
+
+        shared.set_safe_mode(Some("the configuration does not load".into()));
+        assert!(shared.request_keep_next(now).is_err());
+        assert!(!shared.status().keep_next);
     }
 
     #[test]
