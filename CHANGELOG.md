@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/andymai/hush/compare/v1.2.1...v1.3.0) (2026-11-26)
+
+
+### Features
+
+* **models:** add large-v3-turbo and say which models can translate ([#359](https://github.com/andymai/hush/issues/359)) ([db915c2](https://github.com/andymai/hush/commit/db915c2251d08de1850af694e9e4f0e47df7fa67))
+
+
+### Bug Fixes
+
+* **permissions:** count the udev rule that packages install under /usr/lib ([#358](https://github.com/andymai/hush/issues/358)) ([67c917d](https://github.com/andymai/hush/commit/67c917d6046d8b0e3b617d70ec6a3532025a0eea))
+
 ## [1.2.1](https://github.com/andymai/hush/compare/v1.2.0...v1.2.1) (2026-11-26)
 
 
