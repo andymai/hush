@@ -55,6 +55,11 @@ pub enum DaemonCommand {
     /// Keep the audio of the next take, from any trigger, in a file that only
     /// the user can read, for `hush tune`
     KeepNext,
+    /// Free the local model's memory while the daemon is idle, for
+    /// `hush tune`; the next take, or `reload`, loads it again
+    Unload,
+    /// Load the local model again after `unload`
+    Reload,
     /// Type the last transcript again
     PasteLast,
     /// Add words to the vocabulary; without `text`, the current selection

@@ -1063,6 +1063,18 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     processor.reload_vocabulary();
                 }
             },
+            SessionCommand::UnloadModel => {
+                if take.is_none() && shared.is_idle() && model.unload() {
+                    info!("Unloaded the model on request");
+                }
+                publish_model(&model);
+            },
+            SessionCommand::LoadModel => {
+                if model.begin_load() {
+                    info!("Loading the model on request");
+                }
+                publish_model(&model);
+            },
             SessionCommand::Rewrite(style) => {
                 if take.is_some() {
                     warn!("Ignoring the rewrite while recording");
