@@ -9,6 +9,7 @@
 //! Each portal sits behind a trait, so the logic around it (consent, the
 //! restore token, the gesture feed) runs in tests with a mock.
 
+pub mod appearance;
 pub mod background;
 pub mod keyboard;
 pub mod keysym;
