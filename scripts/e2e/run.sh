@@ -717,6 +717,34 @@ case_chunked_german() {
   [ "${parts:-0}" -ge 2 ] || fail "the take was not cut into parts (parts: ${parts:-none})"
 }
 
+# A take after a keep_next request leaves its audio in the runtime folder for
+# `hush tune`, readable only by the user; the next take removes it.
+case_keep_next() {
+  local kept=$CASE_HOME/run/hush/tune-take.flac reply text code=0
+  start_daemon
+  reply=$(in_home "$CASE_HOME" python3 -I -c '
+import json, os, socket
+s = socket.socket(socket.AF_UNIX)
+s.connect(os.path.join(os.environ["XDG_RUNTIME_DIR"], "hush", "hush.sock"))
+s.sendall(b"{\"command\":\"keep_next\"}\n")
+print(s.makefile().readline().strip())
+') || fail "the keep_next request failed"
+  log "keep_next: $reply"
+  assert_eq true "$(jq -r '.keep_next' <<<"$reply")" "keep_next in the reply"
+  record_clip "$SAMPLES/jfk.wav"
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  [ -f "$kept" ] || fail "no kept take at $kept"
+  assert_eq 600 "$(stat -c %a "$kept")" "the kept take's mode"
+  text=$(hush_cli transcribe "$kept") || code=$?
+  log "transcribe: exit $code, $text"
+  assert_exit 0 "$code" "hush transcribe of the kept take"
+  assert_words "$text" ask country
+  record_clip "$SAMPLES/jfk.wav"
+  stop_print_json
+  [ ! -e "$kept" ] || fail "the next take did not remove the kept take"
+}
+
 case_print_types_nothing() {
   start_daemon
   record_clip "$SAMPLES/jfk.wav"

@@ -52,6 +52,9 @@ pub enum DaemonCommand {
         events: bool,
     },
     Quit,
+    /// Keep the audio of the next take, from any trigger, in a file that only
+    /// the user can read, for `hush tune`
+    KeepNext,
     /// Type the last transcript again
     PasteLast,
     /// Add words to the vocabulary; without `text`, the current selection
@@ -301,6 +304,10 @@ pub struct DaemonResponse {
     /// In a status or watch reply: whether the overlay shows
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overlay: Option<OverlayStatus>,
+    /// In a status or watch reply: the next take's audio will be kept, so a
+    /// restart now would lose the request
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_next: bool,
 }
 
 impl DaemonResponse {
@@ -319,6 +326,7 @@ impl DaemonResponse {
             shortcuts: None,
             version: None,
             overlay: None,
+            keep_next: false,
         }
     }
 
@@ -337,7 +345,13 @@ impl DaemonResponse {
             shortcuts: None,
             version: None,
             overlay: None,
+            keep_next: false,
         }
+    }
+
+    pub fn with_keep_next(mut self, keep_next: bool) -> Self {
+        self.keep_next = keep_next;
+        self
     }
 
     pub fn with_overlay(mut self, overlay: Option<OverlayStatus>) -> Self {
@@ -801,6 +815,24 @@ mod tests {
             stops_in_ms: None,
         };
         assert_eq!(command.to_string(), "recording a command (0.5 s)");
+    }
+
+    #[test]
+    fn keep_next_is_a_plain_command_and_a_flag_only_when_set() {
+        assert_eq!(
+            serde_json::to_string(&DaemonCommand::KeepNext).unwrap(),
+            r#"{"command":"keep_next"}"#
+        );
+        let idle = DaemonResponse::ok(DaemonState::Idle);
+        assert!(!serde_json::to_string(&idle).unwrap().contains("keep_next"));
+        let waiting = idle.with_keep_next(true);
+        let json = serde_json::to_string(&waiting).unwrap();
+        assert!(json.ends_with(r#""keep_next":true}"#), "{json}");
+        assert!(
+            serde_json::from_str::<DaemonResponse>(&json)
+                .unwrap()
+                .keep_next
+        );
     }
 
     #[test]
