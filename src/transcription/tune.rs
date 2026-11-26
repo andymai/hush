@@ -223,6 +223,13 @@ impl TuneResult {
     pub fn holds_for(&self, gpu: Option<&GpuFingerprint>) -> bool {
         self.gpu.as_ref() == gpu
     }
+
+    /// The saved tune, when it timed the GPU and driver that Hush uses now.
+    pub fn current() -> Option<Self> {
+        let gpu = crate::transcription::device::GpuAvailability::detect();
+        let fingerprint = gpu.available.then(|| GpuFingerprint::current(gpu));
+        Self::load_from(&Self::path()).filter(|result| result.holds_for(fingerprint.as_ref()))
+    }
 }
 
 #[cfg(test)]

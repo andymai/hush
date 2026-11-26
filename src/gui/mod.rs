@@ -106,6 +106,8 @@ pub struct Machine {
     pub autostart: bool,
     /// The daemon waits to keep the next take for the tune
     pub keep_next: bool,
+    /// The last `hush tune`, when it timed this GPU and driver
+    pub tune: Option<crate::transcription::tune::TuneResult>,
     /// A compositor that runs no autostart entries and must start Hush
     /// from its own config
     pub startup_compositor: Option<crate::service::Compositor>,
@@ -141,6 +143,7 @@ impl Machine {
             },
             probe,
             keep_next: reply.as_ref().is_some_and(|reply| reply.keep_next),
+            tune: crate::transcription::tune::TuneResult::current(),
             safe_mode: reply.and_then(|reply| reply.safe_mode),
             start_delay,
             config_loads: Config::load().is_ok(),
@@ -941,6 +944,9 @@ impl Gui {
             return;
         };
         self.machine = machine;
+        if let Some(tune) = &self.machine.tune {
+            self.recommended = tune.pick.model;
+        }
         self.follow_file_and_safe_mode();
         if self.debounce.pending() {
             match self.machine.probe {
@@ -1318,6 +1324,7 @@ mod tests {
             vad_installed: true,
             autostart: false,
             keep_next: false,
+            tune: None,
             startup_compositor: None,
             cloud_keys: Vec::new(),
         }

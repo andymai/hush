@@ -9,7 +9,7 @@ use crate::config::paths;
 use crate::notify::{notify, NoticeKind};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 const PROC_NVIDIA_VERSION: &str = "/proc/driver/nvidia/version";
 
@@ -40,8 +40,8 @@ pub fn compare(before: Option<&Option<GpuFingerprint>>, now: Option<&GpuFingerpr
 }
 
 /// The GPU at this start, kept for the next start. Notifies when the GPU of
-/// the last start is gone, or when a Flatpak lacks the GL extension of the
-/// host's NVIDIA driver.
+/// the last start is gone, when a Flatpak lacks the GL extension of the
+/// host's NVIDIA driver, or when a new GPU or driver outdates the tune.
 pub fn check_at_start(gpu: &GpuAvailability) {
     if !GPU_BUILD {
         return;
@@ -54,13 +54,21 @@ pub fn check_at_start(gpu: &GpuAvailability) {
         debug!("Could not keep the GPU for the next start: {:#}", e);
     }
     let missing = missing_flatpak_gl();
+    let tuned_elsewhere = super::tune::TuneResult::load_from(&super::tune::TuneResult::path())
+        .is_some_and(|tune| !tune.holds_for(now.as_ref()));
     let notice = match (&change, now.is_none()) {
         (Change::Gone(before), _) => Some(gone_notice(Some(before), missing.as_deref())),
         (Change::First, true) if missing.is_some() => Some(gone_notice(None, missing.as_deref())),
+        (Change::New(gpu), _) if tuned_elsewhere => Some(retune_notice(gpu)),
         _ => None,
     };
     if let Some((title, body)) = notice {
-        warn!("{}: {}", title, body.replace('\n', " "));
+        let line = body.replace('\n', " ");
+        if matches!(change, Change::New(_)) {
+            info!("{}: {}", title, line);
+        } else {
+            warn!("{}: {}", title, line);
+        }
         notify(NoticeKind::Problem, title, &body);
     }
 }
@@ -90,6 +98,17 @@ pub fn gone_notice(
         },
     };
     (title, body)
+}
+
+/// The notice for a GPU or driver that the last tune did not time.
+pub fn retune_notice(gpu: &GpuFingerprint) -> (&'static str, String) {
+    (
+        "The hardware tune is out of date",
+        format!(
+            "Hush now runs on {} with {}. Run `hush tune` to pick the model for it again.",
+            gpu.gpu, gpu.driver
+        ),
+    )
 }
 
 /// In a Flatpak on a host with an NVIDIA driver: the GL extension that the
@@ -187,6 +206,17 @@ mod tests {
             Some("org.freedesktop.Platform.GL.nvidia-620-73-04")
         );
         assert_eq!(missing_extension("620.70.06", &mounted), None);
+    }
+
+    #[test]
+    fn a_new_driver_asks_for_a_new_tune() {
+        let (title, body) = retune_notice(&rtx("NVIDIA 620.73.04"));
+        assert_eq!(title, "The hardware tune is out of date");
+        assert_eq!(
+            body,
+            "Hush now runs on NVIDIA GeForce RTX 4080 SUPER with NVIDIA 620.73.04. Run `hush tune` \
+             to pick the model for it again."
+        );
     }
 
     #[test]

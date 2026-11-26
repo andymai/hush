@@ -238,19 +238,11 @@ impl<'de> serde::Deserialize<'de> for ModelSize {
 /// and a small machine should not swap while transcribing.
 pub fn recommended_model() -> ModelSize {
     static RECOMMENDED: OnceLock<ModelSize> = OnceLock::new();
-    *RECOMMENDED.get_or_init(|| {
-        let gpu = crate::transcription::device::GpuAvailability::detect();
-        let fingerprint = gpu
-            .available
-            .then(|| crate::transcription::gpu_fallback::GpuFingerprint::current(gpu));
-        let tuned = crate::transcription::tune::TuneResult::load_from(
-            &crate::transcription::tune::TuneResult::path(),
-        )
-        .filter(|result| result.holds_for(fingerprint.as_ref()));
-        match tuned {
-            Some(result) => result.pick.model,
-            None => recommended_model_for(gpu.available),
-        }
+    *RECOMMENDED.get_or_init(|| match crate::transcription::tune::TuneResult::current() {
+        Some(result) => result.pick.model,
+        None => {
+            recommended_model_for(crate::transcription::device::GpuAvailability::detect().available)
+        },
     })
 }
 
