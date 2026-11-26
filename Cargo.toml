@@ -150,10 +150,20 @@ toml = "1.1"
 serde = { version = "1.0", features = ["derive"] }
 clap = { version = "4.5", features = ["derive", "color", "help", "usage"] }
 
-# Overlay GUI dependencies
+# The settings window's widgets (eframe draws them)
 egui = "0.29"
-egui_overlay = "0.9"
-raw-window-handle = "0.6"
+
+# The recording overlay: a separate process that draws on the CPU and shows
+# the image on a Wayland layer-shell surface or an X11 window
+tiny-skia = { version = "0.11", default-features = false, features = [
+  "std",
+  "simd",
+] }
+ab_glyph = "0.2"
+# No xkbcommon: the overlay takes no keyboard input, and the default feature
+# links the system libxkbcommon through pkg-config
+smithay-client-toolkit = { version = "0.20", default-features = false }
+wayland-client = "0.31"
 
 # Application directories (XDG)
 dirs = "7.0"
@@ -208,7 +218,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # X11 window system; xkb reads the active layout on X11 sessions
-x11rb = { version = "0.14", features = ["xkb"] }
+x11rb = { version = "0.14", features = ["xkb", "shape", "randr"] }
 
 # Kernel-level keyboard emulation (uinput)
 input-linux = "0.7"

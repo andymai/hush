@@ -221,6 +221,19 @@ impl TakeResult {
     }
 }
 
+/// Whether the daemon shows the recording overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayStatus {
+    Running,
+    /// The session has neither a layer-shell compositor nor an X11 display
+    Unavailable,
+    /// The overlay crashed again and again, or Hush was updated under it
+    Failed,
+    /// `overlay.enabled` is off
+    Off,
+}
+
 /// Something that happened, sent to a watch that asked for events.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -285,6 +298,9 @@ pub struct DaemonResponse {
     /// compares with its own after an upgrade
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// In a status or watch reply: whether the overlay shows
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<OverlayStatus>,
 }
 
 impl DaemonResponse {
@@ -302,6 +318,7 @@ impl DaemonResponse {
             start_delay: None,
             shortcuts: None,
             version: None,
+            overlay: None,
         }
     }
 
@@ -319,7 +336,13 @@ impl DaemonResponse {
             start_delay: None,
             shortcuts: None,
             version: None,
+            overlay: None,
         }
+    }
+
+    pub fn with_overlay(mut self, overlay: Option<OverlayStatus>) -> Self {
+        self.overlay = overlay;
+        self
     }
 
     pub fn with_version(mut self, version: &str) -> Self {

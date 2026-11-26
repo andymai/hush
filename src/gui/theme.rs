@@ -239,12 +239,12 @@ pub fn icon_font(size: f32) -> FontId {
 pub fn fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let embedded: [(&str, &'static [u8]); 6] = [
-        ("geist", include_bytes!("fonts/Geist-Regular.ttf")),
-        (MEDIUM, include_bytes!("fonts/Geist-Medium.ttf")),
-        (SEMIBOLD, include_bytes!("fonts/Geist-SemiBold.ttf")),
-        ("geist-mono", include_bytes!("fonts/GeistMono-Regular.ttf")),
-        (MONO_MEDIUM, include_bytes!("fonts/GeistMono-Medium.ttf")),
-        (ICONS, include_bytes!("fonts/lucide.ttf")),
+        ("geist", crate::fonts::GEIST_REGULAR),
+        (MEDIUM, crate::fonts::GEIST_MEDIUM),
+        (SEMIBOLD, crate::fonts::GEIST_SEMIBOLD),
+        ("geist-mono", crate::fonts::GEIST_MONO_REGULAR),
+        (MONO_MEDIUM, crate::fonts::GEIST_MONO_MEDIUM),
+        (ICONS, crate::fonts::LUCIDE),
     ];
     for (name, bytes) in embedded {
         fonts

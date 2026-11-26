@@ -92,7 +92,7 @@ src/
 ├── text_processing/# Pipeline: filler removal → vocabulary → entities → LLM polish
 ├── text/           # uinput typing through the XKB keymap (xkb.rs, typing.rs, layout.rs), clipboard paste fallback, window detection (X11, Hyprland, Sway, KWin)
 ├── hotkey/         # Hotkey combination parser, evdev backend, X11 fallback, gesture detector, menu mask
-├── overlay/        # egui floating window UI
+├── overlay/        # The recording pill: its own process (`hush overlay`) on a socket pair from the daemon (supervisor.rs), drawn on the CPU (render.rs), on layer-shell or X11 (present/)
 ├── gui/            # eframe window (`hush settings`): own title bar and sidebar (chrome.rs), controls (widgets.rs), save on each change and one debounced daemon restart (autosave.rs), palette, fonts, and sizes (theme.rs), pages in gui/pages, evdev key capture, mic level meter
 ├── tray/           # StatusNotifierItem panel icon and the Hush mark
 ├── config/         # TOML settings, API keys from the environment and .env, `config export` and `import` (transfer.rs)
@@ -119,7 +119,7 @@ Transcribed text flows through: filler word removal → vocabulary expansion →
 ## Pinned Dependencies
 
 These constraints hold:
-- egui and eframe 0.29 (egui_overlay 0.9 requires egui ^0.29; Dependabot ignores their minor and major updates)
+- egui and eframe 0.29 (the settings window's code targets 0.29; Dependabot ignores their minor and major updates until the upgrade)
 - `SequentialSlice` comes from rubato's `audioadapter_buffers` re-export, not a
   direct dependency, so its `Adapter`/`AdapterMut` impls always match rubato's
 - rodio needs the `playback` feature explicitly, since it uses

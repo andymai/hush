@@ -94,21 +94,18 @@ The command fails when no attestation from `andymai/hush` matches the file.
 ### Ubuntu / Debian
 ```bash
 sudo apt install build-essential cmake pkg-config libasound2-dev \
-  libx11-dev libxi-dev libxtst-dev libxcursor-dev libxrandr-dev libxinerama-dev libgl1-mesa-dev \
   glslc libvulkan-dev spirv-headers
 ```
 
 ### Fedora
 ```bash
 sudo dnf install gcc gcc-c++ cmake make pkgconf-pkg-config alsa-lib-devel \
-  libX11-devel libXi-devel libXtst-devel libXcursor-devel libXrandr-devel libXinerama-devel mesa-libGL-devel \
   glslc vulkan-headers vulkan-loader-devel spirv-headers-devel
 ```
 
 ### Arch Linux
 ```bash
 sudo pacman -S base-devel cmake pkgconf alsa-lib \
-  libx11 libxi libxtst libxcursor libxrandr libxinerama mesa \
   shaderc vulkan-headers vulkan-icd-loader spirv-headers
 ```
 

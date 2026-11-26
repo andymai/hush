@@ -6,9 +6,10 @@ sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: hush
 finish-args:
-  # The settings window uses Wayland. The overlay draws through GLFW on X11, so
-  # it needs X11 also on a Wayland session (Xwayland): without DISPLAY, GLFW
-  # panics and the daemon aborts.
+  # The settings window uses Wayland. The overlay uses a layer-shell surface
+  # where the compositor offers one to a sandboxed app; elsewhere (GNOME, or
+  # a compositor that withholds layer-shell from sandboxes) it draws in an X11
+  # window through Xwayland.
   - --socket=wayland
   - --socket=x11
   - --share=ipc

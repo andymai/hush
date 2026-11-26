@@ -19,6 +19,8 @@ If the first word of a recording gets cut off, the microphone probably sleeps be
 
 After such a slow recording, the Speech page of `hush settings` shows the same warning, with a button for each command. Hush does not keep a Bluetooth microphone awake, because an open headset link lowers the sound quality.
 
+If no pill shows while you record, run `hush doctor` and read its `Overlay` line. `unavailable` means the session has neither a compositor with layer-shell nor an X11 display, as on GNOME without Xwayland. `failed` means the overlay crashed five times in a row, or a package upgrade replaced Hush under it; `hush daemon restart` starts it again. Dictation works either way.
+
 If Hush does not start at login on a package install, run `systemctl --user status hush.service`. `hush install --autostart` enables the unit, and `journalctl --user -u hush.service` shows why a start failed. On Sway, Hyprland, or niri started from a TTY, neither the unit nor an autostart entry runs at login. Add the line from [commands.md](commands.md) to the compositor's config.
 
 If `hush setup permissions` cannot run where you are (a container, an SSH session), `hush setup permissions --print` prints the udev rule to apply as root.

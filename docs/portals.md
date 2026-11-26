@@ -15,4 +15,6 @@ The paste chord is Shift+Insert, because Shift and Insert have the same place on
 
 Portal mode needs KDE Plasma 6 or GNOME 48, or a later version. xdg-desktop-portal-wlr, -gtk, and -hyprland have no RemoteDesktop portal. On Sway, Hyprland, and other wlroots compositors, install Hush from a package instead. `hush doctor` shows which portals the desktop has.
 
+In the Flatpak, the recording pill uses a layer-shell surface when the compositor gives one to a sandboxed app. Otherwise it draws in an X11 window through Xwayland, so the manifest asks for X11 as well as Wayland.
+
 If you refuse keyboard access, Hush puts the text on the clipboard and does not ask again. Run `hush daemon restart`, and the desktop asks at the next dictation. To try portal mode outside a sandbox, set `backend = "portal"` under `[input]` and restart the daemon.

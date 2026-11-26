@@ -6,9 +6,10 @@ runs:
   steps:
     # transcribe-cpp-sys builds transcribe.cpp with cmake and, for the vulkan
     # feature, compiles its shaders with glslc against the Vulkan and SPIR-V
-    # headers; cpal needs ALSA headers; the overlay's GLFW build and x11rb need
-    # the X11 and GL files. The keymap tests load libxkbcommon and read the
-    # xkb-data layouts. TRANSCRIBE_CMAKE_ARGS keeps OpenBLAS out of the link,
+    # headers; cpal needs ALSA headers. The X11 and GL libraries load at run
+    # time (x11rb speaks the protocol itself), so the build needs no headers
+    # for them. The keymap tests load libxkbcommon and read the xkb-data
+    # layouts. TRANSCRIBE_CMAKE_ARGS keeps OpenBLAS out of the link,
     # as the release job does. ggml's CPU code is a module for each x86 level,
     # and each process loads the one that its runner can run, so a cache from
     # one runner is safe on another.
@@ -19,8 +20,6 @@ runs:
         sudo apt-get install -y --no-install-recommends \
           cmake pkg-config \
           libasound2-dev \
-          libx11-dev libxi-dev libxtst-dev libxcursor-dev \
-          libxrandr-dev libxinerama-dev libgl1-mesa-dev \
           libvulkan-dev libxkbcommon0 xkb-data spirv-headers
         # Ubuntu 22.04, which the release job uses for its glibc floor, has no
         # glslc package; LunarG's Vulkan repository ships it as shaderc.

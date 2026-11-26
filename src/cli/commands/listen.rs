@@ -28,7 +28,6 @@ use crate::hotkey::{
 use crate::ipc::protocol::{DaemonState, ModelState, NO_TAKE};
 use crate::ipc::{SessionCommand, TakeResult, TakeWaiter};
 use crate::notify::{notify, NoticeKind};
-use crate::overlay::{OverlayState, OverlayWindowBuilder};
 use crate::portal::{ConsentRefused, InputMode};
 use crate::text::WindowInfo;
 use crate::text_processing::styles::{self, StyleName, TakeStyle};
@@ -64,7 +63,7 @@ struct CommandTarget {
 ///
 /// * `options.editing_mode` - Text editing aggressiveness: "light", "medium", or "aggressive"
 /// * `options.no_processing` - If true, skip LLM-based text processing (rule-based only)
-/// * `options.no_button` - If true, hide the idle overlay button
+/// * `options.no_button` - Accepted for older scripts: the overlay shows no idle pill
 ///
 /// # Workflow
 ///
@@ -76,7 +75,7 @@ struct CommandTarget {
 ///    - Initialize text processor with LLM (if enabled)
 ///    - Initialize text inserter
 ///    - Setup voice command system (parser, executor, history)
-///    - Create overlay window with tiny design
+///    - Start the overlay process (`crate::overlay::supervisor`)
 ///
 /// 2. **Multi-threaded Execution**
 ///    - **Hotkey Thread**: Listens for Ctrl+Shift+Space press/release
@@ -88,12 +87,10 @@ struct CommandTarget {
 ///      - Process text with LLM (if enabled)
 ///      - Insert text with 200ms delay
 ///      - Record in history for undo
-///      - Update overlay state
-///    - **Overlay Thread**: Manages visual feedback window
 ///    - **Main Thread**: Handles audio recording pipeline
 ///      - Start/stop recording on commands
-///      - Give the start cue and show the overlay at the first audio frame,
-///        or cancel when no audio arrives in 5 s
+///      - Give the start cue at the first audio frame, or cancel when no
+///        audio arrives in 5 s
 ///      - Stop and transcribe a take when its audio stops for 2 s
 ///      - Build a new input stream before the take after a stall or a start timeout
 ///      - Monitor amplitude during recording
@@ -113,15 +110,15 @@ struct CommandTarget {
 /// - Invalid editing mode: Returns error immediately
 /// - Transcriber initialization failure: Continues with simulated mode
 /// - Text processor initialization failure: Falls back to rule-based only
-/// - Text inserter initialization failure: Only shows text in overlay
-/// - Recording/transcription errors: Displays error in overlay
+/// - Text inserter initialization failure: Logs the failure and runs on
+/// - Recording/transcription errors: Sent to watches as events, which the overlay shows
 ///
 /// # Performance Notes
 ///
-/// - Amplitude updates batched at 20 Hz to match overlay repaint rate
+/// - Amplitude averaged over 33 ms frames for the meter watches
 /// - Text insertion delayed 200ms for UI responsiveness
 /// - Multi-threaded design keeps hotkey response instant
-/// - Overlay runs in separate thread for smooth visuals
+/// - The overlay runs in a separate process
 ///
 /// # Privacy
 ///
@@ -424,7 +421,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         },
         Err(e) => {
             warn!("Failed to initialize text inserter: {}", e);
-            warn!("Transcribed text will only be shown in overlay");
             None
         },
     };
@@ -441,24 +437,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let insertion_history = Arc::new(Mutex::new(InsertionHistory::new()));
     info!("✅ Voice command system initialized");
 
-    // Create overlay
-    let overlay = OverlayWindowBuilder::new()
-        .show_button_when_idle(false)
-        .hotkey(&hotkey_combination)
-        .build();
-
-    let state_handle = overlay.state();
-    let egui_context_handle = overlay.egui_context();
-
     // Hotkey handler thread: raw presses become gestures, gestures become commands
     let audio_cmd_tx_clone = audio_cmd_tx.clone();
-    let state_handle_clone = state_handle.clone();
     let shared_hotkey = Arc::clone(&shared);
     let tap_window = std::time::Duration::from_millis(config.hotkey.tap_ms);
     // A held key ends its own session, so silence must never end it.
     let key_held = Arc::new(AtomicBool::new(false));
     let key_held_hotkey = Arc::clone(&key_held);
-    // The overlay shows the lock when the first audio frame arrives.
+    // A hands-free take is long enough to need parts.
     let hands_free = Arc::new(AtomicBool::new(false));
     let hands_free_hotkey = Arc::clone(&hands_free);
     let hotkey_thread = thread::spawn(move || {
@@ -516,13 +502,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     gesture.language(),
                     gesture.style(),
                 )),
-                // The overlay stays in Recording until transcription completes
                 Some(GestureAction::Stop) => Some(SessionCommand::StopRecording),
                 Some(GestureAction::Cancel) => Some(SessionCommand::CancelRecording),
                 None => None,
             };
             if gesture.is_locked() {
-                state_handle_clone.lock().set_locked(true);
                 shared_hotkey.set_locked();
             }
             if let Some(command) = command {
@@ -539,7 +523,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     });
 
     // Result handler thread
-    let state_handle_clone2 = state_handle.clone();
     let text_inserter_clone = text_inserter.clone();
     let text_processor_clone = text_processor.clone();
     let profiles = config.profiles.clone();
@@ -613,7 +596,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             transcript_hook.as_ref(),
                             &hook_env,
                         );
-                        *state_handle_clone2.lock() = OverlayState::idle();
                         shared_result.set_idle();
                         continue;
                     }
@@ -625,7 +607,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
                     // An undo types backspaces, and a printed take must type nothing.
                     if exec_result.undo_requested && printer.is_some() {
-                        *state_handle_clone2.lock() = OverlayState::idle();
                         shared_result.set_idle();
                         finish(printer, TakeResult::NoSpeech);
                         continue;
@@ -651,31 +632,20 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
                                 #[cfg(target_os = "linux")]
                                 match inserter.lock().undo_last_insertion(last_entry.char_count) {
-                                    Ok(_) => {
-                                        *state_handle_clone2.lock() = OverlayState::idle();
-                                    },
+                                    Ok(_) => {},
                                     Err(e) => {
                                         error!("Undo failed: {}", e);
                                         shared_result.report_error("Undo failed");
-                                        *state_handle_clone2.lock() = OverlayState::error(
-                                            "Undo failed",
-                                            std::time::Duration::from_secs(3),
-                                        );
                                     },
                                 }
 
                                 #[cfg(not(target_os = "linux"))]
                                 {
                                     warn!("Undo not supported on this platform");
-                                    *state_handle_clone2.lock() = OverlayState::idle();
                                 }
                             } else {
                                 warn!("No recent insertion to undo");
                                 shared_result.report_error("Nothing to undo");
-                                *state_handle_clone2.lock() = OverlayState::error(
-                                    "Nothing to undo",
-                                    std::time::Duration::from_secs(2),
-                                );
                             }
                         }
                         shared_result.set_idle();
@@ -730,7 +700,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                 text: String::new(),
                             },
                         );
-                        *state_handle_clone2.lock() = OverlayState::idle();
                         shared_result.set_idle();
                         continue;
                     };
@@ -782,15 +751,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         printer.finish(TakeResult::from_text(processed_text.clone()));
                     }
 
-                    // Update overlay
-                    let _display_text = if processed_text.chars().count() > 50 {
-                        let truncated: String = processed_text.chars().take(47).collect();
-                        format!("{}...", truncated)
-                    } else {
-                        processed_text
-                    };
-
-                    *state_handle_clone2.lock() = OverlayState::idle();
                     shared_result.set_idle();
                 },
                 TranscriptionResult::Rewrite {
@@ -828,31 +788,19 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     error!("❌ Transcription failed: {}", error_msg);
                     let _ = feedback.play_error();
                     shared_result.report_error(&error_msg);
-                    *state_handle_clone2.lock() =
-                        OverlayState::error(&error_msg, std::time::Duration::from_secs(4));
                     shared_result.set_idle();
                 },
             }
         }
     });
 
-    // GLFW draws the overlay on X11 and aborts the whole process without
-    // DISPLAY. A Flatpak without X11, or Wayland without Xwayland, has only
-    // WAYLAND_DISPLAY.
-    let has_display = std::env::var_os("DISPLAY").is_some();
-    let overlay_thread = if has_display {
-        Some(thread::spawn(move || {
-            if let Err(e) = overlay.run() {
-                warn!(
-                    "The overlay did not start, so the daemon runs without it: {e:#}. \
-                     Run `hush daemon restart` after the graphics driver is ready"
-                );
-            }
-        }))
-    } else {
-        info!("No display, so the daemon runs without the overlay");
-        None
-    };
+    // A process of its own draws the overlay, so its faults cannot stop dictation.
+    crate::overlay::supervisor::start(
+        config.overlay.enabled,
+        Arc::clone(&shared),
+        audio_cmd_tx.clone(),
+        tokio::runtime::Handle::current(),
+    );
 
     // Main thread: audio handling
     info!("🚀 Audio handler ready");
@@ -862,17 +810,10 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     // Stop signal for amplitude thread - shared between main loop and amplitude thread
     let amplitude_stop_signal = Arc::new(AtomicBool::new(false));
 
-    let show = |next: OverlayState| {
-        *state_handle.lock() = next;
-        if let Some(ctx) = egui_context_handle.lock().as_ref() {
-            ctx.request_repaint();
-        }
-    };
     let mut take: Option<TakeClock> = None;
     let mut take_parts: Option<TakeParts<SpeechToText>> = None;
     let cap = LengthCap::new(config.audio.max_recording_secs);
     let mut cap_warned = false;
-    let mut cap_shown: Option<u64> = None;
     let silence_pause = (config.audio.silence_stop_secs > 0)
         .then(|| std::time::Duration::from_secs(config.audio.silence_stop_secs));
     let silence_heard = Arc::new(AtomicBool::new(false));
@@ -920,12 +861,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         }
                         shared.set_recording(clock.live_since().unwrap_or(now));
                         media.live(clock.live_since().unwrap_or(now));
-                        let mut recording = OverlayState::start_recording();
-                        recording.set_locked(hands_free.load(Ordering::Acquire));
-                        if command_target.is_some() {
-                            recording.set_warning(Some("cmd".to_string()));
-                        }
-                        show(recording);
                         let _ = feedback.play_start();
                     },
                     Some(StartEvent::TimedOut) => {
@@ -957,10 +892,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                             ),
                         );
                         shared.report_error("The microphone did not start");
-                        show(OverlayState::error(
-                            "The microphone did not start",
-                            Duration::from_secs(4),
-                        ));
                         shared.set_idle();
                         continue;
                     },
@@ -1059,14 +990,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                 "Recording stops soon",
                                 &format!("Hush stops recording in {} seconds.", remaining_secs),
                             );
-                        }
-                        if cap_shown != Some(remaining_secs) {
-                            cap_shown = Some(remaining_secs);
-                            state_handle.lock().set_warning(Some(format!(
-                                "{}:{:02}",
-                                remaining_secs / 60,
-                                remaining_secs % 60
-                            )));
                         }
                     },
                 }
@@ -1206,7 +1129,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 if clock.is_live() {
                     let _ = feedback.play_cancel();
                 }
-                show(OverlayState::idle());
                 shared.set_idle();
             },
             SessionCommand::StartRecording(..) | SessionCommand::StartCommand => {
@@ -1234,10 +1156,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     audio_capture.disable_amplitude_monitoring();
                     let _ = feedback.play_error();
                     shared.report_error("Failed to start recording");
-                    show(OverlayState::error(
-                        "Failed to start recording",
-                        Duration::from_secs(4),
-                    ));
                 } else {
                     take = Some(TakeClock::new(stream_started));
                     if let Some(parts) = take_parts.take() {
@@ -1270,18 +1188,16 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         last_text: shared.last_text(),
                     });
                     cap_warned = false;
-                    cap_shown = None;
                     silence_sent = false;
                     silence_heard.store(false, Ordering::Release);
                     // Start polling amplitude updates with batching for performance
-                    let state_handle_amp = state_handle.clone();
                     let shared_amp = Arc::clone(&shared);
                     let stop_signal = amplitude_stop_signal.clone();
                     let mut silence = silence_pause.map(SilenceDetector::new);
                     let silence_heard_amp = Arc::clone(&silence_heard);
 
-                    // Average the amplitude over each meter frame (30 per second), so the
-                    // overlay and meter watches get one smoothed value per frame
+                    // Average the amplitude over each meter frame (30 per second), so
+                    // meter watches such as the overlay get one value per frame
                     let amplitude_thread = std::thread::spawn(move || {
                         let mut amplitude_buffer = Vec::with_capacity(10);
                         let update_interval = std::time::Duration::from_millis(33);
@@ -1311,11 +1227,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                             0.0
                                         };
 
-                                        let mut state = state_handle_amp.lock();
-                                        if state.is_recording() {
-                                            state.update_amplitude(avg_amplitude);
-                                        }
-                                        drop(state);
                                         shared_amp.publish_level(avg_amplitude);
                                         // Don't break here - let stop_signal control exit
 
@@ -1360,7 +1271,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     media.ended();
                     info!("Recording stopped before the microphone delivered audio, discarding it");
                     command_target = None;
-                    show(OverlayState::idle());
                     shared.set_idle();
                     finish(printer, TakeResult::NoSpeech);
                     continue;
@@ -1436,7 +1346,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         "Take too faint to transcribe"
                     );
                     report_empty_take(empty, &audio_capture.get_device_name(), feedback);
-                    show(OverlayState::idle());
                     shared.set_idle();
                     finish(printer, TakeResult::NoSpeech);
                     continue;
@@ -1449,7 +1358,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
                 if matches!(model.state(), SlotState::Loading | SlotState::Unloaded) {
                     info!("The take waits for the model to load");
-                    show(OverlayState::processing("Loading the model"));
                 }
                 let chunked = parts.as_ref().is_some_and(TakeParts::has_parts);
                 let mut part_files = PartFiles::default();
@@ -1518,7 +1426,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                 &audio_capture.get_device_name(),
                                 feedback,
                             );
-                            show(OverlayState::idle());
                             shared.set_idle();
                             finish(printer, TakeResult::NoSpeech);
                             continue;
@@ -1584,8 +1491,6 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     let _ = hotkey_thread.join();
     let _ = result_thread.join();
-    // The overlay window only closes when the process exits, so it is not joined.
-    drop(overlay_thread);
 
     info!("Listen mode ended");
     Ok(())
@@ -1594,7 +1499,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 const RECOVER_HINT: &str = "Hush kept the audio. Run `hush recover` to transcribe it again.";
 
 /// Tell the user that some parts of a take are missing from its text.
-/// What the overlay and the tray call the dictation key in portal mode: the
+/// What the tray calls the dictation key in portal mode: the
 /// key the desktop bound, or a hint where to set one.
 fn dictation_label(bindings: &[crate::ipc::protocol::PortalShortcut]) -> String {
     bindings
@@ -2090,7 +1995,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_overlay_names_the_desktop_key_in_portal_mode() {
+    fn the_tray_names_the_desktop_key_in_portal_mode() {
         use crate::ipc::protocol::PortalShortcut;
         let shortcut = |id: &str, trigger: &str| PortalShortcut {
             id: id.into(),

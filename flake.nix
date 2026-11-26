@@ -10,7 +10,7 @@
       pkgs = nixpkgs.legacyPackages.${system};
       inherit (pkgs) lib;
 
-      # winit, glutin, GLFW, and the typing keymap load these with dlopen, so the linker does not record them.
+      # winit, glutin, and the typing keymap load these with dlopen, so the linker does not record them.
       dlopenLibs = with pkgs; [
         libGL
         vulkan-loader

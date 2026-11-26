@@ -41,6 +41,9 @@ pub struct Config {
     /// Panel status icon
     #[serde(default)]
     pub tray: TrayConfig,
+    /// The pill at the bottom of the screen
+    #[serde(default)]
+    pub overlay: OverlayConfig,
     /// Delivered transcripts kept for the History page
     #[serde(default)]
     pub history: HistoryConfig,
@@ -169,6 +172,21 @@ pub struct TrayConfig {
 }
 
 impl Default for TrayConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Recording overlay settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct OverlayConfig {
+    /// Show the pill at the bottom of the screen while a take records and
+    /// is transcribed
+    pub enabled: bool,
+}
+
+impl Default for OverlayConfig {
     fn default() -> Self {
         Self { enabled: true }
     }

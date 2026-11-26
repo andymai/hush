@@ -102,6 +102,7 @@ text="$(hush stop --print)" && notify-send "Hush heard" "$text"
 | `command` | While a recording runs: `true` when it is a Command Mode instruction, else `false`. `null` outside a recording |
 | `stops_in_ms` | Once the recording cap is near: the time until it stops the recording, else `null` |
 | `style` | The style that the recording in progress asked for (`--style` or a style key), else `null` |
+| `overlay` | `running`, `unavailable` (no layer-shell and no X11 display), `failed` (it crashed again and again, or Hush was updated under it), or `off` (`overlay.enabled = false`); `null` when no daemon runs |
 | `daemon_version` | The version of the daemon that answered, else `null`. After an upgrade, it can differ from `hush --version` until the daemon restarts |
 | `model_state` | `loaded`, `loading`, or `unloaded` for the local model; `none` for a cloud or server backend; `null` when no daemon runs |
 | `backend` | `local`, `groq`, `openai`, or `openai-compatible` |

@@ -3,6 +3,6 @@
     "appstream-external-screenshot-url": "A build outside the Flathub pipeline does not mirror the screenshots to dl.flathub.org",
     "appstream-remote-icon-not-mirrored": "A build outside the Flathub pipeline does not mirror the icons to dl.flathub.org",
     "appstream-screenshots-not-mirrored-in-ostree": "Hush's own Flatpak repository keeps the screenshot URLs of the metainfo, and only the Flathub pipeline mirrors screenshots into OSTree",
-    "finish-args-contains-both-x11-and-wayland": "The overlay draws through GLFW on X11, so it needs X11 also on a Wayland session, and the settings window uses Wayland"
+    "finish-args-contains-both-x11-and-wayland": "The overlay draws in an X11 window where the compositor offers no layer-shell to a sandboxed app (GNOME, some wlroots compositors), and the settings window uses Wayland"
   }
 }

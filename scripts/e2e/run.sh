@@ -12,6 +12,7 @@
 #   HUSH_E2E_PARAKEET_MODEL  a Parakeet GGUF file (default: parakeet-v3, downloaded once into the cache)
 #   HUSH_E2E_KEEP=1          keep the temporary folder with the daemon logs
 #   HUSH_E2E_ALLOW_UINPUT=1  run without the /dev/uinput guard (only on a machine without a desktop)
+#   HUSH_E2E_OVERLAY=1       pass the display to the test daemons, so their overlay shows on this desktop
 
 set -euo pipefail
 
@@ -356,7 +357,8 @@ make_home() {
 }
 
 # The whole environment of a test process: the test home, the PipeWire socket,
-# and PATH. Nothing else from the caller's session: no display, no session bus.
+# and PATH. Nothing else from the caller's session: no session bus, and no
+# display unless HUSH_E2E_OVERLAY asks for one.
 home_env() {
   local home=$1
   HOME_ENV=(
@@ -367,6 +369,18 @@ home_env() {
     PIPEWIRE_RUNTIME_DIR="$PW_RUNTIME" PIPEWIRE_NODE="$MIC"
     PIPEWIRE_PROPS="$STREAM_PROPS"
   )
+  if [[ "${HUSH_E2E_OVERLAY:-}" == 1 ]]; then
+    # The test daemon's runtime folder is its own, so the Wayland socket
+    # needs its full path.
+    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+      local socket=$WAYLAND_DISPLAY
+      [[ $socket == /* ]] || socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$socket"
+      HOME_ENV+=(WAYLAND_DISPLAY="$socket")
+    fi
+    if [[ -n "${DISPLAY:-}" ]]; then
+      HOME_ENV+=(DISPLAY="$DISPLAY")
+    fi
+  fi
 }
 
 in_home() {
