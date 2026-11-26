@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/andymai/hush/compare/v1.4.0...v1.5.0) (2026-11-26)
+
+
+### Features
+
+* **overlay:** draw the recording pill on the CPU in a process of its own ([#357](https://github.com/andymai/hush/issues/357)) ([5c0ea66](https://github.com/andymai/hush/commit/5c0ea66ec94344b15bf95e4d8fb8816c6e4affac))
+* **report:** write one bug-report file with personal details removed ([#362](https://github.com/andymai/hush/issues/362)) ([c604b3b](https://github.com/andymai/hush/commit/c604b3bca1c564e88b1dda0d8c06cc72ddb6f8c6))
+
 ## [1.4.0](https://github.com/andymai/hush/compare/v1.3.0...v1.4.0) (2026-11-26)
 
 
