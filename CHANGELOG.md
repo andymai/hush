@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/andymai/hush/compare/v1.3.0...v1.4.0) (2026-11-26)
+
+
+### Features
+
+* **gpu:** tell the user when the GPU of the last start is gone, with the fix ([#360](https://github.com/andymai/hush/issues/360)) ([bdc03e2](https://github.com/andymai/hush/commit/bdc03e27d12fa06961f3be68e825f108a856cbbf))
+
 ## [1.3.0](https://github.com/andymai/hush/compare/v1.2.1...v1.3.0) (2026-11-26)
 
 
