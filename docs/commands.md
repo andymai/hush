@@ -37,6 +37,7 @@ Models:
 | `hush models set <size>` | Select the active model |
 | `hush models remove <size>` | Delete a downloaded model |
 | `hush models info` / `verify [size] [--fix]` | Show stats, or re-check model files |
+| `hush tune [--prefer faster\|balanced\|accurate] [--apply] [--audio <file> --reference <words>] [--json]` | Time base on the GPU and the CPU, and recommend the most accurate model that keeps up. `--apply` downloads and selects the pick, times it, and takes the next smaller model if it misses the budget |
 
 Setup:
 

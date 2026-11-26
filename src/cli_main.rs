@@ -150,6 +150,44 @@ pub enum Commands {
     #[command(hide = true)]
     Overlay,
 
+    /// Time a model on the CPU and the GPU, and recommend the most accurate
+    /// model that keeps up on this machine
+    Tune {
+        /// A WAV or FLAC file to time on (default: the take that the daemon
+        /// kept for the tune, else a clip that comes with Hush)
+        #[arg(long)]
+        audio: Option<std::path::PathBuf>,
+        /// The words that the audio holds, to show the accuracy
+        #[arg(long)]
+        reference: Option<String>,
+        /// How fast the text must come
+        #[arg(long, value_enum, default_value_t)]
+        prefer: crate::transcription::tune::Preference,
+        /// The model to time (default: base)
+        #[arg(long)]
+        model: Option<String>,
+        /// Print the result as JSON
+        #[arg(long)]
+        json: bool,
+        /// Download and use the recommended model, time it, and take a
+        /// smaller one if it misses the budget
+        #[arg(long)]
+        apply: bool,
+    },
+
+    /// One timing of `hush tune`, in a process of its own
+    #[command(hide = true)]
+    TuneWorker {
+        #[arg(long)]
+        model: std::path::PathBuf,
+        #[arg(long)]
+        audio: std::path::PathBuf,
+        #[arg(long, default_value = "auto")]
+        language: String,
+        #[arg(long)]
+        gpu: bool,
+    },
+
     /// Type the last transcript again (talks to the daemon)
     PasteLast,
 
