@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/andymai/hush/compare/v1.5.0...v1.6.0) (2026-11-26)
+
+
+### Features
+
+* **ipc:** keep the next take's audio on request, for the hardware tune ([#365](https://github.com/andymai/hush/issues/365)) ([93c48fb](https://github.com/andymai/hush/commit/93c48fb484889fdde2a0f8beaab3c2e2febe44b2))
+
 ## [1.5.0](https://github.com/andymai/hush/compare/v1.4.0...v1.5.0) (2026-11-26)
 
 
