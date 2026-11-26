@@ -127,6 +127,34 @@ fn has_render_node(dir: &Path) -> bool {
     })
 }
 
+/// A GPU, its ggml backend, and the driver that runs it: what tells one
+/// setup apart from the next after a driver update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpuFingerprint {
+    /// ggml's description of the GPU
+    pub gpu: String,
+    /// The ggml backend: CUDA or Vulkan
+    pub backend: String,
+    /// The NVIDIA driver version, or the kernel release for other GPUs
+    pub driver: String,
+}
+
+impl GpuFingerprint {
+    /// The GPU that ggml found, with the driver that runs it now.
+    pub fn current(gpu: &GpuAvailability) -> Self {
+        let read = |path: &str| std::fs::read_to_string(path).ok();
+        Self {
+            gpu: gpu.device_name.clone(),
+            backend: gpu.gpu_type.to_string(),
+            driver: driver_label(
+                &gpu.device_name,
+                read(NVIDIA_VERSION).as_deref(),
+                read(KERNEL_RELEASE).as_deref(),
+            ),
+        }
+    }
+}
+
 /// A GPU that failed a take, the driver that ran it, and the model family.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GpuFailure {
@@ -150,15 +178,15 @@ impl GpuFailure {
     /// The GPU that ggml found, with the driver that runs it now, for a
     /// model of `family`.
     pub fn current(gpu: &GpuAvailability, family: Family) -> Self {
-        let read = |path: &str| std::fs::read_to_string(path).ok();
+        let GpuFingerprint {
+            gpu,
+            backend,
+            driver,
+        } = GpuFingerprint::current(gpu);
         Self {
-            gpu: gpu.device_name.clone(),
-            backend: gpu.gpu_type.to_string(),
-            driver: driver_label(
-                &gpu.device_name,
-                read(NVIDIA_VERSION).as_deref(),
-                read(KERNEL_RELEASE).as_deref(),
-            ),
+            gpu,
+            backend,
+            driver,
             family: family.name().to_string(),
         }
     }

@@ -135,6 +135,11 @@ pub async fn checks() -> Vec<Check> {
         let backends = backends_report(device::init_backends(), &device::loaded_modules());
         let backends_loaded = backends.level == Level::Ok;
         checks.push(backends);
+        if let Some(check) =
+            flatpak_gl_check(crate::transcription::gpu_notice::missing_flatpak_gl())
+        {
+            checks.push(check);
+        }
         checks.push(model_check(&config, &models_dir));
         let manager = ModelManager::new(&models_dir).ok();
         checks.push(vad_check(
@@ -220,6 +225,17 @@ fn permissions_check() -> Check {
 
 /// The ggml modules that loaded: the CPU code that ggml picked for this CPU,
 /// and the GPU backend.
+/// A line only when the Flatpak lacks the GL extension of the host's NVIDIA
+/// driver, which leaves the speech model on the CPU.
+fn flatpak_gl_check(missing: Option<String>) -> Option<Check> {
+    let extension = missing?;
+    Some(Check::fail(
+        "Flatpak GPU driver",
+        "the sandbox lacks the graphics driver of the host's NVIDIA driver, so the model runs on the CPU",
+        format!("flatpak install flathub {} && hush daemon restart", extension),
+    ))
+}
+
 fn backends_report(loaded: anyhow::Result<()>, modules: &Modules) -> Check {
     const NAME: &str = "Backends";
     match loaded {
@@ -1105,6 +1121,21 @@ mod tests {
         let empty = crate::updates::UpdateState::default();
         let check = updates_report(true, crate::updates::InstallKind::Flatpak, &empty);
         assert_eq!(check.detail, "Flathub or the Flatpak remote updates Hush");
+    }
+
+    #[test]
+    fn a_missing_flatpak_gl_extension_is_a_failure_with_the_command() {
+        assert!(flatpak_gl_check(None).is_none());
+        let check =
+            flatpak_gl_check(Some("org.freedesktop.Platform.GL.nvidia-620-73-04".into())).unwrap();
+        assert_eq!(check.level, Level::Fail);
+        assert_eq!(
+            check.fix.as_deref(),
+            Some(
+                "flatpak install flathub org.freedesktop.Platform.GL.nvidia-620-73-04 \
+                 && hush daemon restart"
+            )
+        );
     }
 
     #[test]

@@ -197,11 +197,19 @@ impl WhisperTranscriber {
         let gpu = GpuAvailability::detect();
         if use_gpu && !gpu.available {
             if gpu_fallback::GPU_BUILD {
-                warn!(
-                    "The speech model loads on the CPU, because ggml found no GPU. The graphics \
-                     driver was probably not ready when Hush started, for example at login. \
-                     Run `hush daemon restart` to use the GPU"
-                );
+                match super::gpu_notice::missing_flatpak_gl() {
+                    Some(extension) => warn!(
+                        "The speech model loads on the CPU, because the Flatpak lacks the \
+                         graphics driver of the host's NVIDIA driver. Install it, then restart \
+                         Hush: flatpak install flathub {}",
+                        extension
+                    ),
+                    None => warn!(
+                        "The speech model loads on the CPU, because ggml found no GPU. The \
+                         graphics driver was probably not ready when Hush started, for example \
+                         at login. Run `hush daemon restart` to use the GPU"
+                    ),
+                }
             } else {
                 warn!("GPU acceleration requested but no GPU backend is available; using CPU");
             }
