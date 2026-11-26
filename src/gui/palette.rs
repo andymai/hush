@@ -266,7 +266,15 @@ pub const SETTINGS: &[Setting] = &[
         "Speech model",
         Page::Speech,
         "Model",
-        "whisper tiny base small medium large parakeet size accuracy",
+        "whisper tiny base small medium large turbo parakeet size accuracy",
+    )
+    .when(model_list),
+    row(
+        "speech.tune",
+        "Hardware tune",
+        Page::Speech,
+        "Model",
+        "tune benchmark speed gpu cpu recommend time measure",
     )
     .when(model_list),
     row(
@@ -587,6 +595,7 @@ pub enum Action {
     StopHush,
     GrantAccess,
     Download,
+    Tune,
     FindMicrophones,
     KeepMicAwake,
     LetMicSleep,
@@ -601,12 +610,13 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 16] = [
+    pub const ALL: [Action; 17] = [
         Action::StartHush,
         Action::RestartHush,
         Action::StopHush,
         Action::GrantAccess,
         Action::Download,
+        Action::Tune,
         Action::FindMicrophones,
         Action::KeepMicAwake,
         Action::LetMicSleep,
@@ -629,6 +639,7 @@ impl Action {
             },
             Action::GrantAccess => ("overview.access", Some(Page::Overview)),
             Action::Download => ("speech.download", Some(Page::Speech)),
+            Action::Tune => ("speech.tune", Some(Page::Speech)),
             Action::FindMicrophones => ("speech.microphone", Some(Page::Speech)),
             Action::KeepMicAwake | Action::LetMicSleep => ("speech.wake", Some(Page::Speech)),
             Action::OpenConfigFile => ("desktop.config_file", Some(Page::Desktop)),
@@ -648,7 +659,7 @@ impl Action {
         match self {
             Action::StartHush | Action::RestartHush | Action::StopHush => "Status",
             Action::GrantAccess => "Keyboard access",
-            Action::Download => "Model",
+            Action::Download | Action::Tune => "Model",
             Action::FindMicrophones | Action::KeepMicAwake | Action::LetMicSleep => "Microphone",
             Action::OpenConfigFile | Action::Reset => "Configuration file",
             Action::ImportWords | Action::ExportWords => "Vocabulary",
@@ -665,7 +676,7 @@ impl Action {
             Action::StopHush => icons::CIRCLE_STOP,
             Action::GrantAccess => icons::SHIELD_CHECK,
             Action::Download => icons::DOWNLOAD,
-            Action::FindMicrophones => icons::REFRESH_CW,
+            Action::FindMicrophones | Action::Tune => icons::REFRESH_CW,
             Action::KeepMicAwake => icons::MIC,
             Action::OpenConfigFile => icons::FILE_TEXT,
             Action::ImportWords => icons::FILE_INPUT,
@@ -686,6 +697,7 @@ impl Action {
             Action::StopHush => "daemon quit off",
             Action::GrantAccess => "permissions udev uinput input group keyboard",
             Action::Download => "model whisper fetch install voice detection vad",
+            Action::Tune => "tune benchmark speed gpu cpu recommend model time measure",
             Action::FindMicrophones => "refresh microphones input devices rescan",
             Action::KeepMicAwake => {
                 "wake sleep suspend wireplumber pipewire first word cut off slow"
@@ -716,6 +728,8 @@ impl Action {
                     _ => "Download voice detection".to_string(),
                 }
             },
+            Action::Tune if gui.machine.tune.is_some() => "Tune again",
+            Action::Tune => "Tune Hush to this machine",
             Action::FindMicrophones => "Look for microphones again",
             Action::KeepMicAwake => "Keep the microphone awake",
             Action::LetMicSleep => "Let the microphone sleep again",
@@ -738,6 +752,7 @@ impl Action {
             Action::RestartHush | Action::StopHush => gui.machine.running(),
             Action::GrantAccess => !gui.machine.permissions.ready(),
             Action::Download => speech::download_offer(gui).is_some(),
+            Action::Tune => model_list(gui),
             Action::FindMicrophones | Action::OpenConfigFile | Action::Reset => true,
             Action::KeepMicAwake => speech::wake_offer(gui) == Some(speech::WakeAction::Keep),
             Action::LetMicSleep => speech::wake_offer(gui) == Some(speech::WakeAction::Release),
@@ -786,6 +801,10 @@ impl Action {
                     speech::start_download(gui, size);
                     self.show_row(gui, ctx);
                 }
+            },
+            Action::Tune => {
+                speech::start_tune(gui);
+                self.show_row(gui, ctx);
             },
             Action::FindMicrophones => {
                 gui.microphones = meter::input_devices();

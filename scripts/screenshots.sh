@@ -62,6 +62,8 @@ trap cleanup EXIT
 
 export HOME="$work/home"
 export XDG_RUNTIME_DIR="$work/run" XDG_CONFIG_HOME="$HOME/.config" XDG_DATA_HOME="$HOME/.local/share"
+# The state folder holds the tune result and the GPU record of this machine.
+export XDG_STATE_HOME="$HOME/.local/state" XDG_CACHE_HOME="$HOME/.cache"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$work/no-bus"
 unset DISPLAY WAYLAND_DISPLAY HUSH_CONFIG
 mkdir -p -m 700 "$XDG_RUNTIME_DIR/hush"

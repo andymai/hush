@@ -48,6 +48,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     backend(gui, ui);
     if !gui.config.transcription.backend.is_cloud() {
         models(gui, ui);
+        tune(gui, ui);
     }
     listening(gui, ui);
     microphone(gui, ui);
@@ -915,6 +916,69 @@ pub fn start_download(gui: &mut Gui, size: ModelSize) {
 }
 
 /// The name this model has in `transcription.model_size`.
+/// The last hardware tune, and a button that runs it again.
+fn tune(gui: &mut Gui, ui: &mut egui::Ui) {
+    let (title, text) = tune_summary(gui.machine.tune.as_ref());
+    let label = if gui.machine.tune.is_some() {
+        "Tune again"
+    } else {
+        "Tune"
+    };
+    let mut clicked = false;
+    row("speech.tune", title)
+        .describe(&text)
+        .reserve(140.0)
+        .show(ui, |ui| {
+            clicked = ui.add(Button::new(label).icon(icons::REFRESH_CW)).clicked();
+        });
+    if clicked {
+        start_tune(gui);
+    }
+}
+
+pub fn start_tune(gui: &mut Gui) {
+    gui.run_hush(&["tune"], "Timing the models on this machine…");
+}
+
+/// The title and the line of the tune row: the last result, or what a
+/// tune does.
+fn tune_summary(tune: Option<&crate::transcription::tune::TuneResult>) -> (&'static str, String) {
+    use crate::transcription::tune::DeviceKind;
+    let Some(tune) = tune else {
+        return (
+            "Hardware tune",
+            "Times base on this machine's GPU and CPU, and recommends the most accurate model \
+             that keeps up."
+                .to_string(),
+        );
+    };
+    let device = |kind: DeviceKind| match kind {
+        DeviceKind::Gpu => "the GPU",
+        DeviceKind::Cpu => "the CPU",
+    };
+    let runs: Vec<String> = tune
+        .measured
+        .iter()
+        .map(|run| {
+            format!(
+                "{} ran {:.0}x real time on {}",
+                run.model,
+                run.speed,
+                device(run.device)
+            )
+        })
+        .collect();
+    (
+        "Last hardware tune",
+        format!(
+            "{}. It recommends {} on {}.",
+            runs.join(", "),
+            size_key(tune.pick.model),
+            device(tune.pick.device)
+        ),
+    )
+}
+
 pub fn size_key(size: ModelSize) -> &'static str {
     match size {
         ModelSize::Tiny => "tiny",
@@ -1177,5 +1241,35 @@ mod tests {
                 "{code} passes validation"
             );
         }
+    }
+
+    #[test]
+    fn the_tune_row_names_the_runs_and_the_pick() {
+        use crate::transcription::tune::{DeviceKind, Measured, Pick, Preference, TuneResult};
+        let (title, text) = tune_summary(None);
+        assert_eq!(title, "Hardware tune");
+        assert!(text.starts_with("Times base"));
+        let tune = TuneResult {
+            gpu: None,
+            preference: Preference::Balanced,
+            measured: vec![Measured {
+                device: DeviceKind::Gpu,
+                model: ModelSize::Base,
+                speed: 276.8,
+                memory_total: None,
+                word_error_rate: None,
+            }],
+            pick: Pick {
+                model: ModelSize::LargeV3,
+                device: DeviceKind::Gpu,
+                speed: 42.6,
+            },
+        };
+        let (title, text) = tune_summary(Some(&tune));
+        assert_eq!(title, "Last hardware tune");
+        assert_eq!(
+            text,
+            "base ran 277x real time on the GPU. It recommends large-v3 on the GPU."
+        );
     }
 }
