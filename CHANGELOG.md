@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/andymai/hush/compare/v1.1.1...v1.1.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* **overlay:** keep the daemon running when GLFW cannot make an OpenGL window ([#350](https://github.com/andymai/hush/issues/350)) ([8d71e9f](https://github.com/andymai/hush/commit/8d71e9f8b5b000d729fa83645379ff121c8448f5))
+
 ## [1.1.1](https://github.com/andymai/hush/compare/v1.1.0...v1.1.1) (2026-11-16)
 
 
