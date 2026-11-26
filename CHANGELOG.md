@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/andymai/hush/compare/v1.10.0...v1.11.0) (2026-11-26)
+
+
+### Features
+
+* **overlay:** pill colors that follow the desktop, presets, a theme file, and reduced motion ([#375](https://github.com/andymai/hush/issues/375)) ([ebe1fa1](https://github.com/andymai/hush/commit/ebe1fa14509b1dfb47f48af787c960db5e3617b9))
+
 ## [1.10.0](https://github.com/andymai/hush/compare/v1.9.0...v1.10.0) (2026-11-26)
 
 
