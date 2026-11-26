@@ -4,8 +4,8 @@
 //! when the take ends, and a watch replies once for each state change.
 
 use super::protocol::{
-    DaemonCommand, DaemonResponse, DaemonState, Level, ModelState, TakeResult, WatchEvent,
-    FILE_TIMEOUT, PRINT_TIMEOUT,
+    DaemonCommand, DaemonResponse, DaemonState, Level, ModelState, OverlayStatus, TakeResult,
+    WatchEvent, FILE_TIMEOUT, PRINT_TIMEOUT,
 };
 use crate::audio::take::{StartDelay, StartDelays};
 use crate::portal::shortcuts::ShortcutsHandle;
@@ -116,6 +116,7 @@ pub struct SharedState {
     /// newest value, so a slow reader gets fewer lines, never a backlog.
     level: watch::Sender<f32>,
     events: broadcast::Sender<WatchEvent>,
+    overlay: Mutex<Option<OverlayStatus>>,
     safe_mode: Mutex<Option<String>>,
     start_delays: Mutex<StartDelays>,
     /// The GlobalShortcuts session, in portal mode.
@@ -142,6 +143,7 @@ impl SharedState {
             changes: watch::channel(()).0,
             level: watch::channel(0.0).0,
             events: broadcast::channel(EVENT_BACKLOG).0,
+            overlay: Mutex::new(None),
             safe_mode: Mutex::new(None),
             start_delays: Mutex::new(StartDelays::default()),
             shortcuts: Mutex::new(None),
@@ -283,6 +285,14 @@ impl SharedState {
         }
     }
 
+    /// Watchers hear only a change.
+    pub fn set_overlay(&self, status: OverlayStatus) {
+        let changed = self.overlay.lock().replace(status) != Some(status);
+        if changed {
+            self.changes.send_replace(());
+        }
+    }
+
     /// The microphone level of the take that records, from 0 to 1.
     pub fn publish_level(&self, level: f32) {
         self.level.send_replace(level.clamp(0.0, 1.0));
@@ -396,6 +406,7 @@ impl SharedState {
             .with_safe_mode(self.safe_mode.lock().clone())
             .with_start_delay(self.start_delay())
             .with_version(env!("CARGO_PKG_VERSION"))
+            .with_overlay(*self.overlay.lock())
     }
 
     /// The style that the start of the take in progress asked for.
@@ -479,6 +490,25 @@ pub async fn start(
         path: path.to_path_buf(),
         task,
     })
+}
+
+/// Serve one client on a stream that is already connected, such as the
+/// overlay's end of its socket pair.
+pub async fn serve_stream(
+    stream: std::os::unix::net::UnixStream,
+    shared: &SharedState,
+    control: &mpsc::Sender<SessionCommand>,
+) {
+    let stream = match UnixStream::from_std(stream) {
+        Ok(stream) => stream,
+        Err(e) => {
+            debug!("The overlay's socket did not open: {}", e);
+            return;
+        },
+    };
+    if let Err(e) = handle_client(stream, shared, control).await {
+        debug!("The overlay's socket closed: {:#}", e);
+    }
 }
 
 async fn handle_client(

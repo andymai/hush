@@ -73,8 +73,6 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake pkg-config dpkg-dev \
             libasound2-dev \
-            libx11-dev libxi-dev libxtst-dev libxcursor-dev \
-            libxrandr-dev libxinerama-dev libgl1-mesa-dev \
             libvulkan-dev spirv-headers
           # Ubuntu 22.04 has no glslc package; LunarG's Vulkan repository ships it as shaderc.
           if apt-cache show glslc >/dev/null 2>&1; then

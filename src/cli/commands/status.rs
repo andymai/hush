@@ -127,6 +127,8 @@ pub struct StatusReport {
     /// The version of the daemon that answered, which can differ from this
     /// command's version after an upgrade
     pub daemon_version: Option<String>,
+    /// Whether the daemon shows the recording overlay
+    pub overlay: Option<crate::ipc::protocol::OverlayStatus>,
     pub model_state: Option<ModelState>,
     pub backend: Option<TranscriptionBackend>,
     pub model: Option<String>,
@@ -206,6 +208,7 @@ impl StatusReport {
             },
             style: reply.and_then(|reply| reply.style.clone()),
             daemon_version: reply.and_then(|reply| reply.version.clone()),
+            overlay: reply.and_then(|reply| reply.overlay),
             model_state: reply.and_then(|reply| reply.model_state),
             backend: transcription.map(|t| t.backend),
             model: transcription.map(|t| match t.cloud_model() {
@@ -310,6 +313,7 @@ mod tests {
                 "model_path",
                 "model_state",
                 "os",
+                "overlay",
                 "running",
                 "safe_mode",
                 "sample_rate",

@@ -138,6 +138,10 @@ pub enum Commands {
     /// Open the setup and settings window
     Settings,
 
+    /// The recording overlay; the daemon starts it with a socket on fd 3
+    #[command(hide = true)]
+    Overlay,
+
     /// Type the last transcript again (talks to the daemon)
     PasteLast,
 

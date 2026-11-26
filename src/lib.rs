@@ -47,6 +47,9 @@ pub mod gui;
 /// Launcher and autostart entries
 pub mod desktop;
 
+/// The embedded fonts
+pub mod fonts;
+
 /// The systemd user unit that the packages ship
 pub mod service;
 

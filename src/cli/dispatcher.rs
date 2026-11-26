@@ -39,6 +39,7 @@ impl CommandDispatcher {
             Commands::Cancel => "cancel",
             Commands::Doctor => "doctor",
             Commands::Settings => "settings",
+            Commands::Overlay => "overlay",
             Commands::PasteLast => "paste-last",
             Commands::Shortcuts { .. } => "shortcuts",
             Commands::Learn { .. } => "learn",
@@ -148,6 +149,7 @@ impl CommandDispatcher {
             // The window owns a runtime of its own; dropping it inside this
             // async context panics unless the thread leaves the runtime first.
             Commands::Settings => tokio::task::block_in_place(crate::gui::run),
+            Commands::Overlay => tokio::task::block_in_place(|| crate::overlay::run()),
             Commands::PasteLast => handle_client_command(DaemonCommand::PasteLast).await,
             Commands::Shortcuts { configure } => handle_shortcuts(configure).await,
             Commands::Learn { text } => {

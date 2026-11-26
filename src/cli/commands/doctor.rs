@@ -199,7 +199,30 @@ pub async fn checks() -> Vec<Check> {
     checks.push(updates_check(&config));
     checks.push(autostart_check());
     checks.push(daemon_line(reply.as_ref()));
+    if let Some(check) = overlay_line(reply.as_ref()) {
+        checks.push(check);
+    }
     checks
+}
+
+/// The overlay's line, from the daemon's status reply; `None` without a
+/// daemon, or with one from before the overlay process.
+fn overlay_line(reply: Option<&crate::ipc::DaemonResponse>) -> Option<Check> {
+    use crate::ipc::protocol::OverlayStatus;
+    Some(match reply?.overlay? {
+        OverlayStatus::Running => Check::ok("Overlay", "shows while a take records"),
+        OverlayStatus::Off => Check::ok("Overlay", "off (overlay.enabled)"),
+        OverlayStatus::Unavailable => Check::warn(
+            "Overlay",
+            "no surface: the session has neither layer-shell nor an X11 display",
+            "Turn on Xwayland, or use a compositor with layer-shell",
+        ),
+        OverlayStatus::Failed => Check::warn(
+            "Overlay",
+            "stopped after repeated failures, or Hush was updated under it",
+            "hush daemon restart",
+        ),
+    })
 }
 
 fn permissions_check() -> Check {
@@ -1154,6 +1177,24 @@ mod tests {
             "{fix}"
         );
         assert_eq!(daemon_line(None).level, Level::Warn);
+    }
+
+    #[test]
+    fn the_overlay_line_follows_the_status_reply() {
+        use crate::ipc::protocol::OverlayStatus;
+        use crate::ipc::{DaemonResponse, DaemonState};
+        assert!(overlay_line(None).is_none());
+        let older = DaemonResponse::ok(DaemonState::Idle);
+        assert!(
+            overlay_line(Some(&older)).is_none(),
+            "a daemon from before the overlay process"
+        );
+        let failed = older.clone().with_overlay(Some(OverlayStatus::Failed));
+        let line = overlay_line(Some(&failed)).unwrap();
+        assert_eq!(line.level, Level::Warn);
+        assert_eq!(line.fix.as_deref(), Some("hush daemon restart"));
+        let running = older.with_overlay(Some(OverlayStatus::Running));
+        assert_eq!(overlay_line(Some(&running)).unwrap().level, Level::Ok);
     }
 
     #[test]
