@@ -168,16 +168,38 @@ impl OverlayWindow {
             egui_context_storage: self.egui_context,
         };
 
-        start_fullscreen_overlay(app);
+        start_fullscreen_overlay(app)?;
 
         info!("Overlay window closed");
         Ok(())
     }
 }
 
+// GlfwBackend::new panics when GLFW cannot start or cannot make an OpenGL
+// window, and the release profile aborts on panic, so the whole daemon dies.
+// For example, a Flatpak without the GL extension for the host's NVIDIA
+// driver gets "GLX: No GLXFBConfigs returned".
+fn probe_gl_window() -> Result<()> {
+    use egui_overlay::egui_window_glfw_passthrough::glfw::{
+        self, ClientApiHint, WindowHint, WindowMode,
+    };
+
+    let mut glfw_context =
+        glfw::init(glfw::log_errors).map_err(|e| anyhow::anyhow!("GLFW did not start: {e:?}"))?;
+    glfw_context.window_hint(WindowHint::Visible(false));
+    glfw_context.window_hint(WindowHint::TransparentFramebuffer(true));
+    glfw_context.window_hint(WindowHint::ClientApi(ClientApiHint::OpenGl));
+    glfw_context
+        .create_window(1, 1, "hush overlay probe", WindowMode::Windowed)
+        .map(drop)
+        .ok_or_else(|| anyhow::anyhow!("GLFW could not make an OpenGL window"))
+}
+
 /// Custom start function that creates a fullscreen overlay
-fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
+fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) -> Result<()> {
     use egui_overlay::egui_window_glfw_passthrough::{glfw, GlfwBackend, GlfwConfig};
+
+    probe_gl_window()?;
 
     let (monitor_size, monitor_pos) = *PRIMARY_MONITOR_INFO;
     info!(
@@ -237,13 +259,14 @@ fn start_fullscreen_overlay<T: EguiOverlay + 'static>(user_data: T) {
     };
 
     overlay_app.enter_event_loop();
+    Ok(())
 }
 
 /// Get the primary monitor's resolution and position
 fn get_primary_monitor_info() -> Option<([u32; 2], [i32; 2])> {
     use egui_overlay::egui_window_glfw_passthrough::glfw;
 
-    let mut glfw_context = glfw::init(glfw::fail_on_errors).ok()?;
+    let mut glfw_context = glfw::init(glfw::log_errors).ok()?;
 
     glfw_context.with_connected_monitors(|_, monitors| {
         info!("Detected {} monitor(s)", monitors.len());
@@ -377,4 +400,18 @@ fn set_skip_taskbar_x11(window_id: u32) -> anyhow::Result<()> {
 
     conn.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlay_glfw_calls_return_errors_without_a_display() {
+        if std::env::var_os("DISPLAY").is_some() {
+            return;
+        }
+        assert!(probe_gl_window().is_err());
+        assert!(get_primary_monitor_info().is_none());
+    }
 }
