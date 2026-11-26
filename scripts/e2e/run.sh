@@ -785,6 +785,40 @@ case_start_delay() {
   esac
 }
 
+# `unload` frees the model while the daemon is idle, and the next take loads
+# it again; `reload` loads it without a take.
+case_unload_reload() {
+  local reply state
+  start_daemon
+  reply=$(socket_request '{"command":"unload"}') || fail "the unload request failed"
+  log "unload: $reply"
+  assert_eq unloaded "$(jq -r '.model_state' <<<"$reply")" "the model after unload"
+  record_clip "$SAMPLES/jfk.wav"
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  assert_words "$TAKE_TEXT" ask country
+  socket_request '{"command":"unload"}' >/dev/null || fail "the second unload failed"
+  reply=$(socket_request '{"command":"reload"}') || fail "the reload request failed"
+  log "reload: $reply"
+  for _ in $(seq 1 100); do
+    state=$(hush_cli status --json | jq -r '.model_state')
+    [ "$state" = loaded ] && return 0
+    sleep 0.1
+  done
+  fail "the model did not load after reload: $state"
+}
+
+# One JSON request on the test daemon's socket, and its one-line reply.
+socket_request() {
+  in_home "$CASE_HOME" python3 -I -c '
+import os, socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.connect(os.path.join(os.environ["XDG_RUNTIME_DIR"], "hush", "hush.sock"))
+s.sendall(sys.argv[1].encode() + b"\n")
+print(s.makefile().readline().strip())
+' "$1"
+}
+
 # --- Runner -----------------------------------------------------------------
 
 all_cases() { compgen -A function case_ | sed 's/^case_//'; }

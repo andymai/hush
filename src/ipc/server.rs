@@ -48,6 +48,10 @@ pub enum SessionCommand {
     TranscribeFile,
     /// Rewrite the selected text with the prompt of the style
     Rewrite(StyleName),
+    /// Free the local model while no take runs
+    UnloadModel,
+    /// Load the local model when it is unloaded
+    LoadModel,
     Quit,
 }
 
@@ -567,6 +571,7 @@ async fn handle_client(
         Ok(DaemonCommand::Transcribe { path }) => {
             transcribe_file(shared, control, path, FILE_TIMEOUT).await
         },
+        Ok(DaemonCommand::Unload) => unload_model(shared, control, UNLOAD_TIMEOUT).await,
         Ok(DaemonCommand::Shortcuts { configure }) => {
             portal_shortcuts(shared.shortcuts(), shared.snapshot(), configure).await
         },
@@ -653,6 +658,42 @@ async fn watch(
             },
         }
     }
+}
+
+/// How long an unload waits for the session to free the model.
+const UNLOAD_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Free the local model, and reply once the session says it is unloaded.
+/// A take in progress, or a backend without a local model, refuses.
+async fn unload_model(
+    shared: &SharedState,
+    control: &mpsc::Sender<SessionCommand>,
+    timeout: Duration,
+) -> DaemonResponse {
+    match shared.model_state() {
+        Some(ModelState::Remote) => {
+            return DaemonResponse::error("The transcription backend has no local model to unload")
+        },
+        Some(ModelState::Unloaded) => return shared.status(),
+        _ => {},
+    }
+    if !shared.is_idle() {
+        return DaemonResponse::error("Hush is busy with a take; try again when it is idle");
+    }
+    if control.send(SessionCommand::UnloadModel).is_err() {
+        return DaemonResponse::error("The daemon session is no longer running");
+    }
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if shared.model_state() == Some(ModelState::Unloaded) {
+            return shared.status();
+        }
+        if !shared.is_idle() {
+            return DaemonResponse::error("A take started, so the model stays loaded");
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    DaemonResponse::error("The model did not unload in time")
 }
 
 /// Stop the take and reply with its text when the session finishes it. The
@@ -769,6 +810,7 @@ pub fn respond(
             Ok(()) => shared.status(),
             Err(reason) => DaemonResponse::error(reason),
         },
+        DaemonCommand::Reload => forward(SessionCommand::LoadModel, shared.snapshot()),
         DaemonCommand::Quit => forward(SessionCommand::Quit, DaemonState::Stopping),
         DaemonCommand::PasteLast => {
             if shared.last_text().is_none() {
@@ -807,6 +849,9 @@ pub fn respond(
         DaemonCommand::Shortcuts { .. } => DaemonResponse::error(
             "The shortcut reply waits for the portal; send it over the socket",
         ),
+        DaemonCommand::Unload => {
+            DaemonResponse::error("An unload waits for the session; send it over the socket")
+        },
     }
 }
 
@@ -1324,6 +1369,32 @@ mod tests {
             "a plain watch got neither the level nor the error"
         );
         drop(guard);
+    }
+
+    #[tokio::test]
+    async fn unload_waits_for_the_session_and_refuses_a_busy_daemon() {
+        let shared = Arc::new(SharedState::new());
+        let (tx, rx) = mpsc::channel();
+        shared.set_model_state(ModelState::Loaded);
+        shared.set_starting(false, None);
+        let busy = unload_model(&shared, &tx, Duration::from_millis(50)).await;
+        assert!(!busy.ok, "a take in progress keeps the model");
+        assert!(rx.try_recv().is_err());
+
+        shared.set_idle();
+        let session = Arc::clone(&shared);
+        let answer = std::thread::spawn(move || {
+            assert_eq!(rx.recv().unwrap(), SessionCommand::UnloadModel);
+            session.set_model_state(ModelState::Unloaded);
+        });
+        let reply = unload_model(&shared, &tx, Duration::from_secs(2)).await;
+        answer.join().unwrap();
+        assert!(reply.ok);
+        assert_eq!(reply.model_state, Some(ModelState::Unloaded));
+
+        shared.set_model_state(ModelState::Remote);
+        let cloud = unload_model(&shared, &tx, Duration::from_millis(50)).await;
+        assert!(!cloud.ok, "a cloud backend has no local model");
     }
 
     #[test]
