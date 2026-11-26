@@ -1,0 +1,36 @@
+src/cli/dispatcher.rs
+  s_5332262e639a7a::t_37fe884a6557f3 4-6
+  s_5332262e639a7a::t_858f4d669683d6 41,149
+docs/commands.md
+  s_5332262e639a7a::t_858f4d669683d6 22
+src/cli_main.rs
+  s_5332262e639a7a::t_38607402ae6c55 141
+  s_5332262e639a7a::t_858f4d669683d6 138-140,142-145
+src/config/transfer.rs
+  s_5332262e639a7a::t_33a050c17a8df3 23,385-386
+src/cli/commands/mod.rs
+  s_5332262e639a7a::t_858f4d669683d6 9,51
+src/cli/commands/report.rs
+  s_5332262e639a7a::t_186630ba143faf 274-279,281,284
+  s_5332262e639a7a::t_38607402ae6c55 112,121
+  s_5332262e639a7a::t_404caeb23995d9 1-28,34,40-43,47-81,87-111,113-120,122-273,280,282-283,285-294,296-339,348-372
+  s_5332262e639a7a::t_37fe884a6557f3 29-33,35-39,44-46,82-86,295,340-347
+docs/privacy.md
+  s_5332262e639a7a::t_b0ca827ef40183 9-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ca68fa6519dc534fcfc84595e73f68b8c7b5dc78",
+  "prompts": {},
+  "sessions": {
+    "s_5332262e639a7a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cafc310-b19c-4b54-8739-6ec8a3669200",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
