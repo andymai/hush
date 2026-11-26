@@ -1,0 +1,33 @@
+src/transcription/gpu_fallback.rs
+  s_5332262e639a7a::t_577c190471d5e3 130-157,181-185,187-189
+src/transcription/whisper.rs
+  s_5332262e639a7a::t_577c190471d5e3 200-212
+src/cli/commands/listen.rs
+  s_5332262e639a7a::t_577c190471d5e3 368-372
+src/transcription/gpu_notice.rs
+  s_5332262e639a7a::t_b0a77d6a37183c 70-73,118,161-164,184,198-199,201-203
+  s_5332262e639a7a::t_f29dd7fd2c903e 1-69,74-117,119-160,165-183,185-197,200,204-217
+src/transcription/mod.rs
+  s_5332262e639a7a::t_577c190471d5e3 28
+src/cli/commands/doctor.rs
+  s_5332262e639a7a::t_b0a77d6a37183c 138-142,228-238,1126-1138
+  s_5332262e639a7a::t_ad9d11bc620ce1 1139-1140
+docs/troubleshooting.md
+  s_5332262e639a7a::t_b322e628dafd59 28-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ae57c0b06944a633db1b4df60087c794dd8b8e58",
+  "prompts": {},
+  "sessions": {
+    "s_5332262e639a7a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cafc310-b19c-4b54-8739-6ec8a3669200",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
