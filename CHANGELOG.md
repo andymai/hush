@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/andymai/hush/compare/v1.1.2...v1.2.0) (2026-11-26)
+
+
+### Features
+
+* **ipc:** report the lock, command, cap, and style of a take, and stream the level and errors ([#353](https://github.com/andymai/hush/issues/353)) ([b4fa765](https://github.com/andymai/hush/commit/b4fa7651d4d4ab5d3ace83dcb058ccda55c77524))
+
 ## [1.1.2](https://github.com/andymai/hush/compare/v1.1.1...v1.1.2) (2026-11-26)
 
 
