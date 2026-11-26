@@ -2,15 +2,20 @@
 //! Sway). The surface exists only while the pill shows: a mapped surface
 //! over a fullscreen game would stop direct scanout.
 
-use super::{poll, Failure, Presenter};
+use super::{pixels, poll, Failure, Pointer, Presenter, Rect, Wake};
 use crate::overlay::render::{to_bgra, BOTTOM_MARGIN, SURFACE_HEIGHT, SURFACE_WIDTH};
 use anyhow::Context;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, Region},
-    delegate_compositor, delegate_layer, delegate_output, delegate_registry, delegate_shm,
+    delegate_compositor, delegate_layer, delegate_output, delegate_pointer, delegate_registry,
+    delegate_seat, delegate_shm,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
+    seat::{
+        pointer::{PointerEvent, PointerEventKind, PointerHandler},
+        Capability, SeatHandler, SeatState,
+    },
     shell::{
         wlr_layer::{
             Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
@@ -27,7 +32,7 @@ use tracing::debug;
 use wayland_client::{
     backend::WaylandError,
     globals::registry_queue_init,
-    protocol::{wl_output, wl_shm, wl_surface},
+    protocol::{wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
     Connection, DispatchError, EventQueue, QueueHandle,
 };
 
@@ -39,6 +44,12 @@ pub struct LayerShellPresenter {
 struct State {
     registry: RegistryState,
     outputs: OutputState,
+    seats: SeatState,
+    pointer: Option<wl_pointer::WlPointer>,
+    /// The part of the surface that takes clicks, in logical pixels
+    input: Option<(i32, i32, i32, i32)>,
+    /// What the pointer did since the last wait
+    events: Vec<Pointer>,
     compositor: CompositorState,
     layer_shell: LayerShell,
     shm: Shm,
@@ -78,6 +89,10 @@ impl LayerShellPresenter {
         let state = State {
             registry: RegistryState::new(&globals),
             outputs: OutputState::new(&globals, &handle),
+            seats: SeatState::new(&globals, &handle),
+            pointer: None,
+            input: None,
+            events: Vec::new(),
             compositor,
             layer_shell,
             shm,
@@ -120,14 +135,27 @@ impl Presenter for LayerShellPresenter {
         self.queue.flush().map_err(wayland_failure)
     }
 
-    fn wait(&mut self, link: BorrowedFd<'_>, timeout: Option<Duration>) -> Result<bool, Failure> {
+    fn set_input(&mut self, rect: Option<Rect>) -> Result<(), Failure> {
+        let input = rect.map(|rect| pixels(rect, 1.0));
+        if input != self.state.input {
+            self.state.input = input;
+            self.state.apply_input();
+            self.queue.flush().map_err(wayland_failure)?;
+        }
+        Ok(())
+    }
+
+    fn wait(&mut self, link: BorrowedFd<'_>, timeout: Option<Duration>) -> Result<Wake, Failure> {
         self.queue
             .dispatch_pending(&mut self.state)
             .map_err(dispatch_failure)?;
         self.queue.flush().map_err(wayland_failure)?;
         let Some(guard) = self.queue.prepare_read() else {
             // Events wait in the queue: the loop dispatches them first.
-            return Ok(false);
+            return Ok(Wake {
+                link: false,
+                pointer: std::mem::take(&mut self.state.events),
+            });
         };
         let ready =
             poll(&[guard.connection_fd(), link], timeout).map_err(|e| Failure::Broken(e.into()))?;
@@ -139,15 +167,38 @@ impl Presenter for LayerShellPresenter {
         self.queue
             .dispatch_pending(&mut self.state)
             .map_err(dispatch_failure)?;
-        Ok(ready[1])
+        Ok(Wake {
+            link: ready[1],
+            pointer: std::mem::take(&mut self.state.events),
+        })
     }
 }
 
 impl State {
+    /// Only the pill takes clicks, and only while a take records; every
+    /// other click goes through to the window below.
+    fn apply_input(&self) {
+        let Some(shown) = self.shown.as_ref() else {
+            return;
+        };
+        if let Ok(region) = Region::new(&self.compositor) {
+            if let Some((x, y, width, height)) = self.input {
+                region.add(x, y, width, height);
+            }
+            shown
+                .layer
+                .wl_surface()
+                .set_input_region(Some(region.wl_region()));
+            shown.layer.commit();
+        }
+    }
+
     fn show(&mut self) {
         let surface = self.compositor.create_surface(&self.handle);
-        // An empty input region lets every click through to the window below.
         if let Ok(region) = Region::new(&self.compositor) {
+            if let Some((x, y, width, height)) = self.input {
+                region.add(x, y, width, height);
+            }
             surface.set_input_region(Some(region.wl_region()));
         }
         let layer = self.layer_shell.create_layer_surface(
@@ -296,6 +347,78 @@ impl OutputHandler for State {
     fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
 }
 
+impl SeatHandler for State {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.seats
+    }
+
+    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+
+    fn new_capability(
+        &mut self,
+        _: &Connection,
+        handle: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer && self.pointer.is_none() {
+            self.pointer = self.seats.get_pointer(handle, &seat).ok();
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer {
+            if let Some(pointer) = self.pointer.take() {
+                pointer.release();
+            }
+        }
+    }
+
+    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+}
+
+/// linux/input-event-codes.h
+const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
+
+impl PointerHandler for State {
+    fn pointer_frame(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_pointer::WlPointer,
+        events: &[PointerEvent],
+    ) {
+        let ours = |event: &PointerEvent| {
+            self.shown
+                .as_ref()
+                .is_some_and(|shown| shown.layer.wl_surface() == &event.surface)
+        };
+        let seen: Vec<Pointer> = events
+            .iter()
+            .filter(|event| ours(event))
+            .filter_map(|event| match event.kind {
+                PointerEventKind::Enter { .. } => Some(Pointer::Enter),
+                PointerEventKind::Leave { .. } => Some(Pointer::Leave),
+                PointerEventKind::Press { button, .. } if button == BTN_LEFT => {
+                    Some(Pointer::Primary)
+                },
+                PointerEventKind::Press { button, .. } if button == BTN_RIGHT => {
+                    Some(Pointer::Secondary)
+                },
+                _ => None,
+            })
+            .collect();
+        self.events.extend(seen);
+    }
+}
+
 impl ShmHandler for State {
     fn shm_state(&mut self) -> &mut Shm {
         &mut self.shm
@@ -307,7 +430,7 @@ impl ProvidesRegistryState for State {
         &mut self.registry
     }
 
-    registry_handlers![OutputState];
+    registry_handlers![OutputState, SeatState];
 }
 
 delegate_compositor!(State);
@@ -315,6 +438,8 @@ delegate_output!(State);
 delegate_shm!(State);
 delegate_layer!(State);
 delegate_registry!(State);
+delegate_seat!(State);
+delegate_pointer!(State);
 
 /// A socket error means the compositor went away; anything else is a fault.
 fn wayland_failure(error: WaylandError) -> Failure {

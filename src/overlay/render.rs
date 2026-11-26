@@ -14,7 +14,13 @@ use tiny_skia::{
 /// The surface in logical pixels: room for the widest pill, so a badge
 /// never resizes the surface. The pill sits in its middle.
 pub const SURFACE_WIDTH: u32 = 360;
-pub const SURFACE_HEIGHT: u32 = 48;
+/// The pill at the bottom, with room above it for the hover hint.
+pub const SURFACE_HEIGHT: u32 = 76;
+/// The gap between the pill and the surface's bottom edge.
+const PILL_BOTTOM: f32 = 8.0;
+const HINT_HEIGHT: f32 = 22.0;
+const HINT_SIZE: f32 = 11.0;
+pub const HINT_TEXT: &str = "Click stops, right-click discards";
 
 /// The gap between the surface and the bottom edge of the screen.
 pub const BOTTOM_MARGIN: u32 = 36;
@@ -68,18 +74,58 @@ fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color {
 static FONT: LazyLock<Option<FontRef<'static>>> =
     LazyLock::new(|| FontRef::try_from_slice(crate::fonts::GEIST_MEDIUM).ok());
 
-/// `None` when the scale makes an empty surface.
-pub fn render(scene: &Scene, palette: &Palette, scale: f32, seconds: f32) -> Option<Pixmap> {
+/// The pill's rectangle in the surface, in logical pixels: left, top,
+/// width, height. Only this part takes clicks, and only while a take records.
+pub fn pill_rect(scene: &Scene) -> (f32, f32, f32, f32) {
+    let width = pill_width(scene);
+    (
+        (SURFACE_WIDTH as f32 - width) / 2.0,
+        SURFACE_HEIGHT as f32 - PILL_BOTTOM - PILL_HEIGHT,
+        width,
+        PILL_HEIGHT,
+    )
+}
+
+/// `None` when the scale makes an empty surface. With `hint`, a line above
+/// the pill names what a click does.
+pub fn render(
+    scene: &Scene,
+    palette: &Palette,
+    scale: f32,
+    seconds: f32,
+    hint: bool,
+) -> Option<Pixmap> {
     let width = (SURFACE_WIDTH as f32 * scale).round() as u32;
     let height = (SURFACE_HEIGHT as f32 * scale).round() as u32;
     let mut pixmap = Pixmap::new(width, height)?;
-    let pill = pill_width(scene);
-    let left = (SURFACE_WIDTH as f32 - pill) / 2.0;
-    let top = (SURFACE_HEIGHT as f32 - PILL_HEIGHT) / 2.0;
+    let (left, top, pill, _) = pill_rect(scene);
     let mut canvas = Canvas {
         pixmap: &mut pixmap,
         scale,
     };
+    if hint {
+        let text = text_width(HINT_TEXT, HINT_SIZE);
+        let bubble = text + 2.0 * PADDING;
+        let bubble_left = (SURFACE_WIDTH as f32 - bubble) / 2.0;
+        let bubble_top = top - HINT_HEIGHT - 4.0;
+        canvas.fill(
+            rounded_rect(
+                bubble_left,
+                bubble_top,
+                bubble,
+                HINT_HEIGHT,
+                HINT_HEIGHT / 2.0,
+            ),
+            palette.background,
+        );
+        canvas.text(
+            HINT_TEXT,
+            bubble_left + PADDING,
+            bubble_top + HINT_HEIGHT / 2.0,
+            HINT_SIZE,
+            palette.foreground,
+        );
+    }
     canvas.fill(
         rounded_rect(left, top, pill, PILL_HEIGHT, PILL_HEIGHT / 2.0),
         palette.background,
@@ -433,7 +479,8 @@ mod tests {
     #[test]
     fn the_pill_sits_in_the_middle_with_clear_corners() {
         for scale in [1.0, 2.0] {
-            let pixmap = render(&recording(false, false, None), &dark(), scale, 0.0).unwrap();
+            let pixmap =
+                render(&recording(false, false, None), &dark(), scale, 0.0, false).unwrap();
             assert_eq!(pixmap.width(), (SURFACE_WIDTH as f32 * scale) as u32);
             assert_eq!(pixmap.height(), (SURFACE_HEIGHT as f32 * scale) as u32);
             let (w, h) = (pixmap.width(), pixmap.height());
@@ -504,7 +551,7 @@ mod tests {
             ),
         ];
         for (name, scene) in scenes {
-            let pixmap = render(&scene, &dark(), 2.0, 0.3).unwrap();
+            let pixmap = render(&scene, &dark(), 2.0, 0.3, false).unwrap();
             let image =
                 image::RgbaImage::from_raw(pixmap.width(), pixmap.height(), to_rgba(&pixmap))
                     .unwrap();
@@ -512,5 +559,19 @@ mod tests {
                 .save(std::path::Path::new(&dir).join(format!("{}.png", name)))
                 .unwrap();
         }
+    }
+
+    #[test]
+    fn the_hint_shows_above_the_pill_only_on_hover() {
+        let scene = recording(true, false, None);
+        let (_, top, _, height) = pill_rect(&scene);
+        assert_eq!(top + height + PILL_BOTTOM, SURFACE_HEIGHT as f32);
+        let above = |pixmap: &Pixmap| {
+            let row = (top - HINT_HEIGHT / 2.0 - 4.0) as u32;
+            (0..pixmap.width()).any(|x| alpha_at(pixmap, x, row) > 0)
+        };
+        assert!(!above(&render(&scene, &dark(), 1.0, 0.0, false).unwrap()));
+        assert!(above(&render(&scene, &dark(), 1.0, 0.0, true).unwrap()));
+        assert!(text_width(HINT_TEXT, HINT_SIZE) + 2.0 * PADDING < SURFACE_WIDTH as f32);
     }
 }
