@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/andymai/hush/compare/v1.6.0...v1.7.0) (2026-11-26)
+
+
+### Features
+
+* **ipc:** unload and reload the local model on request ([#366](https://github.com/andymai/hush/issues/366)) ([fa74c6e](https://github.com/andymai/hush/commit/fa74c6e1ac325134c977fdd44bde514cd9368d65))
+
 ## [1.6.0](https://github.com/andymai/hush/compare/v1.5.0...v1.6.0) (2026-11-26)
 
 
