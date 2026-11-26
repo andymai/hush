@@ -711,6 +711,7 @@ fn model_note(size: ModelSize) -> &'static str {
         ModelSize::Small => "more accurate",
         ModelSize::Medium => "high accuracy",
         ModelSize::Large | ModelSize::LargeV2 | ModelSize::LargeV3 => "most accurate, slowest",
+        ModelSize::LargeV3Turbo => "close to large-v3, much faster",
         ModelSize::ParakeetV3 => {
             "opt-in: 25 European languages only, picks the language itself, reads no prompt"
         },
@@ -891,6 +892,10 @@ mod tests {
         assert_eq!(pick_model("2\n", ModelSize::Medium), Some(ModelSize::Base));
         assert_eq!(
             pick_model("8", ModelSize::Medium),
+            Some(ModelSize::LargeV3Turbo)
+        );
+        assert_eq!(
+            pick_model("9", ModelSize::Medium),
             Some(ModelSize::ParakeetV3)
         );
         assert_eq!(
@@ -901,7 +906,7 @@ mod tests {
             pick_model("parakeet-v3", ModelSize::Tiny),
             Some(ModelSize::ParakeetV3)
         );
-        for bad in ["0", "9", "huge", "-1"] {
+        for bad in ["0", "10", "huge", "-1"] {
             assert_eq!(pick_model(bad, ModelSize::Base), None, "{bad}");
         }
     }

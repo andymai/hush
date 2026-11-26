@@ -134,6 +134,9 @@ pub enum ModelSize {
     Large,
     LargeV2,
     LargeV3,
+    /// large-v3 with a 4-layer decoder, about 8 times faster than large-v3,
+    /// as the q8_0 file
+    LargeV3Turbo,
     /// NVIDIA Parakeet TDT 0.6B v3, opt-in: 25 European languages, no prompt
     ParakeetV3,
 }
@@ -155,6 +158,7 @@ impl ModelSize {
             ModelSize::Large => "ggml-large-v1.bin",
             ModelSize::LargeV2 => "ggml-large-v2.bin",
             ModelSize::LargeV3 => "ggml-large-v3.bin",
+            ModelSize::LargeV3Turbo => "ggml-large-v3-turbo-q8_0.bin",
             ModelSize::ParakeetV3 => PARAKEET_V3_FILENAME,
         }
         .to_string()
@@ -162,6 +166,12 @@ impl ModelSize {
 
     pub fn is_parakeet(&self) -> bool {
         matches!(self, ModelSize::ParakeetV3)
+    }
+
+    /// Whether the model can translate speech into English. large-v3-turbo
+    /// was trained without translation data, and Parakeet only transcribes.
+    pub fn translates(&self) -> bool {
+        !matches!(self, ModelSize::LargeV3Turbo | ModelSize::ParakeetV3)
     }
 }
 
@@ -181,6 +191,7 @@ impl std::str::FromStr for ModelSize {
             "large" => Ok(ModelSize::Large),
             "large-v2" => Ok(ModelSize::LargeV2),
             "large-v3" => Ok(ModelSize::LargeV3),
+            "large-v3-turbo" => Ok(ModelSize::LargeV3Turbo),
             "parakeet-v3" => Ok(ModelSize::ParakeetV3),
             _ => Err(anyhow::anyhow!("Unknown model size: {}", s)),
         }
@@ -197,6 +208,7 @@ impl std::fmt::Display for ModelSize {
             ModelSize::Large => write!(f, "large"),
             ModelSize::LargeV2 => write!(f, "large-v2"),
             ModelSize::LargeV3 => write!(f, "large-v3"),
+            ModelSize::LargeV3Turbo => write!(f, "large-v3-turbo"),
             ModelSize::ParakeetV3 => write!(f, "parakeet-v3"),
         }
     }
@@ -452,6 +464,19 @@ impl ModelManager {
                 expected_size: 3_094_000_000, // ~3.09GB
                 sha256: Some(
                     "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2".to_string(),
+                ),
+            },
+        );
+
+        models.insert(
+            ModelSize::LargeV3Turbo,
+            ModelInfo {
+                name: "whisper-large-v3-turbo".to_string(),
+                repo_id: "ggerganov/whisper.cpp".to_string(),
+                filename: "ggml-large-v3-turbo-q8_0.bin".to_string(),
+                expected_size: 874_188_075, // ~874MB
+                sha256: Some(
+                    "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1".to_string(),
                 ),
             },
         );
@@ -1234,5 +1259,26 @@ mod tests {
         });
         std::fs::write(&path, parakeet).unwrap();
         assert_eq!(file_architecture(&path).as_deref(), Some("parakeet"));
+    }
+
+    #[test]
+    fn large_v3_turbo_is_the_checked_8_bit_file() {
+        assert_eq!(
+            "large-v3-turbo".parse::<ModelSize>().unwrap(),
+            ModelSize::LargeV3Turbo
+        );
+        assert_eq!(ModelSize::LargeV3Turbo.to_string(), "large-v3-turbo");
+        let info = catalogue_entry(ModelSize::LargeV3Turbo).unwrap();
+        assert_eq!(info.filename, ModelSize::LargeV3Turbo.filename());
+        assert_eq!(info.repo_id, "ggerganov/whisper.cpp");
+        assert_eq!(info.sha256.as_deref().map(str::len), Some(64));
+    }
+
+    #[test]
+    fn only_whisper_models_with_translation_data_translate() {
+        assert!(ModelSize::Base.translates());
+        assert!(ModelSize::LargeV3.translates());
+        assert!(!ModelSize::LargeV3Turbo.translates());
+        assert!(!ModelSize::ParakeetV3.translates());
     }
 }

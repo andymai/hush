@@ -61,7 +61,7 @@ const RESTART_TIMEOUT: Duration = Duration::from_secs(40);
 /// How long the footer says Saved.
 const SAVED_DURATION: Duration = Duration::from_secs(2);
 
-pub const MODEL_ORDER: [ModelSize; 8] = [
+pub const MODEL_ORDER: [ModelSize; 9] = [
     ModelSize::Tiny,
     ModelSize::Base,
     ModelSize::Small,
@@ -69,6 +69,7 @@ pub const MODEL_ORDER: [ModelSize; 8] = [
     ModelSize::Large,
     ModelSize::LargeV2,
     ModelSize::LargeV3,
+    ModelSize::LargeV3Turbo,
     ModelSize::ParakeetV3,
 ];
 

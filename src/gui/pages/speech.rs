@@ -924,6 +924,7 @@ pub fn size_key(size: ModelSize) -> &'static str {
         ModelSize::Large => "large",
         ModelSize::LargeV2 => "large-v2",
         ModelSize::LargeV3 => "large-v3",
+        ModelSize::LargeV3Turbo => "large-v3-turbo",
         ModelSize::ParakeetV3 => "parakeet-v3",
     }
 }

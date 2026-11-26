@@ -6,7 +6,7 @@ Hotkey chords name keys in two ways. Ctrl, Shift, Alt, and Super in a chord mean
 
 | Key | Meaning | Default |
 |---|---|---|
-| `transcription.model_size` | tiny, base, small, medium, large, large-v2, large-v3, or the opt-in parakeet-v3 | base |
+| `transcription.model_size` | tiny, base, small, medium, large, large-v2, large-v3, large-v3-turbo, or the opt-in parakeet-v3 | base |
 | `transcription.language` | A Whisper language code such as `en` or `de`, or `auto` to detect what you speak | en |
 | `transcription.detect_languages` | With `language = "auto"`, a small language-ID model picks the most likely of these languages, such as `["en", "de"]`, and local Whisper writes in it. Hush downloads the model (27 MB) the first time, and tries again later when the download fails. Until the model is there, Whisper detects the language, and a take that it hears in another language runs again in the last language detected within the list, else in the first one. `[]` allows every language, and Whisper detects it. Cloud and server backends detect the language on their own | `[]` |
 | `transcription.use_gpu` | Use the GPU backend the binary was built with | true |
