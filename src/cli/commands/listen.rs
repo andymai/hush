@@ -365,6 +365,11 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     .await?;
     info!("✅ Transcriber ready: {}", transcriber.describe());
     let local_model = !config.transcription.backend.is_cloud();
+    if local_model && config.transcription.use_gpu {
+        crate::transcription::gpu_notice::check_at_start(
+            crate::transcription::device::GpuAvailability::detect(),
+        );
+    }
     let mut model = ModelSlot::loaded(Arc::new(transcriber), model_loader(&config.transcription));
     let unload_after_mins = if local_model {
         config.transcription.unload_after_mins

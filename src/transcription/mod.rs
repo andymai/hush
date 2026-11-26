@@ -25,6 +25,7 @@ pub mod cloud;
 pub mod device;
 pub mod engine;
 pub mod gpu_fallback;
+pub mod gpu_notice;
 pub mod guard;
 pub mod langid;
 pub mod language;
