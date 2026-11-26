@@ -24,6 +24,28 @@ impl From<anyhow::Error> for Failure {
     }
 }
 
+/// What the pointer did on the pill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pointer {
+    Enter,
+    Leave,
+    /// The left button
+    Primary,
+    /// The right button
+    Secondary,
+}
+
+/// What woke the loop.
+#[derive(Debug, Default)]
+pub struct Wake {
+    /// The daemon's socket has lines to read
+    pub link: bool,
+    pub pointer: Vec<Pointer>,
+}
+
+/// A rectangle in the surface, in logical pixels: left, top, width, height.
+pub type Rect = (f32, f32, f32, f32);
+
 pub trait Presenter {
     fn name(&self) -> &'static str;
 
@@ -33,9 +55,23 @@ pub trait Presenter {
     /// Show `frame`, a surface drawn at [`Self::scale`], or hide the pill.
     fn present(&mut self, frame: Option<&Pixmap>) -> Result<(), Failure>;
 
+    /// Take clicks inside `rect` only; `None` lets every click through.
+    fn set_input(&mut self, rect: Option<Rect>) -> Result<(), Failure>;
+
     /// Handle display events until `link` is readable, the display changes
-    /// something, or `timeout` passes. True when `link` is readable.
-    fn wait(&mut self, link: BorrowedFd<'_>, timeout: Option<Duration>) -> Result<bool, Failure>;
+    /// something, or `timeout` passes.
+    fn wait(&mut self, link: BorrowedFd<'_>, timeout: Option<Duration>) -> Result<Wake, Failure>;
+}
+
+/// Whole pixels for a rectangle at `scale`.
+pub(crate) fn pixels(rect: Rect, scale: f32) -> (i32, i32, i32, i32) {
+    let (x, y, width, height) = rect;
+    (
+        (x * scale).floor() as i32,
+        (y * scale).floor() as i32,
+        (width * scale).ceil() as i32,
+        (height * scale).ceil() as i32,
+    )
 }
 
 /// The first presenter that this session offers.

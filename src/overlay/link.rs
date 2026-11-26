@@ -3,7 +3,7 @@
 
 use crate::ipc::protocol::{DaemonCommand, WatchLine};
 use anyhow::{anyhow, Context, Result};
-use std::io::{ErrorKind, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::fd::{AsFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use tracing::debug;
@@ -86,6 +86,24 @@ impl Link {
             }
         }
         lines
+    }
+}
+
+/// Send `command` to the daemon over its socket, as `hush stop` does, and
+/// wait a moment for the reply. A daemon that does not answer misses it.
+pub fn ask(command: &DaemonCommand) {
+    let Ok(mut stream) = UnixStream::connect(crate::ipc::paths::socket_path()) else {
+        debug!("The overlay found no daemon socket for {:?}", command);
+        return;
+    };
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(1)));
+    let Ok(mut line) = serde_json::to_string(command) else {
+        return;
+    };
+    line.push('\n');
+    if stream.write_all(line.as_bytes()).is_ok() {
+        let mut reply = String::new();
+        let _ = BufReader::new(stream).read_line(&mut reply);
     }
 }
 

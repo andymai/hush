@@ -15,7 +15,8 @@ pub mod render;
 pub mod supervisor;
 pub mod view;
 
-use present::Failure;
+use crate::ipc::protocol::DaemonCommand;
+use present::{Failure, Pointer};
 use std::time::Instant;
 use tracing::{error, info};
 
@@ -61,12 +62,20 @@ fn show_until_closed() -> Result<(), Exit> {
     let clock = Instant::now();
     let mut view = view::View::default();
     let mut shown = false;
+    let mut hovered = false;
     loop {
         let now = Instant::now();
-        match view.scene(now) {
+        let scene = view.scene(now);
+        let recording = matches!(scene, Some(view::Scene::Recording { .. }));
+        if !recording {
+            hovered = false;
+        }
+        presenter.set_input(scene.as_ref().filter(|_| recording).map(render::pill_rect))?;
+        match scene {
             Some(scene) => {
                 let seconds = now.duration_since(clock).as_secs_f32();
-                let frame = render::render(&scene, &render::dark(), presenter.scale(), seconds);
+                let frame =
+                    render::render(&scene, &render::dark(), presenter.scale(), seconds, hovered);
                 presenter.present(frame.as_ref())?;
                 shown = true;
             },
@@ -76,7 +85,17 @@ fn show_until_closed() -> Result<(), Exit> {
             },
             None => {},
         }
-        if presenter.wait(link.fd(), view.next_change(now))? {
+        let wake = presenter.wait(link.fd(), view.next_change(now))?;
+        for event in wake.pointer {
+            match event {
+                Pointer::Enter => hovered = true,
+                Pointer::Leave => hovered = false,
+                Pointer::Primary if recording => link::ask(&DaemonCommand::Stop { print: false }),
+                Pointer::Secondary if recording => link::ask(&DaemonCommand::Cancel),
+                _ => {},
+            }
+        }
+        if wake.link {
             for line in link.read() {
                 view.apply(line, Instant::now());
             }

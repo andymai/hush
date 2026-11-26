@@ -3,7 +3,7 @@
 //! in sandboxes whose compositor withholds layer-shell. The window takes no
 //! input, and it is unmapped while the pill is hidden.
 
-use super::{poll, Failure, Presenter};
+use super::{pixels, poll, Failure, Pointer, Presenter, Rect, Wake};
 use crate::overlay::render::{to_bgra, BOTTOM_MARGIN, SURFACE_HEIGHT, SURFACE_WIDTH};
 use anyhow::Context;
 use std::os::fd::{AsFd, BorrowedFd};
@@ -35,6 +35,8 @@ pub struct X11Presenter {
     /// window's shape follows the pill instead.
     shaped: bool,
     mapped: bool,
+    /// The part of the window that takes clicks, in window pixels
+    input: Option<(i32, i32, i32, i32)>,
 }
 
 impl X11Presenter {
@@ -76,7 +78,12 @@ impl X11Presenter {
                 .border_pixel(0)
                 .background_pixel(0)
                 .colormap(colormap)
-                .event_mask(EventMask::EXPOSURE),
+                .event_mask(
+                    EventMask::EXPOSURE
+                        | EventMask::BUTTON_PRESS
+                        | EventMask::ENTER_WINDOW
+                        | EventMask::LEAVE_WINDOW,
+                ),
         )?;
         // An empty input shape lets every click through to the window below.
         conn.shape_rectangles(
@@ -119,6 +126,7 @@ impl X11Presenter {
             screen: (screen.width_in_pixels, screen.height_in_pixels),
             shaped,
             mapped: false,
+            input: None,
         })
     }
 
@@ -230,9 +238,19 @@ impl X11Presenter {
         Ok(())
     }
 
-    fn drain_events(&self) -> Result<(), Failure> {
+    /// The pointer's events since the last call; other events only wake the
+    /// loop, which draws again.
+    fn drain_events(&self, pointer: &mut Vec<Pointer>) -> Result<(), Failure> {
+        use x11rb::protocol::Event;
         loop {
             match self.conn.poll_for_event() {
+                Ok(Some(Event::ButtonPress(press))) => match press.detail {
+                    1 => pointer.push(Pointer::Primary),
+                    3 => pointer.push(Pointer::Secondary),
+                    _ => {},
+                },
+                Ok(Some(Event::EnterNotify(_))) => pointer.push(Pointer::Enter),
+                Ok(Some(Event::LeaveNotify(_))) => pointer.push(Pointer::Leave),
                 Ok(Some(_)) => continue,
                 Ok(None) => return Ok(()),
                 Err(_) => return Err(Failure::Lost),
@@ -266,12 +284,45 @@ impl Presenter for X11Presenter {
         }
     }
 
-    fn wait(&mut self, link: BorrowedFd<'_>, timeout: Option<Duration>) -> Result<bool, Failure> {
-        self.drain_events()?;
+    fn set_input(&mut self, rect: Option<Rect>) -> Result<(), Failure> {
+        let input = rect.map(|rect| pixels(rect, self.scale));
+        if input == self.input {
+            return Ok(());
+        }
+        self.input = input;
+        let rectangles: Vec<Rectangle> = input
+            .into_iter()
+            .map(|(x, y, width, height)| Rectangle {
+                x: x as i16,
+                y: y as i16,
+                width: width as u16,
+                height: height as u16,
+            })
+            .collect();
+        self.conn
+            .shape_rectangles(
+                shape::SO::SET,
+                shape::SK::INPUT,
+                ClipOrdering::UNSORTED,
+                self.window,
+                0,
+                0,
+                &rectangles,
+            )
+            .map_err(|e| lost_or_broken(e.into()))?;
+        self.conn.flush().map_err(|e| lost_or_broken(e.into()))
+    }
+
+    fn wait(&mut self, link: BorrowedFd<'_>, timeout: Option<Duration>) -> Result<Wake, Failure> {
+        let mut pointer = Vec::new();
+        self.drain_events(&mut pointer)?;
         let ready = poll(&[self.conn.stream().as_fd(), link], timeout)
             .map_err(|e| Failure::Broken(e.into()))?;
-        self.drain_events()?;
-        Ok(ready[1])
+        self.drain_events(&mut pointer)?;
+        Ok(Wake {
+            link: ready[1],
+            pointer,
+        })
     }
 }
 
