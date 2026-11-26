@@ -1,0 +1,39 @@
+scripts/e2e/run.sh
+  s_5332262e639a7a::t_7bf24e8b731882 720-747
+src/ipc/protocol.rs
+  s_5332262e639a7a::t_a250c2b7870492 55-57,307-310,329,348,352-354
+  s_5332262e639a7a::t_ef447d1dbe0636 355,821-837
+  s_5332262e639a7a::t_54d43a9a830373 356,820
+src/audio/store.rs
+  s_5332262e639a7a::t_a250c2b7870492 57-89
+src/ipc/server.rs
+  s_5332262e639a7a::t_ef447d1dbe0636 1330-1350
+  s_5332262e639a7a::t_a250c2b7870492 73-75,123-124,152,294-320,443,768-771
+  s_5332262e639a7a::t_aefa2f57d67ce4 1329
+src/cli/commands/listen.rs
+  s_5332262e639a7a::t_bed7614df62c22 230-231,821,846-849,1173,1367-1372
+  s_5332262e639a7a::t_5a789ce8f243ce 1373
+src/gui/autosave.rs
+  s_5332262e639a7a::t_ef447d1dbe0636 976-978,996-998
+  s_5332262e639a7a::t_bed7614df62c22 45-48,52,979-982,987,992,999-1004,1013
+src/gui/mod.rs
+  s_5332262e639a7a::t_bed7614df62c22 107-108,143,819,1320
+docs/privacy.md
+  s_5332262e639a7a::t_e499fc28de4bd2 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "36560e0ee6c75d0a5b8a5e681cd8b469185a9495",
+  "prompts": {},
+  "sessions": {
+    "s_5332262e639a7a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cafc310-b19c-4b54-8739-6ec8a3669200",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
