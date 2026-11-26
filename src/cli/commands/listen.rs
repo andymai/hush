@@ -838,7 +838,12 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let has_display = std::env::var_os("DISPLAY").is_some();
     let overlay_thread = if has_display {
         Some(thread::spawn(move || {
-            let _ = overlay.run();
+            if let Err(e) = overlay.run() {
+                warn!(
+                    "The overlay did not start, so the daemon runs without it: {e:#}. \
+                     Run `hush daemon restart` after the graphics driver is ready"
+                );
+            }
         }))
     } else {
         info!("No display, so the daemon runs without the overlay");
