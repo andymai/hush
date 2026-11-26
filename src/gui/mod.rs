@@ -1296,6 +1296,7 @@ mod tests {
             permissions: PermissionStatus {
                 in_container: false,
                 rule_installed: true,
+                rule_path: None,
                 uinput_present: true,
                 uinput_writable: true,
                 event_nodes: 4,
