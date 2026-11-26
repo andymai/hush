@@ -41,6 +41,8 @@ impl CommandDispatcher {
             Commands::Report { .. } => "report",
             Commands::Settings => "settings",
             Commands::Overlay => "overlay",
+            Commands::Tune { .. } => "tune",
+            Commands::TuneWorker { .. } => "tune-worker",
             Commands::PasteLast => "paste-last",
             Commands::Shortcuts { .. } => "shortcuts",
             Commands::Learn { .. } => "learn",
@@ -152,6 +154,30 @@ impl CommandDispatcher {
             // async context panics unless the thread leaves the runtime first.
             Commands::Settings => tokio::task::block_in_place(crate::gui::run),
             Commands::Overlay => tokio::task::block_in_place(|| crate::overlay::run()),
+            Commands::Tune {
+                audio,
+                reference,
+                prefer,
+                model,
+                json,
+                apply,
+            } => {
+                super::commands::tune::handle_tune(super::commands::tune::TuneOptions {
+                    audio,
+                    reference,
+                    prefer,
+                    model,
+                    json,
+                    apply,
+                })
+                .await
+            },
+            Commands::TuneWorker {
+                model,
+                audio,
+                language,
+                gpu,
+            } => super::commands::tune::handle_tune_worker(model, audio, language, gpu).await,
             Commands::PasteLast => handle_client_command(DaemonCommand::PasteLast).await,
             Commands::Shortcuts { configure } => handle_shortcuts(configure).await,
             Commands::Learn { text } => {

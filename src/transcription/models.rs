@@ -214,12 +214,43 @@ impl std::fmt::Display for ModelSize {
     }
 }
 
+/// Written and read as the name that `hush models` takes, such as
+/// `large-v3-turbo`.
+impl serde::Serialize for ModelSize {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ModelSize {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        name.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 /// The model this machine should start with: a GPU can carry a larger one,
 /// and a small machine should not swap while transcribing.
 pub fn recommended_model() -> ModelSize {
     static RECOMMENDED: OnceLock<ModelSize> = OnceLock::new();
     *RECOMMENDED.get_or_init(|| {
-        recommended_model_for(crate::transcription::device::GpuAvailability::detect().available)
+        let gpu = crate::transcription::device::GpuAvailability::detect();
+        let fingerprint = gpu
+            .available
+            .then(|| crate::transcription::gpu_fallback::GpuFingerprint::current(gpu));
+        let tuned = crate::transcription::tune::TuneResult::load_from(
+            &crate::transcription::tune::TuneResult::path(),
+        )
+        .filter(|result| result.holds_for(fingerprint.as_ref()));
+        match tuned {
+            Some(result) => result.pick.model,
+            None => recommended_model_for(gpu.available),
+        }
     })
 }
 

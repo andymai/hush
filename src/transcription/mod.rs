@@ -32,6 +32,7 @@ pub mod language;
 pub mod models;
 pub mod parts;
 pub mod slot;
+pub mod tune;
 pub mod whisper;
 
 pub use cloud::CloudTranscriber;

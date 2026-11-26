@@ -11,6 +11,7 @@ pub mod setup;
 pub mod status;
 pub mod test;
 pub mod transcribe;
+pub mod tune;
 /// Modular command implementations
 ///
 /// This module contains individual command handlers, each in their own file
