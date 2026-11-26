@@ -6,4 +6,6 @@ With `transcription.backend` set to `groq` or `openai`, Hush sends the audio of 
 
 Hush writes audio to disk only when you set `history.keep_audio_days`, while a hands-free recording transcribes in parts, and when a transcription fails. Hush keeps the parts only until it types the text, and it keeps the audio of a failed take for 7 days, for `hush recover`. Only you can read those files.
 
+`hush report` writes a file for a bug report on your computer and uploads nothing. It holds the version, the checks, your settings, and the last 500 log lines at INFO and above, which hold no dictated text. It replaces your home paths, host name, user name, and API keys, and it removes style prompts, hook commands, and server addresses. Read the file before you attach it to an issue.
+
 Hush reads keyboard events and types through `/dev/input` and `/dev/uinput`. One udev rule grants the logged-in user access to those for the length of the session. Details in [SECURITY.md](../SECURITY.md).

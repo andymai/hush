@@ -19,6 +19,7 @@ Everyday dictation:
 | `hush recover [--all] [--list] [--type]` | Transcribe the newest take that failed (or `--all` of them), print or type the text, and delete its audio. `--list` only lists them |
 | `hush settings` | Open the setup and settings window |
 | `hush doctor` | Check every component and print the fix for each problem |
+| `hush report [--output <file>]` | Write one file for a bug report: the version, the checks, `hush status --full`, the settings, the last 500 log lines at INFO and above, and the last crash. It replaces home paths, the host name, the user name, and API keys, removes style prompts, hook commands, and server addresses, and uploads nothing |
 
 Daemon:
 
