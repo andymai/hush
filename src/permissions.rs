@@ -5,10 +5,19 @@
 //! No group change, no logout, and nothing beyond that one rule runs as root.
 
 use anyhow::{anyhow, Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub const UDEV_RULE_PATH: &str = "/etc/udev/rules.d/70-hush.rules";
+
+/// Where a rule can be: `hush setup permissions` (and NixOS) write `/etc`,
+/// and the .deb, the .rpm, and the AUR package install it under the system's
+/// udev folder.
+pub const UDEV_RULE_LOCATIONS: [&str; 3] = [
+    UDEV_RULE_PATH,
+    "/usr/lib/udev/rules.d/70-hush.rules",
+    "/lib/udev/rules.d/70-hush.rules",
+];
 pub const MODULES_LOAD_PATH: &str = "/etc/modules-load.d/hush-uinput.conf";
 
 pub const UDEV_RULE: &str = r#"# Installed by `hush setup permissions`.
@@ -38,6 +47,8 @@ pub fn install_script() -> String {
 pub struct PermissionStatus {
     pub in_container: bool,
     pub rule_installed: bool,
+    /// Where the rule is, when it is installed
+    pub rule_path: Option<PathBuf>,
     pub uinput_present: bool,
     pub uinput_writable: bool,
     pub event_nodes: usize,
@@ -54,9 +65,11 @@ impl PermissionStatus {
 
 pub fn status() -> PermissionStatus {
     let (event_nodes, readable_event_nodes) = count_event_nodes();
+    let rule_path = installed_rule(&UDEV_RULE_LOCATIONS.map(Path::new));
     PermissionStatus {
         in_container: in_container(),
-        rule_installed: Path::new(UDEV_RULE_PATH).exists(),
+        rule_installed: rule_path.is_some(),
+        rule_path,
         uinput_present: Path::new("/dev/uinput").exists(),
         uinput_writable: std::fs::OpenOptions::new()
             .write(true)
@@ -66,6 +79,14 @@ pub fn status() -> PermissionStatus {
         readable_event_nodes,
         in_input_group: in_input_group(),
     }
+}
+
+/// The first of `locations` that exists.
+fn installed_rule(locations: &[&Path]) -> Option<PathBuf> {
+    locations
+        .iter()
+        .find(|path| path.exists())
+        .map(|path| path.to_path_buf())
 }
 
 /// Toolbox, Distrobox, Podman, and Docker all mark their root filesystem.
@@ -163,7 +184,11 @@ pub fn print_status(status: &PermissionStatus) {
     println!(
         "   {} udev rule {}",
         mark(status.rule_installed),
-        UDEV_RULE_PATH
+        status
+            .rule_path
+            .as_deref()
+            .unwrap_or(Path::new(UDEV_RULE_PATH))
+            .display()
     );
     println!(
         "   {} /dev/uinput {}",
@@ -225,5 +250,17 @@ mod tests {
         if status.uinput_writable {
             assert!(status.uinput_present);
         }
+    }
+
+    #[test]
+    fn a_packaged_rule_counts_as_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let etc = dir.path().join("etc-70-hush.rules");
+        let usr = dir.path().join("usr-70-hush.rules");
+        assert_eq!(installed_rule(&[&etc, &usr]), None);
+        std::fs::write(&usr, UDEV_RULE).unwrap();
+        assert_eq!(installed_rule(&[&etc, &usr]), Some(usr.clone()));
+        std::fs::write(&etc, UDEV_RULE).unwrap();
+        assert_eq!(installed_rule(&[&etc, &usr]), Some(etc), "/etc comes first");
     }
 }
