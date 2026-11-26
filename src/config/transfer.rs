@@ -20,7 +20,7 @@ pub const VERSION: i64 = 1;
 const HEADER: &str = "# Hush settings and vocabulary. Load them with: hush config import <file>\n";
 
 /// Shorter values are too common to mark a key.
-const MIN_KEY_LEN: usize = 8;
+pub(crate) const MIN_KEY_LEN: usize = 8;
 
 /// The files an export reads and an import writes.
 #[derive(Debug, Clone)]
@@ -382,7 +382,8 @@ fn leaves(value: &toml::Value) -> usize {
 }
 
 /// Each API key that Hush can read now, with its variable.
-fn api_keys(config: &Config) -> Vec<(String, String)> {
+/// Each API key that Hush can read, by its variable.
+pub(crate) fn api_keys(config: &Config) -> Vec<(String, String)> {
     TranscriptionBackend::ALL
         .iter()
         .filter_map(|backend| backend.key_var())

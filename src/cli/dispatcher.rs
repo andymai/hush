@@ -1,9 +1,9 @@
 use crate::cli::commands::{
     handle_client_command, handle_config, handle_daemon_restart, handle_daemon_start,
     handle_daemon_status, handle_daemon_stop, handle_doctor, handle_listen, handle_manual,
-    handle_models, handle_record, handle_recover, handle_rewrite, handle_setup, handle_shortcuts,
-    handle_start, handle_status, handle_status_follow, handle_status_json, handle_stop,
-    handle_test, handle_transcribe, SessionOptions,
+    handle_models, handle_record, handle_recover, handle_report, handle_rewrite, handle_setup,
+    handle_shortcuts, handle_start, handle_status, handle_status_follow, handle_status_json,
+    handle_stop, handle_test, handle_transcribe, SessionOptions,
 };
 use crate::cli::{Commands, DaemonCommands};
 use crate::ipc::DaemonCommand;
@@ -38,6 +38,7 @@ impl CommandDispatcher {
             Commands::Stop { .. } => "stop",
             Commands::Cancel => "cancel",
             Commands::Doctor => "doctor",
+            Commands::Report { .. } => "report",
             Commands::Settings => "settings",
             Commands::Overlay => "overlay",
             Commands::PasteLast => "paste-last",
@@ -146,6 +147,7 @@ impl CommandDispatcher {
             Commands::Stop { print, json } => handle_stop(print, json).await,
             Commands::Cancel => handle_client_command(DaemonCommand::Cancel).await,
             Commands::Doctor => handle_doctor().await,
+            Commands::Report { output } => handle_report(output).await,
             // The window owns a runtime of its own; dropping it inside this
             // async context panics unless the thread leaves the runtime first.
             Commands::Settings => tokio::task::block_in_place(crate::gui::run),

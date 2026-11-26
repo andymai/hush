@@ -135,6 +135,14 @@ pub enum Commands {
     /// Check everything Hush needs and say how to fix what is missing
     Doctor,
 
+    /// Write a bug report file: the version, the checks, the settings, and
+    /// recent log lines, with personal details removed. Uploads nothing.
+    Report {
+        /// The file to write (default: `hush-report-<date>.txt` here)
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+    },
+
     /// Open the setup and settings window
     Settings,
 
