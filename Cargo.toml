@@ -1,6 +1,6 @@
 [package]
 name = "hush"
-version = "1.1.1"
+version = "1.1.2"
 edition = "2021"
 description = "Local voice-to-text for Linux desktops"
 authors = ["Andy Aragon"]
