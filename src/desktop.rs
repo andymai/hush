@@ -1,6 +1,8 @@
 //! The application and autostart entries, so the launcher, the installer, and
 //! the settings window all agree on one file name and one set of actions.
 
+use crate::service::ServiceState;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 pub const APP_ID: &str = "io.github.andymai.hush";
@@ -53,13 +55,79 @@ pub fn autostart_path() -> PathBuf {
 }
 
 /// Whether Hush starts at login: in portal mode, the last answer of the
-/// Background portal; else the entry file.
+/// Background portal; else the entry file or the enabled unit.
 pub fn starts_at_login() -> bool {
+    starts_at_login_with(ServiceState::probe)
+}
+
+/// [`starts_at_login`], with the unit's state from `service` when the
+/// answer needs it.
+pub fn starts_at_login_with(service: impl FnOnce() -> ServiceState) -> bool {
     #[cfg(target_os = "linux")]
     if crate::portal::InputMode::current().is_portal() {
         return crate::portal::background::autostart_on();
     }
     autostart_installed()
+        || std::env::current_exe().is_ok_and(|exe| service().starts_at_login(&exe))
+}
+
+/// The binary that a launcher or autostart entry runs. An AppImage's binary
+/// lives in a mount that ends with the process, so the entry names the
+/// AppImage file. A Nix store path can vanish in a garbage collection, so
+/// the entry names the profile link to it.
+pub fn entry_binary() -> std::io::Result<PathBuf> {
+    let exe = std::env::current_exe()?;
+    Ok(entry_binary_for(
+        &exe,
+        std::env::var_os("APPIMAGE").as_deref(),
+        std::env::var_os("APPDIR").as_deref(),
+        &nix_profile_links(),
+    ))
+}
+
+fn entry_binary_for(
+    exe: &Path,
+    appimage: Option<&OsStr>,
+    appdir: Option<&OsStr>,
+    links: &[PathBuf],
+) -> PathBuf {
+    // A process that another AppImage started inherits APPIMAGE, so the
+    // binary must also run from inside this AppImage's mount.
+    if let (Some(appimage), Some(appdir)) = (appimage, appdir) {
+        if !appimage.is_empty() && !appdir.is_empty() && exe.starts_with(appdir) {
+            return PathBuf::from(appimage);
+        }
+    }
+    if exe.starts_with("/nix/store") {
+        if let Some(link) = stable_link(exe, links) {
+            return link;
+        }
+    }
+    exe.to_path_buf()
+}
+
+/// The first of `links` that resolves to `exe`.
+fn stable_link(exe: &Path, links: &[PathBuf]) -> Option<PathBuf> {
+    links
+        .iter()
+        .find(|link| std::fs::canonicalize(link).is_ok_and(|target| target == exe))
+        .cloned()
+}
+
+fn nix_profile_links() -> Vec<PathBuf> {
+    let mut links = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        links.push(home.join(".nix-profile/bin/hush"));
+        links.push(home.join(".local/state/nix/profile/bin/hush"));
+    }
+    if let Ok(user) = std::env::var("USER") {
+        links.push(PathBuf::from(format!(
+            "/etc/profiles/per-user/{}/bin/hush",
+            user
+        )));
+    }
+    links.push(PathBuf::from("/run/current-system/sw/bin/hush"));
+    links
 }
 
 /// Both names count, so an entry written by an older version still reads as on.
@@ -86,6 +154,45 @@ mod tests {
         let entry = autostart_entry(Path::new("/usr/bin/hush"));
         assert!(entry.contains("Exec=/usr/bin/hush daemon start --foreground"));
         assert!(entry.contains("X-GNOME-Autostart-enabled=true"));
+    }
+
+    #[test]
+    fn entries_name_a_binary_that_outlives_the_process() {
+        let none: &[PathBuf] = &[];
+        let mounted = Path::new("/tmp/.mount_hushAbc/usr/bin/hush");
+        assert_eq!(
+            entry_binary_for(
+                mounted,
+                Some(OsStr::new("/home/me/Apps/Hush.AppImage")),
+                Some(OsStr::new("/tmp/.mount_hushAbc")),
+                none
+            ),
+            PathBuf::from("/home/me/Apps/Hush.AppImage")
+        );
+        assert_eq!(
+            entry_binary_for(
+                Path::new("/usr/bin/hush"),
+                Some(OsStr::new("/home/me/Apps/Other.AppImage")),
+                Some(OsStr::new("/tmp/.mount_otherXyz")),
+                none
+            ),
+            PathBuf::from("/usr/bin/hush"),
+            "APPIMAGE inherited from another AppImage"
+        );
+        assert_eq!(
+            entry_binary_for(Path::new("/home/me/.local/bin/hush"), None, None, none),
+            PathBuf::from("/home/me/.local/bin/hush")
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("store-hush");
+        std::fs::write(&target, "").unwrap();
+        let target = std::fs::canonicalize(&target).unwrap();
+        let link = dir.path().join("profile-hush");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let elsewhere = dir.path().join("missing");
+        assert_eq!(stable_link(&target, &[elsewhere, link.clone()]), Some(link));
+        assert_eq!(stable_link(Path::new("/nowhere/hush"), &[]), None);
     }
 
     #[test]

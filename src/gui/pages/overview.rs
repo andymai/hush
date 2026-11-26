@@ -62,6 +62,18 @@ fn running(gui: &mut Gui, ui: &mut egui::Ui) {
             }
         });
     let mut autostart = gui.machine.autostart;
+    if let (Some(compositor), false) = (gui.machine.startup_compositor, autostart) {
+        let line = compositor.startup_line();
+        row("overview.autostart", "Start Hush when I log in")
+            .describe(&format!(
+                "{} runs no autostart entries on its own. Add this line to its config.",
+                compositor.name()
+            ))
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new(line).monospace());
+            });
+        return;
+    }
     row("overview.autostart", "Start Hush when I log in")
         .describe("Adds Hush to your desktop session's autostart.")
         .reserve(36.0)

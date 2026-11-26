@@ -99,6 +99,7 @@ src/
 ├── permissions.rs  # The udev rule that grants keyboard and uinput access
 ├── updates.rs      # The opt-in release check; a package-manager install never runs it
 ├── desktop.rs      # The .desktop and autostart entries
+├── service.rs      # The packages' hush.service user unit: start, restart, and autostart go through it when it runs this binary
 └── logging.rs      # Structured tracing with request correlation
 ```
 

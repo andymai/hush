@@ -103,6 +103,9 @@ pub struct Machine {
     /// The Silero voice activity detection model is downloaded.
     pub vad_installed: bool,
     pub autostart: bool,
+    /// A compositor that runs no autostart entries and must start Hush
+    /// from its own config
+    pub startup_compositor: Option<crate::service::Compositor>,
     /// The transcription key variables that hold a key: the hosted
     /// services' and the server's.
     pub cloud_keys: Vec<String>,
@@ -124,6 +127,7 @@ impl Machine {
             })
             .unwrap_or_default();
         let (probe, reply) = client::reply_blocking(STATUS_TIMEOUT);
+        let service = crate::service::ServiceState::probe();
         let start_delay = reply.as_ref().and_then(|reply| reply.start_delay);
         Self {
             permissions: crate::permissions::status(),
@@ -138,7 +142,8 @@ impl Machine {
             config_loads: Config::load().is_ok(),
             installed_models,
             vad_installed,
-            autostart: crate::desktop::starts_at_login(),
+            autostart: crate::desktop::starts_at_login_with(|| service.clone()),
+            startup_compositor: crate::service::compositor_without_autostart(&service),
             cloud_keys: TranscriptionBackend::ALL
                 .iter()
                 .filter_map(|backend| backend.key_var())
@@ -1306,6 +1311,7 @@ mod tests {
             installed_models: vec![ModelSize::Base],
             vad_installed: true,
             autostart: false,
+            startup_compositor: None,
             cloud_keys: Vec::new(),
         }
     }

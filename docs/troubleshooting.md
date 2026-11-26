@@ -19,6 +19,8 @@ If the first word of a recording gets cut off, the microphone probably sleeps be
 
 After such a slow recording, the Speech page of `hush settings` shows the same warning, with a button for each command. Hush does not keep a Bluetooth microphone awake, because an open headset link lowers the sound quality.
 
+If Hush does not start at login on a package install, run `systemctl --user status hush.service`. `hush install --autostart` enables the unit, and `journalctl --user -u hush.service` shows why a start failed. On Sway, Hyprland, or niri started from a TTY, neither the unit nor an autostart entry runs at login. Add the line from [commands.md](commands.md) to the compositor's config.
+
 If `hush setup permissions` cannot run where you are (a container, an SSH session), `hush setup permissions --print` prints the udev rule to apply as root.
 
 In the first three minutes after boot, Hush waits up to five seconds for the graphics driver. If the driver is not ready then, the speech model runs on the CPU until you run `hush daemon restart`. When a take fails on the GPU, Hush runs it again on the CPU. Hush then keeps that model family (Whisper or Parakeet) on the CPU for that GPU until the driver version changes. When the GPU runs out of memory for a take, only that take runs again on the CPU, and the next take uses the GPU. `hush doctor` shows a `GPU failure` line with the command that tries the GPU again.
