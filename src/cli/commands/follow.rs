@@ -1,7 +1,8 @@
 //! `hush status --follow --json`: one Waybar custom-module line at once and
 //! after each state change, for as long as the reader keeps the pipe open.
 
-use crate::ipc::{client, paths, DaemonCommand, DaemonState};
+use crate::ipc::protocol::WatchLine;
+use crate::ipc::{client, paths, DaemonCommand, DaemonResponse, DaemonState};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::io::{self, Write};
@@ -19,22 +20,25 @@ pub struct WaybarLine {
     pub text: &'static str,
     pub alt: &'static str,
     pub class: &'static str,
-    pub tooltip: &'static str,
+    pub tooltip: String,
 }
 
 impl WaybarLine {
-    /// `None` means no daemon runs.
-    pub fn new(state: Option<DaemonState>) -> Self {
+    /// `None` means no daemon runs. `style` is the style that the take in
+    /// progress asked for.
+    pub fn new(state: Option<DaemonState>, style: Option<&str>) -> Self {
         let (name, text, tooltip) = match state {
-            None => ("stopped", "⊘", "Hush is not running"),
+            None => ("stopped", "⊘", "Hush is not running".to_string()),
             Some(state) => {
                 let (text, tooltip) = match state {
-                    DaemonState::Idle => ("○", "Hush is idle"),
-                    DaemonState::Starting => ("◔", "Hush is starting the microphone"),
-                    DaemonState::Recording { .. } => ("●", "Hush is recording"),
-                    DaemonState::Transcribing => ("◑", "Hush is transcribing"),
-                    DaemonState::Inserting => ("◕", "Hush is typing the text"),
-                    DaemonState::Stopping => ("◌", "Hush is stopping"),
+                    DaemonState::Idle => ("○", "Hush is idle".to_string()),
+                    DaemonState::Starting => ("◔", "Hush is starting the microphone".to_string()),
+                    DaemonState::Recording {
+                        locked, command, ..
+                    } => ("●", recording_tooltip(locked, command, style)),
+                    DaemonState::Transcribing => ("◑", "Hush is transcribing".to_string()),
+                    DaemonState::Inserting => ("◕", "Hush is typing the text".to_string()),
+                    DaemonState::Stopping => ("◌", "Hush is stopping".to_string()),
                 };
                 (state.name(), text, tooltip)
             },
@@ -48,6 +52,19 @@ impl WaybarLine {
     }
 }
 
+fn recording_tooltip(locked: bool, command: bool, style: Option<&str>) -> String {
+    let mut tooltip = match (command, locked) {
+        (true, _) => "Hush is recording a command",
+        (false, true) => "Hush is recording hands-free",
+        (false, false) => "Hush is recording",
+    }
+    .to_string();
+    if let Some(style) = style {
+        tooltip.push_str(&format!(" in the {} style", style));
+    }
+    tooltip
+}
+
 /// Lets a line through only when the state name changes, so the time in a
 /// recording does not repeat the line.
 #[derive(Debug, Default)]
@@ -56,8 +73,12 @@ pub struct ChangeFilter {
 }
 
 impl ChangeFilter {
-    pub fn update(&mut self, state: Option<DaemonState>) -> Option<WaybarLine> {
-        let line = WaybarLine::new(state);
+    pub fn update(
+        &mut self,
+        state: Option<DaemonState>,
+        style: Option<&str>,
+    ) -> Option<WaybarLine> {
+        let line = WaybarLine::new(state, style);
         if self.last.as_ref() == Some(&line) {
             return None;
         }
@@ -78,12 +99,15 @@ async fn follow(socket: &Path, out: &mut impl Write) -> io::Result<()> {
     let mut filter = ChangeFilter::default();
     loop {
         if let Ok(mut watcher) = client::Watcher::connect(socket).await {
-            while let Ok(Some(response)) = watcher.next().await {
+            while let Ok(Some(line)) = watcher.next().await {
+                let WatchLine::State(response) = line else {
+                    continue;
+                };
                 if !response.ok {
                     poll(socket, out, &mut filter).await?;
                     break;
                 }
-                emit(out, &mut filter, response.state)?;
+                emit(out, &mut filter, Some(response.as_ref()))?;
             }
         }
         emit(out, &mut filter, None)?;
@@ -94,18 +118,21 @@ async fn follow(socket: &Path, out: &mut impl Write) -> io::Result<()> {
 /// For a daemon that does not know the watch command.
 async fn poll(socket: &Path, out: &mut impl Write, filter: &mut ChangeFilter) -> io::Result<()> {
     while let Ok(response) = client::send_to(socket, DaemonCommand::Status).await {
-        emit(out, filter, response.state)?;
+        emit(out, filter, Some(&response))?;
         tokio::time::sleep(POLL).await;
     }
     Ok(())
 }
 
+/// `None` means no daemon runs.
 fn emit(
     out: &mut impl Write,
     filter: &mut ChangeFilter,
-    state: Option<DaemonState>,
+    response: Option<&DaemonResponse>,
 ) -> io::Result<()> {
-    if let Some(line) = filter.update(state) {
+    let state = response.and_then(|response| response.state);
+    let style = response.and_then(|response| response.style.as_deref());
+    if let Some(line) = filter.update(state, style) {
         serde_json::to_writer(&mut *out, &line)?;
         writeln!(out)?;
         out.flush()?;
@@ -202,7 +229,7 @@ mod tests {
                 r#"{"text":"◔","alt":"starting","class":"starting","tooltip":"Hush is starting the microphone"}"#,
             ),
             (
-                Some(DaemonState::Recording { elapsed_ms: 900 }),
+                Some(DaemonState::recording(900)),
                 r#"{"text":"●","alt":"recording","class":"recording","tooltip":"Hush is recording"}"#,
             ),
             (
@@ -220,7 +247,7 @@ mod tests {
         ];
         for (state, json) in cases {
             assert_eq!(
-                serde_json::to_string(&WaybarLine::new(state)).unwrap(),
+                serde_json::to_string(&WaybarLine::new(state, None)).unwrap(),
                 json
             );
         }
@@ -232,15 +259,15 @@ mod tests {
         let names: Vec<Option<&str>> = [
             Some(DaemonState::Idle),
             Some(DaemonState::Idle),
-            Some(DaemonState::Recording { elapsed_ms: 10 }),
-            Some(DaemonState::Recording { elapsed_ms: 900 }),
+            Some(DaemonState::recording(10)),
+            Some(DaemonState::recording(900)),
             Some(DaemonState::Transcribing),
             None,
             None,
             Some(DaemonState::Idle),
         ]
         .into_iter()
-        .map(|state| filter.update(state).map(|line| line.class))
+        .map(|state| filter.update(state, None).map(|line| line.class))
         .collect();
         assert_eq!(
             names,
@@ -263,11 +290,50 @@ mod tests {
         let mut filter = ChangeFilter::default();
         emit(&mut out, &mut filter, None).unwrap();
         emit(&mut out, &mut filter, None).unwrap();
-        emit(&mut out, &mut filter, Some(DaemonState::Idle)).unwrap();
+        emit(
+            &mut out,
+            &mut filter,
+            Some(&DaemonResponse::ok(DaemonState::Idle)),
+        )
+        .unwrap();
         let text = String::from_utf8(out).unwrap();
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains(r#""class":"stopped""#));
         assert!(lines[1].contains(r#""class":"idle""#));
+    }
+
+    #[test]
+    fn the_tooltip_names_the_lock_the_command_and_the_style() {
+        let locked = DaemonState::Recording {
+            elapsed_ms: 10,
+            locked: true,
+            command: false,
+            stops_in_ms: None,
+        };
+        assert_eq!(
+            WaybarLine::new(Some(locked), Some("casual")).tooltip,
+            "Hush is recording hands-free in the casual style"
+        );
+        let command = DaemonState::Recording {
+            elapsed_ms: 10,
+            locked: false,
+            command: true,
+            stops_in_ms: None,
+        };
+        assert_eq!(
+            WaybarLine::new(Some(command), None).tooltip,
+            "Hush is recording a command"
+        );
+
+        let mut filter = ChangeFilter::default();
+        assert!(filter
+            .update(Some(DaemonState::recording(10)), None)
+            .is_some());
+        assert!(
+            filter.update(Some(locked), None).is_some(),
+            "a lock in the middle of a take changes the line"
+        );
+        assert!(filter.update(Some(locked), None).is_none());
     }
 }

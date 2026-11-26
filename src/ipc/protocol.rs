@@ -42,8 +42,15 @@ pub enum DaemonCommand {
     /// Stop recording and discard the audio
     Cancel,
     Status,
-    /// Keep the connection open and send the state at once and on each change
-    Watch,
+    /// Keep the connection open and send the state at once and on each
+    /// change. `meter` adds the microphone level while a take records, and
+    /// `events` adds errors. A daemon from before these fields sends neither.
+    Watch {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        meter: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        events: bool,
+    },
     Quit,
     /// Type the last transcript again
     PasteLast,
@@ -87,6 +94,15 @@ pub enum DaemonState {
     Starting,
     Recording {
         elapsed_ms: u64,
+        /// Hands-free: the take records without the key held
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        locked: bool,
+        /// A Command Mode take, whose text is an instruction for the selection
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        command: bool,
+        /// Once the recording cap is near: the time until it stops the take
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stops_in_ms: Option<u64>,
     },
     Transcribing,
     Inserting,
@@ -94,6 +110,17 @@ pub enum DaemonState {
 }
 
 impl DaemonState {
+    /// A take that records with the key held, `elapsed_ms` after its first
+    /// audio frame.
+    pub fn recording(elapsed_ms: u64) -> Self {
+        DaemonState::Recording {
+            elapsed_ms,
+            locked: false,
+            command: false,
+            stops_in_ms: None,
+        }
+    }
+
     /// The lowercase state name that scripts read.
     pub fn name(&self) -> &'static str {
         match self {
@@ -112,8 +139,23 @@ impl fmt::Display for DaemonState {
         match self {
             DaemonState::Idle => f.write_str("idle"),
             DaemonState::Starting => f.write_str("starting"),
-            DaemonState::Recording { elapsed_ms } => {
-                write!(f, "recording ({:.1} s)", *elapsed_ms as f64 / 1000.0)
+            DaemonState::Recording {
+                elapsed_ms,
+                locked,
+                command,
+                ..
+            } => {
+                let kind = match (command, locked) {
+                    (true, _) => " a command",
+                    (false, true) => " hands-free",
+                    (false, false) => "",
+                };
+                write!(
+                    f,
+                    "recording{} ({:.1} s)",
+                    kind,
+                    *elapsed_ms as f64 / 1000.0
+                )
             },
             DaemonState::Transcribing => f.write_str("transcribing"),
             DaemonState::Inserting => f.write_str("inserting"),
@@ -179,6 +221,31 @@ impl TakeResult {
     }
 }
 
+/// Something that happened, sent to a watch that asked for events.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum WatchEvent {
+    /// A take or its transcription failed
+    Error { message: String },
+}
+
+/// The microphone level of the take that records, from 0 to 1.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Level {
+    pub level: f32,
+}
+
+/// One line of a watch: the state, and on request the level and events.
+/// Each kind has a key that the others lack (`level`, `event`, `ok`), so
+/// the order of the variants decides nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum WatchLine {
+    Level(Level),
+    Event(WatchEvent),
+    State(Box<DaemonResponse>),
+}
+
 /// One reply per command.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonResponse {
@@ -214,6 +281,10 @@ pub struct DaemonResponse {
     /// In a shortcuts reply: the portal shortcuts
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shortcuts: Option<Vec<PortalShortcut>>,
+    /// In a status or watch reply: the daemon's version, which a client
+    /// compares with its own after an upgrade
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 impl DaemonResponse {
@@ -230,6 +301,7 @@ impl DaemonResponse {
             safe_mode: None,
             start_delay: None,
             shortcuts: None,
+            version: None,
         }
     }
 
@@ -246,7 +318,13 @@ impl DaemonResponse {
             safe_mode: None,
             start_delay: None,
             shortcuts: None,
+            version: None,
         }
+    }
+
+    pub fn with_version(mut self, version: &str) -> Self {
+        self.version = Some(version.to_string());
+        self
     }
 
     pub fn with_shortcuts(mut self, shortcuts: Vec<PortalShortcut>) -> Self {
@@ -349,8 +427,71 @@ mod tests {
             serde_json::from_str(r#"{"command":"stop","print":true}"#).unwrap();
         assert_eq!(new, DaemonCommand::Stop { print: true });
         assert_eq!(
-            serde_json::to_string(&DaemonCommand::Watch).unwrap(),
+            serde_json::to_string(&DaemonCommand::Watch {
+                meter: false,
+                events: false
+            })
+            .unwrap(),
             r#"{"command":"watch"}"#
+        );
+    }
+
+    #[test]
+    fn a_watch_asks_for_the_meter_and_events_and_an_older_daemon_ignores_them() {
+        let plain: DaemonCommand = serde_json::from_str(r#"{"command":"watch"}"#).unwrap();
+        assert_eq!(
+            plain,
+            DaemonCommand::Watch {
+                meter: false,
+                events: false
+            },
+            "an older client"
+        );
+        let both = DaemonCommand::Watch {
+            meter: true,
+            events: true,
+        };
+        let json = serde_json::to_string(&both).unwrap();
+        assert_eq!(json, r#"{"command":"watch","meter":true,"events":true}"#);
+        assert_eq!(serde_json::from_str::<DaemonCommand>(&json).unwrap(), both);
+
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(tag = "command", rename_all = "snake_case")]
+        enum OldCommand {
+            Watch,
+        }
+        let old: OldCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(old, OldCommand::Watch, "an older daemon");
+    }
+
+    #[test]
+    fn watch_lines_tell_the_state_the_level_and_events_apart() {
+        let lines = [
+            WatchLine::State(Box::new(DaemonResponse::ok(DaemonState::recording(40)))),
+            WatchLine::Level(Level { level: 0.5 }),
+            WatchLine::Event(WatchEvent::Error {
+                message: "The microphone did not start".into(),
+            }),
+        ];
+        let json: Vec<String> = lines
+            .iter()
+            .map(|line| serde_json::to_string(line).unwrap())
+            .collect();
+        assert_eq!(
+            json,
+            [
+                r#"{"ok":true,"state":{"state":"recording","elapsed_ms":40}}"#,
+                r#"{"level":0.5}"#,
+                r#"{"event":"error","message":"The microphone did not start"}"#,
+            ]
+        );
+        for (line, json) in lines.iter().zip(&json) {
+            assert_eq!(&serde_json::from_str::<WatchLine>(json).unwrap(), line);
+        }
+        let failure: WatchLine = serde_json::from_str(r#"{"ok":false,"error":"nope"}"#).unwrap();
+        assert_eq!(
+            failure,
+            WatchLine::State(Box::new(DaemonResponse::error("nope")))
         );
     }
 
@@ -551,7 +692,7 @@ mod tests {
         let names: Vec<&str> = [
             DaemonState::Idle,
             DaemonState::Starting,
-            DaemonState::Recording { elapsed_ms: 5 },
+            DaemonState::recording(5),
             DaemonState::Transcribing,
             DaemonState::Inserting,
             DaemonState::Stopping,
@@ -590,7 +731,7 @@ mod tests {
         for state in [
             DaemonState::Idle,
             DaemonState::Starting,
-            DaemonState::Recording { elapsed_ms: 1500 },
+            DaemonState::recording(1500),
             DaemonState::Transcribing,
             DaemonState::Inserting,
             DaemonState::Stopping,
@@ -601,13 +742,55 @@ mod tests {
             assert!(back.ok);
         }
         assert_eq!(
-            serde_json::to_string(&DaemonState::Recording { elapsed_ms: 20 }).unwrap(),
+            serde_json::to_string(&DaemonState::recording(20)).unwrap(),
             r#"{"state":"recording","elapsed_ms":20}"#
         );
         assert_eq!(
-            DaemonState::Recording { elapsed_ms: 1250 }.to_string(),
+            DaemonState::recording(1250).to_string(),
             "recording (1.2 s)"
         );
+    }
+
+    #[test]
+    fn a_recording_names_its_lock_command_and_cap_only_when_set() {
+        let locked = DaemonState::Recording {
+            elapsed_ms: 2000,
+            locked: true,
+            command: false,
+            stops_in_ms: Some(45_000),
+        };
+        let json = serde_json::to_string(&locked).unwrap();
+        assert_eq!(
+            json,
+            r#"{"state":"recording","elapsed_ms":2000,"locked":true,"stops_in_ms":45000}"#
+        );
+        assert_eq!(serde_json::from_str::<DaemonState>(&json).unwrap(), locked);
+        assert_eq!(
+            serde_json::from_str::<DaemonState>(r#"{"state":"recording","elapsed_ms":7}"#).unwrap(),
+            DaemonState::recording(7),
+            "an older daemon"
+        );
+        assert_eq!(locked.to_string(), "recording hands-free (2.0 s)");
+        let command = DaemonState::Recording {
+            elapsed_ms: 500,
+            locked: false,
+            command: true,
+            stops_in_ms: None,
+        };
+        assert_eq!(command.to_string(), "recording a command (0.5 s)");
+    }
+
+    #[test]
+    fn status_replies_carry_the_version_only_when_set() {
+        let reply = DaemonResponse::ok(DaemonState::Idle).with_version("1.2.0");
+        let json = serde_json::to_string(&reply).unwrap();
+        assert_eq!(
+            json,
+            r#"{"ok":true,"state":{"state":"idle"},"version":"1.2.0"}"#
+        );
+        let old: DaemonResponse =
+            serde_json::from_str(r#"{"ok":true,"state":{"state":"idle"}}"#).unwrap();
+        assert_eq!(old.version, None, "an older daemon");
     }
 
     #[test]

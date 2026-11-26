@@ -107,7 +107,7 @@ impl HushTray {
         match self.state {
             DaemonState::Idle => format!("Idle. Hold {} to dictate.", self.hotkey),
             DaemonState::Starting => "Starting the microphone.".to_string(),
-            DaemonState::Recording { elapsed_ms } => {
+            DaemonState::Recording { elapsed_ms, .. } => {
                 format!("Recording, {} s.", elapsed_ms / 1000)
             },
             DaemonState::Transcribing => "Transcribing.".to_string(),
@@ -444,7 +444,7 @@ mod tests {
         assert_eq!(idle.icon_state(), IconState::Idle);
         assert!(idle.summary().contains("RightAlt"));
 
-        let (recording, _rx) = tray(DaemonState::Recording { elapsed_ms: 4200 });
+        let (recording, _rx) = tray(DaemonState::recording(4200));
         assert_eq!(recording.icon_state(), IconState::Recording);
         assert_eq!(recording.summary(), "Recording, 4 s.");
 
@@ -469,7 +469,7 @@ mod tests {
             Ok(SessionCommand::StartRecording(Trigger::Tray, None, None))
         );
 
-        let (mut recording, rx) = tray(DaemonState::Recording { elapsed_ms: 0 });
+        let (mut recording, rx) = tray(DaemonState::recording(0));
         recording.activate(0, 0);
         assert_eq!(rx.try_recv(), Ok(SessionCommand::StopRecording));
 
@@ -494,7 +494,7 @@ mod tests {
         assert!(labels.contains(&"Settings".to_string()));
         assert!(labels.contains(&"Quit Hush".to_string()));
 
-        let (recording, _rx) = tray(DaemonState::Recording { elapsed_ms: 0 });
+        let (recording, _rx) = tray(DaemonState::recording(0));
         let menu = recording.menu();
         let MenuItem::Standard(first) = &menu[0] else {
             panic!("the first item is a standard item")
@@ -508,7 +508,7 @@ mod tests {
 
     #[test]
     fn menu_actions_reach_the_session() {
-        let (mut tray, rx) = tray(DaemonState::Recording { elapsed_ms: 0 });
+        let (mut tray, rx) = tray(DaemonState::recording(0));
         let menu = tray.menu();
         for item in menu {
             let MenuItem::Standard(item) = item else {
@@ -524,13 +524,13 @@ mod tests {
     #[test]
     fn only_real_changes_redraw() {
         assert!(!worth_redrawing(
-            DaemonState::Recording { elapsed_ms: 10 },
-            DaemonState::Recording { elapsed_ms: 900 }
+            DaemonState::recording(10),
+            DaemonState::recording(900)
         ));
         assert!(!worth_redrawing(DaemonState::Idle, DaemonState::Idle));
         assert!(worth_redrawing(
             DaemonState::Idle,
-            DaemonState::Recording { elapsed_ms: 0 }
+            DaemonState::recording(0)
         ));
         assert!(worth_redrawing(
             DaemonState::Transcribing,

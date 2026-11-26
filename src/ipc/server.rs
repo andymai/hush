@@ -4,7 +4,8 @@
 //! when the take ends, and a watch replies once for each state change.
 
 use super::protocol::{
-    DaemonCommand, DaemonResponse, DaemonState, ModelState, TakeResult, FILE_TIMEOUT, PRINT_TIMEOUT,
+    DaemonCommand, DaemonResponse, DaemonState, Level, ModelState, TakeResult, WatchEvent,
+    FILE_TIMEOUT, PRINT_TIMEOUT,
 };
 use crate::audio::take::{StartDelay, StartDelays};
 use crate::portal::shortcuts::ShortcutsHandle;
@@ -21,7 +22,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{broadcast, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
@@ -50,14 +51,27 @@ pub enum SessionCommand {
     Quit,
 }
 
+/// What a take carries from its start into its recording. A phase outside
+/// the take carries none, so nothing here outlives the take.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct TakeFlags {
+    locked: bool,
+    command: bool,
+    style: Option<StyleName>,
+    stops_at: Option<Instant>,
+}
+
 enum Phase {
     Idle,
-    Starting,
-    Recording(Instant),
+    Starting(TakeFlags),
+    Recording(Instant, TakeFlags),
     Transcribing,
     Inserting,
     Stopping,
 }
+
+/// How many events a slow watch can fall behind before it misses some.
+const EVENT_BACKLOG: usize = 16;
 
 /// The client of a print stop. The take it ends types nothing and sends its
 /// text here instead.
@@ -98,6 +112,10 @@ pub struct SharedState {
     waiter: Mutex<Option<oneshot::Sender<TakeResult>>>,
     files: Mutex<VecDeque<FileJob>>,
     changes: watch::Sender<()>,
+    /// The microphone level of the take that records. A watch reads only the
+    /// newest value, so a slow reader gets fewer lines, never a backlog.
+    level: watch::Sender<f32>,
+    events: broadcast::Sender<WatchEvent>,
     safe_mode: Mutex<Option<String>>,
     start_delays: Mutex<StartDelays>,
     /// The GlobalShortcuts session, in portal mode.
@@ -122,6 +140,8 @@ impl SharedState {
             waiter: Mutex::new(None),
             files: Mutex::new(VecDeque::new()),
             changes: watch::channel(()).0,
+            level: watch::channel(0.0).0,
+            events: broadcast::channel(EVENT_BACKLOG).0,
             safe_mode: Mutex::new(None),
             start_delays: Mutex::new(StartDelays::default()),
             shortcuts: Mutex::new(None),
@@ -204,9 +224,15 @@ impl SharedState {
         self.set(Phase::Idle);
     }
 
-    /// The stream started and waits for its first audio frame.
-    pub fn set_starting(&self) {
-        self.set(Phase::Starting);
+    /// The stream started and waits for its first audio frame. `command`
+    /// marks a Command Mode take, and `style` is the style that its start
+    /// asked for.
+    pub fn set_starting(&self, command: bool, style: Option<StyleName>) {
+        self.set(Phase::Starting(TakeFlags {
+            command,
+            style,
+            ..TakeFlags::default()
+        }));
     }
 
     /// The first audio frame of a take arrived `delay` after its stream
@@ -219,9 +245,55 @@ impl SharedState {
         self.start_delays.lock().summary()
     }
 
-    /// `since` is the time of the first audio frame.
+    /// `since` is the time of the first audio frame. The take keeps the
+    /// flags that it got while it started.
     pub fn set_recording(&self, since: Instant) {
-        self.set(Phase::Recording(since));
+        let mut phase = self.phase.lock();
+        let flags = match *phase {
+            Phase::Starting(flags) | Phase::Recording(_, flags) => flags,
+            _ => TakeFlags::default(),
+        };
+        *phase = Phase::Recording(since, flags);
+        drop(phase);
+        self.changes.send_replace(());
+    }
+
+    /// The take in progress records hands-free.
+    pub fn set_locked(&self) {
+        self.update_take(|flags| flags.locked = true);
+    }
+
+    /// The recording cap stops the take in progress at `at`.
+    pub fn set_stops_at(&self, at: Instant) {
+        self.update_take(|flags| flags.stops_at = Some(at));
+    }
+
+    /// Watchers hear a change of the flags; outside a take, nothing changes.
+    fn update_take(&self, change: impl FnOnce(&mut TakeFlags)) {
+        let mut phase = self.phase.lock();
+        let (Phase::Starting(flags) | Phase::Recording(_, flags)) = &mut *phase else {
+            return;
+        };
+        let before = *flags;
+        change(flags);
+        let changed = *flags != before;
+        drop(phase);
+        if changed {
+            self.changes.send_replace(());
+        }
+    }
+
+    /// The microphone level of the take that records, from 0 to 1.
+    pub fn publish_level(&self, level: f32) {
+        self.level.send_replace(level.clamp(0.0, 1.0));
+    }
+
+    /// A take or its transcription failed. Only watches that asked for
+    /// events hear it; with none, the event goes nowhere.
+    pub fn report_error(&self, message: &str) {
+        let _ = self.events.send(WatchEvent::Error {
+            message: message.to_string(),
+        });
     }
 
     pub fn set_transcribing(&self) {
@@ -238,7 +310,10 @@ impl SharedState {
 
     /// A take is in progress, whether or not its first frame arrived.
     pub fn in_take(&self) -> bool {
-        matches!(*self.phase.lock(), Phase::Starting | Phase::Recording(_))
+        matches!(
+            *self.phase.lock(),
+            Phase::Starting(_) | Phase::Recording(..)
+        )
     }
 
     /// No take, transcription, or result processing is in progress.
@@ -317,16 +392,31 @@ impl SharedState {
         DaemonResponse::ok(self.snapshot())
             .with_model_state(self.model_state())
             .with_language(self.active_language().map(|l| l.code().to_string()))
+            .with_style(self.take_style().map(|name| name.to_string()))
             .with_safe_mode(self.safe_mode.lock().clone())
             .with_start_delay(self.start_delay())
+            .with_version(env!("CARGO_PKG_VERSION"))
+    }
+
+    /// The style that the start of the take in progress asked for.
+    fn take_style(&self) -> Option<StyleName> {
+        match *self.phase.lock() {
+            Phase::Starting(flags) | Phase::Recording(_, flags) => flags.style,
+            _ => None,
+        }
     }
 
     pub fn snapshot(&self) -> DaemonState {
         match *self.phase.lock() {
             Phase::Idle => DaemonState::Idle,
-            Phase::Starting => DaemonState::Starting,
-            Phase::Recording(since) => DaemonState::Recording {
+            Phase::Starting(_) => DaemonState::Starting,
+            Phase::Recording(since, flags) => DaemonState::Recording {
                 elapsed_ms: since.elapsed().as_millis() as u64,
+                locked: flags.locked,
+                command: flags.command,
+                stops_in_ms: flags
+                    .stops_at
+                    .map(|at| at.saturating_duration_since(Instant::now()).as_millis() as u64),
             },
             Phase::Transcribing => DaemonState::Transcribing,
             Phase::Inserting => DaemonState::Inserting,
@@ -404,7 +494,9 @@ async fn handle_client(
         .await
         .context("Failed to read IPC command")?;
     let response = match serde_json::from_str::<DaemonCommand>(line.trim()) {
-        Ok(DaemonCommand::Watch) => return watch(reader, writer, shared).await,
+        Ok(DaemonCommand::Watch { meter, events }) => {
+            return watch(reader, writer, shared, meter, events).await
+        },
         Ok(DaemonCommand::Stop { print: true }) => {
             stop_and_print(shared, control, PRINT_TIMEOUT).await
         },
@@ -442,7 +534,11 @@ async fn portal_shortcuts(
 }
 
 async fn write_response(writer: &mut OwnedWriteHalf, response: &DaemonResponse) -> Result<()> {
-    let mut payload = serde_json::to_string(response)?;
+    write_line(writer, response).await
+}
+
+async fn write_line(writer: &mut OwnedWriteHalf, line: &impl serde::Serialize) -> Result<()> {
+    let mut payload = serde_json::to_string(line)?;
     payload.push('\n');
     writer
         .write_all(payload.as_bytes())
@@ -451,20 +547,40 @@ async fn write_response(writer: &mut OwnedWriteHalf, response: &DaemonResponse) 
 }
 
 /// Send the state now and after each change, until the client hangs up.
+/// With `meter`, also each new microphone level; with `events`, each error.
 async fn watch(
     mut reader: BufReader<OwnedReadHalf>,
     mut writer: OwnedWriteHalf,
     shared: &SharedState,
+    meter: bool,
+    events: bool,
 ) -> Result<()> {
     let mut changes = shared.subscribe();
+    let mut levels = shared.level.subscribe();
+    let mut errors = shared.events.subscribe();
     let mut scratch = [0u8; 64];
+    write_response(&mut writer, &shared.status()).await?;
     loop {
-        write_response(&mut writer, &shared.status()).await?;
         tokio::select! {
             changed = changes.changed() => {
                 if changed.is_err() {
                     return Ok(());
                 }
+                write_response(&mut writer, &shared.status()).await?;
+            },
+            changed = levels.changed(), if meter => {
+                if changed.is_err() {
+                    return Ok(());
+                }
+                let level = *levels.borrow_and_update();
+                write_line(&mut writer, &Level { level }).await?;
+            },
+            event = errors.recv(), if events => match event {
+                Ok(event) => write_line(&mut writer, &event).await?,
+                Err(broadcast::error::RecvError::Lagged(missed)) => {
+                    debug!(missed, "A watch fell behind and missed events");
+                },
+                Err(broadcast::error::RecvError::Closed) => return Ok(()),
             },
             read = reader.read(&mut scratch) => {
                 if matches!(read, Ok(0) | Err(_)) {
@@ -574,7 +690,7 @@ pub fn respond(
         other => other,
     };
     match command {
-        DaemonCommand::Status | DaemonCommand::Watch => shared.status(),
+        DaemonCommand::Status | DaemonCommand::Watch { .. } => shared.status(),
         DaemonCommand::Toggle { language, style } => {
             if shared.in_take() {
                 forward(SessionCommand::StopRecording, after_stop)
@@ -630,6 +746,7 @@ pub fn respond(
 mod tests {
     use super::*;
     use crate::ipc::client;
+    use crate::ipc::protocol::WatchLine;
 
     #[tokio::test]
     async fn the_shortcuts_reply_needs_portal_mode() {
@@ -662,7 +779,7 @@ mod tests {
             Ok(SessionCommand::StartRecording(Trigger::Ipc, None, None))
         );
 
-        shared.set_starting();
+        shared.set_starting(false, None);
         assert_eq!(
             respond(toggle(), &shared, &tx).state,
             Some(DaemonState::Idle),
@@ -1087,13 +1204,106 @@ mod tests {
         let guard = start(&path, Arc::clone(&shared), tx).await.unwrap();
 
         let mut watcher = client::Watcher::connect(&path).await.unwrap();
-        let first = watcher.next().await.unwrap().unwrap();
+        let first = next_state(&mut watcher).await;
         assert_eq!(first.state, Some(DaemonState::Idle));
+        assert_eq!(first.version.as_deref(), Some(env!("CARGO_PKG_VERSION")));
 
-        shared.set_starting();
-        let next = watcher.next().await.unwrap().unwrap();
+        shared.set_starting(false, None);
+        let next = next_state(&mut watcher).await;
         assert_eq!(next.state, Some(DaemonState::Starting));
         drop(guard);
+    }
+
+    async fn next_state(watcher: &mut client::Watcher) -> DaemonResponse {
+        match watcher.next().await.unwrap().unwrap() {
+            WatchLine::State(response) => *response,
+            other => panic!("expected a state line, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_watch_gets_the_level_and_errors_only_when_it_asks() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hush.sock");
+        let shared = Arc::new(SharedState::new());
+        let (tx, _rx) = mpsc::channel();
+        let guard = start(&path, Arc::clone(&shared), tx).await.unwrap();
+
+        let mut plain = client::Watcher::connect(&path).await.unwrap();
+        let mut full = client::Watcher::connect_with(&path, true, true)
+            .await
+            .unwrap();
+        next_state(&mut plain).await;
+        next_state(&mut full).await;
+
+        shared.publish_level(0.25);
+        assert_eq!(
+            full.next().await.unwrap().unwrap(),
+            WatchLine::Level(Level { level: 0.25 })
+        );
+        shared.report_error("The microphone did not start");
+        assert_eq!(
+            full.next().await.unwrap().unwrap(),
+            WatchLine::Event(WatchEvent::Error {
+                message: "The microphone did not start".into()
+            })
+        );
+
+        shared.set_starting(false, None);
+        assert_eq!(
+            next_state(&mut plain).await.state,
+            Some(DaemonState::Starting),
+            "a plain watch got neither the level nor the error"
+        );
+        drop(guard);
+    }
+
+    #[test]
+    fn a_take_keeps_its_lock_command_and_style_until_it_ends() {
+        let shared = SharedState::new();
+        let style = StyleName::parse("casual").unwrap();
+        shared.set_starting(true, Some(style));
+        shared.set_locked();
+        shared.set_recording(Instant::now());
+        let status = shared.status();
+        assert!(matches!(
+            status.state,
+            Some(DaemonState::Recording {
+                locked: true,
+                command: true,
+                stops_in_ms: None,
+                ..
+            })
+        ));
+        assert_eq!(status.style.as_deref(), Some("casual"));
+
+        shared.set_stops_at(Instant::now() + Duration::from_secs(30));
+        let DaemonState::Recording { stops_in_ms, .. } = shared.snapshot() else {
+            panic!("the take still records");
+        };
+        assert!(stops_in_ms.is_some_and(|ms| (29_000..=30_000).contains(&ms)));
+
+        shared.set_idle();
+        shared.set_locked();
+        assert_eq!(
+            shared.snapshot(),
+            DaemonState::Idle,
+            "a lock outside a take does nothing"
+        );
+        assert_eq!(shared.status().style, None);
+        shared.set_starting(false, None);
+        shared.set_recording(Instant::now());
+        assert!(
+            matches!(
+                shared.snapshot(),
+                DaemonState::Recording {
+                    locked: false,
+                    command: false,
+                    ..
+                }
+            ),
+            "the next take starts without the old flags"
+        );
     }
 
     #[tokio::test]
