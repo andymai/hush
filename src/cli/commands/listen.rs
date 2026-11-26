@@ -523,6 +523,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             };
             if gesture.is_locked() {
                 state_handle_clone.lock().set_locked(true);
+                shared_hotkey.set_locked();
             }
             if let Some(command) = command {
                 if audio_cmd_tx_clone.send(command).is_err() {
@@ -655,6 +656,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                     },
                                     Err(e) => {
                                         error!("Undo failed: {}", e);
+                                        shared_result.report_error("Undo failed");
                                         *state_handle_clone2.lock() = OverlayState::error(
                                             "Undo failed",
                                             std::time::Duration::from_secs(3),
@@ -669,6 +671,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                 }
                             } else {
                                 warn!("No recent insertion to undo");
+                                shared_result.report_error("Nothing to undo");
                                 *state_handle_clone2.lock() = OverlayState::error(
                                     "Nothing to undo",
                                     std::time::Duration::from_secs(2),
@@ -824,6 +827,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 TranscriptionResult::Error(error_msg) => {
                     error!("❌ Transcription failed: {}", error_msg);
                     let _ = feedback.play_error();
+                    shared_result.report_error(&error_msg);
                     *state_handle_clone2.lock() =
                         OverlayState::error(&error_msg, std::time::Duration::from_secs(4));
                     shared_result.set_idle();
@@ -952,6 +956,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                 device
                             ),
                         );
+                        shared.report_error("The microphone did not start");
                         show(OverlayState::error(
                             "The microphone did not start",
                             Duration::from_secs(4),
@@ -1046,6 +1051,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     CapCheck::Warn { remaining_secs } => {
                         if !cap_warned {
                             cap_warned = true;
+                            shared
+                                .set_stops_at(Instant::now() + Duration::from_secs(remaining_secs));
                             let _ = feedback.play_warning();
                             notify(
                                 NoticeKind::Status,
@@ -1226,6 +1233,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     error!("Failed to start recording: {}", e);
                     audio_capture.disable_amplitude_monitoring();
                     let _ = feedback.play_error();
+                    shared.report_error("Failed to start recording");
                     show(OverlayState::error(
                         "Failed to start recording",
                         Duration::from_secs(4),
@@ -1247,7 +1255,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     }
                     shared.set_take_language(current_language);
                     current_style = once_style;
-                    shared.set_starting();
+                    shared.set_starting(is_command, once_style);
                     if model.begin_load() {
                         publish_model(&model);
                     }
@@ -1267,15 +1275,16 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     silence_heard.store(false, Ordering::Release);
                     // Start polling amplitude updates with batching for performance
                     let state_handle_amp = state_handle.clone();
+                    let shared_amp = Arc::clone(&shared);
                     let stop_signal = amplitude_stop_signal.clone();
                     let mut silence = silence_pause.map(SilenceDetector::new);
                     let silence_heard_amp = Arc::clone(&silence_heard);
 
-                    // Batch amplitude updates to match overlay repaint rate (20 FPS during recording)
-                    // This reduces mutex contention and provides smoother averaged values
+                    // Average the amplitude over each meter frame (30 per second), so the
+                    // overlay and meter watches get one smoothed value per frame
                     let amplitude_thread = std::thread::spawn(move || {
                         let mut amplitude_buffer = Vec::with_capacity(10);
-                        let update_interval = std::time::Duration::from_millis(50); // 20 Hz, matches recording repaint
+                        let update_interval = std::time::Duration::from_millis(33);
                         let mut last_update = std::time::Instant::now();
 
                         loop {
@@ -1293,7 +1302,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                         silence_heard_amp.store(true, Ordering::Release);
                                     }
 
-                                    // Update state every 50ms with averaged amplitude
+                                    // Update state every frame with averaged amplitude
                                     if last_update.elapsed() >= update_interval {
                                         let avg_amplitude = if !amplitude_buffer.is_empty() {
                                             amplitude_buffer.iter().sum::<f32>()
@@ -1306,6 +1315,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                         if state.is_recording() {
                                             state.update_amplitude(avg_amplitude);
                                         }
+                                        drop(state);
+                                        shared_amp.publish_level(avg_amplitude);
                                         // Don't break here - let stop_signal control exit
 
                                         amplitude_buffer.clear();

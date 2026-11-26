@@ -90,6 +90,11 @@ text="$(hush stop --print)" && notify-send "Hush heard" "$text"
 | `state` | `idle`, `starting`, `recording`, `transcribing`, `inserting`, `stopping`, or `stopped` when no daemon runs |
 | `running` | `true` when the daemon answers |
 | `elapsed_ms` | Length of the current recording, else `null` |
+| `locked` | While a recording runs: `true` when it is hands-free, else `false`. `null` outside a recording |
+| `command` | While a recording runs: `true` when it is a Command Mode instruction, else `false`. `null` outside a recording |
+| `stops_in_ms` | Once the recording cap is near: the time until it stops the recording, else `null` |
+| `style` | The style that the recording in progress asked for (`--style` or a style key), else `null` |
+| `daemon_version` | The version of the daemon that answered, else `null`. After an upgrade, it can differ from `hush --version` until the daemon restarts |
 | `model_state` | `loaded`, `loading`, or `unloaded` for the local model; `none` for a cloud or server backend; `null` when no daemon runs |
 | `backend` | `local`, `groq`, `openai`, or `openai-compatible` |
 | `model` | Model size for `local`, model name for a cloud backend |
@@ -108,7 +113,7 @@ text="$(hush stop --print)" && notify-send "Hush heard" "$text"
 
 ## Waybar
 
-`hush status --follow --json` prints one line at start and one line for each state change, in the JSON format of a Waybar custom module. `alt` and `class` are the state name. When the daemon stops, the module shows `stopped`, and it recovers when the daemon starts again.
+`hush status --follow --json` prints one line at start and one line for each state change, in the JSON format of a Waybar custom module. `alt` and `class` are the state name. The tooltip also says when a recording is hands-free or a Command Mode instruction, and names the style that the recording asked for. When the daemon stops, the module shows `stopped`, and it recovers when the daemon starts again.
 
 ```json
 "custom/hush": {

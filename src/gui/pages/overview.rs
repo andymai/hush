@@ -214,7 +214,7 @@ fn try_it(gui: &mut Gui, ui: &mut egui::Ui) {
             match gui.machine.daemon {
                 None => widgets::status(ui, icons::CIRCLE_ALERT, colours.warn, "Start Hush first."),
                 Some(DaemonState::Starting) => widgets::busy(ui, "Starting the microphone…"),
-                Some(DaemonState::Recording { elapsed_ms }) => widgets::status(
+                Some(DaemonState::Recording { elapsed_ms, .. }) => widgets::status(
                     ui,
                     icons::MIC,
                     colours.accent,

@@ -990,7 +990,7 @@ mod tests {
         assert_eq!(Daemon::of(Probe::NotRunning, false, false), Daemon::Stopped);
         for state in [
             DaemonState::Starting,
-            DaemonState::Recording { elapsed_ms: 5 },
+            DaemonState::recording(5),
             DaemonState::Transcribing,
             DaemonState::Inserting,
             DaemonState::Stopping,

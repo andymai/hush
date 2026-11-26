@@ -116,6 +116,17 @@ pub struct StatusReport {
     pub state: &'static str,
     pub running: bool,
     pub elapsed_ms: Option<u64>,
+    /// While a take records: whether it is hands-free
+    pub locked: Option<bool>,
+    /// While a take records: whether it is a Command Mode instruction
+    pub command: Option<bool>,
+    /// Once the recording cap is near: the time until it stops the take
+    pub stops_in_ms: Option<u64>,
+    /// The style that the take in progress asked for
+    pub style: Option<String>,
+    /// The version of the daemon that answered, which can differ from this
+    /// command's version after an upgrade
+    pub daemon_version: Option<String>,
     pub model_state: Option<ModelState>,
     pub backend: Option<TranscriptionBackend>,
     pub model: Option<String>,
@@ -178,9 +189,23 @@ impl StatusReport {
             state: state.as_ref().map_or("stopped", DaemonState::name),
             running: state.is_some(),
             elapsed_ms: match state {
-                Some(DaemonState::Recording { elapsed_ms }) => Some(elapsed_ms),
+                Some(DaemonState::Recording { elapsed_ms, .. }) => Some(elapsed_ms),
                 _ => None,
             },
+            locked: match state {
+                Some(DaemonState::Recording { locked, .. }) => Some(locked),
+                _ => None,
+            },
+            command: match state {
+                Some(DaemonState::Recording { command, .. }) => Some(command),
+                _ => None,
+            },
+            stops_in_ms: match state {
+                Some(DaemonState::Recording { stops_in_ms, .. }) => stops_in_ms,
+                _ => None,
+            },
+            style: reply.and_then(|reply| reply.style.clone()),
+            daemon_version: reply.and_then(|reply| reply.version.clone()),
             model_state: reply.and_then(|reply| reply.model_state),
             backend: transcription.map(|t| t.backend),
             model: transcription.map(|t| match t.cloud_model() {
@@ -243,7 +268,7 @@ mod tests {
 
     #[test]
     fn json_status_has_stable_keys() {
-        let reply = DaemonResponse::ok(DaemonState::Recording { elapsed_ms: 1500 })
+        let reply = DaemonResponse::ok(DaemonState::recording(1500))
             .with_model_state(Some(ModelState::Loading))
             .with_language(Some("de".to_string()))
             .with_start_delay(Some(StartDelay {
@@ -271,13 +296,16 @@ mod tests {
             [
                 "arch",
                 "backend",
+                "command",
                 "config_error",
+                "daemon_version",
                 "devices",
                 "elapsed_ms",
                 "gpu",
                 "gpu_type",
                 "hotkey",
                 "language",
+                "locked",
                 "model",
                 "model_path",
                 "model_state",
@@ -287,12 +315,16 @@ mod tests {
                 "sample_rate",
                 "start_delay",
                 "state",
+                "stops_in_ms",
+                "style",
                 "use_gpu"
             ]
         );
         assert_eq!(value["state"], "recording");
         assert_eq!(value["running"], true);
         assert_eq!(value["elapsed_ms"], 1500);
+        assert_eq!(value["locked"], false);
+        assert_eq!(value["stops_in_ms"], serde_json::Value::Null);
         assert_eq!(value["backend"], "local");
         assert_eq!(value["model"], "base");
         assert_eq!(value["model_state"], "loading");

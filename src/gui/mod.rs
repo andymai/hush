@@ -1373,7 +1373,7 @@ mod tests {
     fn a_daemon_mid_dictation_counts_as_busy() {
         let mut machine = ready_machine();
         assert!(machine.running() && !machine.busy());
-        machine.daemon = Some(DaemonState::Recording { elapsed_ms: 10 });
+        machine.daemon = Some(DaemonState::recording(10));
         assert!(machine.busy());
         machine.daemon = Some(DaemonState::Starting);
         assert!(machine.busy());

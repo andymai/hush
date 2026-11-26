@@ -1,7 +1,7 @@
 //! Client side of the socket, used by `hush toggle`, `hush stop`, and status.
 
 use super::paths;
-use super::protocol::{DaemonCommand, DaemonResponse, DaemonState};
+use super::protocol::{DaemonCommand, DaemonResponse, DaemonState, WatchLine};
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Duration;
@@ -42,15 +42,23 @@ async fn connect(path: &Path, command: &DaemonCommand) -> Result<(OwnedReadHalf,
     Ok((reader, writer))
 }
 
-/// The daemon's state at once and after each change.
+/// The daemon's state at once and after each change, and on request the
+/// microphone level and events.
 pub struct Watcher {
     lines: Lines<BufReader<OwnedReadHalf>>,
     _writer: OwnedWriteHalf,
 }
 
 impl Watcher {
+    /// The state only.
     pub async fn connect(path: &Path) -> Result<Self> {
-        let (reader, writer) = connect(path, &DaemonCommand::Watch).await?;
+        Self::connect_with(path, false, false).await
+    }
+
+    /// With `meter`, also the level while a take records; with `events`,
+    /// also errors. A daemon from before these options sends the state only.
+    pub async fn connect_with(path: &Path, meter: bool, events: bool) -> Result<Self> {
+        let (reader, writer) = connect(path, &DaemonCommand::Watch { meter, events }).await?;
         Ok(Self {
             lines: BufReader::new(reader).lines(),
             _writer: writer,
@@ -58,7 +66,7 @@ impl Watcher {
     }
 
     /// `None` when the daemon closes the connection.
-    pub async fn next(&mut self) -> Result<Option<DaemonResponse>> {
+    pub async fn next(&mut self) -> Result<Option<WatchLine>> {
         let Some(line) = self
             .lines
             .next_line()
