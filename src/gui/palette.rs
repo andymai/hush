@@ -499,6 +499,20 @@ pub const SETTINGS: &[Setting] = &[
         "updates version github notification",
     ),
     row(
+        "desktop.overlay",
+        "Show the recording pill",
+        Page::Desktop,
+        "Recording pill",
+        "overlay pill waveform indicator osd bottom",
+    ),
+    row(
+        "desktop.overlay_theme",
+        "Pill colors",
+        Page::Desktop,
+        "Recording pill",
+        "overlay pill theme colours colors nord catppuccin dracula gruvbox contrast accent",
+    ),
+    row(
         "desktop.appearance",
         "Theme",
         Page::Desktop,

@@ -34,6 +34,9 @@ const BAR_WIDTH: f32 = 3.0;
 const BAR_GAP: f32 = 2.0;
 const BAR_MIN: f32 = 3.0;
 const BAR_MAX: f32 = 18.0;
+/// The bars side by side; the still meter takes the same room.
+const BARS_WIDTH: f32 = BARS as f32 * (BAR_WIDTH + BAR_GAP) - BAR_GAP;
+const METER_HEIGHT: f32 = 6.0;
 const TEXT_SIZE: f32 = 12.5;
 const BADGE_TEXT_SIZE: f32 = 11.0;
 const LOCK_SIZE: f32 = 10.0;
@@ -45,30 +48,35 @@ pub const LOADING_TEXT: &str = "Loading the model";
 pub const COMMAND_TEXT: &str = "cmd";
 
 /// The colours of the pill.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
     pub background: Color,
     pub border: Color,
+    /// Text, the lock, and the working dots
     pub foreground: Color,
+    /// The level bars
+    pub level: Color,
     pub recording: Color,
     pub warning: Color,
     pub error: Color,
 }
 
-/// The default pill: light marks on dark ink.
-pub fn dark() -> Palette {
-    Palette {
-        background: rgba(14, 14, 17, 222),
-        border: rgba(255, 255, 255, 36),
-        foreground: rgba(242, 240, 234, 235),
-        recording: rgba(229, 72, 77, 255),
-        warning: rgba(245, 165, 36, 255),
-        error: rgba(204, 41, 54, 255),
-    }
+/// What the theme gives the renderer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Look {
+    pub palette: Palette,
+    /// One still level meter in place of the moving bars, and working dots
+    /// that do not pulse
+    pub reduced_motion: bool,
 }
 
-fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color {
-    Color::from_rgba8(r, g, b, a)
+impl Default for Look {
+    fn default() -> Self {
+        Self {
+            palette: super::theme::preset(crate::config::settings::OverlayTheme::Dark),
+            reduced_motion: false,
+        }
+    }
 }
 
 static FONT: LazyLock<Option<FontRef<'static>>> =
@@ -88,13 +96,8 @@ pub fn pill_rect(scene: &Scene) -> (f32, f32, f32, f32) {
 
 /// `None` when the scale makes an empty surface. With `hint`, a line above
 /// the pill names what a click does.
-pub fn render(
-    scene: &Scene,
-    palette: &Palette,
-    scale: f32,
-    seconds: f32,
-    hint: bool,
-) -> Option<Pixmap> {
+pub fn render(scene: &Scene, look: &Look, scale: f32, seconds: f32, hint: bool) -> Option<Pixmap> {
+    let palette = &look.palette;
     let width = (SURFACE_WIDTH as f32 * scale).round() as u32;
     let height = (SURFACE_HEIGHT as f32 * scale).round() as u32;
     let mut pixmap = Pixmap::new(width, height)?;
@@ -156,15 +159,33 @@ pub fn render(
                 palette.recording,
             );
             x += 2.0 * DOT_RADIUS + GAP;
-            for level in levels {
-                let height = BAR_MIN + (BAR_MAX - BAR_MIN) * level.clamp(0.0, 1.0);
+            if look.reduced_motion {
+                let level = levels[BARS - 1].clamp(0.0, 1.0);
+                let top = middle - METER_HEIGHT / 2.0;
+                let mut track = palette.level;
+                track.set_alpha(track.alpha() * 0.3);
                 canvas.fill(
-                    rounded_rect(x, middle - height / 2.0, BAR_WIDTH, height, BAR_WIDTH / 2.0),
-                    palette.foreground,
+                    rounded_rect(x, top, BARS_WIDTH, METER_HEIGHT, METER_HEIGHT / 2.0),
+                    track,
                 );
-                x += BAR_WIDTH + BAR_GAP;
+                let filled = METER_HEIGHT + (BARS_WIDTH - METER_HEIGHT) * level;
+                canvas.fill(
+                    rounded_rect(x, top, filled, METER_HEIGHT, METER_HEIGHT / 2.0),
+                    palette.level,
+                );
+                x += BARS_WIDTH;
+            } else {
+                for level in levels {
+                    let height = BAR_MIN + (BAR_MAX - BAR_MIN) * level.clamp(0.0, 1.0);
+                    canvas.fill(
+                        rounded_rect(x, middle - height / 2.0, BAR_WIDTH, height, BAR_WIDTH / 2.0),
+                        palette.level,
+                    );
+                    x += BAR_WIDTH + BAR_GAP;
+                }
+                x -= BAR_GAP;
             }
-            x += GAP - BAR_GAP;
+            x += GAP;
             let (time, colour) = match remaining {
                 Some(left) => (clock(*left), palette.warning),
                 None => (clock(*elapsed), palette.foreground),
@@ -183,7 +204,11 @@ pub fn render(
         Scene::Working { loading } => {
             for dot in 0..3 {
                 let wave = (seconds * std::f32::consts::TAU * 1.2 - dot as f32 * 0.7).sin();
-                let alpha = 0.35 + 0.65 * (0.5 + 0.5 * wave);
+                let alpha = if look.reduced_motion {
+                    0.8
+                } else {
+                    0.35 + 0.65 * (0.5 + 0.5 * wave)
+                };
                 let mut colour = palette.foreground;
                 colour.set_alpha(colour.alpha() * alpha);
                 canvas.fill(circle(x + WORK_DOT_RADIUS, middle, WORK_DOT_RADIUS), colour);
@@ -213,9 +238,9 @@ pub fn pill_width(scene: &Scene) -> f32 {
             remaining,
             ..
         } => {
-            let bars = BARS as f32 * BAR_WIDTH + (BARS - 1) as f32 * BAR_GAP;
             let time = clock(remaining.unwrap_or(*elapsed));
-            let mut width = 2.0 * DOT_RADIUS + GAP + bars + GAP + text_width(&time, TEXT_SIZE);
+            let mut width =
+                2.0 * DOT_RADIUS + GAP + BARS_WIDTH + GAP + text_width(&time, TEXT_SIZE);
             if *locked {
                 width += BADGE_GAP + LOCK_SIZE;
             }
@@ -454,6 +479,7 @@ pub fn to_rgba(pixmap: &Pixmap) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::settings::OverlayTheme;
 
     fn recording(locked: bool, command: bool, remaining: Option<Duration>) -> Scene {
         Scene::Recording {
@@ -479,8 +505,14 @@ mod tests {
     #[test]
     fn the_pill_sits_in_the_middle_with_clear_corners() {
         for scale in [1.0, 2.0] {
-            let pixmap =
-                render(&recording(false, false, None), &dark(), scale, 0.0, false).unwrap();
+            let pixmap = render(
+                &recording(false, false, None),
+                &Look::default(),
+                scale,
+                0.0,
+                false,
+            )
+            .unwrap();
             assert_eq!(pixmap.width(), (SURFACE_WIDTH as f32 * scale) as u32);
             assert_eq!(pixmap.height(), (SURFACE_HEIGHT as f32 * scale) as u32);
             let (w, h) = (pixmap.width(), pixmap.height());
@@ -550,15 +582,36 @@ mod tests {
                 },
             ),
         ];
-        for (name, scene) in scenes {
-            let pixmap = render(&scene, &dark(), 2.0, 0.3, false).unwrap();
+        let save = |name: String, scene: &Scene, look: &Look| {
+            let pixmap = render(scene, look, 2.0, 0.3, false).unwrap();
             let image =
                 image::RgbaImage::from_raw(pixmap.width(), pixmap.height(), to_rgba(&pixmap))
                     .unwrap();
             image
                 .save(std::path::Path::new(&dir).join(format!("{}.png", name)))
                 .unwrap();
+        };
+        for (name, scene) in &scenes {
+            save(name.to_string(), scene, &Look::default());
         }
+        let locked = recording(true, false, None);
+        for theme in OverlayTheme::ALL {
+            let look = Look {
+                palette: super::super::theme::preset(theme),
+                reduced_motion: false,
+            };
+            save(format!("theme-{:?}", theme).to_lowercase(), &locked, &look);
+        }
+        let still = Look {
+            reduced_motion: true,
+            ..Look::default()
+        };
+        save("still".into(), &locked, &still);
+        save(
+            "still-working".into(),
+            &Scene::Working { loading: false },
+            &still,
+        );
     }
 
     #[test]
@@ -570,8 +623,12 @@ mod tests {
             let row = (top - HINT_HEIGHT / 2.0 - 4.0) as u32;
             (0..pixmap.width()).any(|x| alpha_at(pixmap, x, row) > 0)
         };
-        assert!(!above(&render(&scene, &dark(), 1.0, 0.0, false).unwrap()));
-        assert!(above(&render(&scene, &dark(), 1.0, 0.0, true).unwrap()));
+        assert!(!above(
+            &render(&scene, &Look::default(), 1.0, 0.0, false).unwrap()
+        ));
+        assert!(above(
+            &render(&scene, &Look::default(), 1.0, 0.0, true).unwrap()
+        ));
         assert!(text_width(HINT_TEXT, HINT_SIZE) + 2.0 * PADDING < SURFACE_WIDTH as f32);
     }
 }

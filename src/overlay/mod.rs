@@ -5,18 +5,21 @@
 //! It runs as its own process, `hush overlay`, which the daemon starts with
 //! a socket pair on fd 3 ([`supervisor`]). The process watches the daemon's
 //! state over that socket (`link`), turns it into a scene ([`view`]), draws
-//! the scene on the CPU ([`render`]), and shows it on a layer-shell surface
-//! or an X11 window ([`present`]). A fault in it cannot stop dictation, and
-//! it needs no GPU.
+//! the scene on the CPU ([`render`]) in the colours of [`theme`], and shows
+//! it on a layer-shell surface or an X11 window ([`present`]). A fault in it
+//! cannot stop dictation, and it needs no GPU.
 
 mod link;
 pub mod present;
 pub mod render;
 pub mod supervisor;
+pub mod theme;
 pub mod view;
 
 use crate::ipc::protocol::DaemonCommand;
+use crate::portal::appearance::{self, Appearance};
 use present::{Failure, Pointer};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tracing::{error, info};
 
@@ -59,6 +62,18 @@ fn show_until_closed() -> Result<(), Exit> {
     let mut link = link::Link::open().map_err(|e| Exit::Presenter(Failure::Broken(e)))?;
     let mut presenter = present::open().ok_or(Exit::NoSurface)?;
     info!(presenter = presenter.name(), "The overlay runs");
+    // A daemon restart follows each settings change, and restarts the overlay.
+    let choice = crate::config::Config::load()
+        .map(|config| config.overlay.theme)
+        .unwrap_or_default();
+    let mut theme = theme::Theme::new(choice, theme::file_path());
+    let desktop = Arc::new(Mutex::new(Appearance::default()));
+    let latest = Arc::clone(&desktop);
+    appearance::watch(move |appearance| {
+        if let Ok(mut shared) = latest.lock() {
+            *shared = appearance;
+        }
+    });
     let clock = Instant::now();
     let mut view = view::View::default();
     let mut shown = false;
@@ -74,8 +89,9 @@ fn show_until_closed() -> Result<(), Exit> {
         match scene {
             Some(scene) => {
                 let seconds = now.duration_since(clock).as_secs_f32();
-                let frame =
-                    render::render(&scene, &render::dark(), presenter.scale(), seconds, hovered);
+                let appearance = desktop.lock().map(|shared| *shared).unwrap_or_default();
+                let look = theme.look(&appearance, now);
+                let frame = render::render(&scene, &look, presenter.scale(), seconds, hovered);
                 presenter.present(frame.as_ref())?;
                 shown = true;
             },

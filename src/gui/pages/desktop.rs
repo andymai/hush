@@ -1,11 +1,11 @@
 //! The panel icon, the sounds, the media players, the update check, the
-//! window's colours, and the file behind every page.
+//! recording pill, the window's colours, and the file behind every page.
 
-use crate::config::settings::Appearance;
+use crate::config::settings::{Appearance, OverlayTheme};
 use crate::config::Config;
 use crate::gui::autosave::Pending;
 use crate::gui::icons;
-use crate::gui::widgets::{row, section, segmented, switch_row, Button, Variant};
+use crate::gui::widgets::{dropdown, option, row, section, segmented, switch_row, Button, Variant};
 use crate::gui::Gui;
 use std::path::Path;
 
@@ -53,6 +53,27 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
             );
         });
     }
+
+    section(ui, "Recording pill");
+    switch_row(
+        ui,
+        "desktop.overlay",
+        "Show the recording pill",
+        "The pill at the bottom of the screen shows the level and the time while you record. Click it to stop, or right-click to discard.",
+        &mut gui.config.overlay.enabled,
+    );
+    let theme = gui.config.overlay.theme;
+    row("desktop.overlay_theme", "Pill colors")
+        .describe(overlay_theme_note(theme))
+        .reserve(190.0)
+        .show(ui, |ui| {
+            let current = &mut gui.config.overlay.theme;
+            dropdown(ui, "overlay_theme", 190.0, theme.name(), |ui| {
+                for choice in OverlayTheme::ALL {
+                    option(ui, current, choice, choice.name());
+                }
+            });
+        });
 
     section(ui, "Appearance");
     row("desktop.appearance", "Theme")
@@ -133,6 +154,18 @@ pub fn open_config_file(gui: &mut Gui) {
 
 /// The built-in defaults, with the history settings and the writing styles
 /// of `current`, so a reset deletes no kept audio and no transcripts.
+fn overlay_theme_note(theme: OverlayTheme) -> &'static str {
+    match theme {
+        OverlayTheme::System => {
+            "System follows the light or dark preference of your desktop, its accent color, and its contrast setting."
+        },
+        OverlayTheme::File => {
+            "Reads overlay-theme.toml next to the configuration file, and again after each change."
+        },
+        _ => "When your desktop asks for less motion, the level shows as one still bar.",
+    }
+}
+
 fn reset_settings(current: &Config) -> anyhow::Result<Config> {
     let mut defaults = Config::defaults()?;
     defaults.history = current.history.clone();

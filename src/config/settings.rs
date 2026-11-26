@@ -184,11 +184,61 @@ pub struct OverlayConfig {
     /// Show the pill at the bottom of the screen while a take records and
     /// is transcribed
     pub enabled: bool,
+    pub theme: OverlayTheme,
 }
 
 impl Default for OverlayConfig {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            theme: OverlayTheme::System,
+        }
+    }
+}
+
+/// The colours of the recording pill
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum OverlayTheme {
+    /// The desktop's light or dark preference, accent, and contrast
+    #[default]
+    System,
+    Dark,
+    Light,
+    Nord,
+    Catppuccin,
+    Dracula,
+    Gruvbox,
+    HighContrast,
+    /// `overlay-theme.toml` next to the config file
+    File,
+}
+
+impl OverlayTheme {
+    pub const ALL: [OverlayTheme; 9] = [
+        OverlayTheme::System,
+        OverlayTheme::Dark,
+        OverlayTheme::Light,
+        OverlayTheme::Nord,
+        OverlayTheme::Catppuccin,
+        OverlayTheme::Dracula,
+        OverlayTheme::Gruvbox,
+        OverlayTheme::HighContrast,
+        OverlayTheme::File,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            OverlayTheme::System => "System",
+            OverlayTheme::Dark => "Dark",
+            OverlayTheme::Light => "Light",
+            OverlayTheme::Nord => "Nord",
+            OverlayTheme::Catppuccin => "Catppuccin",
+            OverlayTheme::Dracula => "Dracula",
+            OverlayTheme::Gruvbox => "Gruvbox",
+            OverlayTheme::HighContrast => "High contrast",
+            OverlayTheme::File => "Theme file",
+        }
     }
 }
 

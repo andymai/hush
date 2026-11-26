@@ -52,6 +52,7 @@ Hotkey chords name keys in two ways. Ctrl, Shift, Alt, and Super in a chord mean
 | `history.enabled`, `history.max_entries` | Keep delivered transcripts in `~/.local/share/hush/history.jsonl`, and how many | true, 500 |
 | `history.keep_audio_days` | Keep the audio of each take as FLAC in `~/.local/share/hush/audio` for this many days. 0 keeps none and deletes the audio that Hush kept. The audio of a failed take stays in `~/.local/share/hush/recover` for 7 days for `hush recover`, whatever this says. When the two folders hold more than 500 MB, the oldest files go | 0 |
 | `overlay.enabled` | The pill at the bottom of the screen while a take records and is transcribed | true |
+| `overlay.theme` | The pill's colors: `system`, a preset, or `file`. See [Pill colors](#pill-colors) | system |
 | `tray.enabled` | Status icon on the desktop panel | true |
 | `updates.check` | Ask GitHub once a day whether a newer release exists. AppImage, tarball, and source installs check. A package manager updates its own installs, so those never check | false |
 | `gui.appearance` | The colors of the settings window: `system` follows the light or dark preference of the desktop and changes with it, and `light` or `dark` keeps one. When the desktop has no preference, the window is light | system |
@@ -74,6 +75,32 @@ hush config import hush-setup.toml
 - Before `import` writes a file, it checks the whole file and keeps the old file next to it as `config.toml.bak` or `vocabulary.json.bak`. A running daemon restarts with the new settings.
 
 The Text page of `hush settings` also imports and exports the vocabulary as a plain-text list, with one word on each line.
+
+## Pill colors
+
+With `overlay.theme = "system"`, the pill follows the desktop through the Settings portal. It is light or dark as the desktop prefers, and its level bars take the desktop's accent color. When the desktop asks for higher contrast, the pill uses the `high-contrast` preset. An older portal lacks some of these keys, so Hush also reads GNOME's `enable-animations` and `high-contrast` keys and KDE's `AnimationDurationFactor`.
+
+The presets are `dark`, `light`, `nord`, `catppuccin`, `dracula`, `gruvbox`, and `high-contrast`. With each theme, a desktop that asks for less motion gets one still level bar and dots that do not pulse.
+
+With `overlay.theme = "file"`, the pill reads `overlay-theme.toml` next to the config file. It reads the file again after each change, within a second while the pill shows. Each key is optional:
+
+```toml
+# The theme to start from: "system" (the default) or a preset
+base = "nord"
+# Each color is "#rrggbb" or "#rrggbbaa"
+background = "#2e3440eb"
+border = "#d8dee928"
+foreground = "#eceff4"
+level = "#88c0d0"
+recording = "#bf616a"
+warning = "#ebcb8b"
+error = "#bf616a"
+```
+
+- `foreground` colors the text, the lock, and the dots, and `level` colors the bars.
+- The background alpha is at least 128 and the foreground alpha at least 160, so the text stays readable.
+- When the file has an error, the pill keeps its last good colors, and the log names the problem.
+- Without the file, the pill follows the desktop, as with `system`.
 
 ## Transcript hook
 

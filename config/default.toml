@@ -186,6 +186,12 @@ transcript = "" # e.g. "/usr/bin/tr -d '!'"; empty is off
 # take records, and dots while it is transcribed. It runs as its own process
 # and draws on the CPU, on a Wayland layer-shell surface or an X11 window.
 enabled = true
+# The pill's colors. "system" follows the desktop's light or dark
+# preference, its accent color, and its contrast setting. The presets are
+# "dark", "light", "nord", "catppuccin", "dracula", "gruvbox", and
+# "high-contrast". "file" reads overlay-theme.toml next to this file and
+# reads it again after each change.
+theme = "system"
 
 [tray]
 # Status icon on the desktop panel: click to start or stop dictation, with
