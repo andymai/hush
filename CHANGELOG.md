@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/andymai/hush/compare/v1.9.0...v1.10.0) (2026-11-26)
+
+
+### Features
+
+* **gui:** show the last hardware tune on the Speech page, with a button that runs it again ([#372](https://github.com/andymai/hush/issues/372)) ([b0caf31](https://github.com/andymai/hush/commit/b0caf31eb7cf207c27e8f29c5a3f964e8c109012))
+
 ## [1.9.0](https://github.com/andymai/hush/compare/v1.8.0...v1.9.0) (2026-11-26)
 
 
