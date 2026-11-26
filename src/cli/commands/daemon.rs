@@ -25,17 +25,104 @@ pub struct SessionOptions {
     pub no_button: bool,
 }
 
+impl SessionOptions {
+    /// The options that the unit's `ExecStart` runs with, so the unit can
+    /// start a daemon with them.
+    pub fn are_default(&self) -> bool {
+        self.editing_mode == "light" && !self.no_processing && !self.no_button
+    }
+}
+
+/// How long the unit's daemon waits for a daemon outside the unit to finish
+/// its take before it stops that daemon anyway. A hands-free take stops on
+/// its own after 10 minutes.
+const TAKEOVER_WAIT: Duration = Duration::from_secs(15 * 60);
+
 pub async fn handle_daemon_start(options: SessionOptions, foreground: bool) -> Result<()> {
+    if foreground {
+        if client::status().await.is_some() {
+            // The unit owns the daemon: a daemon that an older restart moved
+            // out of the unit gives way, or the unit would stay inactive.
+            if !crate::service::in_unit() {
+                println!("Hush daemon is already running.");
+                return Ok(());
+            }
+            take_over().await?;
+        }
+        crate::config::paths::move_legacy_models();
+        return super::listen::handle_listen(options).await;
+    }
     if let Some(state) = client::status().await {
         println!("Hush daemon is already running ({}).", state);
         return Ok(());
     }
     crate::config::paths::move_legacy_models();
-    if foreground {
-        super::listen::handle_listen(options).await
+    let exe = current_exe()?;
+    if options.are_default() && crate::service::ServiceState::probe().applies_to(&exe) {
+        start_unit().await
     } else {
         spawn_detached(&options).await
     }
+}
+
+/// Wait until the daemon outside the unit is idle, then stop it and wait for
+/// its process to end, so the PID lock lets this one start.
+async fn take_over() -> Result<()> {
+    let deadline = tokio::time::Instant::now() + TAKEOVER_WAIT;
+    while let Some(state) = client::status().await {
+        if state == DaemonState::Idle || tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let pid = lock::read_pid(&paths::pid_path());
+    println!(
+        "Stopping the Hush daemon that runs outside {}.",
+        crate::service::UNIT
+    );
+    handle_daemon_stop().await?;
+    if let Some(pid) = pid {
+        for _ in 0..40 {
+            if !lock::process_alive(pid) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+    Ok(())
+}
+
+fn current_exe() -> Result<std::path::PathBuf> {
+    std::env::current_exe().context("Failed to locate the hush binary")
+}
+
+/// Start the unit and wait for its daemon's socket.
+async fn start_unit() -> Result<()> {
+    tokio::task::spawn_blocking(crate::service::start)
+        .await
+        .context("systemctl stopped")??;
+    wait_for_unit_daemon().await
+}
+
+async fn wait_for_unit_daemon() -> Result<()> {
+    // Model loading can take a few seconds on the first start.
+    for _ in 0..80 {
+        if let Some(state) = client::status().await {
+            println!(
+                "Hush daemon started through {}, {}.",
+                crate::service::UNIT,
+                state
+            );
+            println!("Use `hush toggle` or the hotkey to dictate, `hush daemon stop` to quit.");
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    Err(anyhow!(
+        "The daemon of {} did not answer within 20 s. See: journalctl --user -u {}",
+        crate::service::UNIT,
+        crate::service::UNIT
+    ))
 }
 
 /// Re-run this binary in the foreground, detached from the terminal, and wait
@@ -117,11 +204,44 @@ fn terminate_by_pid() -> Result<()> {
     }
 }
 
+/// Restart through the unit when the unit runs the daemon, or when the unit
+/// should own it; else stop and start the daemon detached.
 pub async fn handle_daemon_restart(options: SessionOptions) -> Result<()> {
-    if client::is_running().await {
-        handle_daemon_stop().await?;
+    use crate::service::RestartRoute;
+    let running = client::is_running().await;
+    let pid = running
+        .then(|| lock::read_pid(&paths::pid_path()))
+        .flatten();
+    let state = tokio::task::spawn_blocking(crate::service::ServiceState::probe)
+        .await
+        .context("systemctl stopped")?;
+    match crate::service::restart_route(&state, &current_exe()?, pid, options.are_default()) {
+        RestartRoute::RestartUnit => {
+            tokio::task::spawn_blocking(crate::service::restart)
+                .await
+                .context("systemctl stopped")??;
+            // The old daemon can still answer for a moment after systemctl returns.
+            for _ in 0..40 {
+                if lock::read_pid(&paths::pid_path()) != pid {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            wait_for_unit_daemon().await
+        },
+        RestartRoute::StopThenStartUnit => {
+            if running {
+                handle_daemon_stop().await?;
+            }
+            start_unit().await
+        },
+        RestartRoute::StopThenDetached => {
+            if running {
+                handle_daemon_stop().await?;
+            }
+            spawn_detached(&options).await
+        },
     }
-    spawn_detached(&options).await
 }
 
 pub async fn handle_daemon_status() -> Result<()> {

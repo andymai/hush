@@ -706,25 +706,65 @@ async fn install_autostart() -> Result<()> {
         println!("   ✅ The desktop starts Hush when you log in");
         return Ok(());
     }
+    let exe = env::current_exe().with_context(|| "Failed to determine executable path")?;
+    let service = tokio::task::spawn_blocking(crate::service::ServiceState::probe)
+        .await
+        .context("systemctl stopped")?;
+    if service.applies_to(&exe) {
+        println!("📥 Enabling {}...", crate::service::UNIT);
+        tokio::task::spawn_blocking(crate::service::enable)
+            .await
+            .context("systemctl stopped")??;
+        // An autostart entry beside the unit would start a second daemon.
+        remove_autostart_entries()?;
+        println!("   ✅ systemd starts Hush when you log in");
+        return Ok(());
+    }
     println!("📥 Installing autostart entry...");
     let dir = crate::desktop::autostart_dir();
     fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;
-    let exe = env::current_exe().with_context(|| "Failed to determine executable path")?;
+    let binary = crate::desktop::entry_binary().context("Failed to determine executable path")?;
     let path = crate::desktop::autostart_path();
-    fs::write(&path, crate::desktop::autostart_entry(&exe))
+    fs::write(&path, crate::desktop::autostart_entry(&binary))
         .with_context(|| format!("Failed to write {}", path.display()))?;
     println!("   ✅ Autostart entry installed: {}", path.display());
-    println!("   ℹ️  Hush will start when you log in");
+    match crate::service::compositor_without_autostart(&service) {
+        Some(compositor) => println!(
+            "   ⚠️  {} runs no autostart entries on its own. Add this line to its config: {}",
+            compositor.name(),
+            compositor.startup_line()
+        ),
+        None => println!("   ℹ️  Hush will start when you log in"),
+    }
     Ok(())
+}
+
+/// Remove both entry names; true when one existed.
+fn remove_autostart_entries() -> Result<bool> {
+    let dir = crate::desktop::autostart_dir();
+    let mut removed = false;
+    for name in [
+        crate::desktop::ENTRY_FILE,
+        crate::desktop::LEGACY_ENTRY_FILE,
+    ] {
+        let path = dir.join(name);
+        if path.exists() {
+            fs::remove_file(&path)
+                .with_context(|| format!("Failed to remove {}", path.display()))?;
+            println!("   ✅ Autostart entry removed: {}", path.display());
+            removed = true;
+        }
+    }
+    Ok(removed)
 }
 
 async fn install_desktop_entry() -> Result<()> {
     println!("📥 Installing desktop entry...");
     let dir = crate::desktop::applications_dir();
     fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;
-    let exe = env::current_exe().with_context(|| "Failed to determine executable path")?;
+    let binary = crate::desktop::entry_binary().context("Failed to determine executable path")?;
     let path = crate::desktop::entry_path();
-    fs::write(&path, crate::desktop::application_entry(&exe))
+    fs::write(&path, crate::desktop::application_entry(&binary))
         .with_context(|| format!("Failed to write {}", path.display()))?;
     let _ = std::process::Command::new("update-desktop-database")
         .arg(&dir)
@@ -805,21 +845,19 @@ async fn remove_autostart() -> Result<()> {
         return Ok(());
     }
     println!("🗑️  Removing autostart entry...");
-    let dir = crate::desktop::autostart_dir();
+    let exe = env::current_exe().with_context(|| "Failed to determine executable path")?;
+    let service = tokio::task::spawn_blocking(crate::service::ServiceState::probe)
+        .await
+        .context("systemctl stopped")?;
     let mut removed = false;
-    for name in [
-        crate::desktop::ENTRY_FILE,
-        crate::desktop::LEGACY_ENTRY_FILE,
-    ] {
-        let path = dir.join(name);
-        if path.exists() {
-            fs::remove_file(&path)
-                .with_context(|| format!("Failed to remove {}", path.display()))?;
-            println!("   ✅ Autostart entry removed: {}", path.display());
-            removed = true;
-        }
+    if service.starts_at_login(&exe) {
+        tokio::task::spawn_blocking(crate::service::disable)
+            .await
+            .context("systemctl stopped")??;
+        println!("   ✅ {} no longer starts at login", crate::service::UNIT);
+        removed = true;
     }
-    if !removed {
+    if !remove_autostart_entries()? && !removed {
         println!("   ℹ️  No autostart entry found");
     }
     Ok(())

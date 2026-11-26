@@ -59,6 +59,14 @@ Diagnostics and lifecycle:
 | `hush install [--autostart] [--desktop] [--system]` | Set up autostart and the desktop entry |
 | `hush uninstall [--autostart] [--desktop] [--system]` | Reverse the above |
 
+The .deb, the .rpm, the AUR package, and the Nix flake ship the user unit `hush.service`. Hush uses the unit when it runs the same binary and a graphical session runs under systemd. Then `hush daemon start` and `restart` go through the unit, `hush install --autostart` enables it, and `hush uninstall --autostart` disables it. A start or restart with `--editing-mode`, `--no-processing`, or `--no-button` runs the daemon outside the unit, because the unit starts it with the default options. A daemon that runs outside the unit stops when the unit starts, after its recording ends.
+
+Without a graphical session under systemd, as on Sway, Hyprland, or niri started from a TTY, Hush starts the daemon itself. The compositor's config must then start it at login:
+
+- Sway: `exec hush daemon start`
+- Hyprland: `exec-once = hush daemon start`
+- niri: `spawn-at-startup "hush" "daemon" "start"`
+
 Global flags: `-c, --config-file <path>` (or `HUSH_CONFIG`) points at another config file; `-v`, `-vv`, `-vvv` set INFO, DEBUG, and TRACE logging; `--no-notifications` silences desktop notifications. `hush --help` lists everything.
 
 ## Scripts

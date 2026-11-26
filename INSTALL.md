@@ -172,7 +172,7 @@ in
 }
 ```
 
-The user service starts the daemon at login. Use it instead of `hush install --autostart`, because that entry points at a store path, and garbage collection can remove the path after an upgrade.
+The user service starts the daemon at login, and `hush install --autostart` and the settings switch enable it. Without the module, the autostart entry names your profile's link to Hush (such as `~/.nix-profile/bin/hush`), not the store path that garbage collection can remove.
 
 ## Flatpak
 
