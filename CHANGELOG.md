@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/andymai/hush/compare/v1.2.0...v1.2.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **daemon:** start, restart, and autostart through hush.service when the unit runs this binary ([#355](https://github.com/andymai/hush/issues/355)) ([87b2909](https://github.com/andymai/hush/commit/87b29096cf2596d5507f465c1c1bfc5ae437756f))
+
 ## [1.2.0](https://github.com/andymai/hush/compare/v1.1.2...v1.2.0) (2026-11-26)
 
 
