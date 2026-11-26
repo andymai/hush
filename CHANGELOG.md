@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/andymai/hush/compare/v1.7.0...v1.8.0) (2026-11-26)
+
+
+### Features
+
+* **tune:** time base on the GPU and the CPU and recommend the model that keeps up ([#369](https://github.com/andymai/hush/issues/369)) ([a90d894](https://github.com/andymai/hush/commit/a90d8942e95bfb7708a42caeecadff7da3a5ec43))
+
 ## [1.7.0](https://github.com/andymai/hush/compare/v1.6.0...v1.7.0) (2026-11-26)
 
 
