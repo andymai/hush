@@ -1,0 +1,45 @@
+src/portal/appearance.rs
+  s_5332262e639a7a::t_3812bf478a536a 3-5,24-25,35-43,50,56-59,82-83,103-107,136-140,155,165,229-273,360-394
+  s_5332262e639a7a::t_5f538a86c15669 395
+packaging/flatpak/cargo-sources.json
+  s_5332262e639a7a::t_f66b2378b350d1 1458-1470,1835-1847,3668-3680,4019-4031,4162-4174,4682-4694,5449-5461,6125-6137,7282-7294
+src/gui/icons.rs
+  s_5332262e639a7a::t_3812bf478a536a 51
+docs/features.md
+  s_5332262e639a7a::t_a2df7eff43c071 26
+src/gui/widgets.rs
+  s_5332262e639a7a::t_3812bf478a536a 304,615
+src/gui/theme.rs
+  s_5332262e639a7a::t_3812bf478a536a 9,20,106-137,139-162,272-278,306,310,314,329-332,357-373,375-377,391-400,403,414-415,560-569
+  s_5332262e639a7a::t_10b8a3a453c708 570
+src/gui/scheme.rs
+  s_5332262e639a7a::t_3812bf478a536a 1-3,5-6,8,11,17-25,30-31,35-36,40,42-65,69-71
+  s_5332262e639a7a::t_e7760dacd6a1c7 72-73
+src/overlay/mod.rs
+  s_5332262e639a7a::t_3812bf478a536a 96-99
+Cargo.toml
+  s_5332262e639a7a::t_3812bf478a536a 211,215-218
+  s_5332262e639a7a::t_0ef415300041b8 219
+src/gui/mod.rs
+  s_5332262e639a7a::t_3812bf478a536a 10,1164-1167
+Cargo.lock
+  s_5332262e639a7a::t_d241c6bd7fdaad 1007,1107-1121,1366-1387,1584,1837,2902-2911,3188-3193,3281-3290,3694-3702,4262-4270,4800-4805,4883,4897,5738-5748
+src/gui/desktop_font.rs
+  s_5332262e639a7a::t_898fff348b45a4 1-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "582912f064678928568b566d357ca8e3e3ee14d8",
+  "prompts": {},
+  "sessions": {
+    "s_5332262e639a7a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cafc310-b19c-4b54-8739-6ec8a3669200",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
