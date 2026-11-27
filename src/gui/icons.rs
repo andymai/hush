@@ -48,7 +48,7 @@ mod tests {
     fn the_font_has_every_icon() {
         let mut fonts = egui::epaint::text::Fonts::new(
             egui::epaint::text::TextOptions::default(),
-            theme::fonts(),
+            theme::fonts(None),
         );
         let font = theme::icon_font(theme::ICON);
         for icon in [

@@ -6,6 +6,7 @@
 //! sidebar on a slightly darker ground. The accent is Hush's violet, from the
 //! application icon, and marks focus, progress, and the level meter.
 
+use super::desktop_font::Faces;
 use crate::config::settings::Appearance;
 use egui::epaint::Shadow;
 use egui::{
@@ -16,7 +17,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 /// The colours of one scheme.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
     /// The sidebar ground
     pub bg: Color32,
@@ -102,11 +103,63 @@ pub const MARK_FACE_BOTTOM: Color32 = hex(0x5141D5);
 pub const MARK_EDGE: Color32 = hex(0x37299A);
 pub const MARK_CURSOR: Color32 = hex(0xFFC247);
 
-pub fn palette(ctx: &Context) -> &'static Palette {
-    match ctx.theme() {
-        Theme::Dark => &DARK,
-        Theme::Light => &LIGHT,
+/// The desktop's accent as `0x01RRGGBB`, or 0 for Hush's own.
+static ACCENT: AtomicU32 = AtomicU32::new(0);
+
+/// Use the desktop's accent in place of Hush's own; `None` gives Hush's
+/// back. True when the accent changed.
+pub fn set_accent(accent: Option<[u8; 3]>) -> bool {
+    let bits = accent.map_or(0, |[r, g, b]| {
+        0x0100_0000 | u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)
+    });
+    ACCENT.swap(bits, Ordering::Relaxed) != bits
+}
+
+fn desktop_accent() -> Option<Color32> {
+    let bits = ACCENT.load(Ordering::Relaxed);
+    (bits != 0).then(|| hex(bits & 0x00FF_FFFF))
+}
+
+/// The colours of a scheme, with the desktop's accent when it has one.
+pub fn scheme(dark: bool) -> Palette {
+    with_accent(if dark { DARK } else { LIGHT }, desktop_accent())
+}
+
+/// `palette` with `accent`, and text on it in the dark or the light ink,
+/// whichever has more contrast with it.
+fn with_accent(mut palette: Palette, accent: Option<Color32>) -> Palette {
+    if let Some(accent) = accent {
+        palette.accent = accent;
+        palette.on_accent = if contrast(accent, DARK.surface) >= contrast(accent, LIGHT.surface) {
+            DARK.surface
+        } else {
+            LIGHT.surface
+        };
     }
+    palette
+}
+
+/// The WCAG 2 contrast ratio, from 1 to 21.
+fn contrast(a: Color32, b: Color32) -> f32 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// Relative luminance, from 0 for black to 1 for white (WCAG 2).
+fn luminance(colour: Color32) -> f32 {
+    let channel = |value: u8| {
+        let value = f32::from(value) / 255.0;
+        if value <= 0.040_45 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(colour.r()) + 0.7152 * channel(colour.g()) + 0.0722 * channel(colour.b())
+}
+
+pub fn palette(ctx: &Context) -> Palette {
+    scheme(ctx.theme() == Theme::Dark)
 }
 
 /// The dim over the window behind a dialog.
@@ -216,6 +269,13 @@ pub const ICONS: &str = "lucide";
 const GEIST_LINE: f32 = 1.3;
 const LUCIDE_LINE: f32 = 1.0;
 
+/// The line of the face that sets the text: Geist, or the desktop's font.
+static TEXT_LINE: AtomicU32 = AtomicU32::new(GEIST_LINE.to_bits());
+
+fn text_line() -> f32 {
+    f32::from_bits(TEXT_LINE.load(Ordering::Relaxed))
+}
+
 /// The scale of the window, in pixels per point, as the bits of an `f32`.
 static PIXELS_PER_POINT: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
 
@@ -243,15 +303,15 @@ fn snap_at(size: f32, line: f32, pixels_per_point: f32) -> f32 {
 }
 
 pub fn sans(size: f32) -> FontId {
-    FontId::new(snap(size, GEIST_LINE), FontFamily::Proportional)
+    FontId::new(snap(size, text_line()), FontFamily::Proportional)
 }
 
 pub fn medium(size: f32) -> FontId {
-    FontId::new(snap(size, GEIST_LINE), FontFamily::Name(MEDIUM.into()))
+    FontId::new(snap(size, text_line()), FontFamily::Name(MEDIUM.into()))
 }
 
 pub fn semibold(size: f32) -> FontId {
-    FontId::new(snap(size, GEIST_LINE), FontFamily::Name(SEMIBOLD.into()))
+    FontId::new(snap(size, text_line()), FontFamily::Name(SEMIBOLD.into()))
 }
 
 pub fn mono(size: f32) -> FontId {
@@ -266,9 +326,10 @@ pub fn icon_font(size: f32) -> FontId {
     FontId::new(snap(size, LUCIDE_LINE), FontFamily::Name(ICONS.into()))
 }
 
-/// Geist for text, Geist Mono for values, and Lucide for icons, with egui's
-/// own fonts behind them for scripts and emoji that Geist lacks.
-pub fn fonts() -> FontDefinitions {
+/// The desktop's font for text, or Geist; Geist Mono for values; and
+/// Lucide for icons. Geist and egui's own fonts stand behind the text for
+/// characters that the first face lacks.
+pub fn fonts(desktop: Option<&Faces>) -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let embedded: [(&str, &'static [u8]); 6] = [
         ("geist", crate::fonts::GEIST_REGULAR),
@@ -293,10 +354,27 @@ pub fn fonts() -> FontDefinitions {
             .chain(fallbacks.iter().cloned())
             .collect::<Vec<_>>()
     };
+    let mut text = [
+        with_fallbacks("geist"),
+        with_fallbacks(MEDIUM),
+        with_fallbacks(SEMIBOLD),
+    ];
+    if let Some(faces) = desktop {
+        let weights = [
+            ("desktop", &faces.regular),
+            ("desktop-medium", &faces.medium),
+            ("desktop-semibold", &faces.semibold),
+        ];
+        for (names, (name, data)) in text.iter_mut().zip(weights) {
+            fonts.font_data.insert(name.to_string(), Arc::clone(data));
+            names.insert(0, name.to_string());
+        }
+    }
+    let [regular, medium, semibold] = text;
     let families = [
-        (FontFamily::Proportional, with_fallbacks("geist")),
-        (FontFamily::Name(MEDIUM.into()), with_fallbacks(MEDIUM)),
-        (FontFamily::Name(SEMIBOLD.into()), with_fallbacks(SEMIBOLD)),
+        (FontFamily::Proportional, regular),
+        (FontFamily::Name(MEDIUM.into()), medium),
+        (FontFamily::Name(SEMIBOLD.into()), semibold),
         (FontFamily::Monospace, with_fallbacks("geist-mono")),
         (
             FontFamily::Name(MONO_MEDIUM.into()),
@@ -310,9 +388,19 @@ pub fn fonts() -> FontDefinitions {
     fonts
 }
 
+/// Set the text in the desktop's font, or in Geist with `None`, and size
+/// the type for that face.
+pub fn install_text(ctx: &Context, desktop: Option<&Faces>) {
+    let line = desktop.map_or(GEIST_LINE, |faces| faces.line);
+    TEXT_LINE.store(line.to_bits(), Ordering::Relaxed);
+    ctx.set_fonts(fonts(desktop));
+    install_styles(ctx);
+    ctx.request_repaint();
+}
+
 /// Install the fonts and both schemes' styles.
 pub fn install(ctx: &Context) {
-    ctx.set_fonts(fonts());
+    ctx.set_fonts(fonts(None));
     // Shapes keep their exact place: the bars of the mark and the window's
     // edge fall between pixels.
     ctx.tessellation_options_mut(|options| {
@@ -323,8 +411,8 @@ pub fn install(ctx: &Context) {
 }
 
 fn install_styles(ctx: &Context) {
-    ctx.set_style_of(Theme::Light, style(&LIGHT, false));
-    ctx.set_style_of(Theme::Dark, style(&DARK, true));
+    ctx.set_style_of(Theme::Light, style(&scheme(false), false));
+    ctx.set_style_of(Theme::Dark, style(&scheme(true), true));
 }
 
 fn style(palette: &Palette, dark: bool) -> egui::Style {
@@ -468,6 +556,17 @@ pub fn split(width: f32, control: f32) -> Split {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_desktop_accent_takes_the_place_of_hush_s_own() {
+        assert_eq!(with_accent(DARK, None), DARK);
+        let breeze = with_accent(DARK, Some(Color32::from_rgb(61, 174, 233)));
+        assert_eq!(breeze.accent, Color32::from_rgb(61, 174, 233));
+        assert_eq!(breeze.on_accent, DARK.surface, "dark text on a light blue");
+        assert_eq!(breeze.ink, DARK.ink);
+        let navy = with_accent(LIGHT, Some(Color32::from_rgb(20, 40, 120)));
+        assert_eq!(navy.on_accent, LIGHT.surface, "light text on a dark blue");
+    }
 
     fn luminance(colour: Color32) -> f64 {
         let channel = |c: u8| {

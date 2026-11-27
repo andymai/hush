@@ -7,6 +7,7 @@
 mod autosave;
 mod capture;
 mod chrome;
+mod desktop_font;
 mod icons;
 mod jump;
 mod meter;
@@ -1163,6 +1164,10 @@ impl eframe::App for Gui {
     /// hidden. Thus a close from the taskbar asks first.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         theme::follow_scale(ctx);
+        if let Some(style) = self.desktop.take_style() {
+            theme::set_accent(style.accent);
+            theme::install_text(ctx, style.faces.as_ref());
+        }
         let theme = self.theme();
         if ctx.theme() != theme {
             ctx.set_theme(theme);

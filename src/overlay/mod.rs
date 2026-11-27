@@ -93,7 +93,10 @@ fn show_until_closed() -> Result<(), Exit> {
         match scene {
             Some(scene) => {
                 let seconds = now.duration_since(clock).as_secs_f32();
-                let appearance = desktop.lock().map(|shared| *shared).unwrap_or_default();
+                let appearance = desktop
+                    .lock()
+                    .map(|shared| shared.clone())
+                    .unwrap_or_default();
                 let look = theme.look(&appearance, now);
                 let frame = render::render(&scene, &look, presenter.scale(), seconds, hovered);
                 presenter.present(frame.as_ref())?;

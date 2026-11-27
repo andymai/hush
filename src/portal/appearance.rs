@@ -1,7 +1,8 @@
 //! The desktop's appearance through the Settings portal: light or dark, the
 //! accent colour, higher contrast, and reduced motion
-//! (`org.freedesktop.appearance`). An older portal lacks some of these
-//! keys, so GNOME's and KDE's own keys fill the gaps.
+//! (`org.freedesktop.appearance`), and the interface font from GNOME's or
+//! KDE's own keys. An older portal lacks some of the freedesktop keys, so
+//! GNOME's and KDE's keys fill the gaps.
 //!
 //! GNOME and KDE answer the portal. On wlroots desktops,
 //! xdg-desktop-portal-wlr does not, so the gtk portal or darkman must.
@@ -20,7 +21,8 @@ const APPEARANCE: &str = "org.freedesktop.appearance";
 const GNOME_INTERFACE: &str = "org.gnome.desktop.interface";
 const GNOME_A11Y: &str = "org.gnome.desktop.a11y.interface";
 const KDE: &str = "org.kde.kdeglobals.KDE";
-const NAMESPACES: [&str; 4] = [APPEARANCE, GNOME_INTERFACE, GNOME_A11Y, KDE];
+const KDE_GENERAL: &str = "org.kde.kdeglobals.General";
+const NAMESPACES: [&str; 5] = [APPEARANCE, GNOME_INTERFACE, GNOME_A11Y, KDE, KDE_GENERAL];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Scheme {
@@ -30,18 +32,31 @@ pub enum Scheme {
     Light,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// The interface font of the desktop.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DesktopFont {
+    pub family: String,
+    /// In points; a point is 4/3 of a pixel at a scale of 1
+    pub size: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Appearance {
     pub scheme: Scheme,
     /// sRGB
     pub accent: Option<[u8; 3]>,
     pub high_contrast: bool,
     pub reduced_motion: bool,
+    pub font: Option<DesktopFont>,
 }
 
 /// Each key as the portal last gave it.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Keys {
+    /// KDE also answers GNOME's keys, so on KDE its own font key wins.
+    kde: bool,
+    kde_font: Option<DesktopFont>,
+    gnome_font: Option<DesktopFont>,
     scheme: Option<Scheme>,
     accent: Option<[u8; 3]>,
     contrast: Option<bool>,
@@ -64,6 +79,8 @@ impl Keys {
             (GNOME_A11Y, "high-contrast") => self.gnome_high_contrast = flag_of(value),
             (GNOME_INTERFACE, "enable-animations") => self.gnome_animations = flag_of(value),
             (KDE, "AnimationDurationFactor") => self.kde_animation_factor = factor_of(value),
+            (KDE_GENERAL, "font") => self.kde_font = text_of(value).and_then(qt_font),
+            (GNOME_INTERFACE, "font-name") => self.gnome_font = text_of(value).and_then(pango_font),
             _ => {},
         }
     }
@@ -83,6 +100,11 @@ impl Keys {
             reduced_motion: self
                 .reduced_motion
                 .unwrap_or(gnome_still == Some(true) || kde_still == Some(true)),
+            font: if self.kde {
+                self.kde_font.clone().or_else(|| self.gnome_font.clone())
+            } else {
+                self.gnome_font.clone().or_else(|| self.kde_font.clone())
+            },
         }
     }
 }
@@ -111,7 +133,11 @@ fn listen(mut on_change: impl FnMut(Appearance)) -> zbus::Result<()> {
     let proxy = zbus::blocking::Proxy::new(&connection, DESTINATION, PATH, INTERFACE)?;
     // Listen before the read, so a change between the two is not lost.
     let changes = proxy.receive_signal("SettingChanged")?;
-    let mut keys = Keys::default();
+    let mut keys = Keys {
+        kde: std::env::var("XDG_CURRENT_DESKTOP")
+            .is_ok_and(|desktop| desktop.split(':').any(|name| name == "KDE")),
+        ..Keys::default()
+    };
     let read: zbus::Result<HashMap<String, HashMap<String, OwnedValue>>> =
         proxy.call("ReadAll", &(NAMESPACES.as_slice(),));
     match read {
@@ -126,7 +152,7 @@ fn listen(mut on_change: impl FnMut(Appearance)) -> zbus::Result<()> {
         Err(e) => debug!("The desktop portal gave no appearance yet: {}", e),
     }
     let mut shown = keys.appearance();
-    on_change(shown);
+    on_change(shown.clone());
     for message in changes {
         let Ok((namespace, key, value)) =
             message.body().deserialize::<(String, String, OwnedValue)>()
@@ -136,7 +162,7 @@ fn listen(mut on_change: impl FnMut(Appearance)) -> zbus::Result<()> {
         keys.set(&namespace, &key, &value);
         let now = keys.appearance();
         if now != shown {
-            shown = now;
+            shown = now.clone();
             on_change(now);
         }
     }
@@ -198,6 +224,51 @@ fn flag_of(value: &Value<'_>) -> Option<bool> {
         Value::Bool(flag) => Some(*flag),
         _ => None,
     }
+}
+
+fn text_of<'a>(value: &'a Value<'_>) -> Option<&'a str> {
+    match value {
+        Value::Str(text) => Some(text.as_str()),
+        _ => None,
+    }
+}
+
+/// Qt's font text: the family, the size in points, then more fields, such
+/// as `Noto Sans,10,-1,5,50,0,0,0,0,0`.
+fn qt_font(text: &str) -> Option<DesktopFont> {
+    let mut fields = text.split(',');
+    let family = fields.next()?.trim();
+    let size: f32 = fields.next()?.trim().parse().ok()?;
+    (!family.is_empty() && size > 0.0).then(|| DesktopFont {
+        family: family.to_string(),
+        size,
+    })
+}
+
+/// Pango's font text: the family, style words, and the size in points last,
+/// such as `Cantarell 11` or `Noto Sans Bold 10`.
+fn pango_font(text: &str) -> Option<DesktopFont> {
+    const STYLES: [&str; 10] = [
+        "Regular",
+        "Book",
+        "Medium",
+        "Semi-Bold",
+        "SemiBold",
+        "Bold",
+        "Italic",
+        "Oblique",
+        "Light",
+        "Condensed",
+    ];
+    let mut words: Vec<&str> = text.split_whitespace().collect();
+    let size: f32 = words.pop()?.parse().ok()?;
+    while words.last().is_some_and(|word| STYLES.contains(word)) {
+        words.pop();
+    }
+    (!words.is_empty() && size > 0.0).then(|| DesktopFont {
+        family: words.join(" "),
+        size,
+    })
 }
 
 /// KDE's portal gives kdeglobals values as text.
@@ -284,6 +355,42 @@ mod tests {
         assert!(keys.appearance().reduced_motion);
         keys.set(KDE, "AnimationDurationFactor", &Value::F64(1.0));
         assert!(!keys.appearance().reduced_motion);
+    }
+
+    #[test]
+    fn the_font_comes_from_the_keys_of_this_desktop() {
+        let noto = DesktopFont {
+            family: "Noto Sans".into(),
+            size: 10.0,
+        };
+        assert_eq!(
+            qt_font("Noto Sans,10,-1,5,50,0,0,0,0,0"),
+            Some(noto.clone())
+        );
+        assert_eq!(pango_font("Noto Sans  10"), Some(noto.clone()));
+        assert_eq!(
+            pango_font("Adwaita Sans Bold 11"),
+            Some(DesktopFont {
+                family: "Adwaita Sans".into(),
+                size: 11.0
+            })
+        );
+        assert_eq!(pango_font("Cantarell"), None, "no size");
+        assert_eq!(qt_font(",10"), None);
+
+        let mut kde = Keys {
+            kde: true,
+            ..Keys::default()
+        };
+        kde.set(GNOME_INTERFACE, "font-name", &Value::from("Cantarell 11"));
+        kde.set(
+            KDE_GENERAL,
+            "font",
+            &Value::from("Noto Sans,10,-1,5,50,0,0,0,0,0"),
+        );
+        assert_eq!(kde.appearance().font, Some(noto.clone()));
+        let gnome = Keys { kde: false, ..kde };
+        assert_eq!(gnome.appearance().font.unwrap().family, "Cantarell");
     }
 
     #[test]

@@ -301,7 +301,7 @@ impl<'a> Row<'a> {
         let drafted = ui
             .data(|data| data.get_temp::<Draft>(draft_id(self.key)))
             .and_then(|draft| draft.problem);
-        let block = self.text_block(ui, colours, text_width, drafted.as_deref());
+        let block = self.text_block(ui, &colours, text_width, drafted.as_deref());
         let text_height = block.height;
 
         let (text_top, control_rect, layout) = match split {
@@ -612,7 +612,7 @@ impl Widget for Button<'_> {
             return response;
         }
         let hovered = self.enabled && response.hovered();
-        let (fill, edge, ink) = button_colours(colours, self.variant, self.enabled, hovered);
+        let (fill, edge, ink) = button_colours(&colours, self.variant, self.enabled, hovered);
         ui.painter().rect(
             rect,
             theme::RADIUS_SM,
