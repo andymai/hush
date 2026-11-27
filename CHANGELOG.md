@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.3](https://github.com/andymai/hush/compare/v1.20.2...v1.20.3) (2026-11-27)
+
+
+### Bug Fixes
+
+* **gui:** the Try it box names no key in portal mode, and one day is singular ([#412](https://github.com/andymai/hush/issues/412)) ([f130daf](https://github.com/andymai/hush/commit/f130dafbc93d461a2d6f0f4e515c627ca51ab5ab))
+
 ## [1.20.2](https://github.com/andymai/hush/compare/v1.20.1...v1.20.2) (2026-11-27)
 
 
