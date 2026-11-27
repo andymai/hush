@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/andymai/hush/compare/v1.19.0...v1.20.0) (2026-11-27)
+
+
+### Features
+
+* **site:** a landing page at andymai.github.io/hush ([#404](https://github.com/andymai/hush/issues/404)) ([2dbf3b9](https://github.com/andymai/hush/commit/2dbf3b9d056c2dc4614146a7f4f59358070c290f))
+
 ## [1.19.0](https://github.com/andymai/hush/compare/v1.18.0...v1.19.0) (2026-11-27)
 
 
