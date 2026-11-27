@@ -226,6 +226,11 @@ fn backend_label(backend: TranscriptionBackend) -> &'static str {
 
 fn models(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Model");
+    model_rows(gui, ui);
+}
+
+/// The model to use, and the progress of its download.
+pub(crate) fn model_rows(gui: &mut Gui, ui: &mut egui::Ui) {
     if gui.catalogue.is_empty() {
         row("speech.models_dir", "The models directory is not readable")
             .status(false)
@@ -917,7 +922,7 @@ pub fn start_download(gui: &mut Gui, size: ModelSize) {
 
 /// The name this model has in `transcription.model_size`.
 /// The last hardware tune, and a button that runs it again.
-fn tune(gui: &mut Gui, ui: &mut egui::Ui) {
+pub(crate) fn tune(gui: &mut Gui, ui: &mut egui::Ui) {
     let (title, text) = tune_summary(gui.machine.tune.as_ref());
     let label = if gui.machine.tune.is_some() {
         "Tune again"

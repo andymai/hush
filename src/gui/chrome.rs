@@ -271,6 +271,13 @@ pub fn sidebar(gui: &mut Gui, ui: &mut Ui) {
         })
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
+            if gui.setup.is_some() {
+                let page = Page::Setup;
+                if nav_item(ui, page.icon(), page.title(), gui.page == page, false).clicked() {
+                    gui.go_to(page);
+                }
+                ui.add_space(14.0);
+            }
             for (index, (label, pages)) in GROUPS.iter().enumerate() {
                 if index > 0 {
                     ui.add_space(14.0);

@@ -62,6 +62,7 @@ as `-march=native`. Only the AVX-512 CPU modules, and Rust functions that a runt
 ./hush listen                 # Same session attached to the terminal
 ./hush record --duration 5    # Record for N seconds
 ./hush settings               # Setup and settings window
+./hush setup                  # The same window on Get started, the first run, one step at a time
 ./hush doctor                 # Check everything and print the fix for each problem
 ./hush status --full          # System diagnostics
 scripts/screenshots.sh target/debug/hush docs/screenshots/settings  # Redraw the settings screenshots under a headless Weston, from a --features vulkan build

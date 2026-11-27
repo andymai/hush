@@ -5,6 +5,7 @@ pub mod history;
 pub mod hotkeys;
 pub mod output;
 pub mod overview;
+pub mod setup;
 pub mod speech;
 pub mod text;
 
@@ -17,6 +18,8 @@ use std::ops::RangeInclusive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
+    /// The first run, while `hush setup` opened the window
+    Setup,
     Overview,
     Hotkeys,
     Speech,
@@ -48,6 +51,7 @@ impl Page {
 
     pub fn icon(self) -> char {
         match self {
+            Page::Setup => icons::CIRCLE_CHECK,
             Page::Overview => icons::HOUSE,
             Page::Hotkeys => icons::KEYBOARD,
             Page::Speech => icons::MIC,
@@ -60,6 +64,7 @@ impl Page {
 
     pub fn title(self) -> &'static str {
         match self {
+            Page::Setup => "Get started",
             Page::Overview => "Overview",
             Page::Hotkeys => "Hotkeys",
             Page::Speech => "Speech",
@@ -73,6 +78,7 @@ impl Page {
     /// Words about the page that the command palette also matches.
     pub fn words(self) -> &'static str {
         match self {
+            Page::Setup => "first run setup steps",
             Page::Overview => "status setup start ready access model try",
             Page::Hotkeys => "keys shortcuts keyboard chords languages styles rewrite",
             Page::Speech => "transcription whisper model language microphone recording",
@@ -87,6 +93,7 @@ impl Page {
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     file_problems(gui, ui);
     match gui.page {
+        Page::Setup => setup::show(gui, ui),
         Page::Overview => overview::show(gui, ui),
         Page::Hotkeys => hotkeys::show(gui, ui),
         Page::Speech => speech::show(gui, ui),

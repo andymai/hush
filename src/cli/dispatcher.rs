@@ -39,7 +39,7 @@ impl CommandDispatcher {
             Commands::Cancel => "cancel",
             Commands::Doctor => "doctor",
             Commands::Report { .. } => "report",
-            Commands::Settings => "settings",
+            Commands::Settings { .. } => "settings",
             Commands::Overlay => "overlay",
             Commands::Tune { .. } => "tune",
             Commands::TuneWorker { .. } => "tune-worker",
@@ -156,7 +156,9 @@ impl CommandDispatcher {
             Commands::Report { output } => handle_report(output).await,
             // The window owns a runtime of its own; dropping it inside this
             // async context panics unless the thread leaves the runtime first.
-            Commands::Settings => tokio::task::block_in_place(crate::gui::run),
+            Commands::Settings { first_run } => {
+                tokio::task::block_in_place(|| crate::gui::run(first_run))
+            },
             Commands::Overlay => tokio::task::block_in_place(|| crate::overlay::run()),
             Commands::Tune {
                 audio,
@@ -195,7 +197,12 @@ impl CommandDispatcher {
                 type_text,
             } => handle_recover(all, list, type_text).await,
             Commands::Rewrite { style } => handle_rewrite(&style).await,
-            Commands::Setup { setup_command } => handle_setup(setup_command).await,
+            Commands::Setup {
+                setup_command: Some(setup_command),
+            } => handle_setup(setup_command).await,
+            Commands::Setup {
+                setup_command: None,
+            } => tokio::task::block_in_place(|| crate::gui::run(true)),
             Commands::Test { test_command } => handle_test(test_command).await,
             Commands::Models { model_command } => handle_models(model_command).await,
             Commands::Config { config_command } => handle_config(config_command).await,

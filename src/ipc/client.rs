@@ -100,6 +100,21 @@ pub fn status_blocking(timeout: Duration) -> Option<DaemonState> {
     }
 }
 
+/// Send `command` over a plain socket, for code off an async runtime, and
+/// wait at most `timeout` for the reply. `None` when no daemon answers.
+pub fn command_blocking(command: &DaemonCommand, timeout: Duration) -> Option<DaemonResponse> {
+    use std::io::{BufRead, BufReader, Write};
+    let mut stream = std::os::unix::net::UnixStream::connect(paths::socket_path()).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    let mut payload = serde_json::to_string(command).ok()?;
+    payload.push('\n');
+    stream.write_all(payload.as_bytes()).ok()?;
+    let mut line = String::new();
+    BufReader::new(&stream).read_line(&mut line).ok()?;
+    serde_json::from_str::<DaemonResponse>(line.trim()).ok()
+}
+
 /// What a status question over the socket found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Probe {
