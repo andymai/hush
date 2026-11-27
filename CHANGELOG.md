@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/andymai/hush/compare/v1.17.0...v1.18.0) (2026-11-27)
+
+
+### Features
+
+* **setup:** a language model step finds Ollama, takes a key, and tests the choice ([#396](https://github.com/andymai/hush/issues/396)) ([62f0aa6](https://github.com/andymai/hush/commit/62f0aa6df621fb0e4b4d48471f839d2b85562caa))
+
 ## [1.17.0](https://github.com/andymai/hush/compare/v1.16.0...v1.17.0) (2026-11-27)
 
 
