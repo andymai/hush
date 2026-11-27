@@ -1389,6 +1389,7 @@ impl Palette {
                 .desired_width(field.width())
                 .lock_focus(true),
         );
+        crate::gui::widgets::name_text_box(&inside, &response, PLACEHOLDER);
         if response.changed() {
             self.selected = 0;
             self.restart = true;

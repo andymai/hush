@@ -1189,6 +1189,9 @@ impl eframe::App for Gui {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        ctx.accesskit_node_builder(egui::accesskit_root_id(), |node| {
+            node.set_label("Hush settings");
+        });
         self.palette.keys(&ctx, self.capture.is_some());
         if self.palette.is_open() {
             self.capture = None;

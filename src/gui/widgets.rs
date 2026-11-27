@@ -171,6 +171,31 @@ pub struct Row<'a> {
     control: f32,
 }
 
+/// Where a row keeps its title while it draws its control.
+const ROW_TITLE: &str = "hush-row-title";
+
+/// The title of the row whose control is drawing: the name that a screen
+/// reader gives a control with no text of its own.
+fn row_title(ui: &Ui) -> String {
+    ui.data(|data| data.get_temp::<String>(egui::Id::unique(ROW_TITLE)))
+        .unwrap_or_default()
+}
+
+/// Name a text box for a screen reader: the row's title, else `fallback`.
+/// egui gives a text box its value and its hint, but no name.
+pub fn name_text_box(ui: &Ui, response: &Response, fallback: &str) {
+    let title = row_title(ui);
+    let name = if title.is_empty() {
+        fallback
+    } else {
+        title.as_str()
+    };
+    if !name.is_empty() {
+        ui.ctx()
+            .accesskit_node_builder(response.id, |node| node.set_label(name));
+    }
+}
+
 /// A row with the stable `key` and the `title` a search shows.
 pub fn row<'a>(key: &'a str, title: &'a str) -> Row<'a> {
     Row {
@@ -332,7 +357,10 @@ impl<'a> Row<'a> {
 
         let mut control = ui.new_child(UiBuilder::new().max_rect(control_rect).layout(layout));
         control.spacing_mut().item_spacing.x = 8.0;
+        control
+            .data_mut(|data| data.insert_temp(egui::Id::unique(ROW_TITLE), self.title.to_string()));
         let inner = add(&mut control);
+        control.data_mut(|data| data.remove::<String>(egui::Id::unique(ROW_TITLE)));
         let bottom = control
             .min_rect()
             .bottom()
@@ -713,7 +741,8 @@ pub fn switch(ui: &mut Ui, on: &mut bool) -> Response {
         *on = !*on;
         response.mark_changed();
     }
-    response.widget_info(|| WidgetInfo::selected(Role::CheckBox, ui.is_enabled(), *on, ""));
+    let name = row_title(ui);
+    response.widget_info(|| WidgetInfo::selected(Role::CheckBox, ui.is_enabled(), *on, &name));
     jump::offer(ui, &response);
     if !ui.is_rect_visible(rect) {
         return response;
@@ -789,10 +818,21 @@ pub fn stepper(
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
+            let title = row_title(ui);
+            let named = |response: Response, which: &str| {
+                let name = if title.is_empty() {
+                    which.to_string()
+                } else {
+                    format!("{}: {}", title, which.to_lowercase())
+                };
+                let enabled = response.enabled();
+                response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, &name));
+                response
+            };
             let fewer = Button::icon_only(icons::MINUS, "Less")
                 .variant(Variant::Secondary)
                 .enabled(*value > min);
-            if ui.add(fewer).clicked() {
+            if named(ui.add(fewer), "Less").clicked() {
                 *value = value.saturating_sub(1).max(min);
             }
             let (rect, _) =
@@ -807,7 +847,7 @@ pub fn stepper(
             let more = Button::icon_only(icons::PLUS, "More")
                 .variant(Variant::Secondary)
                 .enabled(*value < max);
-            if ui.add(more).clicked() {
+            if named(ui.add(more), "More").clicked() {
                 *value = (*value + 1).min(max);
             }
         },
@@ -974,6 +1014,7 @@ impl Widget for Field<'_> {
             .desired_width(self.width);
         let background = ui.painter().add(egui::Shape::Noop);
         let response = ui.add(edit);
+        name_text_box(ui, &response, self.placeholder);
         note_text_focus(ui, &response, text.is_empty());
         jump::offer(ui, &response);
         let rect = response.rect;
@@ -1031,6 +1072,7 @@ pub fn text_area(
             .desired_rows(rows)
             .desired_width(width),
     );
+    name_text_box(ui, &response, placeholder);
     note_text_focus(ui, &response, text.is_empty());
     jump::offer(ui, &response);
     let rect = response.rect;
@@ -1351,6 +1393,12 @@ pub fn dropdown<R>(
             ui.set_min_width(width - 8.0);
             add(ui)
         });
+    let name = row_title(ui);
+    shown.response.widget_info(|| {
+        let mut info = WidgetInfo::labeled(Role::ComboBox, ui.is_enabled(), &name);
+        info.current_text_value = Some(selected.to_string());
+        info
+    });
     jump::offer(ui, &shown.response);
     if shown.response.has_focus() {
         focus_ring(ui, shown.response.rect, theme::RADIUS_SM);
@@ -1413,7 +1461,13 @@ pub fn key_field(
     } else {
         chord
     };
-    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), label));
+    let title = row_title(ui);
+    let name = if title.is_empty() {
+        label.to_string()
+    } else {
+        format!("{}: {}", title, label)
+    };
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), &name));
     jump::offer(ui, &response);
     if !ui.is_rect_visible(rect) {
         return response;

@@ -205,6 +205,7 @@ arboard = { version = "3.6", default-features = false, features = [
 ] }
 ksni = { version = "0.3", default-features = false, features = ["tokio"] }
 eframe = { version = "0.37", default-features = false, features = [
+  "accesskit",
   "clipboard",
   "default_fonts",
   "glow",
