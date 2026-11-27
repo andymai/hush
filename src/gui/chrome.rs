@@ -412,7 +412,7 @@ fn nav_item(ui: &mut Ui, icon: char, label: &str, current: bool, alert: bool) ->
         widgets::focus_ring(ui, rect.shrink(2.0), theme::RADIUS_SM);
     }
     if alert {
-        response.on_hover_text("Hush is not ready yet")
+        response.on_hover_text("Hush isn't ready yet")
     } else {
         response
     }
@@ -446,7 +446,7 @@ pub fn footer(gui: &mut Gui, ui: &mut Ui) {
             widgets::icon(ui, icons::CIRCLE_ALERT, colours.warn);
             widgets::text(
                 ui,
-                "Hush applies the change when the configuration file loads again",
+                "Your change applies once the config file is fixed",
                 small(),
                 colours.muted,
             );
@@ -454,7 +454,7 @@ pub fn footer(gui: &mut Gui, ui: &mut Ui) {
             widgets::icon(ui, icons::MIC, colours.muted);
             widgets::text(
                 ui,
-                "Hush applies the change when the take ends",
+                "Your change applies when this recording ends",
                 small(),
                 colours.muted,
             );
@@ -472,7 +472,7 @@ pub fn footer(gui: &mut Gui, ui: &mut Ui) {
             widgets::text(ui, "Hush is running", small(), colours.muted);
         } else {
             widgets::icon(ui, icons::CIRCLE_ALERT, colours.warn);
-            widgets::text(ui, "Hush is not running", small(), colours.muted);
+            widgets::text(ui, "Hush isn't running", small(), colours.muted);
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             match gui.save_feedback() {

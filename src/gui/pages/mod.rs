@@ -114,8 +114,8 @@ fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
     if let Some(error) = gui.files.config_error.clone() {
         let loses_audio = replace_loses_audio(gui, ui.ctx());
         let mut description = format!(
-            "The window shows the built-in defaults and saves nothing to the file until \
-             you replace it. {}",
+            "You're seeing the default settings, and nothing will be saved until you \
+             replace the file. {}",
             error
         );
         if loses_audio {
@@ -126,13 +126,13 @@ fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
             );
         }
         let confirming = gui.confirm_replace && loses_audio;
-        row("files.config", "The configuration file does not load")
+        row("files.config", "Your config file has an error")
             .status(false)
             .describe(&description)
             .control_below()
             .show(ui, |ui| {
                 if confirming {
-                    let replace = Button::new("Replace, and delete the kept audio")
+                    let replace = Button::new("Replace it, and delete saved audio")
                         .icon(icons::TRASH)
                         .variant(Variant::Danger);
                     if ui.add(replace).clicked() {
@@ -147,9 +147,9 @@ fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
                     return;
                 }
                 let label = if loses_audio {
-                    "Replace with defaults, which delete the kept audio"
+                    "Replace with defaults (deletes saved audio)"
                 } else {
-                    "Replace with defaults, keep config.toml.bak"
+                    "Replace with defaults (backs up to config.toml.bak)"
                 };
                 let replace = Button::new(label)
                     .icon(icons::ROTATE_CCW)
@@ -166,18 +166,21 @@ fn file_problems(gui: &mut Gui, ui: &mut egui::Ui) {
     if let Some(error) = gui.files.vocabulary_error.clone() {
         let path = gui.files.vocabulary_path().display().to_string();
         let description = format!(
-            "The window shows an empty vocabulary and saves nothing to the file until you \
-             replace it. {}: {}",
+            "You're seeing an empty vocabulary, and nothing will be saved until you \
+             replace the file. {}: {}",
             path, error
         );
-        row("files.vocabulary", "The vocabulary file does not load")
+        row("files.vocabulary", "Your vocabulary file has an error")
             .status(false)
             .describe(&description)
             .control_below()
             .show(ui, |ui| {
-                let replace = Button::new("Replace with this list, keep vocabulary.json.bak")
-                    .icon(icons::ROTATE_CCW)
-                    .variant(Variant::Danger);
+                let replace = Button::new(
+                    "Replace with this list (backs up to \
+                                           vocabulary.json.bak)",
+                )
+                .icon(icons::ROTATE_CCW)
+                .variant(Variant::Danger);
                 if ui.add(replace).clicked() {
                     gui.replace_vocabulary();
                 }

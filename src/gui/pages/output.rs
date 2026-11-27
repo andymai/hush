@@ -18,8 +18,8 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Typing");
     row("output.method", "Insert text by")
         .describe(
-            "Typing works everywhere, including password fields and games. \
-             Pasting handles emoji, other alphabets, and very long text.",
+            "Typing works everywhere, even in password fields and games. Pasting is \
+             better for emoji, other alphabets, and long text.",
         )
         .reserve(240.0)
         .show(ui, |ui| {
@@ -38,7 +38,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         gui,
         ui,
         row("output.typing_delay", "Between keystrokes")
-            .describe("Raise it if an application drops letters.")
+            .describe("Raise this if an app drops letters.")
             .reserve(110.0),
         0..=MAX_TYPING_DELAY_MS,
         "ms",
@@ -51,15 +51,15 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "By application");
     intro(
         ui,
-        "These rules come before the setting above. Part of a window class is \
-         enough: konsole matches org.kde.konsole. The History page shows the \
-         class of each application you dictate into.",
+        "These override the setting above for specific apps. Part of the window class is \
+         enough, so konsole matches org.kde.konsole. The History page shows the class of \
+         each app you've dictated into.",
     );
     let removed = app_list(
         ui,
         "output.uinput_apps",
         "Always type in",
-        "For applications where a paste does nothing.",
+        "For apps where pasting doesn't work.",
         &mut gui.config.insertion.uinput_apps,
         &mut gui.new_uinput_app,
     );
@@ -70,7 +70,7 @@ fn by_application(gui: &mut Gui, ui: &mut egui::Ui) {
         ui,
         "output.clipboard_apps",
         "Always paste in",
-        "For applications that drop or reorder typed letters.",
+        "For apps that drop or scramble typed letters.",
         &mut gui.config.insertion.clipboard_apps,
         &mut gui.new_clipboard_app,
     );
@@ -145,7 +145,7 @@ fn add_app(apps: &mut Vec<String>, draft: &str) -> bool {
 
 fn method_name(method: InsertionMethod) -> &'static str {
     match method {
-        InsertionMethod::Auto => "Typing, pasting when it cannot",
+        InsertionMethod::Auto => "Typing, or pasting when it can't",
         InsertionMethod::Uinput => "Always typing",
         InsertionMethod::Clipboard => "Always pasting",
     }

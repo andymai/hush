@@ -82,8 +82,8 @@ fn tone(gui: &mut Gui, ui: &mut egui::Ui) {
         ui,
         "text.profiles",
         "Match the application you are typing into",
-        "Lower case and no full stop in terminals and editors, casual in chat, \
-         full sentences in mail and documents.",
+        "Lowercase with no period in terminals and editors, casual in chat, proper \
+         sentences in email and documents.",
         &mut gui.config.profiles.enabled,
     );
 }
@@ -115,13 +115,13 @@ pub(crate) fn polish_rows(gui: &mut Gui, ui: &mut egui::Ui) {
     let waiting = gui.pending.provider.and_then(|provider| {
         checked_change(&gui.config, |config| config.llm.provider = provider)
             .err()
-            .map(|reason| format!("Not switched yet: set the server below. {}", reason))
+            .map(|reason| format!("Fill in the server below to switch. {}", reason))
     });
     let mut shown = shown_before;
     row("text.llm_provider", "Provider")
         .describe(
-            "The model tidies up transcripts and carries out Command Mode. It gets \
-             only the text, never the audio.",
+            "A language model cleans up what you say and handles Command Mode. It only \
+             ever sees the text, never your audio.",
         )
         .problem(waiting.as_deref())
         .show(ui, |ui| {
@@ -159,7 +159,10 @@ pub(crate) fn polish_rows(gui: &mut Gui, ui: &mut egui::Ui) {
         server_rows(gui, ui);
     }
     row("text.polish", "Tidy up every transcript")
-        .describe("Otherwise the model only handles spoken commands.")
+        .describe(
+            "Fixes grammar and punctuation in everything you dictate. When it's \
+                   off, the model only handles Command Mode.",
+        )
         .reserve(36.0)
         .show(ui, |ui| {
             ui.add_enabled_ui(shown != LlmSetting::None, |ui| {
@@ -233,8 +236,8 @@ fn writing_styles(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Styles");
     intro(
         ui,
-        "A style changes one recording. A style key on the Hotkeys page, \
-         hush start --style NAME, or profiles.app_styles in config.toml picks it.",
+        "A style changes how one dictation is written. Use one with a style key on the \
+         Hotkeys page, or set one for an app with profiles.app_styles in config.toml.",
     );
     let names: Vec<String> = gui.config.styles.keys().cloned().collect();
     let mut remove: Option<String> = None;
@@ -246,9 +249,7 @@ fn writing_styles(gui: &mut Gui, ui: &mut egui::Ui) {
             icons::PEN_LINE,
             styles::VERBATIM.as_str(),
         )
-        .detail(
-            "Built in. The model leaves the recording alone. The rule-based cleanup still runs.",
-        )
+        .detail("Built in. Types what you said, with only light cleanup.")
         .show(ui, 0.0, |_| {});
         for name in &names {
             let about = style_summary(&gui.config.styles[name]);
@@ -307,7 +308,7 @@ fn style_form(gui: &mut Gui, ui: &mut egui::Ui) {
             value_field(ui, &mut gui.style_draft.name, "casual");
         });
     row("text.style_form.prompt", "Prompt")
-        .describe("One line that Hush adds to the prompt of the model.")
+        .describe("Tell the model how to write, in one line.")
         .reserve(PROMPT_WIDTH)
         .show(ui, |ui| {
             text_area(
@@ -322,7 +323,7 @@ fn style_form(gui: &mut Gui, ui: &mut egui::Ui) {
         ui,
         "text.style_form.polish",
         "Tidy up",
-        "The model tidies up recordings in this style, whatever Tidy up every transcript says.",
+        "Tidies up dictations in this style, even when Tidy up every transcript is off.",
         &mut gui.style_draft.polish,
     );
     let ready = !gui.style_draft.name.trim().is_empty();
@@ -377,14 +378,14 @@ fn style_summary(style: &StyleConfig) -> String {
 pub fn save_style(config: &mut Config, draft: &StyleDraft) -> Result<(), String> {
     let name = draft.name.trim();
     let parsed = StyleName::parse(name)
-        .ok_or_else(|| format!("'{}' is not a style name: {}.", name, styles::NAME_RULE))?;
+        .ok_or_else(|| format!("'{}' can't be a style name: {}.", name, styles::NAME_RULE))?;
     if parsed == styles::VERBATIM {
         return Err("Verbatim is built in. Pick another name.".to_string());
     }
     let renamed = draft.original.as_deref().filter(|old| *old != name);
     if draft.original.as_deref() != Some(name) && config.styles.contains_key(name) {
         return Err(format!(
-            "A style with the name {} exists. Pick another name.",
+            "There's already a style called {}. Pick another name.",
             name
         ));
     }
@@ -455,7 +456,7 @@ pub fn remove_style(config: &mut Config, name: &str) -> Result<(), String> {
     let users = style_users(config, name);
     if !users.is_empty() {
         return Err(format!(
-            "The style {} is in use: {}. Remove that first.",
+            "The style {} is still used by {}. Remove that first.",
             name,
             warnings::join(&users)
         ));
@@ -467,11 +468,11 @@ pub fn remove_style(config: &mut Config, name: &str) -> Result<(), String> {
 /// Where the text goes when the server URL is set.
 fn server_reach(url: &str) -> String {
     if url.trim().is_empty() {
-        "Hush adds /v1/chat/completions when the address does not end with it.".to_string()
+        "You can leave off /v1/chat/completions. Hush adds it.".to_string()
     } else if server::is_local(url) {
         format!("A local server: {}.", server::host_label(url))
     } else {
-        format!("{} receives the text.", server::host_label(url))
+        format!("{} gets the text.", server::host_label(url))
     }
 }
 
@@ -480,8 +481,8 @@ fn vocabulary(gui: &mut Gui, ui: &mut egui::Ui) {
     let mut add = false;
     row("text.vocabulary.add", "Add a word")
         .describe(
-            "Hush spells these exactly this way. The Learn key adds the selected \
-             text; you can also type one here.",
+            "Hush always spells these words exactly like this. Add one here, or select it \
+             anywhere and press your Learn key.",
         )
         .reserve(ADD_COLUMN)
         .show(ui, |ui| {
@@ -653,8 +654,8 @@ fn word_list(gui: &mut Gui, ui: &mut egui::Ui) {
     let has_terms = !gui.vocabulary.technical_terms.is_empty();
     let (import, export) = row("text.vocabulary.word_list", "Word list")
         .describe(
-            "A text file with one word on each line. Import adds each word that \
-             the vocabulary does not have. Export writes every word to a new file.",
+            "A plain text file with one word per line. Import adds any words you don't \
+             have yet. Export saves all your words to a new file.",
         )
         .reserve(LIST_COLUMN)
         .show(ui, |ui| {
@@ -695,7 +696,7 @@ pub fn import_word_list(gui: &mut Gui) {
             let result = learn::import_list(&mut gui.vocabulary, &text);
             gui.say(import_message(result));
         },
-        Err(e) => gui.say(format!("Could not read {}: {}", path.display(), e)),
+        Err(e) => gui.say(format!("Couldn't read {}: {}", path.display(), e)),
     }
 }
 
@@ -704,7 +705,7 @@ pub fn export_word_list(gui: &mut Gui) {
     let path = word_list_path(gui);
     if path.exists() {
         gui.say(format!(
-            "{} already exists. Type the name of a new file.",
+            "{} already exists. Pick a new file name.",
             path.display()
         ));
         return;
@@ -716,7 +717,7 @@ pub fn export_word_list(gui: &mut Gui) {
             words(text.lines().count()),
             path.display()
         )),
-        Err(e) => gui.say(format!("Could not export: {:#}", e)),
+        Err(e) => gui.say(format!("Couldn't export: {:#}", e)),
     }
 }
 
@@ -814,7 +815,7 @@ mod tests {
         );
         assert_eq!(
             server_reach("https://llm.example.com"),
-            "llm.example.com receives the text."
+            "llm.example.com gets the text."
         );
     }
 
@@ -852,7 +853,7 @@ mod tests {
         assert!(config.styles["casual"].polish);
 
         let err = save_style(&mut config, &draft(None, "casual", "x", true)).unwrap_err();
-        assert!(err.contains("exists"), "{err}");
+        assert!(err.contains("already a style called"), "{err}");
         let err = save_style(&mut config, &draft(None, "verbatim", "x", true)).unwrap_err();
         assert!(err.contains("built in"), "{err}");
         let err = save_style(&mut config, &draft(None, "Big Name", "x", true)).unwrap_err();
@@ -881,7 +882,7 @@ mod tests {
             .insert("slack".into(), "casual".into());
 
         let err = save_style(&mut config, &draft(Some("casual"), "formal", "x", true)).unwrap_err();
-        assert!(err.contains("exists"), "{err}");
+        assert!(err.contains("already a style called"), "{err}");
         save_style(&mut config, &draft(Some("casual"), "chat", "Brief.", true)).unwrap();
         assert!(!config.styles.contains_key("casual"));
         assert_eq!(config.hotkey.styles["F14"], "chat");
@@ -929,8 +930,8 @@ mod tests {
         let err = remove_style(&mut config, "casual").unwrap_err();
         assert_eq!(
             err,
-            "The style casual is in use: the style key F14 and profiles.app_styles for \
-             slack. Remove that first."
+            "The style casual is still used by the style key F14 and profiles.app_styles \
+             for slack. Remove that first."
         );
         config.hotkey.styles.clear();
         config.profiles.app_styles.clear();

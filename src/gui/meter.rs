@@ -47,7 +47,7 @@ impl Meter {
         let candidates: Vec<Device> = match device {
             Some(name) => vec![host
                 .input_devices()
-                .map_err(|e| anyhow!("Could not list microphones: {}", e))?
+                .map_err(|e| anyhow!("Couldn't list microphones: {}", e))?
                 .find(|d| name_of(d).is_some_and(|n| n.contains(name)))
                 .ok_or_else(|| anyhow!("Microphone '{}' not found", name))?],
             None => {
@@ -110,10 +110,10 @@ fn start(device: &Device, level: Arc<AtomicU32>) -> Result<cpal::Stream> {
             |_| {},
             None,
         )
-        .map_err(|e| anyhow!("Could not open the microphone: {}", e))?;
+        .map_err(|e| anyhow!("Couldn't open the microphone: {}", e))?;
     stream
         .play()
-        .map_err(|e| anyhow!("Could not start the microphone: {}", e))?;
+        .map_err(|e| anyhow!("Couldn't start the microphone: {}", e))?;
     Ok(stream)
 }
 
