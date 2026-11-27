@@ -254,6 +254,8 @@ pub struct Gui {
     pub capture: Option<(KeyTarget, Capture)>,
     /// The language code for the next language key; empty until one is picked.
     pub new_language: String,
+    /// The language of the next translate key
+    pub new_translate: String,
     /// The style name for the next style key; empty until one is picked.
     pub new_style: String,
     /// The style name for the next rewrite key; empty until one is picked.
@@ -412,6 +414,7 @@ impl Gui {
             toast: None,
             capture: None,
             new_language: String::new(),
+            new_translate: String::new(),
             new_style: String::new(),
             new_rewrite: String::new(),
             editing_key: None,

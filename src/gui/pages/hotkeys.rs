@@ -31,6 +31,7 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChordMap {
     Languages,
+    Translate,
     Styles,
     Rewrite,
 }
@@ -39,6 +40,7 @@ impl ChordMap {
     fn entries(self, hotkey: &HotkeyConfig) -> &BTreeMap<String, String> {
         match self {
             ChordMap::Languages => &hotkey.languages,
+            ChordMap::Translate => &hotkey.translate,
             ChordMap::Styles => &hotkey.styles,
             ChordMap::Rewrite => &hotkey.rewrite,
         }
@@ -47,6 +49,7 @@ impl ChordMap {
     fn entries_mut(self, hotkey: &mut HotkeyConfig) -> &mut BTreeMap<String, String> {
         match self {
             ChordMap::Languages => &mut hotkey.languages,
+            ChordMap::Translate => &mut hotkey.translate,
             ChordMap::Styles => &mut hotkey.styles,
             ChordMap::Rewrite => &mut hotkey.rewrite,
         }
@@ -56,6 +59,7 @@ impl ChordMap {
     fn role(self, value: &str) -> Option<Role> {
         match self {
             ChordMap::Languages => Language::parse(value).map(Role::Language),
+            ChordMap::Translate => Language::parse(value).map(Role::Translate),
             ChordMap::Styles => StyleName::parse(value).map(Role::Style),
             ChordMap::Rewrite => StyleName::parse(value).map(Role::Rewrite),
         }
@@ -64,17 +68,24 @@ impl ChordMap {
     fn owns(self, role: Role) -> bool {
         match self {
             ChordMap::Languages => matches!(role, Role::Language(_)),
+            ChordMap::Translate => matches!(role, Role::Translate(_)),
             ChordMap::Styles => matches!(role, Role::Style(_)),
             ChordMap::Rewrite => matches!(role, Role::Rewrite(_)),
         }
     }
 
-    pub const ALL: [ChordMap; 3] = [ChordMap::Languages, ChordMap::Styles, ChordMap::Rewrite];
+    pub const ALL: [ChordMap; 4] = [
+        ChordMap::Languages,
+        ChordMap::Translate,
+        ChordMap::Styles,
+        ChordMap::Rewrite,
+    ];
 
     /// The label of the section that lists the chords.
     pub fn section(self) -> &'static str {
         match self {
             ChordMap::Languages => "Language keys",
+            ChordMap::Translate => "Translate keys",
             ChordMap::Styles => "Style keys",
             ChordMap::Rewrite => "Rewrite keys",
         }
@@ -84,6 +95,7 @@ impl ChordMap {
         match (self.role(value), self) {
             (Some(role), _) => role.label(),
             (None, ChordMap::Languages) => format!("Dictate in {}", value),
+            (None, ChordMap::Translate) => format!("Dictate {} into English", value),
             (None, ChordMap::Styles) => format!("Dictate in the {} style", value),
             (None, ChordMap::Rewrite) => format!("Rewrite in the {} style", value),
         }
@@ -93,6 +105,7 @@ impl ChordMap {
     fn new_value(self, gui: &mut Gui) -> &mut String {
         match self {
             ChordMap::Languages => &mut gui.new_language,
+            ChordMap::Translate => &mut gui.new_translate,
             ChordMap::Styles => &mut gui.new_style,
             ChordMap::Rewrite => &mut gui.new_rewrite,
         }
@@ -455,6 +468,14 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     chord_keys(
         gui,
         ui,
+        ChordMap::Translate,
+        "Each key dictates in its language and types the words in English, with the same \
+         hold, double-tap, and cancel as the dictation key. large-v3-turbo and parakeet-v3 \
+         cannot translate.",
+    );
+    chord_keys(
+        gui,
+        ui,
         ChordMap::Styles,
         "Each key dictates in its own writing style, with the same hold, double-tap, and \
          cancel as the dictation key. Verbatim turns polish off. Add styles on the Text page.",
@@ -513,7 +534,7 @@ fn picker(
     placeholder: &str,
 ) {
     match map {
-        ChordMap::Languages => {
+        ChordMap::Languages | ChordMap::Translate => {
             language_picker(ui, id_salt, value, true, PICKER_WIDTH, placeholder);
         },
         ChordMap::Styles | ChordMap::Rewrite => {
@@ -581,6 +602,11 @@ fn new_chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap) {
         ChordMap::Languages => (
             "Add a language key",
             "Pick a language, then click the button and press the key.",
+            "Language",
+        ),
+        ChordMap::Translate => (
+            "Add a translate key",
+            "Pick the language you speak, then click the button and press the key.",
             "Language",
         ),
         ChordMap::Styles => (

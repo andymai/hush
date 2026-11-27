@@ -185,6 +185,13 @@ pub const SETTINGS: &[Setting] = &[
         "hotkey chord dictate language",
     ),
     row(
+        "hotkeys.translate.new",
+        "Add a translate key",
+        Page::Hotkeys,
+        "Translate keys",
+        "hotkey chord dictate translate english language",
+    ),
+    row(
         "hotkeys.styles.new",
         "Add a style key",
         Page::Hotkeys,
