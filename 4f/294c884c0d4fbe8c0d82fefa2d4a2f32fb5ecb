@@ -1,0 +1,24 @@
+packaging/site/index.html
+  s_5332262e639a7a::t_7df53662dd4e77 1-79,82-186
+  s_5332262e639a7a::t_247e602aa23585 80-81
+packaging/site/build.sh
+  s_5332262e639a7a::t_64a55e76a76051 1-28
+.github/workflows/flatpak.yml
+  s_5332262e639a7a::t_0cad4d1d0b45f2 169-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4f294c884c0d4fbe8c0d82fefa2d4a2f32fb5ecb",
+  "prompts": {},
+  "sessions": {
+    "s_5332262e639a7a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cafc310-b19c-4b54-8739-6ec8a3669200",
+        "model": "unknown"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
