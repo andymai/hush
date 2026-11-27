@@ -163,7 +163,7 @@ tiny-skia = { version = "0.12", default-features = false, features = [
 ab_glyph = "0.2"
 # No xkbcommon: the overlay takes no keyboard input, and the default feature
 # links the system libxkbcommon through pkg-config
-smithay-client-toolkit = { version = "0.20", default-features = false }
+smithay-client-toolkit = { version = "0.21", default-features = false }
 wayland-client = "0.31"
 
 # Application directories (XDG)
