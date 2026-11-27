@@ -22,8 +22,9 @@ use tokio::sync::{mpsc as async_mpsc, oneshot};
 use tracing::{debug, info, warn};
 
 /// The dictation trigger when the config chord has none: a bare modifier
-/// such as Right Alt cannot be a portal trigger.
-pub const DEFAULT_DICTATE: &str = "LOGO+space";
+/// such as Right Alt cannot be a portal trigger. GNOME switches the input
+/// source with Super+Space, and KDE and GNOME leave Ctrl+Super+Space free.
+pub const DEFAULT_DICTATE: &str = "CTRL+LOGO+space";
 
 /// On a desktop that sends no `Deactivated`, a second `Activated` sooner
 /// than this is key repeat. A later one counts as the release.
