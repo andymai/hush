@@ -275,10 +275,13 @@ pub async fn handle_shortcuts(configure: bool) -> Result<()> {
     if configure {
         println!("The desktop opened its shortcut settings.");
     }
-    print!(
-        "{}",
-        shortcut_lines(response.shortcuts.as_deref().unwrap_or_default())
-    );
+    let shortcuts = response.shortcuts.as_deref().unwrap_or_default();
+    if shortcuts.is_empty() {
+        println!(
+            "The desktop holds no keys for Hush yet. Run hush shortcuts --configure to set them."
+        );
+    }
+    print!("{}", shortcut_lines(shortcuts));
     Ok(())
 }
 

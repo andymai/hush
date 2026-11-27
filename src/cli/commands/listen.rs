@@ -148,40 +148,14 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     }
     let hotkey_combination = config.hotkey.combination.clone();
     let hotkey_mode = config.hotkey.mode;
+    let portal = InputMode::detect(config.input.backend).is_portal();
 
     println!("🎤 Hush Intelligent Listening Mode");
     println!("═══════════════════════════════════════════════════════");
-    match hotkey_mode {
-        HotkeyMode::Hold => {
-            println!("Hold {} to dictate, release to insert", hotkey_combination);
-            println!("Double-tap it to keep recording hands-free, press again to stop");
-        },
-        HotkeyMode::Toggle => {
-            println!(
-                "Tap {} to start recording, press again to stop and insert",
-                hotkey_combination
-            );
-            println!("Holding it records only while held");
-        },
-    }
-    if !config.hotkey.cancel.trim().is_empty() {
-        println!("{} discards a recording", config.hotkey.cancel.trim());
-    }
-    for (language, chord) in config.hotkey.language_keys() {
-        println!("{} dictates in {}", chord, language.name());
-    }
-    for (language, chord) in config.hotkey.translate_keys() {
-        println!(
-            "{} dictates {}",
-            chord,
-            Spoken::into_english(language).name()
-        );
-    }
-    for (style, chord) in config.hotkey.style_keys() {
-        println!("{} dictates in the {} style", chord, style);
-    }
-    for (style, chord) in config.hotkey.rewrite_keys() {
-        println!("{} rewrites the selection in the {} style", chord, style);
+    if portal {
+        print_portal_keys();
+    } else {
+        print_keys(&config, &hotkey_combination, hotkey_mode);
     }
     println!("`hush toggle` starts and stops from a keybind; Ctrl+C or `hush daemon stop` quits");
     println!("═══════════════════════════════════════════════════════\n");
@@ -303,11 +277,18 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             )?
         };
         manager.start_listening()?;
-        info!(
-            "✅ Hotkey '{}' registered via {}",
-            hotkey_combination,
-            manager.backend_name()
-        );
+        if input_mode.is_portal() {
+            info!(
+                "✅ The desktop holds the hotkeys, through {}",
+                manager.backend_name()
+            );
+        } else {
+            info!(
+                "✅ Hotkey '{}' registered via {}",
+                hotkey_combination,
+                manager.backend_name()
+            );
+        }
         (Some(manager), receiver)
     } else {
         info!("Hotkeys are off (hotkey.enabled = false); the socket and the tray control Hush");
@@ -2060,6 +2041,50 @@ fn run_style_rewrite(
         ),
         RewriteOutcome::Skipped => {},
     }
+}
+
+/// The keys of the config, for the banner of a session that reads them
+/// itself.
+fn print_keys(config: &Config, hotkey_combination: &str, hotkey_mode: HotkeyMode) {
+    match hotkey_mode {
+        HotkeyMode::Hold => {
+            println!("Hold {} to dictate, release to insert", hotkey_combination);
+            println!("Double-tap it to keep recording hands-free, press again to stop");
+        },
+        HotkeyMode::Toggle => {
+            println!(
+                "Tap {} to start recording, press again to stop and insert",
+                hotkey_combination
+            );
+            println!("Holding it records only while held");
+        },
+    }
+    if !config.hotkey.cancel.trim().is_empty() {
+        println!("{} discards a recording", config.hotkey.cancel.trim());
+    }
+    for (language, chord) in config.hotkey.language_keys() {
+        println!("{} dictates in {}", chord, language.name());
+    }
+    for (language, chord) in config.hotkey.translate_keys() {
+        println!(
+            "{} dictates {}",
+            chord,
+            Spoken::into_english(language).name()
+        );
+    }
+    for (style, chord) in config.hotkey.style_keys() {
+        println!("{} dictates in the {} style", chord, style);
+    }
+    for (style, chord) in config.hotkey.rewrite_keys() {
+        println!("{} rewrites the selection in the {} style", chord, style);
+    }
+}
+
+/// In portal mode the desktop holds every key, so the banner names none.
+fn print_portal_keys() {
+    println!("Your desktop holds Hush's keys: hold the dictation key to talk, or double-tap it");
+    println!("to keep recording hands-free. `hush shortcuts` lists the keys, and");
+    println!("`hush shortcuts --configure` opens the desktop's shortcut settings");
 }
 
 #[cfg(test)]
