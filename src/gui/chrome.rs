@@ -10,10 +10,10 @@ use super::pages::Page;
 use super::theme::{self, palette};
 use super::widgets::{self, Button, Size, Variant};
 use super::Gui;
-use egui::epaint::{Mesh, RectShape, TessellationOptions, Tessellator};
+use egui::epaint::{Mesh, RectShape, Tessellator};
 use egui::{
     Align, Align2, Color32, Context, CursorIcon, Id, Layout, Order, PointerButton, Pos2, Rect,
-    ResizeDirection, Sense, Stroke, Ui, Vec2, ViewportCommand,
+    ResizeDirection, Role, Sense, Stroke, StrokeKind, Ui, Vec2, ViewportCommand,
 };
 
 const MARK_SIZE: f32 = 22.0;
@@ -46,7 +46,7 @@ pub fn mark(ui: &Ui, rect: Rect) {
     let fonts = ui.fonts(|fonts| fonts.font_image_size());
     let mut tessellator = Tessellator::new(
         ui.ctx().pixels_per_point(),
-        TessellationOptions::default(),
+        ui.ctx().tessellation_options(|options| *options),
         fonts,
         Vec::new(),
     );
@@ -79,7 +79,7 @@ pub fn mark(ui: &Ui, rect: Rect) {
 
 /// Toggle maximize on a double click, and move the window on a drag.
 fn drag_region(ui: &Ui, rect: Rect, id: &str) {
-    let response = ui.interact(rect, Id::new(id), Sense::click_and_drag());
+    let response = ui.interact(rect, Id::unique(id), Sense::click_and_drag());
     if response.double_clicked() {
         let maximized = ui.input(|input| input.viewport().maximized.unwrap_or(false));
         ui.ctx()
@@ -131,7 +131,7 @@ pub fn title_bar(ui: &mut Ui, title: &str) {
 fn window_button(ui: &mut Ui, icon: char, size: f32, label: &str, close: bool) -> egui::Response {
     let colours = palette(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    response.widget_info(|| egui::WidgetInfo::labeled(Role::Button, true, label));
     let (fill, ink) = match (response.hovered(), close) {
         (true, true) => (colours.bad, colours.on_primary),
         (true, false) => (colours.hover, colours.ink),
@@ -151,9 +151,9 @@ pub fn resize_edges(ctx: &Context) {
     if ctx.input(|input| input.viewport().maximized.unwrap_or(false)) {
         return;
     }
-    let screen = ctx.screen_rect();
+    let screen = ctx.viewport_rect();
     for (index, (direction, rect, cursor)) in edges(screen).into_iter().enumerate() {
-        egui::Area::new(Id::new(("resize", index)))
+        egui::Area::new(Id::unique(("resize", index)))
             .order(Order::Foreground)
             .fixed_pos(rect.min)
             .interactable(true)
@@ -227,12 +227,13 @@ pub fn window_border(ctx: &Context) {
     let colours = palette(ctx);
     ctx.layer_painter(egui::LayerId::new(
         Order::Foreground,
-        Id::new("window_border"),
+        Id::unique("window_border"),
     ))
     .rect_stroke(
-        ctx.screen_rect().shrink(0.5),
+        ctx.viewport_rect().shrink(0.5),
         0.0,
         Stroke::new(1.0_f32, colours.line),
+        StrokeKind::Outside,
     );
 }
 
@@ -259,12 +260,12 @@ pub fn sidebar(gui: &mut Gui, ui: &mut Ui) {
     );
 
     let ready = gui.machine.ready(&gui.config.transcription);
-    egui::Frame::none()
+    egui::Frame::NONE
         .inner_margin(egui::Margin {
-            left: 8.0,
-            right: 8.0,
-            top: 8.0,
-            bottom: 8.0,
+            left: 8,
+            right: 8,
+            top: 8,
+            bottom: 8,
         })
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
@@ -282,8 +283,8 @@ pub fn sidebar(gui: &mut Gui, ui: &mut Ui) {
             }
         });
     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-        egui::Frame::none()
-            .inner_margin(egui::Margin::same(8.0))
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
                 if commands_item(ui).clicked() {
                     gui.open_palette(ui.ctx());
@@ -297,7 +298,7 @@ fn commands_item(ui: &mut Ui) -> egui::Response {
     let colours = palette(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Commands"));
+    response.widget_info(|| egui::WidgetInfo::labeled(Role::Button, true, "Commands"));
     let hovered = response.hovered();
     if hovered {
         ui.painter()
@@ -356,9 +357,7 @@ fn nav_item(ui: &mut Ui, icon: char, label: &str, current: bool, alert: bool) ->
     let colours = palette(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.0), Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current, label)
-    });
+    response.widget_info(|| egui::WidgetInfo::selected(Role::Button, true, current, label));
     let fill = if current {
         colours.selection
     } else if response.hovered() {
@@ -498,6 +497,98 @@ pub fn footer(gui: &mut Gui, ui: &mut Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::Event;
+
+    /// The title bar in its panel, as the window shows it, 1000 points wide.
+    struct Bar {
+        ctx: Context,
+        time: f64,
+    }
+
+    impl Bar {
+        fn new() -> Self {
+            let ctx = Context::default();
+            theme::install(&ctx);
+            let mut bar = Self { ctx, time: 0.0 };
+            bar.frame(Vec::new());
+            bar
+        }
+
+        /// One frame with `events`, and the commands that the bar sent.
+        fn frame(&mut self, events: Vec<Event>) -> Vec<ViewportCommand> {
+            self.time += 0.05;
+            let input = egui::RawInput {
+                events,
+                time: Some(self.time),
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 720.0))),
+                ..Default::default()
+            };
+            let mut output = self.ctx.run_ui(input, |ui| {
+                egui::Panel::top("title")
+                    .show_separator_line(false)
+                    .exact_size(theme::BAR_HEIGHT)
+                    .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                        left: 16,
+                        right: 8,
+                        top: 0,
+                        bottom: 0,
+                    }))
+                    .show(ui, |ui| title_bar(ui, "Title"));
+            });
+            output.textures_delta.clear();
+            output
+                .viewport_output
+                .remove(&egui::ViewportId::ROOT)
+                .map(|viewport| viewport.commands)
+                .unwrap_or_default()
+        }
+
+        fn button(at: Pos2, pressed: bool) -> Event {
+            Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }
+        }
+
+        fn click(&mut self, at: Pos2) -> Vec<ViewportCommand> {
+            let mut sent = self.frame(vec![Event::PointerMoved(at), Self::button(at, true)]);
+            sent.extend(self.frame(vec![Self::button(at, false)]));
+            sent
+        }
+    }
+
+    #[test]
+    fn the_window_buttons_close_maximize_and_minimize() {
+        let mut bar = Bar::new();
+        let centre = |right: f32| Pos2::new(1000.0 - 8.0 - right - 16.0, 24.0);
+        let sent = bar.click(centre(0.0));
+        assert!(sent.contains(&ViewportCommand::Close), "{sent:?}");
+        let sent = bar.click(centre(34.0));
+        assert!(sent.contains(&ViewportCommand::Maximized(true)), "{sent:?}");
+        let sent = bar.click(centre(68.0));
+        assert!(sent.contains(&ViewportCommand::Minimized(true)), "{sent:?}");
+    }
+
+    #[test]
+    fn a_drag_on_the_title_bar_moves_the_window_and_a_double_click_maximizes_it() {
+        let mut bar = Bar::new();
+        let at = Pos2::new(400.0, 24.0);
+        let mut sent = bar.frame(vec![Event::PointerMoved(at), Bar::button(at, true)]);
+        for step in 1..=4 {
+            let to = at + Vec2::new(10.0 * step as f32, 0.0);
+            sent.extend(bar.frame(vec![Event::PointerMoved(to)]));
+        }
+        sent.extend(bar.frame(vec![Bar::button(at + Vec2::new(40.0, 0.0), false)]));
+        assert!(sent.contains(&ViewportCommand::StartDrag), "{sent:?}");
+        assert!(!sent.contains(&ViewportCommand::Maximized(true)));
+
+        let mut bar = Bar::new();
+        let mut sent = bar.click(at);
+        sent.extend(bar.click(at));
+        assert!(sent.contains(&ViewportCommand::Maximized(true)), "{sent:?}");
+    }
 
     #[test]
     fn the_resize_bands_ring_the_window_without_overlapping() {

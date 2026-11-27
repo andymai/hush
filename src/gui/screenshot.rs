@@ -6,7 +6,9 @@
 //! palette with that query; an empty value opens it with none.
 
 use anyhow::{Context as _, Result};
+use parking_lot::Mutex;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{error, info};
 
 /// Frames drawn before the capture, so fonts, layout, and the first machine
@@ -17,6 +19,7 @@ pub struct Screenshot {
     path: PathBuf,
     frames: u32,
     requested: bool,
+    taken: Arc<Mutex<Option<Arc<egui::ColorImage>>>>,
 }
 
 impl Screenshot {
@@ -26,6 +29,7 @@ impl Screenshot {
             path: PathBuf::from(path),
             frames: 0,
             requested: false,
+            taken: Arc::default(),
         })
     }
 
@@ -42,12 +46,7 @@ impl Screenshot {
 
     /// Ask for the frame once the window settles, then save it and close.
     pub fn step(&mut self, ctx: &egui::Context) {
-        let image = ctx.input(|input| {
-            input.raw.events.iter().find_map(|event| match event {
-                egui::Event::Screenshot { image, .. } => Some(image.clone()),
-                _ => None,
-            })
-        });
+        let image = self.taken.lock().take();
         if let Some(image) = image {
             match save(&self.path, &image) {
                 Ok(()) => info!("Saved {}", self.path.display()),
@@ -59,7 +58,12 @@ impl Screenshot {
         self.frames += 1;
         if self.frames >= SETTLE_FRAMES && !self.requested {
             self.requested = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+            let taken = Arc::clone(&self.taken);
+            let waker = ctx.clone();
+            ctx.request_screenshot(move |image| {
+                *taken.lock() = Some(image);
+                waker.request_repaint();
+            });
         }
         ctx.request_repaint();
     }

@@ -191,7 +191,7 @@ pub fn replace_loses_audio(gui: &Gui, ctx: &egui::Context) -> bool {
         autosave::stamp(gui.files.config_path()),
         autosave::stamp(&takes),
     );
-    let id = egui::Id::new("hush-replace-loses-audio");
+    let id = egui::Id::unique("hush-replace-loses-audio");
     let cached: Option<(Stamps, bool)> = ctx.data(|data| data.get_temp(id));
     if let Some((cached_stamps, loses)) = cached {
         if cached_stamps == stamps {

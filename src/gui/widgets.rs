@@ -11,8 +11,8 @@ use super::jump;
 use super::theme::{self, palette, Palette, Split};
 use egui::text::LayoutJob;
 use egui::{
-    Align, Align2, Color32, FontId, Galley, Layout, Pos2, Rect, Response, Rounding, Sense, Stroke,
-    Ui, UiBuilder, Vec2, Widget, WidgetInfo, WidgetType,
+    Align, Align2, Color32, FontId, Galley, Layout, Pos2, Rect, Response, Role, Sense, Stroke,
+    StrokeKind, Ui, UiBuilder, Vec2, Widget, WidgetInfo,
 };
 use std::ops::RangeInclusive;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ impl Text {
     fn new(ui: &Ui, text: &str, font: FontId, color: Color32, width: f32, line: f32) -> Self {
         let job = LayoutJob::simple(text.to_owned(), font, color, width.max(1.0));
         Self {
-            galley: ui.fonts(|fonts| fonts.layout_job(job)),
+            galley: ui.painter().layout_job(job),
             line,
         }
     }
@@ -80,6 +80,7 @@ pub fn focus_ring(ui: &Ui, rect: Rect, rounding: f32) {
         rect.expand(2.0),
         rounding + 2.0,
         Stroke::new(2.0_f32, palette(ui.ctx()).accent),
+        StrokeKind::Outside,
     );
 }
 
@@ -584,9 +585,8 @@ impl Widget for Button<'_> {
             ),
         };
         let galley = (self.size != Size::Icon).then(|| {
-            ui.fonts(|fonts| {
-                fonts.layout_no_wrap(self.label.to_owned(), font, Color32::PLACEHOLDER)
-            })
+            ui.painter()
+                .layout_no_wrap(self.label.to_owned(), font, Color32::PLACEHOLDER)
         });
         let content = match (&galley, self.icon) {
             (Some(galley), Some(_)) => icon_size + gap + galley.size().x,
@@ -604,7 +604,7 @@ impl Widget for Button<'_> {
             Sense::hover()
         };
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), sense);
-        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, self.enabled, self.label));
+        response.widget_info(|| WidgetInfo::labeled(Role::Button, self.enabled, self.label));
         if self.focus_on_jump {
             jump::offer(ui, &response);
         }
@@ -613,8 +613,13 @@ impl Widget for Button<'_> {
         }
         let hovered = self.enabled && response.hovered();
         let (fill, edge, ink) = button_colours(colours, self.variant, self.enabled, hovered);
-        ui.painter()
-            .rect(rect, theme::RADIUS_SM, fill, Stroke::new(1.0_f32, edge));
+        ui.painter().rect(
+            rect,
+            theme::RADIUS_SM,
+            fill,
+            Stroke::new(1.0_f32, edge),
+            StrokeKind::Outside,
+        );
         if response.has_focus() {
             focus_ring(ui, rect, theme::RADIUS_SM);
         }
@@ -708,7 +713,7 @@ pub fn switch(ui: &mut Ui, on: &mut bool) -> Response {
         *on = !*on;
         response.mark_changed();
     }
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), *on, ""));
+    response.widget_info(|| WidgetInfo::selected(Role::CheckBox, ui.is_enabled(), *on, ""));
     jump::offer(ui, &response);
     if !ui.is_rect_visible(rect) {
         return response;
@@ -721,8 +726,13 @@ pub fn switch(ui: &mut Ui, on: &mut bool) -> Response {
         colours.control
     };
     let radius = rect.height() / 2.0;
-    ui.painter()
-        .rect(rect, radius, track, Stroke::new(1.0_f32, edge));
+    ui.painter().rect(
+        rect,
+        radius,
+        track,
+        Stroke::new(1.0_f32, edge),
+        StrokeKind::Outside,
+    );
     let knob = if *on {
         colours.on_primary
     } else {
@@ -764,12 +774,10 @@ pub fn stepper(
     let widest = [min, max, *value]
         .into_iter()
         .map(|n| {
-            ui.fonts(|fonts| {
-                fonts
-                    .layout_no_wrap(show(n), font.clone(), colours.ink)
-                    .size()
-                    .x
-            })
+            ui.painter()
+                .layout_no_wrap(show(n), font.clone(), colours.ink)
+                .size()
+                .x
         })
         .fold(32.0_f32, f32::max);
     let before = *value;
@@ -822,9 +830,8 @@ pub fn segmented<T: PartialEq + Copy>(
     let galleys: Vec<_> = options
         .iter()
         .map(|(_, label)| {
-            ui.fonts(|fonts| {
-                fonts.layout_no_wrap((*label).to_owned(), font.clone(), Color32::PLACEHOLDER)
-            })
+            ui.painter()
+                .layout_no_wrap((*label).to_owned(), font.clone(), Color32::PLACEHOLDER)
         })
         .collect();
     let widths: Vec<f32> = galleys.iter().map(|g| g.size().x + 24.0).collect();
@@ -836,6 +843,7 @@ pub fn segmented<T: PartialEq + Copy>(
         theme::RADIUS_SM,
         colours.surface,
         Stroke::new(1.0_f32, colours.control),
+        StrokeKind::Outside,
     );
     let mut x = rect.left() + 3.0;
     for (((option, label), galley), width) in options.iter().zip(galleys).zip(widths) {
@@ -847,7 +855,7 @@ pub fn segmented<T: PartialEq + Copy>(
         let cell_response = ui.interact(cell, id, Sense::click());
         cell_response.widget_info(|| {
             WidgetInfo::selected(
-                WidgetType::RadioButton,
+                Role::RadioButton,
                 ui.is_enabled(),
                 *value == *option,
                 *label,
@@ -942,12 +950,11 @@ impl Widget for Field<'_> {
         } else {
             theme::sans(theme::BODY)
         };
-        let left = if self.icon.is_some() { 30.0 } else { 8.0 };
         let margin = egui::Margin {
-            left,
-            right: 8.0,
-            top: 0.0,
-            bottom: 0.0,
+            left: if self.icon.is_some() { 30 } else { 8 },
+            right: 8,
+            top: 0,
+            bottom: 0,
         };
         let hint = egui::RichText::new(self.placeholder)
             .font(font.clone())
@@ -957,17 +964,19 @@ impl Widget for Field<'_> {
             .font(font)
             .text_color(colours.ink)
             .hint_text(hint)
-            .frame(false)
-            .margin(margin)
-            .horizontal_align(if self.right { Align::Max } else { Align::Min })
-            .vertical_align(Align::Center)
+            .frame(egui::Frame::NONE.inner_margin(margin))
+            .align(if self.right {
+                Align2::RIGHT_CENTER
+            } else {
+                Align2::LEFT_CENTER
+            })
             .min_size(Vec2::new(self.width, theme::CONTROL_HEIGHT))
-            .desired_width(self.width - left - 8.0);
+            .desired_width(self.width);
         let background = ui.painter().add(egui::Shape::Noop);
         let response = ui.add(edit);
         note_text_focus(ui, &response, text.is_empty());
         jump::offer(ui, &response);
-        let rect = response.rect + margin;
+        let rect = response.rect;
         let edge = if self.invalid {
             colours.bad
         } else {
@@ -980,6 +989,7 @@ impl Widget for Field<'_> {
                 theme::RADIUS_SM,
                 colours.surface,
                 Stroke::new(1.0_f32, edge),
+                StrokeKind::Outside,
             ),
         );
         if let Some(icon) = self.icon {
@@ -1010,21 +1020,20 @@ pub fn text_area(
     let hint = egui::RichText::new(placeholder)
         .font(theme::sans(theme::BODY))
         .color(colours.muted);
-    let margin = egui::Margin::symmetric(10.0, 8.0);
+    let margin = egui::Margin::symmetric(10, 8);
     let background = ui.painter().add(egui::Shape::Noop);
     let response = ui.add(
         egui::TextEdit::multiline(&mut *text)
             .font(theme::sans(theme::BODY))
             .text_color(colours.ink)
             .hint_text(hint)
-            .frame(false)
-            .margin(margin)
+            .frame(egui::Frame::NONE.inner_margin(margin))
             .desired_rows(rows)
-            .desired_width(width - 20.0),
+            .desired_width(width),
     );
     note_text_focus(ui, &response, text.is_empty());
     jump::offer(ui, &response);
-    let rect = response.rect + margin;
+    let rect = response.rect;
     ui.painter().set(
         background,
         egui::epaint::RectShape::new(
@@ -1032,6 +1041,7 @@ pub fn text_area(
             theme::RADIUS_SM,
             colours.surface,
             Stroke::new(1.0_f32, colours.control),
+            StrokeKind::Outside,
         ),
     );
     if response.has_focus() {
@@ -1080,7 +1090,7 @@ pub struct TextFocus {
 }
 
 pub fn text_focus_id() -> egui::Id {
-    egui::Id::new("hush-text-focus")
+    egui::Id::unique("hush-text-focus")
 }
 
 fn note_text_focus(ui: &Ui, response: &Response, empty: bool) {
@@ -1099,9 +1109,9 @@ pub fn key_caps(ui: &Ui, right: f32, y: f32, keys: &[&str]) -> f32 {
     let colours = palette(ui.ctx());
     let mut x = right;
     for key in keys.iter().rev() {
-        let galley = ui.fonts(|fonts| {
-            fonts.layout_no_wrap((*key).to_owned(), theme::mono(theme::MONO), colours.muted)
-        });
+        let galley =
+            ui.painter()
+                .layout_no_wrap((*key).to_owned(), theme::mono(theme::MONO), colours.muted);
         let width = (galley.size().x + 8.0).max(20.0);
         let cap = Rect::from_min_size(Pos2::new(x - width, y - 10.0), Vec2::new(width, 20.0));
         ui.painter().rect(
@@ -1109,6 +1119,7 @@ pub fn key_caps(ui: &Ui, right: f32, y: f32, keys: &[&str]) -> f32 {
             theme::RADIUS_XS,
             colours.surface,
             Stroke::new(1.0_f32, colours.line),
+            StrokeKind::Outside,
         );
         ui.painter()
             .galley(cap.center() - galley.size() / 2.0, galley, colours.muted);
@@ -1165,7 +1176,7 @@ pub fn draft_step(
 }
 
 fn draft_id(key: &str) -> egui::Id {
-    egui::Id::new(("hush-draft", key))
+    egui::Id::unique(("hush-draft", key))
 }
 
 /// Text that the user committed in the field of the row `key`.
@@ -1192,7 +1203,7 @@ impl Committed {
 }
 
 fn rejections_id() -> egui::Id {
-    egui::Id::new("hush-rejections")
+    egui::Id::unique("hush-rejections")
 }
 
 /// How many commits were rejected since the last call, so a close that
@@ -1247,7 +1258,7 @@ pub fn setting_field(
     if focus {
         response.request_focus();
     }
-    let event = if response.lost_focus() {
+    let event = if lost_focus_once(ui, &response) {
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             FieldEvent::Escape
         } else {
@@ -1260,7 +1271,9 @@ pub fn setting_field(
     };
     let (next, commit) = draft_step(draft, saved, text, event);
     ui.data_mut(|data| match next {
-        Some(next) => data.insert_temp(id, next),
+        Some(next) => {
+            data.insert_temp(id, next);
+        },
         None => data.remove::<Draft>(id),
     });
     match (event, commit) {
@@ -1269,6 +1282,19 @@ pub fn setting_field(
         (FieldEvent::Editing, None) => FieldOutcome::Editing,
         (FieldEvent::Idle, None) => FieldOutcome::Idle,
     }
+}
+
+/// Whether `response` lost the focus in this frame. egui also reports a
+/// loss in the frame after it, which would close or commit a field twice.
+fn lost_focus_once(ui: &Ui, response: &Response) -> bool {
+    let id = response.id.with("lost-focus");
+    let lost = response.lost_focus();
+    let before = ui.data_mut(|data| {
+        let before = data.get_temp::<bool>(id).unwrap_or(false);
+        data.insert_temp(id, lost);
+        before
+    });
+    lost && !before
 }
 
 /// Drop the draft of the row `key`, as when its field closes.
@@ -1297,7 +1323,7 @@ pub fn parse_number(text: &str, range: &RangeInclusive<u64>) -> Result<u64, Stri
 /// [`option`] for each choice.
 pub fn dropdown<R>(
     ui: &mut Ui,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl egui::AsIdSalt,
     width: f32,
     selected: &str,
     add: impl FnOnce(&mut Ui) -> R,
@@ -1311,7 +1337,7 @@ pub fn dropdown<R>(
         .height(320.0)
         .selected_text(text)
         .truncate()
-        .icon(|ui, rect, _visuals, _open, _above| {
+        .icon(|ui, rect, _visuals, _open| {
             paint_icon(
                 ui,
                 rect.center(),
@@ -1337,12 +1363,12 @@ pub fn option<T: PartialEq>(ui: &mut Ui, current: &mut T, value: T, label: &str)
     let colours = palette(ui.ctx());
     let chosen = *current == value;
     let width = ui.available_width().max(ui.min_rect().width());
-    let galley = ui.fonts(|fonts| {
-        fonts.layout_no_wrap(label.to_owned(), theme::sans(theme::BODY), colours.ink)
-    });
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), theme::sans(theme::BODY), colours.ink);
     let width = width.max(galley.size().x + 40.0);
     let (rect, mut response) = ui.allocate_exact_size(Vec2::new(width, 28.0), Sense::click());
-    response.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, chosen, label));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, chosen, label));
     if response.hovered() || response.has_focus() {
         ui.painter()
             .rect_filled(rect, theme::RADIUS_XS, colours.hover);
@@ -1387,7 +1413,7 @@ pub fn key_field(
     } else {
         chord
     };
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, ui.is_enabled(), label));
     jump::offer(ui, &response);
     if !ui.is_rect_visible(rect) {
         return response;
@@ -1402,6 +1428,7 @@ pub fn key_field(
         theme::RADIUS_SM,
         fill,
         Stroke::new(1.0_f32, colours.control),
+        StrokeKind::Outside,
     );
     if listening || response.has_focus() {
         focus_ring(ui, rect, theme::RADIUS_SM);
@@ -1431,9 +1458,9 @@ pub fn key_field(
     }
     let mut x = start;
     for part in chord.split('+').map(str::trim).filter(|p| !p.is_empty()) {
-        let galley = ui.fonts(|fonts| {
-            fonts.layout_no_wrap(part.to_owned(), theme::mono(theme::MONO), colours.ink)
-        });
+        let galley =
+            ui.painter()
+                .layout_no_wrap(part.to_owned(), theme::mono(theme::MONO), colours.ink);
         let cap = Rect::from_min_size(
             Pos2::new(x, rect.center().y - 10.0),
             Vec2::new((galley.size().x + 10.0).max(20.0), 20.0),
@@ -1446,6 +1473,7 @@ pub fn key_field(
             theme::RADIUS_XS,
             colours.sunken,
             Stroke::new(1.0_f32, colours.line),
+            StrokeKind::Outside,
         );
         ui.painter()
             .galley(cap.center() - galley.size() / 2.0, galley, colours.ink);
@@ -1593,16 +1621,19 @@ pub fn list<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 /// A rounded chip, for a word that a fix proposes.
 pub fn chip<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let colours = palette(ui.ctx());
-    egui::Frame::none()
+    // The outline goes outside the margins, and the chip takes no room for
+    // it, as the outline of every other control.
+    egui::Frame::NONE
         .fill(colours.surface)
         .stroke(Stroke::new(1.0_f32, colours.control))
-        .rounding(Rounding::same(14.0))
+        .corner_radius(15)
         .inner_margin(egui::Margin {
-            left: 12.0,
-            right: 4.0,
-            top: 2.0,
-            bottom: 2.0,
+            left: 12,
+            right: 4,
+            top: 2,
+            bottom: 2,
         })
+        .outer_margin(-1)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.horizontal(add).inner
@@ -1668,21 +1699,24 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let _ = self.ctx.run(input, |ctx| {
-                if surrender {
-                    if let Some(focused) = ctx.memory(|memory| memory.focused()) {
-                        ctx.memory_mut(|memory| memory.surrender_focus(focused));
+            self.ctx
+                .run_ui(input, |ui| {
+                    if surrender {
+                        if let Some(focused) = ui.memory(|memory| memory.focused()) {
+                            ui.memory_mut(|memory| memory.surrender_focus(focused));
+                        }
                     }
-                }
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    outcome = match setting_field(ui, "test", saved, "", FieldKind::Value, focus) {
-                        FieldOutcome::Idle => "idle".into(),
-                        FieldOutcome::Editing => "editing".into(),
-                        FieldOutcome::Closed => "closed".into(),
-                        FieldOutcome::Commit(commit) => format!("commit {}", commit.text),
-                    };
-                });
-            });
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        outcome =
+                            match setting_field(ui, "test", saved, "", FieldKind::Value, focus) {
+                                FieldOutcome::Idle => "idle".into(),
+                                FieldOutcome::Editing => "editing".into(),
+                                FieldOutcome::Closed => "closed".into(),
+                                FieldOutcome::Commit(commit) => format!("commit {}", commit.text),
+                            };
+                    });
+                })
+                .drop_without_applying_deltas();
             outcome
         }
 
@@ -1692,13 +1726,15 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let _ = self.ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    number = row("test", "Test")
-                        .number_field(ui, saved, 0..=200, "ms")
-                        .map(|(number, _)| number);
-                });
-            });
+            self.ctx
+                .run_ui(input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        number = row("test", "Test")
+                            .number_field(ui, saved, 0..=200, "ms")
+                            .map(|(number, _)| number);
+                    });
+                })
+                .drop_without_applying_deltas();
             number
         }
 
@@ -1755,6 +1791,25 @@ mod tests {
     }
 
     #[test]
+    fn a_field_commits_once_when_it_loses_the_focus() {
+        let window = Window::new();
+        window.frame(Vec::new(), "llama", true);
+        window.frame(vec![typed("3")], "llama", false);
+        window.frame(vec![key(egui::Key::Enter)], "llama", false);
+        assert_eq!(window.frame(Vec::new(), "llama", false), "idle");
+
+        window.frame(Vec::new(), "llama", true);
+        window.frame(vec![typed("3")], "llama", false);
+        assert_eq!(window.frame(click_away(), "llama", false), "commit llama3");
+        assert_eq!(window.frame(Vec::new(), "llama", false), "idle");
+
+        window.frame(Vec::new(), "llama", true);
+        window.frame(vec![typed("3")], "llama", false);
+        assert_eq!(window.closing_frame("llama"), "commit llama3");
+        assert_eq!(window.frame(Vec::new(), "llama", false), "idle");
+    }
+
+    #[test]
     fn leaving_the_field_saves_the_typed_text_in_a_real_frame() {
         let window = Window::new();
         window.frame(Vec::new(), "llama", true);
@@ -1806,6 +1861,79 @@ mod tests {
             kept.problem.as_deref(),
             Some("Enter a whole number from 0 to 200.")
         );
+    }
+
+    /// A drop-down of two choices, and where its button and its second
+    /// choice drew.
+    struct Choices {
+        ctx: egui::Context,
+        choice: u8,
+        button: Rect,
+        second: Rect,
+    }
+
+    impl Choices {
+        fn new() -> Self {
+            let ctx = egui::Context::default();
+            crate::gui::theme::install(&ctx);
+            Self {
+                ctx,
+                choice: 1,
+                button: Rect::NOTHING,
+                second: Rect::NOTHING,
+            }
+        }
+
+        /// One frame; whether the list is open.
+        fn frame(&mut self, events: Vec<egui::Event>) -> bool {
+            let mut open = false;
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let ctx = self.ctx.clone();
+            ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let selected = if self.choice == 1 { "One" } else { "Two" };
+                    let shown = ui.scope(|ui| {
+                        dropdown(ui, "test", theme::FIELD_WIDTH, selected, |ui| {
+                            option(ui, &mut self.choice, 1, "One");
+                            self.second = option(ui, &mut self.choice, 2, "Two").rect;
+                        })
+                    });
+                    self.button = shown.response.rect;
+                    open = shown.inner.is_some();
+                });
+            })
+            .drop_without_applying_deltas();
+            open
+        }
+
+        fn click(&mut self, at: Pos2) {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            self.frame(vec![egui::Event::PointerMoved(at), button(true)]);
+            self.frame(vec![button(false)]);
+        }
+    }
+
+    #[test]
+    fn a_dropdown_opens_on_a_click_and_a_click_on_a_choice_picks_it() {
+        let mut choices = Choices::new();
+        assert!(!choices.frame(Vec::new()), "closed at first");
+        choices.click(choices.button.center());
+        assert!(choices.frame(Vec::new()), "a click opens the list");
+        assert!(
+            choices.button.max.y <= choices.second.min.y,
+            "the list is below"
+        );
+        choices.click(choices.second.center());
+        assert_eq!(choices.choice, 2);
+        assert!(!choices.frame(Vec::new()), "a pick closes the list");
     }
 
     fn draft(text: &str, problem: Option<&str>) -> Option<Draft> {

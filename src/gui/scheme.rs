@@ -52,17 +52,31 @@ fn store(latest: &AtomicU8, ctx: &Context, scheme: Scheme) {
 mod tests {
     use super::*;
 
+    /// A context with no repaint waiting, as after its first frames.
+    fn settled() -> Context {
+        let ctx = Context::default();
+        for _ in 0..10 {
+            if !ctx.has_requested_repaint() {
+                break;
+            }
+            ctx.run_ui(egui::RawInput::default(), |_| {})
+                .drop_without_applying_deltas();
+        }
+        assert!(!ctx.has_requested_repaint());
+        ctx
+    }
+
     #[test]
     fn a_change_repaints_only_when_the_scheme_differs() {
         let scheme = DesktopScheme::default();
         assert_eq!(scheme.get(), None);
 
-        let ctx = Context::default();
+        let ctx = settled();
         store(&scheme.latest, &ctx, Scheme::Dark);
         assert!(ctx.has_requested_repaint(), "no preference to dark");
         assert_eq!(scheme.get(), Some(Theme::Dark));
 
-        let ctx = Context::default();
+        let ctx = settled();
         store(&scheme.latest, &ctx, Scheme::Dark);
         assert!(!ctx.has_requested_repaint(), "dark again");
         assert_eq!(scheme.get(), Some(Theme::Dark));
@@ -71,7 +85,7 @@ mod tests {
         assert!(ctx.has_requested_repaint(), "dark to light");
         assert_eq!(scheme.get(), Some(Theme::Light));
 
-        let ctx = Context::default();
+        let ctx = settled();
         store(&scheme.latest, &ctx, Scheme::NoPreference);
         assert!(ctx.has_requested_repaint(), "light to no preference");
         assert_eq!(scheme.get(), None);

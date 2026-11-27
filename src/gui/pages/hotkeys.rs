@@ -507,7 +507,7 @@ fn chord_keys(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap, about: &str) {
 fn picker(
     ui: &mut egui::Ui,
     map: ChordMap,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl egui::AsIdSalt,
     value: &mut String,
     style_names: &[StyleName],
     placeholder: &str,
