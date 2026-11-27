@@ -91,6 +91,14 @@
   </screenshots>
 
   <releases>
+    <release version="1.20.3" date="2026-11-27" type="stable">
+      <description>
+        <p>Bug Fixes</p>
+        <ul>
+          <li>The Try it box names no key in portal mode, and one day is singular</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.20.2" date="2026-11-27" type="stable">
       <description>
         <p>Bug Fixes</p>
@@ -161,15 +169,6 @@
         <p>Features</p>
         <ul>
           <li>Screen readers reach the settings window through AccessKit</li>
-        </ul>
-      </description>
-    </release>
-    <release version="1.13.0" date="2026-11-27" type="stable">
-      <description>
-        <p>Features</p>
-        <ul>
-          <li>Add and change translate keys on the Hotkeys page</li>
-          <li>The settings window uses the desktop's interface font and accent color</li>
         </ul>
       </description>
     </release>
