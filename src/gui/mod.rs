@@ -483,22 +483,6 @@ impl Gui {
 
     /// Open `page`, and drop the key field that listens and the questions
     /// of the page before.
-    /// What the first run finds on this machine, for an install without
-    /// `setup.toml`.
-    fn setup_facts(&self) -> crate::setup::Facts {
-        let transcription = &self.config.transcription;
-        crate::setup::Facts {
-            config_file: crate::config::paths::config_path().exists(),
-            model: !self.machine.installed_models.is_empty()
-                || transcription.model_path.is_some()
-                || transcription.backend.is_cloud(),
-            history: crate::text_processing::transcripts::default_path().exists(),
-            access: self.machine.can_type(),
-            tuned: crate::transcription::tune::TuneResult::path().exists(),
-            autostart: self.machine.autostart,
-        }
-    }
-
     pub fn go_to(&mut self, page: Page) {
         self.capture = None;
         if self.page != page {
@@ -1327,14 +1311,21 @@ impl eframe::App for Gui {
 /// user closes it.
 pub fn run(first_run: bool) -> Result<()> {
     let mut app = Gui::new()?;
+    let facts = crate::setup::Facts::gather(&app.config);
+    let saved = crate::setup::SetupState::load(&crate::setup::path());
     if first_run {
         let Some(lock) = crate::setup::lock()? else {
             println!("The setup window is open already.");
             return Ok(());
         };
-        let facts = app.setup_facts();
         app.setup = Some(pages::setup::Setup::open(&facts, lock));
         app.page = Page::Setup;
+    } else if Page::from_env().is_none() && crate::setup::opens_first_run(saved.as_ref(), &facts) {
+        // Another setup window keeps the lock; this one opens as settings.
+        if let Some(lock) = crate::setup::lock()? {
+            app.setup = Some(pages::setup::Setup::open(&facts, lock));
+            app.page = Page::Setup;
+        }
     }
     let size = app
         .screenshot

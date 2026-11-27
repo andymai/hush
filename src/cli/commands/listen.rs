@@ -353,6 +353,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
         tokio::spawn(crate::updates::run(crate::updates::InstallKind::current()));
     }
 
+    // Before the model loads, which fails on a new install without one.
+    crate::setup::notify_at_start(&config);
+
     // Initialize audio capture (main thread - !Send)
     let mut audio_capture = AudioCapture::new(config.audio.device.as_deref())?;
     // Note: amplitude monitoring is now enabled per-recording session to avoid thread accumulation
