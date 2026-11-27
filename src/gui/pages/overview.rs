@@ -19,6 +19,12 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn running(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Status");
+    daemon_row(gui, ui);
+    autostart_row(gui, ui);
+}
+
+/// Whether the daemon runs, with a button that starts or restarts it.
+pub(crate) fn daemon_row(gui: &mut Gui, ui: &mut egui::Ui) {
     let running = gui.machine.running();
     let safe_mode = gui
         .machine
@@ -61,6 +67,10 @@ fn running(gui: &mut Gui, ui: &mut egui::Ui) {
                 gui.run_hush(&["daemon", "start"], "Starting…");
             }
         });
+}
+
+/// The switch that starts Hush at login, or the line a compositor needs.
+pub(crate) fn autostart_row(gui: &mut Gui, ui: &mut egui::Ui) {
     let mut autostart = gui.machine.autostart;
     if let (Some(compositor), false) = (gui.machine.startup_compositor, autostart) {
         let line = compositor.startup_line();
@@ -99,6 +109,12 @@ pub fn safe_mode_text(reason: &str) -> String {
 
 fn access(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Keyboard access");
+    access_row(gui, ui);
+}
+
+/// Whether Hush can read the keyboard and type, with the button that
+/// grants it.
+pub(crate) fn access_row(gui: &mut Gui, ui: &mut egui::Ui) {
     if gui.machine.portal {
         row("overview.access", "The desktop types for Hush")
             .status(true)
@@ -208,6 +224,11 @@ fn model(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn try_it(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Try it");
+    try_box(gui, ui);
+}
+
+/// A box that the next dictation types into, and the state of the daemon.
+pub(crate) fn try_box(gui: &mut Gui, ui: &mut egui::Ui) {
     intro(
         ui,
         &format!(

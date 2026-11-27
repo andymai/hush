@@ -681,7 +681,7 @@ pub fn bind_chord(gui: &mut Gui, map: ChordMap, own: Option<String>, chord: Stri
     }
 }
 
-fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
+pub(crate) fn key_row(gui: &mut Gui, ui: &mut egui::Ui, role: Role, hint_text: &str) {
     let capturing = gui
         .capture
         .as_ref()

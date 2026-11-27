@@ -52,6 +52,7 @@ pub mod fonts;
 
 /// The systemd user unit that the packages ship
 pub mod service;
+pub mod setup;
 
 /// Desktop portals for a sandboxed Hush
 #[cfg(target_os = "linux")]

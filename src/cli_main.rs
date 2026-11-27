@@ -152,7 +152,11 @@ pub enum Commands {
     },
 
     /// Open the setup and settings window
-    Settings,
+    Settings {
+        /// Walk through the first run: access, model, key, a take, tune, login, privacy
+        #[arg(long)]
+        first_run: bool,
+    },
 
     /// The recording overlay; the daemon starts it with a socket on fd 3
     #[command(hide = true)]
@@ -241,10 +245,10 @@ pub enum Commands {
         style: String,
     },
 
-    /// Setup and configuration commands
+    /// Set Hush up in a window, step by step; or run one setup command
     Setup {
         #[command(subcommand)]
-        setup_command: SetupCommands,
+        setup_command: Option<SetupCommands>,
     },
 
     /// Testing and diagnostic commands
