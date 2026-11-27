@@ -1466,6 +1466,14 @@ pub fn key_field(
             Vec2::new((galley.size().x + 10.0).max(20.0), 20.0),
         );
         if cap.right() > rect.right() - 6.0 {
+            // The keys that fit must not pass for the whole chord.
+            ui.painter().text(
+                Pos2::new(x, rect.center().y),
+                Align2::LEFT_CENTER,
+                "…",
+                theme::mono(theme::MONO),
+                colours.muted,
+            );
             break;
         }
         ui.painter().rect(
