@@ -8,6 +8,7 @@ use crate::gui::theme::{palette, CONTROL_HEIGHT};
 use crate::gui::widgets::{self, intro, row, section, switch, text_area, Button, Size, Variant};
 use crate::gui::Gui;
 use crate::ipc::DaemonState;
+use crate::portal::InputMode;
 use crate::transcription::models::ModelSize;
 
 pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
@@ -246,11 +247,16 @@ fn try_it(gui: &mut Gui, ui: &mut egui::Ui) {
 
 /// A box that the next dictation types into, and the state of the daemon.
 pub(crate) fn try_box(gui: &mut Gui, ui: &mut egui::Ui) {
+    let key = if InputMode::detect(gui.saved.input.backend).is_portal() {
+        "your dictation key".to_string()
+    } else {
+        gui.saved.hotkey.combination.clone()
+    };
     intro(
         ui,
         &format!(
             "Click in the box, hold {}, and talk. Your words show up here.",
-            gui.saved.hotkey.combination
+            key
         ),
     );
     let width = ui.available_width();
