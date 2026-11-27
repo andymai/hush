@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/andymai/hush/compare/v1.14.0...v1.15.0) (2026-11-27)
+
+
+### Features
+
+* **setup:** hush setup opens a first run that goes one step at a time ([#391](https://github.com/andymai/hush/issues/391)) ([de2cd9f](https://github.com/andymai/hush/commit/de2cd9fd0f896cdeaae2ebe00af5322b8f47ace9))
+
 ## [1.14.0](https://github.com/andymai/hush/compare/v1.13.0...v1.14.0) (2026-11-27)
 
 
