@@ -79,7 +79,8 @@ pub fn mark(ui: &Ui, rect: Rect) {
 
 /// Toggle maximize on a double click, and move the window on a drag.
 fn drag_region(ui: &Ui, rect: Rect, id: &str) {
-    let response = ui.interact(rect, Id::unique(id), Sense::click_and_drag());
+    // Not in the Tab order: the keyboard has the title bar's buttons.
+    let response = ui.interact(rect, Id::unique(id), Sense::CLICK | Sense::DRAG);
     if response.double_clicked() {
         let maximized = ui.input(|input| input.viewport().maximized.unwrap_or(false));
         ui.ctx()
@@ -158,7 +159,8 @@ pub fn resize_edges(ctx: &Context) {
             .fixed_pos(rect.min)
             .interactable(true)
             .show(ctx, |ui| {
-                let (_, response) = ui.allocate_exact_size(rect.size(), Sense::drag());
+                // Not in the Tab order: a band of the window's edge.
+                let (_, response) = ui.allocate_exact_size(rect.size(), Sense::DRAG);
                 if response.hovered() {
                     ctx.set_cursor_icon(cursor);
                     if ctx.input(|input| input.pointer.primary_pressed()) {
