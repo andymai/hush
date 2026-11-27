@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/andymai/hush/compare/v1.16.0...v1.17.0) (2026-11-27)
+
+
+### Features
+
+* **keys:** hush settings saves API keys in the keyring, or in the sandbox's .env ([#395](https://github.com/andymai/hush/issues/395)) ([df3564c](https://github.com/andymai/hush/commit/df3564cbdc976b9ffe19aa504203018ef16bf027))
+
 ## [1.16.0](https://github.com/andymai/hush/compare/v1.15.0...v1.16.0) (2026-11-27)
 
 
