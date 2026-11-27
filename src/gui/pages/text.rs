@@ -90,6 +90,15 @@ fn tone(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Polish");
+    polish_rows(gui, ui);
+    section(ui, "Language models");
+    ollama_rows(gui, ui);
+    anthropic_rows(gui, ui);
+    server_rows(gui, ui);
+}
+
+/// The provider that polishes, and whether it tidies every transcript.
+pub(crate) fn polish_rows(gui: &mut Gui, ui: &mut egui::Ui) {
     let shown_before = gui.pending.provider.unwrap_or(gui.config.llm.provider);
     let waiting = gui.pending.provider.and_then(|provider| {
         checked_change(&gui.config, |config| config.llm.provider = provider)
@@ -136,8 +145,9 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
                 switch(ui, &mut gui.config.llm.polish);
             });
         });
+}
 
-    section(ui, "Language models");
+pub(crate) fn ollama_rows(gui: &mut Gui, ui: &mut egui::Ui) {
     text_setting(
         gui,
         ui,
@@ -152,6 +162,9 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
         "llama3.2",
         |config| &mut config.llm.ollama_model,
     );
+}
+
+pub(crate) fn anthropic_rows(gui: &mut Gui, ui: &mut egui::Ui) {
     text_setting(
         gui,
         ui,
@@ -166,6 +179,9 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
         row("text.anthropic_key", "Anthropic API key").describe(&status),
         "ANTHROPIC_API_KEY",
     );
+}
+
+pub(crate) fn server_rows(gui: &mut Gui, ui: &mut egui::Ui) {
     let reach = server_reach(&gui.config.llm.server_url);
     text_setting(
         gui,

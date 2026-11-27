@@ -21,17 +21,19 @@ pub enum Step {
     Hotkey,
     TryIt,
     Tune,
+    Llm,
     Autostart,
     Privacy,
 }
 
 impl Step {
-    pub const ALL: [Step; 7] = [
+    pub const ALL: [Step; 8] = [
         Step::Access,
         Step::Model,
         Step::Hotkey,
         Step::TryIt,
         Step::Tune,
+        Step::Llm,
         Step::Autostart,
         Step::Privacy,
     ];
@@ -43,6 +45,7 @@ impl Step {
             Step::Hotkey => "Dictation key",
             Step::TryIt => "Try it",
             Step::Tune => "Hardware tune",
+            Step::Llm => "Language model",
             Step::Autostart => "Start at login",
             Step::Privacy => "Privacy",
         }
@@ -135,6 +138,9 @@ impl SetupState {
     pub fn derive(facts: &Facts) -> Self {
         let mut state = Self::default();
         if !(facts.config_file || facts.model || facts.history) {
+            for step in Step::ALL {
+                state.set(step, Progress::Pending);
+            }
             return state;
         }
         let done = |yes: bool| {
@@ -149,14 +155,23 @@ impl SetupState {
         state.set(Step::Hotkey, done(facts.config_file));
         state.set(Step::TryIt, done(facts.history));
         state.set(Step::Tune, done(facts.tuned));
+        state.set(Step::Llm, done(facts.config_file));
         state.set(Step::Autostart, done(facts.autostart));
         state.set(Step::Privacy, done(facts.config_file));
         state
     }
 
-    /// `None` when the file is absent or does not parse.
+    /// `None` when the file is absent or does not parse. A step that a
+    /// newer Hush added after this setup began counts as skipped, so a
+    /// finished setup stays finished.
     pub fn load(path: &Path) -> Option<Self> {
-        toml::from_str(&std::fs::read_to_string(path).ok()?).ok()
+        let mut state: Self = toml::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+        if !state.steps.is_empty() {
+            for step in Step::ALL {
+                state.steps.entry(step).or_insert(Progress::Skipped);
+            }
+        }
+        Some(state)
     }
 
     /// Write the file whole, so a crash leaves the old one or the new one.
@@ -246,9 +261,9 @@ pub fn notify_at_start(config: &Config) {
     notify_with_action(
         NoticeKind::Status,
         "Set up Hush",
-        "Seven short steps: keyboard access, a model, your key, and a first dictation.",
+        "Eight short steps: keyboard access, a model, your key, and a first dictation.",
         "Set up Hush",
-        "Seven short steps: keyboard access, a model, your key, and a first dictation. \
+        "Eight short steps: keyboard access, a model, your key, and a first dictation. \
          Run hush setup to start.",
         launch,
     );
@@ -318,11 +333,38 @@ mod tests {
     }
 
     #[test]
+    fn a_step_added_later_does_not_reopen_a_finished_setup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("setup.toml");
+        std::fs::write(
+            &path,
+            "[steps]\naccess = \"done\"\nmodel = \"done\"\nhotkey = \"done\"\n\
+             try-it = \"done\"\ntune = \"skipped\"\nautostart = \"done\"\nprivacy = \"done\"\n",
+        )
+        .unwrap();
+        let state = SetupState::load(&path).unwrap();
+        assert_eq!(state.progress(Step::Llm), Progress::Skipped);
+        assert_eq!(state.next(), None);
+
+        let fresh = SetupState::derive(&Facts::default());
+        fresh.save(&path).unwrap();
+        let loaded = SetupState::load(&path).unwrap();
+        assert_eq!(
+            loaded.next(),
+            Some(Step::Access),
+            "a new install lists every step"
+        );
+        assert!(Step::ALL
+            .iter()
+            .all(|step| loaded.progress(*step) == Progress::Pending));
+    }
+
+    #[test]
     fn the_state_survives_a_round_trip_and_resumes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("hush").join("setup.toml");
         assert_eq!(SetupState::load(&path), None);
-        let mut state = SetupState::default();
+        let mut state = SetupState::derive(&Facts::default());
         state.set(Step::Access, Progress::Done);
         state.set(Step::Model, Progress::Skipped);
         state.save(&path).unwrap();

@@ -629,6 +629,52 @@ fn strip_wrapping(text: &str) -> String {
     unquoted.to_string()
 }
 
+/// The models of the Ollama server at `url`, such as `llama3.2:latest`;
+/// `None` when no server answers.
+pub async fn ollama_models(url: &str) -> Option<Vec<String>> {
+    let client = Client::builder()
+        .timeout(OLLAMA_PROBE_TIMEOUT)
+        .build()
+        .ok()?;
+    let response = client
+        .get(format!("{}/api/tags", url.trim_end_matches('/')))
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let tags: serde_json::Value = response.json().await.ok()?;
+    Some(model_names(&tags))
+}
+
+fn model_names(tags: &serde_json::Value) -> Vec<String> {
+    tags.get("models")
+        .and_then(serde_json::Value::as_array)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| model.get("name")?.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// One short request to the provider that `config` picks, as the setup's
+/// test. `Ok` names the provider; the error says why, and holds no key.
+pub async fn test_provider(config: &LlmConfig, env_file: &Path) -> Result<String> {
+    let provider = resolve_provider(config, env_file).await;
+    if provider == LlmProvider::None {
+        anyhow::bail!("{}", no_llm_message(config));
+    }
+    let processor = LlmProcessor::new(provider, 32, 0.0)?;
+    let name = processor.provider_name();
+    processor
+        .polish("hello world", EditingMode::Light)
+        .await
+        .map(|_| name)
+}
+
 /// Whether an Ollama server answers at `url`.
 pub async fn ollama_reachable(url: &str) -> bool {
     let client = match Client::builder().timeout(OLLAMA_PROBE_TIMEOUT).build() {
@@ -769,6 +815,33 @@ pub async fn resolve_polish_provider(config: &LlmConfig, env_file: &Path) -> Llm
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_test_without_a_model_says_why() {
+        let config = LlmConfig {
+            provider: LlmSetting::None,
+            ..LlmConfig::default()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let reason = test_provider(&config, &dir.path().join(".env"))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(reason.contains("llm.provider is \"none\""), "{reason}");
+    }
+
+    #[test]
+    fn ollama_tags_give_the_model_names() {
+        let tags = serde_json::json!({
+            "models": [
+                {"name": "llama3.2:latest", "size": 2019393189},
+                {"name": "qwen2.5:7b"},
+                {"size": 1}
+            ]
+        });
+        assert_eq!(model_names(&tags), ["llama3.2:latest", "qwen2.5:7b"]);
+        assert!(model_names(&serde_json::json!({})).is_empty());
+    }
 
     #[test]
     fn test_system_prompt_creation() {

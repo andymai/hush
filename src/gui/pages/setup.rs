@@ -3,15 +3,17 @@
 //! privacy. Each step can be skipped, and `setup.toml` keeps the progress,
 //! so the setup resumes where it stopped.
 
-use super::{hotkeys, overview, speech, Page};
-use crate::config::settings::TranscriptionBackend;
+use super::{hotkeys, overview, speech, text, Page};
+use crate::config::settings::{LlmSetting, TranscriptionBackend};
 use crate::gui::widgets::{intro, row, section, switch_row, Button, Size, Variant};
 use crate::gui::{icons, Gui};
 use crate::hotkey::Role;
 use crate::ipc::protocol::DaemonCommand;
 use crate::portal::InputMode;
 use crate::setup::{self, Facts, Progress, SetupLock, SetupState, Step};
+use parking_lot::Mutex;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, warn};
 
@@ -24,7 +26,20 @@ pub struct Setup {
     downloading: bool,
     /// The daemon was asked to keep the next take for the tune
     asked_keep: bool,
+    llm: Arc<Mutex<LlmCheck>>,
     _lock: SetupLock,
+}
+
+/// What the language model step found, from tasks on the window's runtime.
+#[derive(Debug, Default)]
+struct LlmCheck {
+    /// The Ollama address of the last probe, and its models; `None` models
+    /// when no server answered
+    ollama: Option<(String, Option<Vec<String>>)>,
+    probing: bool,
+    /// The provider that answered the test, or why it did not
+    test: Option<Result<String, String>>,
+    testing: bool,
 }
 
 impl Setup {
@@ -39,6 +54,7 @@ impl Setup {
             path,
             downloading: false,
             asked_keep: false,
+            llm: Arc::default(),
             _lock: lock,
         };
         setup.save();
@@ -66,7 +82,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Set up Hush");
     intro(
         ui,
-        "Seven steps get Hush ready. You can skip any of them: each one also has its \
+        "Eight steps get Hush ready. You can skip any of them: each one also has its \
          place in the settings.",
     );
     for step in Step::ALL {
@@ -141,6 +157,7 @@ fn open_step(gui: &mut Gui, ui: &mut egui::Ui, step: Step) {
         Step::Hotkey => hotkey(gui, ui),
         Step::TryIt => try_it(gui, ui),
         Step::Tune => tune(gui, ui),
+        Step::Llm => llm(gui, ui),
         Step::Autostart => {
             overview::autostart_row(gui, ui);
             true
@@ -289,6 +306,117 @@ fn tune(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
             });
     }
     gui.machine.tune.is_some()
+}
+
+fn llm(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
+    let Some(check) = gui.setup.as_ref().map(|setup| Arc::clone(&setup.llm)) else {
+        return true;
+    };
+    intro(
+        ui,
+        "A language model tidies each transcript and carries out Command Mode. It gets \
+         the text only, never the audio. Ollama runs one on this machine.",
+    );
+    let url = gui.config.llm.ollama_url.clone();
+    let stale = {
+        let check = check.lock();
+        !check.probing
+            && check
+                .ollama
+                .as_ref()
+                .is_none_or(|(probed, _)| *probed != url)
+    };
+    if stale {
+        check.lock().probing = true;
+        let ctx = ui.ctx().clone();
+        let check = Arc::clone(&check);
+        gui.runtime.spawn(async move {
+            let models = crate::text_processing::llm::ollama_models(&url).await;
+            let mut check = check.lock();
+            check.ollama = Some((url, models));
+            check.probing = false;
+            ctx.request_repaint();
+        });
+    }
+    let found = check.lock().ollama.clone();
+    let (title, description, command) = match found.map(|(_, models)| models) {
+        None => ("Looking for Ollama", String::new(), None),
+        Some(Some(models)) if !models.is_empty() => (
+            "Ollama runs here",
+            format!("Its models: {}.", models.join(", ")),
+            None,
+        ),
+        Some(Some(_)) => (
+            "Ollama runs here, with no model",
+            "Pull one, then name it below.".to_string(),
+            Some("ollama pull llama3.2"),
+        ),
+        Some(None) => (
+            "Ollama does not answer",
+            format!(
+                "Nothing answers at {}. Install Ollama from ollama.com, then pull a model.",
+                gui.config.llm.ollama_url
+            ),
+            Some("curl -fsSL https://ollama.com/install.sh | sh\nollama pull llama3.2"),
+        ),
+    };
+    let mut ollama = row("setup.ollama", title).describe(&description);
+    if title == "Ollama runs here" {
+        ollama = ollama.status(true);
+    }
+    ollama.control_below().show(ui, |ui| {
+        if let Some(command) = command {
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.label(egui::RichText::new(command).monospace());
+            });
+        }
+    });
+    text::polish_rows(gui, ui);
+    match gui.config.llm.provider {
+        LlmSetting::Auto => {
+            text::ollama_rows(gui, ui);
+            text::anthropic_rows(gui, ui);
+        },
+        LlmSetting::Ollama => text::ollama_rows(gui, ui),
+        LlmSetting::Anthropic => text::anthropic_rows(gui, ui),
+        LlmSetting::OpenAiCompatible => text::server_rows(gui, ui),
+        LlmSetting::None => {},
+    }
+    if gui.config.llm.provider != LlmSetting::None {
+        let (testing, answer) = {
+            let check = check.lock();
+            (check.testing, check.test.clone())
+        };
+        let description = match &answer {
+            None => "Sends one short request with these settings.".to_string(),
+            Some(Ok(provider)) => format!("{} answered.", provider),
+            Some(Err(reason)) => reason.clone(),
+        };
+        let mut test = row("setup.llm_test", "Test the model").describe(&description);
+        if let Some(answer) = &answer {
+            test = test.status(answer.is_ok());
+        }
+        test.reserve(120.0).show(ui, |ui| {
+            let button = Button::new(if testing { "Testing…" } else { "Test" }).enabled(!testing);
+            if ui.add(button).clicked() {
+                check.lock().testing = true;
+                let config = gui.config.llm.clone();
+                let ctx = ui.ctx().clone();
+                let check = Arc::clone(&check);
+                gui.runtime.spawn(async move {
+                    let env_file = crate::config::keys::env_file();
+                    let answer = crate::text_processing::llm::test_provider(&config, &env_file)
+                        .await
+                        .map_err(|e| format!("{:#}", e));
+                    let mut check = check.lock();
+                    check.test = Some(answer);
+                    check.testing = false;
+                    ctx.request_repaint();
+                });
+            }
+        });
+    }
+    true
 }
 
 fn privacy(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
