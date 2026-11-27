@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.13.0](https://github.com/andymai/hush/compare/v1.12.0...v1.13.0) (2026-11-27)
+
+
+### Features
+
+* **gui:** add and change translate keys on the Hotkeys page ([#387](https://github.com/andymai/hush/issues/387)) ([5950cee](https://github.com/andymai/hush/commit/5950cee66b5dfc488083bff129e77020d9d6fb49))
+* **gui:** the settings window uses the desktop's interface font and accent color ([#385](https://github.com/andymai/hush/issues/385)) ([0f8bcf0](https://github.com/andymai/hush/commit/0f8bcf09325e178676c0fc49be915e71be8dd62b))
+
 ## [1.12.0](https://github.com/andymai/hush/compare/v1.11.1...v1.12.0) (2026-11-27)
 
 
