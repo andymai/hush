@@ -16,6 +16,10 @@ Each release has four packages for x86-64 Linux and a `SHA256SUMS` file. The
 Each release also has a Flatpak bundle, `hush-<version>-x86_64.flatpak`. See
 [Flatpak](#flatpak).
 
+Each release also has a source archive, `hush-<version>-vendored.tar.xz`. It
+holds the source at the tag and the crates that the build needs, so
+`cargo build --offline --frozen` needs no network.
+
 Four other ways install Hush:
 
 - `install.sh` picks the `.deb` on Debian and Ubuntu, the `.rpm` on Fedora,
@@ -65,8 +69,8 @@ other layout.
 ## Verify a download
 
 The release workflow attests the build provenance of each release file: the
-tarball, the `.deb`, the `.rpm`, the AppImage, and `SHA256SUMS`. The Flatpak
-workflow attests the Flatpak bundle. An attestation
+tarball, the `.deb`, the `.rpm`, the AppImage, the source archive, and
+`SHA256SUMS`. The Flatpak workflow attests the Flatpak bundle. An attestation
 is a Sigstore-signed record. It ties the SHA-256 digest of a file to the
 workflow run that built the file. Releases from 0.17.0 have attestations.
 

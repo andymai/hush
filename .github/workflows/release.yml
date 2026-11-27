@@ -110,6 +110,30 @@ jobs:
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      # The source at the tag, the crates of Cargo.lock in vendor/, and a
+      # .cargo/config.toml that points cargo at vendor/, so that
+      # `cargo build --offline --frozen` needs no network. The step runs
+      # before the build, so no build script can change the tree first. Fixed
+      # tar and xz settings give the same file, and the same SHA-256 for a
+      # manifest, when a dispatch builds the tag again.
+      - name: Build the vendored source archive
+        run: |
+          set -euo pipefail
+          name="hush-${VERSION}"
+          src="target/source/$name"
+          rm -rf target/source
+          mkdir -p "$src/.cargo" target/dist
+          git archive HEAD | tar -x -C "$src"
+          (cd "$src" && cargo vendor --locked --versioned-dirs vendor) > target/source/config.toml
+          mv target/source/config.toml "$src/.cargo/config.toml"
+          (cd "$src" && cargo metadata --offline --frozen --format-version 1 > /dev/null)
+          if ! grep -q "<release version=\"${VERSION}\"" "$src/packaging/io.github.andymai.hush.metainfo.xml"; then
+            echo "::warning::the metainfo at $TAG does not list $VERSION"
+          fi
+          tar -C target/source --sort=name --mtime="@$(git log -1 --format=%ct)" \
+            --owner=0 --group=0 --numeric-owner -cf - "$name" \
+            | xz -T1 > "target/dist/${name}-vendored.tar.xz"
+
       - run: cargo build --release --features vulkan
 
       # Inlined, like the dependencies step, so that a dispatch for an older tag
