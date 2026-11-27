@@ -1,0 +1,25 @@
+docs/features.md
+  s_5332262e639a7a::t_40151733980dc0 3,11,22
+README.md
+  s_5332262e639a7a::t_6d0efbf8499cfe 8-9,28-30,36,45,52,71,74,84-88,96,106,110-118,132
+packaging/flatpak/repo.sh
+  s_5332262e639a7a::t_1bed655a9b1bf8 24
+packaging/io.github.andymai.hush.metainfo.xml
+  s_5332262e639a7a::t_cbe3c096596b1e 9,16-25,32-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "343e4ad73db475ba7fbd3a3f8f7574a0631b140f",
+  "prompts": {},
+  "sessions": {
+    "s_5332262e639a7a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cafc310-b19c-4b54-8739-6ec8a3669200",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
