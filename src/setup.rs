@@ -191,8 +191,9 @@ pub fn launch() {
             return;
         },
     };
-    let quiet = |command: &mut Command| {
-        command
+    // The window reads keys in its own order, without the daemon's `.env`.
+    let prepare = |command: &mut Command| {
+        crate::config::keys::without_env_files(command)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -202,7 +203,7 @@ pub fn launch() {
         .args(["--user", "--scope", "--unit=hush-setup", "--quiet", "--"])
         .arg(&exe)
         .args(["settings", "--first-run"]);
-    quiet(&mut scoped);
+    prepare(&mut scoped);
     let child = scoped.spawn().or_else(|e| {
         debug!(
             "No systemd-run for the setup window ({}), so it runs as a child",
@@ -210,7 +211,7 @@ pub fn launch() {
         );
         let mut plain = Command::new(&exe);
         plain.args(["settings", "--first-run"]);
-        quiet(&mut plain);
+        prepare(&mut plain);
         plain.spawn()
     });
     match child {
