@@ -30,8 +30,8 @@ pub fn config_section(config: Result<Config>) -> String {
             let transcription = &config.transcription;
             let key = transcription
                 .key_var()
-                .map(|var| match crate::config::keys::api_key(var) {
-                    Some(_) => format!("{} set", var),
+                .map(|var| match crate::config::keys::source(var) {
+                    Some(source) => format!("{} {}", var, source.describe()),
                     None => format!("{} missing", var),
                 });
             match transcription.backend {

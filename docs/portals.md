@@ -17,4 +17,6 @@ Portal mode needs KDE Plasma 6 or GNOME 48, or a later version. xdg-desktop-port
 
 In the Flatpak, the recording pill uses a layer-shell surface when the compositor gives one to a sandboxed app. Otherwise it draws in an X11 window through Xwayland, so the manifest asks for X11 as well as Wayland.
 
+In a sandbox, Hush keeps each API key that you save in `hush settings` in its own `.env` file, `~/.var/app/io.github.andymai.hush/config/hush/.env`, which only you can read. Hush does not use the keyring through the Secret portal. The unlock prompt of the keyring can take the keyboard focus while Hush types, and the text would then go into the password field.
+
 If you refuse keyboard access, Hush puts the text on the clipboard and does not ask again. Run `hush daemon restart`, and the desktop asks at the next dictation. To try portal mode outside a sandbox, set `backend = "portal"` under `[input]` and restart the daemon.

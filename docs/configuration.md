@@ -17,7 +17,7 @@ Hotkey chords name keys in two ways. Ctrl, Shift, Alt, and Super in a chord mean
 | `transcription.backend` | `local` (Whisper through transcribe.cpp), or `groq` or `openai`, which send the audio of each dictation to that service. The key comes from `GROQ_API_KEY` or `OPENAI_API_KEY`. `openai-compatible` sends the audio of each dictation to the URL in `transcription.server_url` | local |
 | `transcription.groq_model`, `transcription.openai_model` | The model each service runs | whisper-large-v3-turbo, gpt-4o-mini-transcribe |
 | `transcription.server_url`, `transcription.server_model` | The OpenAI-compatible server and its model. Hush adds `/v1/audio/transcriptions` when the URL does not end with it. `hush doctor` shows whether the server is local | none |
-| `transcription.server_key_env` | The environment variable that holds the server's API key; `""` sends no key | none |
+| `transcription.server_key_env` | The name of the variable that holds the server's API key. See [API keys](#api-keys). `""` sends no key | none |
 | `hotkey.combination` | Key or button: `RightAlt`, `RightCtrl`, `F13`, `Mouse4`, or a chord like `Ctrl+Shift+Space` | RightAlt |
 | `hotkey.mode` | `hold` (double-tap locks hands-free) or `toggle` (a tap locks) | hold |
 | `hotkey.backend` | `auto`, `evdev`, or `x11` | auto |
@@ -61,6 +61,18 @@ Hotkey chords name keys in two ways. Ctrl, Shift, Alt, and Super in a chord mean
 
 Point at a different file with `hush -c other.toml …` or `HUSH_CONFIG=other.toml`.
 
+## API keys
+
+API keys never go in `config.toml`. Hush reads each key from the first of these places that has it:
+
+1. The environment, such as `ANTHROPIC_API_KEY` in your shell profile.
+2. The keyring: the Secret Service, such as GNOME Keyring or KWallet. The key fields on the Speech and Text pages of `hush settings` save a key there. Each item has the attributes `application = hush` and `variable = <NAME>`, and the label `Hush: <NAME>`.
+3. `~/.config/hush/.env`, with one `NAME=value` line for each key. A key that you saved there before stays in use.
+
+The daemon never unlocks the keyring. It reads only the unlocked items. When the keyring is locked, Hush sends one notice and works without those keys until you unlock the keyring. `hush settings` unlocks it when you save or remove a key, and a daemon that uses the key then restarts. Hush starts no keyring: without a Secret Service on the session bus, Hush reads only the environment and the `.env` file.
+
+`hush doctor` shows where each key comes from: the environment, the keyring, the locked keyring, or a `.env` file. It never shows a key. In the Flatpak, Hush keeps a key in its own `.env` file in place of the keyring. See [Flatpak and desktop portals](portals.md).
+
 ## Move your setup
 
 Write your settings and your vocabulary to one file, then load that file on the other machine:
@@ -70,7 +82,7 @@ hush config export hush-setup.toml
 hush config import hush-setup.toml
 ```
 
-- The file has only the keys in your `config.toml` and the entries in your `vocabulary.json`. It has no API keys, so copy `~/.config/hush/.env` yourself.
+- The file has only the keys in your `config.toml` and the entries in your `vocabulary.json`. It has no API keys, and `export` refuses to write a file that holds a key that Hush can read. Save the keys again in `hush settings` on the other machine, or copy `~/.config/hush/.env`.
 - `export` does not replace a file that exists. Add `--force` to replace it.
 - `import` replaces the settings and the vocabulary. With `--merge`, it keeps your current values and adds only the keys and entries that you do not have.
 - Before `import` writes a file, it checks the whole file and keeps the old file next to it as `config.toml.bak` or `vocabulary.json.bak`. A running daemon restarts with the new settings.

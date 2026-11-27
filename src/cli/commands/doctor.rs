@@ -2,9 +2,10 @@
 //! with the one command that fixes it.
 
 use crate::audio::wake;
+use crate::config::keys::{self, Source};
 use crate::config::server::{self, Sends};
 use crate::config::settings::{LlmSetting, TranscriptionBackend, TranscriptionConfig};
-use crate::config::{keys, paths, Config};
+use crate::config::{paths, Config};
 use crate::hotkey::keymap::ModifierKeys;
 use crate::hotkey::{warnings, HotkeyBindings};
 use crate::ipc::protocol::PortalShortcut;
@@ -129,7 +130,7 @@ pub async fn checks() -> Vec<Check> {
         let key_present = config
             .transcription
             .key_var()
-            .is_none_or(|var| keys::api_key_in(&env_file, var).is_some());
+            .is_none_or(|var| keys::source_in(&env_file, var).is_some());
         checks.push(cloud_check(&config.transcription, key_present));
     } else {
         let backends = backends_report(device::init_backends(), &device::loaded_modules());
@@ -194,6 +195,11 @@ pub async fn checks() -> Vec<Check> {
     checks.push(window_check());
     checks.push(clipboard_check(crate::text::clipboard::support()));
     checks.push(llm_check(&config, &env_file).await);
+    let sources: Vec<(String, Source)> = keys::variables(&config)
+        .into_iter()
+        .filter_map(|var| keys::source_in(&env_file, &var).map(|source| (var, source)))
+        .collect();
+    checks.extend(keys_check(&sources));
     checks.push(hook_check(&config));
     checks.push(tray_check(&config));
     checks.push(updates_check(&config));
@@ -830,6 +836,28 @@ async fn llm_check(config: &Config, env_file: &Path) -> Check {
     }
 }
 
+/// Where each key that Hush finds comes from, never its value. A key in the
+/// locked keyring is a warning, because the daemon goes without it.
+fn keys_check(sources: &[(String, Source)]) -> Option<Check> {
+    if sources.is_empty() {
+        return None;
+    }
+    let detail = sources
+        .iter()
+        .map(|(var, source)| format!("{} {}", var, source.describe()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if sources.iter().any(|(_, source)| *source == Source::Locked) {
+        Some(Check::warn(
+            "API keys",
+            detail,
+            "unlock the keyring, or save the key again in hush settings",
+        ))
+    } else {
+        Some(Check::ok("API keys", detail))
+    }
+}
+
 fn hook_check(config: &Config) -> Check {
     let command = config.hooks.transcript.trim();
     let home = dirs::home_dir();
@@ -1409,6 +1437,28 @@ mod tests {
         assert_eq!(check.level, Level::Warn);
         assert!(check.detail.contains("HUSH_TEST_UNSET_LLM_KEY"));
         assert!(check.fix.unwrap().contains("under [llm]"));
+    }
+
+    #[test]
+    fn the_keys_line_says_where_each_key_is() {
+        assert!(keys_check(&[]).is_none(), "no line without a key");
+        let found = [
+            ("GROQ_API_KEY".to_string(), Source::Keyring),
+            ("ANTHROPIC_API_KEY".to_string(), Source::EnvFile),
+            ("OPENAI_API_KEY".to_string(), Source::Environment),
+        ];
+        let check = keys_check(&found).unwrap();
+        assert_eq!(check.level, Level::Ok);
+        assert_eq!(
+            check.detail,
+            "GROQ_API_KEY from the keyring, ANTHROPIC_API_KEY from a .env file, \
+             OPENAI_API_KEY from the environment"
+        );
+        let locked = [("GROQ_API_KEY".to_string(), Source::Locked)];
+        let check = keys_check(&locked).unwrap();
+        assert_eq!(check.level, Level::Warn);
+        assert_eq!(check.detail, "GROQ_API_KEY in the locked keyring");
+        assert!(check.fix.unwrap().contains("unlock the keyring"));
     }
 
     #[test]

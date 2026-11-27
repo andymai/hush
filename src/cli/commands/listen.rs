@@ -366,6 +366,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
 
     // First, because a cloud backend reads its key from these files
     keys::load_env_files();
+    keys::fill_cache();
 
     let transcriber = SpeechToText::from_config(
         &config.transcription,

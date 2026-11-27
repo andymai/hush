@@ -936,6 +936,7 @@ pub struct Field<'a> {
     mono: bool,
     right: bool,
     invalid: bool,
+    password: bool,
     icon: Option<char>,
 }
 
@@ -948,8 +949,17 @@ impl<'a> Field<'a> {
             mono: false,
             right: false,
             invalid: false,
+            password: false,
             icon: None,
         }
+    }
+
+    /// Dots in place of the text, for a key or a password, also for a
+    /// screen reader.
+    pub fn password(mut self) -> Self {
+        self.mono = true;
+        self.password = true;
+        self
     }
 
     pub fn width(mut self, width: f32) -> Self {
@@ -1001,6 +1011,7 @@ impl Widget for Field<'_> {
             .color(colours.muted);
         let text = self.text;
         let edit = egui::TextEdit::singleline(&mut *text)
+            .password(self.password)
             .font(font)
             .text_color(colours.ink)
             .hint_text(hint)

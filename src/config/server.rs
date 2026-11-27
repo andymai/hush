@@ -139,7 +139,7 @@ pub fn validate(
     Ok(())
 }
 
-fn valid_var_name(name: &str) -> bool {
+pub(crate) fn valid_var_name(name: &str) -> bool {
     let mut chars = name.chars();
     chars
         .next()

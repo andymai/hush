@@ -3,7 +3,7 @@
 //! when `transcription.backend` names one, and a failure is reported, never
 //! retried on another backend.
 
-use crate::config::keys;
+use crate::config::keys::{self, ApiKey};
 use crate::config::server::{self, Sends};
 use crate::config::settings::{TranscriptionBackend, TranscriptionConfig};
 use crate::transcription::whisper::{
@@ -35,7 +35,7 @@ pub struct CloudTranscriber {
     service: String,
     model: String,
     language: String,
-    api_key: Option<String>,
+    api_key: Option<ApiKey>,
     client: Client,
 }
 
@@ -55,8 +55,9 @@ struct ErrorDetail {
 }
 
 impl CloudTranscriber {
-    /// The service `config.backend` names, with its key from the
-    /// environment or `env_file` (`~/.config/hush/.env`).
+    /// The service `config.backend` names. Its key counts when the
+    /// environment, the keyring, or `env_file` (`~/.config/hush/.env`) has
+    /// it, and each request reads it then.
     pub fn from_config(config: &TranscriptionConfig, env_file: &Path) -> Result<Self> {
         if !config.detect_languages.is_empty() {
             static NOTED: Once = Once::new();
@@ -68,20 +69,21 @@ impl CloudTranscriber {
                 )
             });
         }
+        let key_in = |var: &str| {
+            keys::source_in(env_file, var)
+                .is_some()
+                .then(|| ApiKey::var(var, env_file))
+        };
         if config.backend != TranscriptionBackend::OpenAiCompatible {
-            let key = config
-                .backend
-                .key_var()
-                .and_then(|var| keys::api_key_in(env_file, var));
-            return Self::new(
+            return Self::hosted(
                 config.backend,
                 config.cloud_model().unwrap_or_default(),
                 &config.language,
-                key,
+                config.backend.key_var().and_then(key_in),
             );
         }
         let key = match config.key_var() {
-            Some(var) => Some(keys::api_key_in(env_file, var).with_context(|| {
+            Some(var) => Some(key_in(var).with_context(|| {
                 format!(
                     "transcription.server_key_env is {} but {} is not set. Put it in \
                      ~/.config/hush/.env, or set server_key_env = \"\"",
@@ -90,7 +92,7 @@ impl CloudTranscriber {
             })?),
             None => None,
         };
-        Self::for_server(
+        Self::on_server(
             &config.server_url,
             &config.server_model,
             &config.language,
@@ -105,19 +107,26 @@ impl CloudTranscriber {
         language: &str,
         api_key: Option<String>,
     ) -> Result<Self> {
+        Self::hosted(backend, model, language, api_key.map(ApiKey::from))
+    }
+
+    fn hosted(
+        backend: TranscriptionBackend,
+        model: &str,
+        language: &str,
+        api_key: Option<ApiKey>,
+    ) -> Result<Self> {
         let (Some(var), Some(endpoint)) = (backend.key_var(), hosted_endpoint(backend)) else {
             anyhow::bail!("{} is not a hosted service", backend.name());
         };
-        let api_key = api_key
-            .filter(|key| !key.trim().is_empty())
-            .with_context(|| {
-                format!(
-                    "transcription.backend is {} but {} is not set. Put it in ~/.config/hush/.env, \
-                     or set backend = \"local\"",
-                    backend.name(),
-                    var
-                )
-            })?;
+        let api_key = api_key.filter(|key| !key.is_blank()).with_context(|| {
+            format!(
+                "transcription.backend is {} but {} is not set. Put it in ~/.config/hush/.env, \
+                 or set backend = \"local\"",
+                backend.name(),
+                var
+            )
+        })?;
         Self::build(
             backend,
             endpoint.to_string(),
@@ -136,6 +145,15 @@ impl CloudTranscriber {
         language: &str,
         api_key: Option<String>,
     ) -> Result<Self> {
+        Self::on_server(base_url, model, language, api_key.map(ApiKey::from))
+    }
+
+    fn on_server(
+        base_url: &str,
+        model: &str,
+        language: &str,
+        api_key: Option<ApiKey>,
+    ) -> Result<Self> {
         let endpoint = server::endpoint(base_url, server::TRANSCRIPTIONS)
             .map_err(|e| anyhow::anyhow!("Invalid transcription.server_url: {}", e))?;
         let service = server::host_label(&endpoint);
@@ -145,7 +163,7 @@ impl CloudTranscriber {
             service,
             model,
             language,
-            api_key.filter(|key| !key.trim().is_empty()),
+            api_key.filter(|key| !key.is_blank()),
         )
     }
 
@@ -155,7 +173,7 @@ impl CloudTranscriber {
         service: String,
         model: &str,
         language: &str,
-        api_key: Option<String>,
+        api_key: Option<ApiKey>,
     ) -> Result<Self> {
         let client = Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
@@ -282,6 +300,10 @@ impl CloudTranscriber {
         } else {
             Cow::Owned(resample(audio, sample_rate, WHISPER_SAMPLE_RATE)?)
         };
+        let key = match &self.api_key {
+            Some(key) => Some(key.require().await?),
+            None => None,
+        };
         let wav = encode_wav(&samples)?;
         let hosted = self.backend != TranscriptionBackend::OpenAiCompatible;
         if hosted && wav.len() > MAX_UPLOAD_BYTES {
@@ -317,7 +339,7 @@ impl CloudTranscriber {
             self.endpoint().to_string()
         };
         let mut request = self.client.post(endpoint).multipart(form);
-        if let Some(key) = &self.api_key {
+        if let Some(key) = &key {
             request = request.bearer_auth(key);
         }
         let response = request
@@ -618,9 +640,9 @@ mod tests {
         assert_eq!(
             CloudTranscriber::from_config(&config, &env_file)
                 .unwrap()
-                .api_key
-                .as_deref(),
-            Some("sk-from-file")
+                .api_key,
+            Some(ApiKey::var("HUSH_TEST_UNSET_SERVER_KEY", &env_file)),
+            "the variable, which each request reads"
         );
 
         let no_key = TranscriptionConfig {
@@ -631,6 +653,44 @@ mod tests {
             .unwrap()
             .api_key
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn each_take_reads_the_key_when_it_goes_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let env_file = dir.path().join(".env");
+        std::fs::write(&env_file, "HUSH_TEST_LATER_SERVER_KEY=test-key-1\n").unwrap();
+        let (url, request) = server::fake_server(r#"{"text":"ok"}"#.into()).await;
+        let config = TranscriptionConfig {
+            backend: TranscriptionBackend::OpenAiCompatible,
+            server_url: url,
+            server_model: "m".into(),
+            server_key_env: "HUSH_TEST_LATER_SERVER_KEY".into(),
+            ..crate::config::Config::defaults().unwrap().transcription
+        };
+        let transcriber = CloudTranscriber::from_config(&config, &env_file).unwrap();
+
+        std::fs::write(&env_file, "").unwrap();
+        let err = transcriber
+            .transcribe_with_prompt(&[0.1; 160], 16_000, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("cannot read HUSH_TEST_LATER_SERVER_KEY"),
+            "{err}"
+        );
+
+        std::fs::write(&env_file, "HUSH_TEST_LATER_SERVER_KEY=test-key-2\n").unwrap();
+        transcriber
+            .transcribe_with_prompt(&[0.1; 160], 16_000, None)
+            .await
+            .unwrap();
+        let request = String::from_utf8_lossy(&request.await.unwrap()).to_lowercase();
+        assert!(
+            request.contains("\r\nauthorization: bearer test-key-2\r\n"),
+            "the key of the file now: {request}"
+        );
     }
 
     #[tokio::test]

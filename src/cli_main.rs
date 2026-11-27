@@ -33,8 +33,9 @@ the text at the cursor.
 By default, speech recognition runs on this machine. With the default
 llm.polish = true and llm.provider = \"auto\", Hush polishes the text with a
 reachable Ollama server. Without Ollama, it uses Anthropic when
-ANTHROPIC_API_KEY is set (in the environment or ~/.config/hush/.env). When
-neither is there, Hush makes no LLM call. The LLM gets only text, never audio.";
+ANTHROPIC_API_KEY is set: in the environment, in the keyring (the Secret
+Service), or in ~/.config/hush/.env. hush settings saves a key. When neither
+is there, Hush makes no LLM call. The LLM gets only text, never audio.";
 
 /// A `--lang` value: a code that Whisper knows, or `auto`.
 fn language_code(code: &str) -> Result<String, String> {

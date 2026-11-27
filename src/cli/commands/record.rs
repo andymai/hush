@@ -272,7 +272,7 @@ mod tests {
             anthropic_model: "claude-test-model".to_string(),
             ..LlmConfig::defaults()
         };
-        let provider = choose_provider(&llm, false, Some("test-key".to_string()), None);
+        let provider = choose_provider(&llm, false, Some("test-key".into()), None);
         let processor = text_processor(&llm, provider, None).expect("a processor");
         assert_eq!(
             processor.llm_name().as_deref(),
