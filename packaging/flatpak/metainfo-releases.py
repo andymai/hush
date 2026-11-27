@@ -4,9 +4,10 @@
     metainfo-releases.py CHANGELOG.md packaging/io.github.andymai.hush.metainfo.xml
 
 The metainfo gets the newest releases that release-please wrote to the
-changelog, each with its date and its change list. The Flatpak build runs this
-script on its own source, so the installed metainfo always lists the release
-that it holds. Run it by hand to refresh the copy in the repository.
+changelog, each with its date and its change list. release-please.yml runs this
+script on the release PR, so the metainfo at each tag lists the release that
+the tag marks. The Flatpak build runs it again on its own source, so the
+installed metainfo lists its release also when the copy in the source is old.
 """
 
 import re
