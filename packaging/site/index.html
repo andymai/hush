@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hush: local dictation for Linux</title>
+<meta name="description" content="Hold a key, talk, and your words appear wherever you're typing. Local dictation for Linux.">
+<link rel="canonical" href="https://andymai.github.io/hush/">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://andymai.github.io/hush/">
+<meta property="og:title" content="Hush: local dictation for Linux">
+<meta property="og:description" content="Hold a key, talk, and your words appear wherever you're typing.">
+<meta property="og:image" content="https://andymai.github.io/hush/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="color-scheme" content="light dark">
+<style>
+  :root {
+    --bg: #fffaf0;
+    --ink: #1d1b22;
+    --muted: #5c5866;
+    --hero-top: #ffe6a8;
+    --hero-bottom: #ffd17a;
+    --card: #ffffff;
+    --line: #eadfc8;
+    --accent: #5141d5;
+    --accent-ink: #ffffff;
+    --code: #f4ecdc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14131a;
+      --ink: #f1eff6;
+      --muted: #aaa5b8;
+      --hero-top: #2a2238;
+      --hero-bottom: #14131a;
+      --card: #1d1b25;
+      --line: #2f2b3b;
+      --accent: #8f82ff;
+      --accent-ink: #14131a;
+      --code: #24212e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Cantarell, "Noto Sans", sans-serif;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+  header {
+    background: linear-gradient(var(--hero-top), var(--hero-bottom));
+    padding: 56px 0 72px;
+    text-align: center;
+  }
+  header img.lockup { height: 64px; width: auto; }
+  h1 {
+    font-size: clamp(28px, 4.6vw, 44px);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin: 28px auto 14px;
+    max-width: 18em;
+  }
+  .lede { color: var(--muted); font-size: 19px; max-width: 34em; margin: 0 auto 28px; }
+  .buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .button {
+    display: inline-block;
+    padding: 11px 20px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--ink);
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .show { margin-top: -36px; text-align: center; }
+  .show img, .show video { width: 100%; max-width: 860px; height: auto; }
+  .show video { border-radius: 14px; box-shadow: 0 18px 50px rgba(20, 16, 40, 0.28); }
+  section { padding: 56px 0 8px; }
+  h2 { font-size: 28px; letter-spacing: -0.01em; margin: 0 0 20px; }
+  .reasons { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+  .card h3 { margin: 0 0 8px; font-size: 19px; }
+  .card p { margin: 0; color: var(--muted); }
+  .install { display: grid; gap: 14px; }
+  .install .card p { color: var(--ink); }
+  .install .note { color: var(--muted); font-size: 15px; margin-top: 8px; }
+  code, pre {
+    font-family: ui-monospace, "Geist Mono", "JetBrains Mono", monospace;
+    font-size: 14px;
+  }
+  pre {
+    background: var(--code);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 10px 0 0;
+    overflow-x: auto;
+  }
+  .aside { color: var(--muted); }
+  footer { padding: 48px 0 64px; color: var(--muted); font-size: 15px; }
+  footer nav { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="lockup-dark.svg">
+      <img class="lockup" src="lockup-light.svg" alt="Hush" width="189" height="64">
+    </picture>
+    <h1>Hold a key, talk, and your words appear wherever you're typing.</h1>
+    <p class="lede">Local dictation for Linux. Whisper runs on your own computer, so your voice stays with you.</p>
+    <div class="buttons">
+      <a class="button primary" href="#install">Install Hush</a>
+      <a class="button" href="https://github.com/andymai/hush">Source on GitHub</a>
+    </div>
+  </div>
+</header>
+
+<div class="wrap show">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="overview.png">
+    <img src="overview-light.png" alt="The Hush settings window" width="1000" height="700">
+  </picture>
+</div>
+
+<main class="wrap">
+  <section>
+    <div class="reasons">
+      <div class="card">
+        <h3>Works where you type</h3>
+        <p>Terminals, browsers, editors, and chat. The packages type through the kernel, so they work on any Wayland or X11 desktop. The Flatpak works on KDE Plasma 6 and GNOME 48 or later.</p>
+      </div>
+      <div class="card">
+        <h3>Stays on your computer</h3>
+        <p>Whisper runs on your own GPU, or on the CPU when you have none. Your audio never leaves unless you pick a cloud service yourself.</p>
+      </div>
+      <div class="card">
+        <h3>Writes like you</h3>
+        <p>Casual in chat, full sentences in email, lowercase in the terminal. Teach it a name once and it spells it your way. Select text, hold the Command key, and say "make this friendlier".</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>Install</h2>
+    <div class="install">
+      <div class="card">
+        <h3>Flatpak</h3>
+        <p>For KDE Plasma 6 and GNOME 48 or later. <a href="io.github.andymai.hush.flatpakref">Download the install file</a>, then open it with your software center, or run:</p>
+        <pre><code>flatpak install --from https://andymai.github.io/hush/io.github.andymai.hush.flatpakref</code></pre>
+        <p class="note">Your desktop sets the hotkeys and asks once for keyboard access. On Sway, Hyprland, and other wlroots desktops, use a package below: the Flatpak can't type there.</p>
+      </div>
+      <div class="card">
+        <h3>Fedora</h3>
+        <pre><code>sudo dnf copr enable veroz/hush &amp;&amp; sudo dnf install hush</code></pre>
+      </div>
+      <div class="card">
+        <h3>Ubuntu, Debian, and other distributions</h3>
+        <p>Get the <code>.deb</code>, <code>.rpm</code>, AppImage, or tarball from the <a href="https://github.com/andymai/hush/releases/latest">latest release</a>. Or let the install script pick the right one and check its checksum:</p>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/andymai/hush/main/install.sh | sh</code></pre>
+      </div>
+      <div class="card">
+        <h3>NixOS</h3>
+        <pre><code>nix profile install github:andymai/hush</code></pre>
+      </div>
+    </div>
+    <p class="aside">Prebuilt files are for x86-64. <a href="https://github.com/andymai/hush/blob/main/INSTALL.md">INSTALL.md</a> covers each method, download checks, and builds from source.</p>
+  </section>
+</main>
+
+<footer class="wrap">
+  <nav>
+    <a href="https://github.com/andymai/hush">GitHub</a>
+    <a href="https://github.com/andymai/hush/blob/main/docs/features.md">Features</a>
+    <a href="https://github.com/andymai/hush/blob/main/docs/privacy.md">Privacy</a>
+    <a href="https://github.com/andymai/hush/issues">Report a problem</a>
+    <a href="https://github.com/andymai/hush/stargazers">Star on GitHub</a>
+  </nav>
+  <p>Hush is free software under the MIT license, made by Andy Aragon.</p>
+</footer>
+</body>
+</html>
