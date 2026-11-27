@@ -14,7 +14,7 @@ use crate::audio::parts::{pad, PartCutter};
 use crate::audio::{store, TakeLevel};
 use crate::text::WindowInfo;
 use crate::text_processing::prompt;
-use crate::transcription::language::Language;
+use crate::transcription::language::{Language, Spoken};
 use crate::transcription::{SpeechToText, WHISPER_SAMPLE_RATE};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -42,7 +42,7 @@ pub trait PartModel: Send + Sync + 'static {
         audio: &[f32],
         prompt: Option<&str>,
         terms: Option<&str>,
-        language: Language,
+        spoken: Spoken,
     ) -> Result<Transcribed>;
 }
 
@@ -57,10 +57,10 @@ impl PartModel for SpeechToText {
         audio: &[f32],
         prompt: Option<&str>,
         terms: Option<&str>,
-        language: Language,
+        spoken: Spoken,
     ) -> Result<Transcribed> {
         let result = self
-            .transcribe_part(audio, WHISPER_SAMPLE_RATE, prompt, terms, Some(language))
+            .transcribe_part(audio, WHISPER_SAMPLE_RATE, prompt, terms, Some(spoken))
             .await?;
         Ok(Transcribed {
             text: result.text,
@@ -100,14 +100,14 @@ struct PartWorker<M> {
 }
 
 impl<M: PartModel> PartWorker<M> {
-    fn spawn(context: Option<PromptContext>, language: Language) -> Self {
+    fn spawn(context: Option<PromptContext>, spoken: Spoken) -> Self {
         let (jobs, jobs_rx) = mpsc::unbounded_channel();
         let (model, model_rx) = watch::channel(None);
         Self {
             jobs: Some(jobs),
             model: Some(model),
             provided: false,
-            task: Some(tokio::spawn(work(jobs_rx, model_rx, context, language))),
+            task: Some(tokio::spawn(work(jobs_rx, model_rx, context, spoken))),
         }
     }
 
@@ -152,7 +152,7 @@ async fn work<M: PartModel>(
     mut jobs: mpsc::UnboundedReceiver<Part>,
     mut model: watch::Receiver<Option<Arc<M>>>,
     context: Option<PromptContext>,
-    mut language: Language,
+    mut spoken: Spoken,
 ) -> Vec<PartOutcome> {
     let mut outcomes = Vec::new();
     let mut ready: Option<(Arc<M>, Option<String>)> = None;
@@ -192,11 +192,11 @@ async fn work<M: PartModel>(
                         &pad(&part.audio),
                         prompt.as_deref(),
                         base.as_deref(),
-                        language,
+                        spoken,
                     )
                     .await
                     .map(|transcribed| {
-                        language = keep_language(language, transcribed.detected);
+                        spoken.language = keep_language(spoken.language, transcribed.detected);
                         transcribed.text
                     })
             },
@@ -248,12 +248,12 @@ pub struct TakeParts<M> {
 
 impl<M: PartModel> TakeParts<M> {
     /// Parts go to `dir` as `<stem>-partNN.flac`, and each is in
-    /// `language`, the language of the take.
+    /// `spoken`, the language of the take.
     pub fn new(
         dir: PathBuf,
         stem: String,
         context: Option<PromptContext>,
-        language: Language,
+        spoken: impl Into<Spoken>,
     ) -> Self {
         Self {
             cutter: PartCutter::new(),
@@ -261,7 +261,7 @@ impl<M: PartModel> TakeParts<M> {
             dir,
             stem,
             sent: Vec::new(),
-            worker: PartWorker::spawn(context, language),
+            worker: PartWorker::spawn(context, spoken.into()),
         }
     }
 
@@ -511,8 +511,9 @@ mod tests {
             audio: &[f32],
             prompt: Option<&str>,
             _terms: Option<&str>,
-            language: Language,
+            spoken: Spoken,
         ) -> Result<Transcribed> {
+            let language = spoken.language;
             assert!(
                 audio[..3_200].iter().all(|s| *s == 0.0),
                 "the part is padded"

@@ -3,7 +3,7 @@ use crate::hotkey::{warnings, HotkeyBackend, HotkeyMode, KeyCombination, Role};
 use crate::text::{InsertionMethod, PasteChord};
 use crate::text_processing::styles::{self, StyleConfig, StyleName};
 use crate::transcription::models::ModelSize;
-use crate::transcription::Language;
+use crate::transcription::{Language, Spoken};
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -554,6 +554,19 @@ where
 }
 
 impl TranscriptionConfig {
+    /// The catalogue model on this machine when it cannot translate:
+    /// large-v3-turbo or Parakeet. A model file of its own, a cloud
+    /// service, or a server decides as the take runs.
+    pub fn cannot_translate(&self) -> Option<ModelSize> {
+        if self.backend != TranscriptionBackend::Local || self.model_path.is_some() {
+            return None;
+        }
+        self.model_size
+            .parse::<ModelSize>()
+            .ok()
+            .filter(|size| !size.translates())
+    }
+
     /// The model the chosen cloud service runs, or `None` for local.
     pub fn cloud_model(&self) -> Option<&str> {
         match self.backend {
@@ -656,6 +669,10 @@ pub struct HotkeyConfig {
     /// Dictation chords for one language each, such as `"Shift+RightAlt" = "de"`
     #[serde(default)]
     pub languages: BTreeMap<String, String>,
+    /// Dictation chords that type a language's speech in English, such as
+    /// `"Super+RightAlt" = "de"`; `auto` takes any language
+    #[serde(default)]
+    pub translate: BTreeMap<String, String>,
     /// Dictation chords for one style each, such as `"Super+RightAlt" = "verbatim"`
     #[serde(default)]
     pub styles: BTreeMap<String, String>,
@@ -674,7 +691,7 @@ impl HotkeyConfig {
             Role::Command => &self.command,
             Role::PasteLast => &self.paste_last,
             Role::Learn => &self.learn,
-            Role::Language(_) | Role::Style(_) | Role::Rewrite(_) => "",
+            Role::Language(_) | Role::Translate(_) | Role::Style(_) | Role::Rewrite(_) => "",
         }
     }
 
@@ -687,7 +704,7 @@ impl HotkeyConfig {
             Role::Command => Some(&mut self.command),
             Role::PasteLast => Some(&mut self.paste_last),
             Role::Learn => Some(&mut self.learn),
-            Role::Language(_) | Role::Style(_) | Role::Rewrite(_) => None,
+            Role::Language(_) | Role::Translate(_) | Role::Style(_) | Role::Rewrite(_) => None,
         }
     }
 
@@ -702,6 +719,29 @@ impl HotkeyConfig {
         self.languages
             .iter()
             .filter_map(|(chord, code)| Some((Language::parse(code)?, chord.as_str())))
+            .collect()
+    }
+
+    /// Each translate chord with the language it hears. A code that Whisper
+    /// does not know gets its own error from [`Config::validate`].
+    pub fn translate_keys(&self) -> Vec<(Language, &str)> {
+        self.translate
+            .iter()
+            .filter_map(|(chord, code)| Some((Language::parse(code)?, chord.as_str())))
+            .collect()
+    }
+
+    /// The language chords and the translate chords, each with what it asks
+    /// for: what the hotkey backends listen for.
+    pub fn spoken_keys(&self) -> Vec<(Spoken, &str)> {
+        self.language_keys()
+            .into_iter()
+            .map(|(language, chord)| (Spoken::from(language), chord))
+            .chain(
+                self.translate_keys()
+                    .into_iter()
+                    .map(|(language, chord)| (Spoken::into_english(language), chord)),
+            )
             .collect()
     }
 
@@ -731,6 +771,11 @@ impl HotkeyConfig {
             self.language_keys()
                 .into_iter()
                 .map(|(language, chord)| (Role::Language(language), chord)),
+        );
+        bound.extend(
+            self.translate_keys()
+                .into_iter()
+                .map(|(language, chord)| (Role::Translate(language), chord)),
         );
         bound.extend(
             self.style_keys()
@@ -886,6 +931,18 @@ impl Config {
             if Language::parse(code).is_none() {
                 return Err(anyhow::anyhow!(
                     "Invalid language '{}' for {} in hotkey.languages: use a Whisper language \
+                     code such as de, or auto",
+                    code,
+                    chord
+                ));
+            }
+        }
+        for (chord, code) in &self.hotkey.translate {
+            KeyCombination::parse(chord)
+                .map_err(|e| anyhow::anyhow!("Invalid chord in hotkey.translate: {}", e))?;
+            if Language::parse(code).is_none() {
+                return Err(anyhow::anyhow!(
+                    "Invalid language '{}' for {} in hotkey.translate: use a Whisper language \
                      code such as de, or auto",
                     code,
                     chord
@@ -1645,6 +1702,66 @@ model_size = "small"
         let mut config = Config::defaults().unwrap();
         config.transcription.language = "klingon".to_string();
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn translate_chords_are_checked_and_bound_beside_the_language_chords() {
+        let config = Config::parse_over_defaults(
+            "[hotkey]\nlanguages = { \"Shift+RightAlt\" = \"de\" }\n\
+             translate = { \"Super+RightAlt\" = \"de\", F14 = \"auto\" }\n",
+        )
+        .unwrap();
+        let german = Language::parse("de").unwrap();
+        assert_eq!(
+            config.hotkey.spoken_keys(),
+            vec![
+                (Spoken::from(german), "Shift+RightAlt"),
+                (Spoken::into_english(Language::AUTO), "F14"),
+                (Spoken::into_english(german), "Super+RightAlt"),
+            ]
+        );
+        assert!(config
+            .hotkey
+            .bound()
+            .contains(&(Role::Translate(german), "Super+RightAlt")));
+
+        for (user, needle) in [
+            ("[hotkey]\ntranslate = { F14 = \"klingon\" }\n", "'klingon'"),
+            (
+                "[hotkey]\ntranslate = { \"Ctrl+Nope\" = \"de\" }\n",
+                "hotkey.translate",
+            ),
+        ] {
+            let err = format!("{:#}", Config::parse_over_defaults(user).unwrap_err());
+            assert!(err.contains(needle), "{user:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn turbo_and_parakeet_on_this_machine_cannot_translate() {
+        let mut transcription = Config::defaults().unwrap().transcription;
+        transcription.model_size = "large-v3-turbo".into();
+        assert_eq!(
+            transcription.cannot_translate(),
+            Some(ModelSize::LargeV3Turbo)
+        );
+        transcription.model_size = "parakeet-v3".into();
+        assert_eq!(
+            transcription.cannot_translate(),
+            Some(ModelSize::ParakeetV3)
+        );
+        transcription.model_size = "large-v3".into();
+        assert_eq!(transcription.cannot_translate(), None);
+        transcription.model_size = "large-v3-turbo".into();
+        transcription.model_path = Some("/models/own.bin".into());
+        assert_eq!(transcription.cannot_translate(), None, "the engine decides");
+        transcription.model_path = None;
+        transcription.backend = TranscriptionBackend::Groq;
+        assert_eq!(
+            transcription.cannot_translate(),
+            None,
+            "the service decides"
+        );
     }
 
     #[test]

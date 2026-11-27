@@ -23,6 +23,9 @@ pub enum DaemonCommand {
     Toggle {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         language: Option<String>,
+        /// Type the take in English, from the language it is spoken in
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        translate: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         style: Option<String>,
     },
@@ -30,6 +33,9 @@ pub enum DaemonCommand {
     Start {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         language: Option<String>,
+        /// Type the take in English, from the language it is spoken in
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        translate: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         style: Option<String>,
     },
@@ -291,6 +297,10 @@ pub struct DaemonResponse {
     /// The style that a start asked for, for the take it began
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<String>,
+    /// A start that asked for English: the take it began comes out in
+    /// English
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub translate: bool,
     /// In a status reply: why the daemon runs in safe mode, which writes
     /// and deletes nothing in the history or the kept audio
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -326,6 +336,7 @@ impl DaemonResponse {
             model_state: None,
             language: None,
             style: None,
+            translate: false,
             safe_mode: None,
             start_delay: None,
             shortcuts: None,
@@ -345,6 +356,7 @@ impl DaemonResponse {
             model_state: None,
             language: None,
             style: None,
+            translate: false,
             safe_mode: None,
             start_delay: None,
             shortcuts: None,
@@ -394,6 +406,11 @@ impl DaemonResponse {
         self
     }
 
+    pub fn with_translate(mut self, translate: bool) -> Self {
+        self.translate = translate;
+        self
+    }
+
     pub fn with_model_state(mut self, model_state: Option<ModelState>) -> Self {
         self.model_state = model_state;
         self
@@ -415,10 +432,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn translate_goes_on_the_wire_only_when_asked() {
+        let asked = DaemonCommand::Start {
+            language: Some("de".into()),
+            translate: true,
+            style: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&asked).unwrap(),
+            r#"{"command":"start","language":"de","translate":true}"#
+        );
+        let older: DaemonCommand = serde_json::from_str(r#"{"command":"start"}"#).unwrap();
+        assert_eq!(
+            older,
+            DaemonCommand::Start {
+                language: None,
+                translate: false,
+                style: None,
+            }
+        );
+        let reply = serde_json::to_string(&DaemonResponse::ok(DaemonState::Starting)).unwrap();
+        assert!(!reply.contains("translate"), "{reply}");
+    }
+
+    #[test]
     fn commands_serialize_as_tagged_objects() {
         assert_eq!(
             serde_json::to_string(&DaemonCommand::Toggle {
                 language: None,
+                translate: false,
                 style: None
             })
             .unwrap(),
@@ -543,6 +585,7 @@ mod tests {
             (
                 DaemonCommand::Start {
                     language: None,
+                    translate: false,
                     style: None,
                 },
                 r#"{"command":"start"}"#,
@@ -551,6 +594,7 @@ mod tests {
             (
                 DaemonCommand::Toggle {
                     language: None,
+                    translate: false,
                     style: None,
                 },
                 r#"{"command":"toggle"}"#,
@@ -566,10 +610,12 @@ mod tests {
             let with_language = match command {
                 DaemonCommand::Start { .. } => DaemonCommand::Start {
                     language: Some("de".to_string()),
+                    translate: false,
                     style: None,
                 },
                 _ => DaemonCommand::Toggle {
                     language: Some("de".to_string()),
+                    translate: false,
                     style: None,
                 },
             };
@@ -602,6 +648,7 @@ mod tests {
     fn start_and_toggle_add_a_style() {
         let start = DaemonCommand::Start {
             language: None,
+            translate: false,
             style: Some("verbatim".to_string()),
         };
         let json = r#"{"command":"start","style":"verbatim"}"#;
@@ -609,6 +656,7 @@ mod tests {
         assert_eq!(serde_json::from_str::<DaemonCommand>(json).unwrap(), start);
         let toggle = DaemonCommand::Toggle {
             language: Some("de".to_string()),
+            translate: false,
             style: Some("casual".to_string()),
         };
         let json = r#"{"command":"toggle","language":"de","style":"casual"}"#;

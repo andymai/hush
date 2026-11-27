@@ -19,7 +19,7 @@
 //!         HotkeyEvent::Cancel => println!("discarded"),
 //!         HotkeyEvent::Action(action) => println!("{:?}", action),
 //!         HotkeyEvent::Command(pressed) => println!("command chord {}", pressed),
-//!         HotkeyEvent::Language(language, pressed) => println!("{} chord {}", language, pressed),
+//!         HotkeyEvent::Language(spoken, pressed) => println!("{} chord {}", spoken.name(), pressed),
 //!         HotkeyEvent::Style(style, pressed) => println!("{} chord {}", style, pressed),
 //!     }
 //! }
@@ -36,7 +36,7 @@ pub mod warnings;
 pub mod x11;
 
 use crate::text_processing::StyleName;
-use crate::transcription::Language;
+use crate::transcription::Spoken;
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc;
@@ -57,9 +57,9 @@ pub enum HotkeyEvent {
     Action(HotkeyAction),
     /// The Command Mode chord went down (`true`) or up (`false`).
     Command(bool),
-    /// A language chord went down (`true`) or up (`false`). It works like
-    /// the dictation hotkey, for a take in that language.
-    Language(Language, bool),
+    /// A language or translate chord went down (`true`) or up (`false`). It
+    /// works like the dictation hotkey, for a take in that language.
+    Language(Spoken, bool),
     /// A style chord went down (`true`) or up (`false`). It works like the
     /// dictation hotkey, for a take in that style.
     Style(StyleName, bool),
@@ -100,7 +100,7 @@ pub struct HotkeyBindings {
     pub cancel: Option<KeyCombination>,
     pub actions: Vec<(HotkeyAction, KeyCombination)>,
     pub command: Option<KeyCombination>,
-    pub languages: Vec<(Language, KeyCombination)>,
+    pub languages: Vec<(Spoken, KeyCombination)>,
     pub styles: Vec<(StyleName, KeyCombination)>,
 }
 
@@ -175,8 +175,10 @@ impl HotkeyBindings {
         Ok(self)
     }
 
-    /// Bind a dictation chord for `language`.
-    pub fn with_language(mut self, language: Language, text: &str) -> Result<Self> {
+    /// Bind a dictation chord for `spoken`: a language, and whether the
+    /// take comes out in English.
+    pub fn with_language(mut self, spoken: impl Into<Spoken>, text: &str) -> Result<Self> {
+        let spoken = spoken.into();
         let combination = KeyCombination::parse(text)?;
         if self
             .all()
@@ -185,10 +187,10 @@ impl HotkeyBindings {
             return Err(anyhow::anyhow!(
                 "{} is already bound; the {} chord needs its own chord",
                 combination,
-                language.name()
+                spoken.name()
             ));
         }
-        self.languages.push((language, combination));
+        self.languages.push((spoken, combination));
         Ok(self)
     }
 
@@ -392,6 +394,7 @@ fn grabbed_keys(x11: bool, combination: &KeyCombination) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcription::Language;
 
     #[test]
     fn mode_and_backend_serialize_lowercase() {
@@ -470,7 +473,7 @@ mod tests {
             .with_language(german, "Shift+RightAlt")
             .unwrap();
         assert_eq!(b.languages.len(), 1);
-        assert_eq!(b.languages[0].0, german);
+        assert_eq!(b.languages[0].0, Spoken::from(german));
         assert!(b.clone().with_language(french, "shift+rightalt").is_err());
         assert!(b.clone().with_language(french, "Ctrl+RightAlt").is_err());
         assert!(b.clone().with_language(french, "Ctrl+Nope").is_err());

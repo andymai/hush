@@ -102,6 +102,10 @@ pub enum Commands {
         #[arg(long, value_name = "CODE", value_parser = language_code)]
         lang: Option<String>,
 
+        /// Type the take it starts in English, from the language it is spoken in
+        #[arg(long)]
+        translate: bool,
+
         /// Style of the take it starts: verbatim, or a style from the styles table
         #[arg(long, value_name = "NAME", value_parser = style_name)]
         style: Option<String>,
@@ -112,6 +116,10 @@ pub enum Commands {
         /// Language of this take: a Whisper code such as de, or auto
         #[arg(long, value_name = "CODE", value_parser = language_code)]
         lang: Option<String>,
+
+        /// Type this take in English, from the language it is spoken in
+        #[arg(long)]
+        translate: bool,
 
         /// Style of this take: verbatim, or a style from the styles table
         #[arg(long, value_name = "NAME", value_parser = style_name)]

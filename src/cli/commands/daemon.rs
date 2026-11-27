@@ -308,7 +308,12 @@ pub fn shortcut_lines(shortcuts: &[crate::ipc::protocol::PortalShortcut]) -> Str
 
 /// `hush start [--lang CODE] [--style NAME]` and `hush toggle [--lang CODE]
 /// [--style NAME]`.
-pub async fn handle_start(toggle: bool, lang: Option<&str>, style: Option<&str>) -> Result<()> {
+pub async fn handle_start(
+    toggle: bool,
+    lang: Option<&str>,
+    translate: bool,
+    style: Option<&str>,
+) -> Result<()> {
     let language = lang.map(Language::from_code).transpose()?;
     let code = language.map(|language| language.code().to_string());
     let style = match style {
@@ -322,11 +327,13 @@ pub async fn handle_start(toggle: bool, lang: Option<&str>, style: Option<&str>)
     let command = if toggle {
         DaemonCommand::Toggle {
             language: code,
+            translate,
             style: style_name,
         }
     } else {
         DaemonCommand::Start {
             language: code,
+            translate,
             style: style_name,
         }
     };
@@ -339,6 +346,9 @@ pub async fn handle_start(toggle: bool, lang: Option<&str>, style: Option<&str>)
     }
     if ignored_style(style, &response) {
         return Err(anyhow!(OLD_DAEMON_STYLE));
+    }
+    if ignored_translate(translate, &response) {
+        return Err(anyhow!(OLD_DAEMON_TRANSLATE));
     }
     println!("{}", state_line(response.state));
     Ok(())
@@ -410,6 +420,12 @@ fn ignored_style(asked: Option<StyleName>, response: &DaemonResponse) -> bool {
     asked.is_some() && response.state == Some(DaemonState::Starting) && response.style.is_none()
 }
 
+/// A daemon from before `--translate` starts the take as spoken, and its
+/// reply does not say `translate`.
+fn ignored_translate(asked: bool, response: &DaemonResponse) -> bool {
+    asked && response.state == Some(DaemonState::Starting) && !response.translate
+}
+
 fn rejection(response: DaemonResponse) -> String {
     response
         .error
@@ -434,6 +450,8 @@ const OLD_DAEMON_LANGUAGE: &str =
     "The running daemon is older than this client and records in its own language. Restart it with: hush daemon restart";
 const OLD_DAEMON_REWRITE: &str =
     "The running daemon is older than this client and cannot rewrite. Restart it with: hush daemon restart";
+const OLD_DAEMON_TRANSLATE: &str =
+    "The running daemon is older than this client and records without translating. Restart it with: hush daemon restart";
 const OLD_DAEMON_STYLE: &str =
     "The running daemon is older than this client and records without the style. Restart it with: hush daemon restart";
 
@@ -732,6 +750,23 @@ mod tests {
         let stopped = DaemonResponse::ok(DaemonState::Transcribing);
         assert!(
             !ignored_style(verbatim, &stopped),
+            "a toggle that stops a take starts none"
+        );
+    }
+
+    #[test]
+    fn an_older_daemon_that_ignores_translate_is_found() {
+        let old = DaemonResponse::ok(DaemonState::Starting).with_language(Some("de".into()));
+        assert!(ignored_translate(true, &old));
+        assert!(
+            !ignored_translate(false, &old),
+            "no translation was asked for"
+        );
+        let new = DaemonResponse::ok(DaemonState::Starting).with_translate(true);
+        assert!(!ignored_translate(true, &new));
+        let stopped = DaemonResponse::ok(DaemonState::Transcribing);
+        assert!(
+            !ignored_translate(true, &stopped),
             "a toggle that stops a take starts none"
         );
     }

@@ -85,6 +85,19 @@ assert_words() {
   done
 }
 
+# None of the words is in the text (whole words, ignoring case).
+assert_no_words() {
+  local text=$1 normalized word
+  shift
+  normalized=$(printf ' %s ' "$text" | tr '[:upper:]' '[:lower:]' | tr -c '[:alnum:]' ' ' | tr -s ' ')
+  for word in "$@"; do
+    word=$(printf '%s' "$word" | tr '[:upper:]' '[:lower:]')
+    case "$normalized" in
+      *" $word "*) fail "'$word' is in the text: $text" ;;
+    esac
+  done
+}
+
 # The file exists and, with a pattern, contains it (ignoring case).
 assert_file() {
   local path=$1 pattern=${2:-}
@@ -591,6 +604,19 @@ case_german_lang() {
   stop_print_json
   assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
   assert_words "$TAKE_TEXT" samsa morgens bett verwandelt
+}
+
+# The German clip through --translate comes out in English: Whisper's
+# translate task, not the words as spoken. The tiny model's English varies
+# from run to run, so the case checks that none of the German words of the
+# clip's transcript (german_lang) is left.
+case_translate_german() {
+  start_daemon
+  record_clip "$SAMPLES/verwandlung_de.wav" --lang de --translate
+  stop_print_json
+  assert_exit 0 "$TAKE_EXIT" "hush stop --print --json"
+  [ -n "$TAKE_TEXT" ] || fail "the translation is empty"
+  assert_no_words "$TAKE_TEXT" als eines aus seinem einem sich fand
 }
 
 # With llm.provider = "none", a style does not change the text, so the case

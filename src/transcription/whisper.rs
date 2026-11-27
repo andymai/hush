@@ -67,6 +67,8 @@ pub struct TranscriptionResult {
     pub processing_time: Duration,
     /// The language that limited detection chose, when it ran and chose one
     pub detected: Option<&'static str>,
+    /// The text is an English translation of the speech
+    pub translated: bool,
 }
 
 /// What one run of Whisper heard.
@@ -157,6 +159,8 @@ struct Engine {
     languages: Vec<String>,
     /// Whether the model knows more than one language, unlike an `.en` model
     multilingual: bool,
+    /// Whether the model can put speech into English text
+    translates: bool,
 }
 
 pub struct WhisperTranscriber {
@@ -371,21 +375,26 @@ impl WhisperTranscriber {
         sample_rate: u32,
         prompt: Option<&str>,
     ) -> Result<TranscriptionResult> {
-        self.transcribe_in(audio_data, sample_rate, prompt, None)
+        self.transcribe_in(audio_data, sample_rate, prompt, None, false)
             .await
     }
 
     /// [`Self::transcribe_with_prompt`] in `language`, a Whisper code or
-    /// `auto`; `None` is the language this transcriber was made with.
+    /// `auto`; `None` is the language this transcriber was made with. With
+    /// `translate`, a model that can translate gives English text.
     pub async fn transcribe_in(
         &self,
         audio_data: &[f32],
         sample_rate: u32,
         prompt: Option<&str>,
         language: Option<&str>,
+        translate: bool,
     ) -> Result<TranscriptionResult> {
         let start = Instant::now();
         let language = language.unwrap_or(&self.language).to_string();
+        if translate && !self.translates() {
+            info!("This model cannot translate, so the take comes out as spoken");
+        }
         let ctx = RequestContext::new("whisper_transcription")
             .with_metadata("samples", &audio_data.len().to_string())
             .with_metadata("sample_rate", &sample_rate.to_string());
@@ -397,6 +406,7 @@ impl WhisperTranscriber {
                 confidence: 0.0,
                 processing_time: start.elapsed(),
                 detected: None,
+                translated: false,
             });
         }
 
@@ -425,19 +435,23 @@ impl WhisperTranscriber {
                 Arc::clone(&samples),
                 prompt.clone(),
                 language.clone(),
+                translate,
             )
             .await
         {
             Err(e) if self.is_using_gpu() && e.downcast_ref::<OutOfMemory>().is_some() => {
                 let earlier = self.out_of_memory.fetch_add(1, Ordering::AcqRel);
                 if retries_on_a_copy(earlier) {
-                    self.retry_once_on_cpu(e, samples, prompt, language).await
+                    self.retry_once_on_cpu(e, samples, prompt, language, translate)
+                        .await
                 } else {
-                    self.stay_on_cpu(e, samples, prompt, language).await
+                    self.stay_on_cpu(e, samples, prompt, language, translate)
+                        .await
                 }
             },
             Err(e) if self.is_using_gpu() && e.downcast_ref::<Rejected>().is_none() => {
-                self.retry_on_cpu(e, samples, prompt, language).await
+                self.retry_on_cpu(e, samples, prompt, language, translate)
+                    .await
             },
             heard => heard,
         };
@@ -464,6 +478,7 @@ impl WhisperTranscriber {
             confidence,
             processing_time,
             detected,
+            translated: translate && self.translates(),
         })
     }
 
@@ -473,6 +488,7 @@ impl WhisperTranscriber {
         samples: Arc<[f32]>,
         prompt: Option<String>,
         language: String,
+        translate: bool,
     ) -> Result<Heard> {
         let vad = self.vad.clone();
         let langid_dir = self.langid_dir.clone();
@@ -503,7 +519,7 @@ impl WhisperTranscriber {
             }
             let prompt = prompt.as_deref().filter(|_| engine.family.takes_prompt());
             if language != "auto" || detect.is_empty() || !engine.multilingual {
-                let (text, _) = run_full(&engine, speech, &language, prompt)?;
+                let (text, _) = run_full(&engine, speech, &language, prompt, translate)?;
                 return Ok(Heard {
                     text,
                     detected: None,
@@ -513,13 +529,13 @@ impl WhisperTranscriber {
                 .as_deref()
                 .and_then(|dir| langid::pick(dir, &samples, speech, &detect))
             {
-                let (text, _) = run_full(&engine, speech, code, prompt)?;
+                let (text, _) = run_full(&engine, speech, code, prompt, translate)?;
                 return Ok(Heard {
                     text,
                     detected: Some(code),
                 });
             }
-            detect_within(&engine, speech, prompt, &detect)
+            detect_within(&engine, speech, prompt, &detect, translate)
         })
         .await
         .map_err(|e| anyhow::anyhow!("Transcription task failed: {}", e))?
@@ -533,6 +549,7 @@ impl WhisperTranscriber {
         samples: Arc<[f32]>,
         prompt: Option<String>,
         language: String,
+        translate: bool,
     ) -> Result<Heard> {
         warn!(
             "The speech model failed on the GPU, so the take runs again on the CPU, \
@@ -541,7 +558,7 @@ impl WhisperTranscriber {
         );
         gpu_fallback::remember(self.gpu, self.family());
         self.move_to_cpu(&gpu_error).await?;
-        self.run_take(self.engine(), samples, prompt, language)
+        self.run_take(self.engine(), samples, prompt, language, translate)
             .await
     }
 
@@ -554,6 +571,7 @@ impl WhisperTranscriber {
         samples: Arc<[f32]>,
         prompt: Option<String>,
         language: String,
+        translate: bool,
     ) -> Result<Heard> {
         warn!(
             "The GPU ran out of memory again, so the take runs again on the CPU, and the CPU \
@@ -562,7 +580,7 @@ impl WhisperTranscriber {
         );
         gpu_fallback::keep_on_cpu(self.family());
         self.move_to_cpu(&gpu_error).await?;
-        self.run_take(self.engine(), samples, prompt, language)
+        self.run_take(self.engine(), samples, prompt, language, translate)
             .await
     }
 
@@ -596,6 +614,7 @@ impl WhisperTranscriber {
         samples: Arc<[f32]>,
         prompt: Option<String>,
         language: String,
+        translate: bool,
     ) -> Result<Heard> {
         warn!(
             "The GPU ran out of memory for this take, so it runs again on the CPU. \
@@ -611,8 +630,15 @@ impl WhisperTranscriber {
                     gpu_error
                 )
             })?;
-        self.run_take(Arc::new(engine), samples, prompt, language)
+        self.run_take(Arc::new(engine), samples, prompt, language, translate)
             .await
+    }
+
+    /// Whether the model can put speech into English text: Whisper models
+    /// other than `.en` and large-v3-turbo.
+    pub fn translates(&self) -> bool {
+        let engine = self.engine();
+        engine.family == Family::Whisper && engine.translates
     }
 
     pub fn is_using_gpu(&self) -> bool {
@@ -678,9 +704,15 @@ async fn load_engine(model_path: &Path, use_gpu: bool) -> Result<Engine> {
             .device()
             .map(|device| device.description)
             .unwrap_or_else(|_| model.backend());
-        let (languages, multilingual) = model
+        let (languages, multilingual, translates) = model
             .capabilities()
-            .map(|caps| (caps.languages, caps.supports_language_detect))
+            .map(|caps| {
+                (
+                    caps.languages,
+                    caps.supports_language_detect,
+                    caps.supports_translate,
+                )
+            })
             .unwrap_or_default();
         debug!(
             backend = %model.backend(),
@@ -696,6 +728,7 @@ async fn load_engine(model_path: &Path, use_gpu: bool) -> Result<Engine> {
             device,
             languages,
             multilingual,
+            translates,
         })
     })
     .await
@@ -732,9 +765,9 @@ fn take_language<'a>(language: &'a str, known: &[String]) -> Option<&'a str> {
 /// Within one take, each 30-second window after the first is conditioned on
 /// the prompt and the text before it, which slide out as the text grows, as
 /// whisper.cpp does. Nothing carries from one take to the next.
-fn run_options(language: Option<&str>, prompt: Option<&str>) -> RunOptions {
+fn run_options(language: Option<&str>, prompt: Option<&str>, task: Task) -> RunOptions {
     RunOptions {
-        task: Task::Transcribe,
+        task,
         timestamps: TimestampKind::Segment,
         language: language.map(str::to_string),
         family: Some(RunExtension::Whisper(WhisperRunOptions {
@@ -762,11 +795,17 @@ fn run_full(
     samples: &[f32],
     language: &str,
     prompt: Option<&str>,
+    translate: bool,
 ) -> Result<(String, Option<String>)> {
     use transcribe_cpp::Error;
 
+    let task = if translate && engine.translates {
+        Task::Translate
+    } else {
+        Task::Transcribe
+    };
     let options = match engine.family {
-        Family::Whisper => run_options(take_language(language, &engine.languages), prompt),
+        Family::Whisper => run_options(take_language(language, &engine.languages), prompt, task),
         Family::Parakeet => parakeet_options(),
     };
     let transcript = match engine.session.lock().run(samples, &options) {
@@ -807,7 +846,7 @@ fn retries_on_a_copy(earlier: u32) -> bool {
 fn run_pieces(engine: &Engine, speech: &[f32], starts: &[usize]) -> Result<String> {
     let mut text = String::new();
     for piece in pieces(speech, starts, PARAKEET_PIECE) {
-        let (heard, _) = run_full(engine, &speech[piece], "auto", None)?;
+        let (heard, _) = run_full(engine, &speech[piece], "auto", None, false)?;
         if heard.is_empty() {
             continue;
         }
@@ -858,8 +897,9 @@ fn detect_within(
     speech: &[f32],
     prompt: Option<&str>,
     allowed: &[String],
+    translate: bool,
 ) -> Result<Heard> {
-    let (text, heard) = run_full(engine, speech, "auto", prompt)?;
+    let (text, heard) = run_full(engine, speech, "auto", prompt, translate)?;
     if let Some(code) = heard
         .as_deref()
         .and_then(|code| langid::allowed_code(code, allowed))
@@ -888,7 +928,7 @@ fn detect_within(
         allowed.join(", "),
         first
     );
-    let (text, _) = run_full(engine, speech, first, prompt)?;
+    let (text, _) = run_full(engine, speech, first, prompt, translate)?;
     Ok(Heard {
         text,
         detected: Some(first),
@@ -1184,7 +1224,7 @@ mod tests {
 
     #[test]
     fn a_run_transcribes_in_the_take_language_with_the_prompt() {
-        let options = run_options(Some("de"), Some("Gregor Samsa"));
+        let options = run_options(Some("de"), Some("Gregor Samsa"), Task::Transcribe);
         assert_eq!(options.task, Task::Transcribe);
         assert_eq!(options.language.as_deref(), Some("de"));
         match options.family {
@@ -1198,7 +1238,11 @@ mod tests {
             },
             other => panic!("expected the Whisper extension, got {other:?}"),
         }
-        assert_eq!(run_options(None, None).language, None);
+        assert_eq!(run_options(None, None, Task::Transcribe).language, None);
+        assert_eq!(
+            run_options(None, None, Task::Translate).task,
+            Task::Translate
+        );
     }
 
     #[test]

@@ -21,6 +21,8 @@ pub enum Role {
     Learn,
     /// A language chord: dictation in that language
     Language(Language),
+    /// A translate chord: speech in that language, typed in English
+    Translate(Language),
     /// A style chord: dictation in that style
     Style(StyleName),
     /// A rewrite chord: the selected text, rewritten in that style
@@ -46,6 +48,12 @@ impl Role {
             Role::PasteLast => "Type last again".to_string(),
             Role::Learn => "Learn selection".to_string(),
             Role::Language(language) => format!("Dictate in {}", language.name()),
+            Role::Translate(language) => {
+                format!(
+                    "Dictate {}",
+                    crate::transcription::Spoken::into_english(language).name()
+                )
+            },
             Role::Style(style) => format!("Dictate in the {} style", style),
             Role::Rewrite(style) => format!("Rewrite in the {} style", style),
         }
@@ -60,15 +68,19 @@ impl Role {
             Role::PasteLast => "paste_last",
             Role::Learn => "learn",
             Role::Language(_) => "languages",
+            Role::Translate(_) => "translate",
             Role::Style(_) => "styles",
             Role::Rewrite(_) => "rewrite",
         }
     }
 
-    /// The chord starts a dictation: the dictation key, a language chord, or
-    /// a style chord.
+    /// The chord starts a dictation: the dictation key, a language or
+    /// translate chord, or a style chord.
     pub fn dictates(self) -> bool {
-        matches!(self, Role::Dictate | Role::Language(_) | Role::Style(_))
+        matches!(
+            self,
+            Role::Dictate | Role::Language(_) | Role::Translate(_) | Role::Style(_)
+        )
     }
 }
 

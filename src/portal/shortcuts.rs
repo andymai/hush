@@ -11,7 +11,7 @@ use super::PortalError;
 use crate::config::settings::HotkeyConfig;
 use crate::hotkey::{HotkeyAction, HotkeyEvent, KeyCombination, Stamped};
 use crate::text_processing::StyleName;
-use crate::transcription::Language;
+use crate::transcription::Spoken;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -39,7 +39,7 @@ pub enum Meaning {
     Cancel,
     Command,
     Action(HotkeyAction),
-    Language(Language),
+    Language(Spoken),
     Style(StyleName),
 }
 
@@ -143,13 +143,19 @@ pub fn specs(hotkey: &HotkeyConfig) -> Vec<ShortcutSpec> {
         &hotkey.learn,
         Meaning::Action(HotkeyAction::Learn),
     ));
-    for (language, chord) in hotkey.language_keys() {
-        specs.push(spec(
-            format!("language-{}", language.code()),
-            format!("Dictate in {}", language.name()),
-            chord,
-            Meaning::Language(language),
-        ));
+    for (spoken, chord) in hotkey.spoken_keys() {
+        let (id, description) = if spoken.translate {
+            (
+                format!("translate-{}", spoken.language.code()),
+                format!("Dictate {}", spoken.name()),
+            )
+        } else {
+            (
+                format!("language-{}", spoken.language.code()),
+                format!("Dictate in {}", spoken.name()),
+            )
+        };
+        specs.push(spec(id, description, chord, Meaning::Language(spoken)));
     }
     for (style, chord) in hotkey.style_keys() {
         specs.push(spec(

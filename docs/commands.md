@@ -7,6 +7,7 @@ Everyday dictation:
 | `hush toggle` | Start or stop recording over the daemon socket |
 | `hush start` / `hush stop` / `hush cancel` | Start, stop, or discard a recording |
 | `hush start --lang de` / `hush toggle --lang de` | Start a recording in that language: a Whisper code, or `auto` |
+| `hush start --translate` / `hush toggle --translate` | Start a recording that comes out in English, from the language it is spoken in. Add `--lang` to name that language |
 | `hush start --style casual` / `hush toggle --style casual` | Start a recording in that writing style: `verbatim`, or a style under `[styles]`. An unknown style exits with code 2 |
 | `hush stop --print [--json]` | Stop, wait for the text, and print it instead of typing it |
 | `hush listen` | Run a dictation session attached to the terminal |

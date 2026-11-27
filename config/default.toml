@@ -65,6 +65,10 @@ command = "Ctrl+RightAlt" # Command Mode: hold, speak an instruction, release; t
 # toggle mode, and cancel as the hotkey. The tray menu sets the language of
 # the hotkey until you change it again.
 languages = {} # e.g. { "Shift+RightAlt" = "de", "F13" = "auto" }
+# A dictation key that types the speech in English: Whisper translates from
+# the language you name, or from any language with "auto". large-v3-turbo
+# and parakeet-v3 cannot translate.
+translate = {} # e.g. { "Ctrl+Shift+RightAlt" = "de", "F14" = "auto" }
 # A dictation key for each writing style (see [styles]), with the same hold,
 # double-tap lock, toggle mode, and cancel as the hotkey.
 styles = {} # e.g. { "Super+RightAlt" = "verbatim" }

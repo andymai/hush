@@ -38,7 +38,7 @@ pub mod whisper;
 pub use cloud::CloudTranscriber;
 pub use device::{BackendDevice, GpuAvailability, GpuType};
 pub use engine::SpeechToText;
-pub use language::Language;
+pub use language::{Language, Spoken};
 pub use models::{ModelInfo, ModelManager, ModelSize};
 pub use slot::{IdleTimer, ModelSlot, SlotState};
 pub use whisper::{Family, TranscriptionResult, WhisperTranscriber, WHISPER_SAMPLE_RATE};
