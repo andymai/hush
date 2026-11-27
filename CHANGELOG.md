@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.2](https://github.com/andymai/hush/compare/v1.20.1...v1.20.2) (2026-11-27)
+
+
+### Bug Fixes
+
+* **portal:** propose Ctrl+Super+Space for dictation ([#410](https://github.com/andymai/hush/issues/410)) ([7d33479](https://github.com/andymai/hush/commit/7d334795832166f63b9ec362bcc000ba30acd547))
+
 ## [1.20.1](https://github.com/andymai/hush/compare/v1.20.0...v1.20.1) (2026-11-27)
 
 
