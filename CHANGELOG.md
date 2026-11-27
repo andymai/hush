@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/andymai/hush/compare/v1.15.0...v1.16.0) (2026-11-27)
+
+
+### Features
+
+* **setup:** a new install opens the setup by itself, and the daemon offers it once ([#393](https://github.com/andymai/hush/issues/393)) ([f31f0f0](https://github.com/andymai/hush/commit/f31f0f0a367ebd9be6ef74295afb1030f3db16bd))
+
 ## [1.15.0](https://github.com/andymai/hush/compare/v1.14.0...v1.15.0) (2026-11-27)
 
 
