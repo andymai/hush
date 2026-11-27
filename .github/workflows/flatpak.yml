@@ -166,6 +166,8 @@ jobs:
           gpg --batch --list-secret-keys --with-colons | grep -q "^fpr:*:$want:" ||
             { echo "::error::FLATPAK_SIGNING_KEY is not the key in packaging/flatpak/hush-repo.asc"; exit 1; }
       - run: packaging/flatpak/repo.sh bundle/hush.flatpak site "$SITE_URL"
+      # The landing page at SITE_URL, next to the remote, so one deploy carries both.
+      - run: packaging/site/build.sh site
       - run: packaging/flatpak/repo-check.sh site "$SITE_URL"
       # The last two releases through the scripts, as two releases in a row
       # would go. Two releases always differ, at least in the version.
