@@ -1,0 +1,31 @@
+docs/portals.md
+  s_5332262e639a7a::t_5b97b344a99ad4 5
+src/cli/commands/listen.rs
+  s_5332262e639a7a::t_8d1bdf6655e084 281-284,286,289
+  s_5332262e639a7a::t_4758a9764fb052 2050
+  s_5332262e639a7a::t_9ba22eaf062575 290,2046-2049,2051-2088
+  s_5332262e639a7a::t_8791667493c8a2 151,155-158
+  s_5332262e639a7a::t_d40e38c806898f 280,285,287-288,291,2089
+README.md
+  s_5332262e639a7a::t_5b97b344a99ad4 86
+src/cli/commands/daemon.rs
+  s_5332262e639a7a::t_f9de9c22314a5d 278-284
+src/setup.rs
+  s_5332262e639a7a::t_88019f47c3fdd6 264,266-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "be580b6ee36cf9200b1b310563601da9a1c7fc4d",
+  "prompts": {},
+  "sessions": {
+    "s_5332262e639a7a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cafc310-b19c-4b54-8739-6ec8a3669200",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
