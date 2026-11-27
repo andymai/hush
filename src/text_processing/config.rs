@@ -1,4 +1,5 @@
 /// Configuration for text processing
+use crate::config::keys::ApiKey;
 use crate::config::settings::LlmConfig;
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +9,7 @@ pub enum LlmProvider {
     /// Anthropic Claude API
     Anthropic {
         /// API key (read from env var if None)
-        api_key: Option<String>,
+        api_key: Option<ApiKey>,
         /// Model to use, from `llm.anthropic_model`
         model: String,
     },
@@ -25,7 +26,7 @@ pub enum LlmProvider {
         url: String,
         model: String,
         /// Sent as a bearer token when set
-        api_key: Option<String>,
+        api_key: Option<ApiKey>,
     },
     /// No LLM - rule-based only
     None,

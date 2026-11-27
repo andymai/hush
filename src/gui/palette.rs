@@ -18,6 +18,7 @@ use super::pages::{self, desktop, hotkeys, speech, text, Page};
 use super::theme::{self, palette};
 use super::widgets::{self, text_focus_id, TextFocus};
 use super::Gui;
+use crate::config::server;
 use crate::config::settings::TranscriptionBackend;
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
@@ -217,7 +218,7 @@ pub const SETTINGS: &[Setting] = &[
         "API key of the service",
         Page::Speech,
         "Transcription",
-        "groq openai key env privacy audio",
+        "groq openai key env privacy audio keyring secret save remove",
     )
     .when(hosted),
     row(
@@ -260,6 +261,14 @@ pub const SETTINGS: &[Setting] = &[
         "openai-compatible whisper",
     )
     .when(server),
+    row(
+        "speech.server_key",
+        "Server key",
+        Page::Speech,
+        "Transcription",
+        "openai-compatible api key token keyring secret save remove",
+    )
+    .when(server_key),
     row(
         "speech.models_dir",
         "The models directory is not readable",
@@ -393,6 +402,13 @@ pub const SETTINGS: &[Setting] = &[
         "llm claude haiku",
     ),
     row(
+        "text.anthropic_key",
+        "Anthropic API key",
+        Page::Text,
+        "Language models",
+        "llm claude key token keyring secret save remove",
+    ),
+    row(
         "text.server_url",
         "OpenAI-compatible server",
         Page::Text,
@@ -406,6 +422,14 @@ pub const SETTINGS: &[Setting] = &[
         "Language models",
         "llm",
     ),
+    row(
+        "text.server_key",
+        "OpenAI-compatible server key",
+        Page::Text,
+        "Language models",
+        "llm api key token keyring secret save remove",
+    )
+    .when(llm_server_key),
     row(
         "text.style_form.name",
         "Style name",
@@ -585,6 +609,14 @@ fn openai(gui: &Gui) -> bool {
 
 fn server(gui: &Gui) -> bool {
     backend(gui) == TranscriptionBackend::OpenAiCompatible
+}
+
+fn server_key(gui: &Gui) -> bool {
+    server(gui) && server::key_var(&gui.config.transcription.server_key_env).is_some()
+}
+
+fn llm_server_key(gui: &Gui) -> bool {
+    gui.config.llm.server_key_var().is_some()
 }
 
 fn on_this_machine(gui: &Gui) -> bool {

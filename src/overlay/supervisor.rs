@@ -163,7 +163,7 @@ fn run_child(
     let child_fd = theirs.as_raw_fd();
     let parent = std::process::id();
     let mut command = Command::new("/proc/self/exe");
-    command
+    crate::config::keys::without_env_files(&mut command)
         .arg0("hush")
         .arg("overlay")
         .stdin(Stdio::null())

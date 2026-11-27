@@ -3,7 +3,7 @@
 //! completions API. Only text is sent, never audio.
 
 use super::config::{EditingMode, LlmProvider};
-use crate::config::keys;
+use crate::config::keys::{self, ApiKey};
 use crate::config::server::{self, Sends};
 use crate::config::settings::{LlmConfig, LlmSetting};
 use anyhow::{Context, Result};
@@ -147,12 +147,13 @@ impl LlmProcessor {
     pub fn new(provider: LlmProvider, max_tokens: u32, temperature: f32) -> Result<Self> {
         match &provider {
             LlmProvider::Anthropic { api_key, model } => {
-                let key = match api_key {
-                    Some(key) => key.clone(),
+                let blank = match api_key {
+                    Some(key) => key.is_blank(),
                     None => std::env::var("ANTHROPIC_API_KEY")
-                        .context("ANTHROPIC_API_KEY not found in environment")?,
+                        .context("ANTHROPIC_API_KEY not found in environment")?
+                        .is_empty(),
                 };
-                if key.is_empty() {
+                if blank {
                     anyhow::bail!("ANTHROPIC_API_KEY is empty");
                 }
                 info!("LLM: Anthropic {}", model);
@@ -223,7 +224,7 @@ impl LlmProcessor {
     async fn complete(&self, system: &str, user: &str) -> Result<String> {
         match &self.provider {
             LlmProvider::Anthropic { api_key, model } => {
-                self.claude_complete(system, user, api_key.as_deref(), model)
+                self.claude_complete(system, user, api_key.as_ref(), model)
                     .await
             },
             LlmProvider::Ollama { url, model } => {
@@ -234,7 +235,7 @@ impl LlmProcessor {
                 model,
                 api_key,
             } => {
-                self.server_complete(system, user, url, model, api_key.as_deref())
+                self.server_complete(system, user, url, model, api_key.as_ref())
                     .await
             },
             LlmProvider::None => Ok(user.to_string()),
@@ -245,11 +246,11 @@ impl LlmProcessor {
         &self,
         system: &str,
         user: &str,
-        api_key: Option<&str>,
+        api_key: Option<&ApiKey>,
         model: &str,
     ) -> Result<String> {
         let key = match api_key {
-            Some(key) => key.to_string(),
+            Some(key) => key.require().await?,
             None => std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY not found")?,
         };
         let request = ClaudeRequest {
@@ -355,8 +356,12 @@ impl LlmProcessor {
         user: &str,
         url: &str,
         model: &str,
-        api_key: Option<&str>,
+        api_key: Option<&ApiKey>,
     ) -> Result<String> {
+        let api_key = match api_key {
+            Some(key) => Some(key.require().await?),
+            None => None,
+        };
         let request = ChatRequest {
             model,
             messages: [
@@ -376,7 +381,7 @@ impl LlmProcessor {
         let host = server::host_label(url);
         let start = std::time::Instant::now();
         let mut builder = self.client.post(url).json(&request);
-        if let Some(key) = api_key {
+        if let Some(key) = &api_key {
             builder = builder.bearer_auth(key);
         }
         let response = builder
@@ -644,18 +649,18 @@ pub async fn ollama_reachable(url: &str) -> bool {
 pub fn choose_provider(
     config: &LlmConfig,
     ollama_ok: bool,
-    anthropic_key: Option<String>,
-    server_key: Option<String>,
+    anthropic_key: Option<ApiKey>,
+    server_key: Option<ApiKey>,
 ) -> LlmProvider {
     let ollama = || LlmProvider::Ollama {
         url: config.ollama_url.clone(),
         model: config.ollama_model.clone(),
     };
-    let anthropic = |key: String| LlmProvider::Anthropic {
+    let anthropic = |key: ApiKey| LlmProvider::Anthropic {
         api_key: Some(key),
         model: config.anthropic_model.clone(),
     };
-    let key = anthropic_key.filter(|k| !k.trim().is_empty());
+    let key = anthropic_key.filter(|k| !k.is_blank());
     match config.provider {
         LlmSetting::None => LlmProvider::None,
         LlmSetting::Ollama => {
@@ -683,7 +688,7 @@ pub fn choose_provider(
             };
             let api_key = match config.server_key_var() {
                 None => None,
-                Some(var) => match server_key.filter(|k| !k.trim().is_empty()) {
+                Some(var) => match server_key.filter(|k| !k.is_blank()) {
                     Some(key) => Some(key),
                     None => {
                         warn!("llm.server_key_env is {} but {} is not set", var, var);
@@ -709,17 +714,27 @@ pub fn choose_provider(
     }
 }
 
-/// Probe what the config needs and pick the provider. The server key comes
-/// from the environment or `env_file` (`~/.config/hush/.env`).
+/// Probe what the config needs and pick the provider. A key counts when
+/// the environment, the keyring, or `env_file` (`~/.config/hush/.env`)
+/// has it, and each request reads it then.
 pub async fn resolve_provider(config: &LlmConfig, env_file: &Path) -> LlmProvider {
     let ollama_ok = match config.provider {
         LlmSetting::Auto | LlmSetting::Ollama => ollama_reachable(&config.ollama_url).await,
         _ => false,
     };
-    let key = std::env::var("ANTHROPIC_API_KEY").ok();
-    let server_key = config
-        .server_key_var()
-        .and_then(|var| keys::api_key_in(env_file, var));
+    let wanted = match config.provider {
+        LlmSetting::Auto | LlmSetting::Anthropic => Some("ANTHROPIC_API_KEY"),
+        LlmSetting::OpenAiCompatible => config.server_key_var(),
+        _ => None,
+    };
+    let found = match wanted {
+        Some(var) if keys::present_in(env_file, var).await => Some(ApiKey::var(var, env_file)),
+        _ => None,
+    };
+    let (key, server_key) = match config.provider {
+        LlmSetting::OpenAiCompatible => (None, found),
+        _ => (found, None),
+    };
     choose_provider(config, ollama_ok, key, server_key)
 }
 
@@ -1044,9 +1059,8 @@ mod tests {
             ..LlmConfig::defaults()
         };
         for ollama_ok in [true, false] {
-            for anthropic in [None, Some("k".to_string())] {
-                let provider =
-                    choose_provider(&config, ollama_ok, anthropic, Some("s".to_string()));
+            for anthropic in [None, Some(ApiKey::from("k"))] {
+                let provider = choose_provider(&config, ollama_ok, anthropic, Some("s".into()));
                 assert!(
                     !matches!(provider, LlmProvider::OpenAiCompatible { .. }),
                     "{provider:?}"
@@ -1080,7 +1094,7 @@ mod tests {
         );
         assert!(matches!(
             with_key,
-            LlmProvider::OpenAiCompatible { api_key: Some(ref key), .. } if key == "secret"
+            LlmProvider::OpenAiCompatible { api_key: Some(ref key), .. } if *key == ApiKey::from("secret")
         ));
         assert_eq!(
             choose_provider(

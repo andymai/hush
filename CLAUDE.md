@@ -96,7 +96,7 @@ src/
 ├── overlay/        # The recording pill: its own process (`hush overlay`) on a socket pair from the daemon (supervisor.rs), drawn on the CPU (render.rs), on layer-shell or X11 (present/)
 ├── gui/            # eframe window (`hush settings`): own title bar and sidebar (chrome.rs), controls (widgets.rs), save on each change and one debounced daemon restart (autosave.rs), palette, fonts, and sizes (theme.rs), pages in gui/pages, evdev key capture, mic level meter
 ├── tray/           # StatusNotifierItem panel icon and the Hush mark
-├── config/         # TOML settings, API keys from the environment and .env, `config export` and `import` (transfer.rs)
+├── config/         # TOML settings, API keys from the environment, the Secret Service (secret_service.rs), and .env (keys.rs), `config export` and `import` (transfer.rs)
 ├── permissions.rs  # The udev rule that grants keyboard and uinput access
 ├── updates.rs      # The opt-in release check; a package-manager install never runs it
 ├── desktop.rs      # The .desktop and autostart entries
@@ -128,7 +128,7 @@ These constraints hold:
 ## Configuration
 
 - **`config/default.toml`** - Compiled-in defaults (16kHz sample rate, "base" model, RightAlt hotkey, Escape cancels, Ctrl+RightAlt for Command Mode). User overrides live in `$XDG_CONFIG_HOME/hush/config.toml`; `--config-file` or `HUSH_CONFIG` point elsewhere. Models live in `$XDG_DATA_HOME/hush/models`.
-- **`.env`** - API keys, never in `config.toml`: `ANTHROPIC_API_KEY` for the Anthropic provider, `GROQ_API_KEY` and `OPENAI_API_KEY` for cloud transcription, and the variables that `transcription.server_key_env` and `llm.server_key_env` name. Hush reads `~/.config/hush/.env` and `./.env`, and a variable in the environment wins. `[llm]` in the config picks Ollama, Anthropic, an OpenAI-compatible server, or none
+- **API keys** - never in `config.toml`: `ANTHROPIC_API_KEY` for the Anthropic provider, `GROQ_API_KEY` and `OPENAI_API_KEY` for cloud transcription, and the variables that `transcription.server_key_env` and `llm.server_key_env` name. A variable in the session's environment wins, then the Secret Service, then `~/.config/hush/.env` and `./.env`. `hush settings` saves keys in the Secret Service, or in the sandbox's `.env` in the Flatpak. The daemon reads only unlocked items and never starts a keyring. `[llm]` in the config picks Ollama, Anthropic, an OpenAI-compatible server, or none
 - **Logging verbosity**: `-v` (INFO), `-vv` (DEBUG), `-vvv` (TRACE)
 
 ## Testing

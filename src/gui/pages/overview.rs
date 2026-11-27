@@ -188,7 +188,7 @@ fn model(gui: &mut Gui, ui: &mut egui::Ui) {
         } else {
             (
                 format!("{} needs an API key", backend.name()),
-                format!("Put {} in ~/.config/hush/.env.", var),
+                format!("Save {} on the Speech page.", var),
             )
         };
         row("overview.model", &title)

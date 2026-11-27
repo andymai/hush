@@ -799,7 +799,8 @@ fn transcribe_again(name: &str, ctx: &egui::Context) -> Again {
     let ctx = ctx.clone();
     std::thread::spawn(move || {
         let binary = std::env::current_exe().unwrap_or_else(|_| "hush".into());
-        let outcome = match std::process::Command::new(binary)
+        let mut command = std::process::Command::new(binary);
+        let outcome = match crate::config::keys::without_env_files(&mut command)
             .arg("transcribe")
             .arg(&path)
             .output()

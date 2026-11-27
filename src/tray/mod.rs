@@ -246,7 +246,11 @@ impl HushTray {
 /// Open the settings window in its own process, so the daemon never owns one.
 fn open_settings() {
     let binary = std::env::current_exe().unwrap_or_else(|_| "hush".into());
-    match std::process::Command::new(&binary).arg("settings").spawn() {
+    let mut command = std::process::Command::new(&binary);
+    match crate::config::keys::without_env_files(&mut command)
+        .arg("settings")
+        .spawn()
+    {
         Ok(_) => debug!("Opened the settings window"),
         Err(e) => warn!("Could not open the settings window: {}", e),
     }

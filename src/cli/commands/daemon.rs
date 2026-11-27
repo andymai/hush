@@ -130,6 +130,7 @@ async fn wait_for_unit_daemon() -> Result<()> {
 async fn spawn_detached(options: &SessionOptions) -> Result<()> {
     let exe = std::env::current_exe().context("Failed to locate the hush binary")?;
     let mut command = Command::new(exe);
+    crate::config::keys::without_env_files(&mut command);
     command.args(["daemon", "start", "--foreground"]);
     command.args(["--editing-mode", &options.editing_mode]);
     if options.no_processing {

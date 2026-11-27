@@ -15,6 +15,8 @@
 
 pub mod keys;
 pub mod paths;
+#[cfg(target_os = "linux")]
+mod secret_service;
 pub mod server;
 pub mod settings;
 pub mod transfer;

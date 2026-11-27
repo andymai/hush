@@ -6,6 +6,7 @@
 use crate::audio::wake::{self, Finding, Plan, Probe, Sleep, Undone};
 use crate::config::settings::{TranscriptionBackend, TranscriptionConfig};
 use crate::config::{server, Config};
+use crate::gui::api_keys;
 use crate::gui::icons;
 use crate::gui::meter::{self, Meter};
 use crate::gui::pages::text_setting;
@@ -101,26 +102,30 @@ fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
     } else {
         "the audio of each dictation"
     };
+    let status = api_keys::status(gui, var);
     let (title, description) = if has_key {
         (
             format!("Audio leaves this machine for {}", service),
-            format!("Hush sends {} to {}.", sent, service),
+            format!("Hush sends {} to {}. {}", sent, service, status),
         )
     } else {
         (
             format!("{} needs an API key", service),
             format!(
-                "Put {} in ~/.config/hush/.env. Until then dictation fails, \
-                 and Hush never falls back to another service.",
-                var
+                "{} Until then dictation fails, and Hush never falls back to another \
+                 service.",
+                status
             ),
         )
     };
-    row("speech.key", &title)
-        .status(has_key)
-        .describe(&description)
-        .reserve(0.0)
-        .show(ui, |_| {});
+    api_keys::key_row(
+        gui,
+        ui,
+        row("speech.key", &title)
+            .status(has_key)
+            .describe(&description),
+        var,
+    );
 
     type Slot = fn(&mut Config) -> &mut String;
     let (key, slot, placeholder): (&str, Slot, &str) = match backend {
@@ -162,6 +167,16 @@ fn server_settings(gui: &mut Gui, ui: &mut egui::Ui) {
         "whisper-large-v3",
         |config| &mut config.transcription.server_model,
     );
+    if let Some(var) = server::key_var(&gui.config.transcription.server_key_env).map(str::to_string)
+    {
+        let status = api_keys::status(gui, &var);
+        api_keys::key_row(
+            gui,
+            ui,
+            row("speech.server_key", "Server key").describe(&status),
+            &var,
+        );
+    }
 }
 
 /// Whether the OpenAI-compatible server is set up, a title, and where the
@@ -185,8 +200,8 @@ pub fn server_status(gui: &Gui) -> (bool, String, String) {
             false,
             format!("The server needs {}", var),
             format!(
-                "Put {} in ~/.config/hush/.env. Until then dictation fails, \
-                 and Hush never falls back to another backend.",
+                "Save {} on the Speech page. Until then dictation fails, and Hush never \
+                 falls back to another backend.",
                 var
             ),
         );

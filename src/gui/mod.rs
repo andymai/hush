@@ -4,6 +4,7 @@
 //! It runs in its own process (`hush settings`), which the tray and the
 //! desktop entry launch, so the daemon never has to own a window.
 
+mod api_keys;
 mod autosave;
 mod capture;
 mod chrome;
@@ -21,6 +22,7 @@ mod widgets;
 pub use pages::speech::size_key;
 
 use crate::audio::take::StartDelay;
+use crate::config::keys::{self, Source};
 use crate::config::settings::{Appearance, TranscriptionBackend, TranscriptionConfig};
 use crate::config::Config;
 use crate::hotkey::keymap::ModifierKeys;
@@ -112,13 +114,13 @@ pub struct Machine {
     /// A compositor that runs no autostart entries and must start Hush
     /// from its own config
     pub startup_compositor: Option<crate::service::Compositor>,
-    /// The transcription key variables that hold a key: the hosted
-    /// services' and the server's.
-    pub cloud_keys: Vec<String>,
+    /// Each key variable that holds a key, and where the key is
+    pub keys: Vec<(String, Source)>,
 }
 
 impl Machine {
-    fn read(server_key_env: &str) -> Self {
+    /// `key_vars` are the variables to look for, from [`keys::variables`].
+    fn read(key_vars: &[String]) -> Self {
         let manager = ModelManager::new(crate::config::paths::models_dir()).ok();
         let vad_installed = manager
             .as_ref()
@@ -152,12 +154,9 @@ impl Machine {
             vad_installed,
             autostart: crate::desktop::starts_at_login_with(|| service.clone()),
             startup_compositor: crate::service::compositor_without_autostart(&service),
-            cloud_keys: TranscriptionBackend::ALL
+            keys: key_vars
                 .iter()
-                .filter_map(|backend| backend.key_var())
-                .chain(crate::config::server::key_var(server_key_env))
-                .filter(|var| crate::config::keys::api_key(var).is_some())
-                .map(String::from)
+                .filter_map(|var| keys::source(var).map(|source| (var.clone(), source)))
                 .collect(),
         }
     }
@@ -166,7 +165,15 @@ impl Machine {
     pub fn has_key(&self, transcription: &TranscriptionConfig) -> bool {
         transcription
             .key_var()
-            .is_none_or(|var| self.cloud_keys.iter().any(|key| key == var))
+            .is_none_or(|var| self.key_source(var).is_some())
+    }
+
+    /// Where the key in `var` is, when Hush has one.
+    pub fn key_source(&self, var: &str) -> Option<Source> {
+        self.keys
+            .iter()
+            .find(|(known, _)| known == var)
+            .map(|(_, source)| *source)
     }
 
     /// Keyboard access, plus a downloaded model, the cloud service's key, or
@@ -293,6 +300,8 @@ pub struct Gui {
     pub history: HistoryView,
     /// Whether the microphone sleeps between takes, and Keep it awake
     pub wake: WakeView,
+    /// The API key fields, and a save or removal that runs
+    api_keys: api_keys::KeyRows,
     pub try_text: String,
     /// The desktop's light or dark preference, for the System appearance
     desktop: DesktopScheme,
@@ -356,7 +365,7 @@ impl Gui {
             .enable_all()
             .build()
             .context("Failed to start the background runtime")?;
-        let machine = Machine::read(&config.transcription.server_key_env);
+        let machine = Machine::read(&keys::variables(&config));
         let (vocabulary, vocabulary_error) = match load_vocabulary() {
             Ok(vocabulary) => (vocabulary, None),
             Err(e) => {
@@ -440,6 +449,7 @@ impl Gui {
             new_clipboard_app: String::new(),
             history: HistoryView::default(),
             wake: WakeView::default(),
+            api_keys: api_keys::KeyRows::default(),
             try_text: String::new(),
             desktop: DesktopScheme::default(),
             appearance_override: None,
@@ -886,7 +896,8 @@ impl Gui {
                 },
                 Probe::State(DaemonState::Idle) => {
                     let binary = std::env::current_exe().unwrap_or_else(|_| "hush".into());
-                    match std::process::Command::new(binary)
+                    let mut command = std::process::Command::new(binary);
+                    match keys::without_env_files(&mut command)
                         .args(["daemon", "restart"])
                         .spawn()
                     {
@@ -928,6 +939,12 @@ impl Gui {
             .map(|(_, feedback)| feedback)
     }
 
+    /// A key that the daemon reads changed: restart the daemon once it is
+    /// idle.
+    fn key_changed(&mut self) {
+        self.debounce.change(Instant::now());
+    }
+
     /// Read the machine on a background thread; `take_refresh` picks up the
     /// result on a later frame.
     pub fn request_refresh(&mut self, ctx: &egui::Context) {
@@ -937,9 +954,9 @@ impl Gui {
         let latest = Arc::clone(&self.poll.latest);
         let in_flight = Arc::clone(&self.poll.in_flight);
         let ctx = ctx.clone();
-        let server_key_env = self.config.transcription.server_key_env.clone();
+        let key_vars = keys::variables(&self.config);
         std::thread::spawn(move || {
-            let machine = Machine::read(&server_key_env);
+            let machine = Machine::read(&key_vars);
             *latest.lock() = Some(machine);
             in_flight.store(false, Ordering::Release);
             ctx.request_repaint();
@@ -1023,7 +1040,8 @@ impl Gui {
     pub fn run_hush(&mut self, args: &[&str], done: &str) {
         let binary = std::env::current_exe().unwrap_or_else(|_| "hush".into());
         let owned: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-        match std::process::Command::new(binary).args(&owned).spawn() {
+        let mut command = std::process::Command::new(binary);
+        match keys::without_env_files(&mut command).args(&owned).spawn() {
             Ok(_) => self.say(done),
             Err(e) => self.say(format!("Could not run hush {}: {}", owned.join(" "), e)),
         }
@@ -1182,6 +1200,7 @@ impl eframe::App for Gui {
         self.take_refresh();
         self.finish_download(ctx);
         pages::speech::finish_wake(self);
+        api_keys::finish(self, ctx);
         self.finish_capture();
         self.intercept_close(ctx);
         // `ui` drives the restart and the close, so it runs while they wait.
@@ -1386,7 +1405,7 @@ mod tests {
             keep_next: false,
             tune: None,
             startup_compositor: None,
-            cloud_keys: Vec::new(),
+            keys: Vec::new(),
         }
     }
 
@@ -1417,7 +1436,7 @@ mod tests {
             "a cloud service needs its key"
         );
         let with_key = Machine {
-            cloud_keys: vec!["GROQ_API_KEY".to_string()],
+            keys: vec![("GROQ_API_KEY".to_string(), Source::Keyring)],
             ..missing_model
         };
         assert!(
@@ -1443,7 +1462,7 @@ mod tests {
         transcription.server_key_env = "STT_KEY".into();
         assert!(!machine.ready(&transcription), "the named key is missing");
         let with_key = Machine {
-            cloud_keys: vec!["STT_KEY".to_string()],
+            keys: vec![("STT_KEY".to_string(), Source::EnvFile)],
             ..machine
         };
         assert!(with_key.ready(&transcription));

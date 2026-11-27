@@ -4,6 +4,7 @@
 
 use crate::config::settings::LlmSetting;
 use crate::config::{server, transfer, Config};
+use crate::gui::api_keys;
 use crate::gui::icons;
 use crate::gui::pages::text_setting;
 use crate::gui::theme::{self, palette, FIELD_WIDTH};
@@ -98,8 +99,8 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
     let mut shown = shown_before;
     row("text.llm_provider", "Polish with")
         .describe(
-            "Only the text is ever sent, never the audio. Anthropic needs \
-             ANTHROPIC_API_KEY in ~/.config/hush/.env. An OpenAI-compatible server \
+            "Only the text is ever sent, never the audio. Anthropic needs an API key, \
+             which you can save under Language models. An OpenAI-compatible server \
              receives the text at the address you set.",
         )
         .problem(waiting.as_deref())
@@ -158,6 +159,13 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
         "claude-haiku-4-5",
         |config| &mut config.llm.anthropic_model,
     );
+    let status = api_keys::status(gui, "ANTHROPIC_API_KEY");
+    api_keys::key_row(
+        gui,
+        ui,
+        row("text.anthropic_key", "Anthropic API key").describe(&status),
+        "ANTHROPIC_API_KEY",
+    );
     let reach = server_reach(&gui.config.llm.server_url);
     text_setting(
         gui,
@@ -173,6 +181,15 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
         "llama3.2",
         |config| &mut config.llm.server_model,
     );
+    if let Some(var) = gui.config.llm.server_key_var().map(str::to_string) {
+        let status = api_keys::status(gui, &var);
+        api_keys::key_row(
+            gui,
+            ui,
+            row("text.server_key", "OpenAI-compatible server key").describe(&status),
+            &var,
+        );
+    }
 }
 
 fn writing_styles(gui: &mut Gui, ui: &mut egui::Ui) {

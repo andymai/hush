@@ -251,6 +251,12 @@ ashpd = { version = "0.14", default-features = false, features = [
 ] }
 # The keysym of a character, as xkb_utf32_to_keysym gives it, for the portal
 xkeysym = "0.2"
+# API keys in the Secret Service (GNOME Keyring, KWallet) outside the sandbox;
+# oo7 needs one runtime and one crypto feature for its encrypted sessions
+oo7 = { version = "0.7", default-features = false, features = [
+  "tokio",
+  "native_crypto",
+] }
 
 
 [profile.release]

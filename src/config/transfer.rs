@@ -2,11 +2,11 @@
 //! vocabulary in one TOML file that another machine can read.
 //!
 //! The file holds only what `config.toml` and `vocabulary.json` hold. API
-//! keys stay in the environment and the `.env` files, and an export that
-//! contains one of them is refused.
+//! keys stay in the environment, the keyring, and the `.env` files, and an
+//! export that contains one of them is refused.
 
-use super::settings::{rename_legacy_keys, Config, TranscriptionBackend};
-use super::{keys, paths, server};
+use super::settings::{rename_legacy_keys, Config};
+use super::{keys, paths};
 use crate::text_processing::DomainVocabulary;
 use anyhow::{bail, Context, Result};
 use std::fs;
@@ -291,7 +291,7 @@ impl Staged {
 // Dotfile managers often link config.toml into a repository. A rename onto
 // the link would put a plain file in its place, so write the file it names.
 // A link whose file does not exist yet names where to create it.
-fn link_target(path: &Path) -> PathBuf {
+pub(crate) fn link_target(path: &Path) -> PathBuf {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => fs::canonicalize(path)
             .or_else(|_| {
@@ -381,16 +381,12 @@ fn leaves(value: &toml::Value) -> usize {
     }
 }
 
-/// Each API key that Hush can read now, with its variable.
-/// Each API key that Hush can read, by its variable.
+/// Each API key that Hush can read now, with its variable: from the
+/// environment, the unlocked keyring, and the `.env` files.
 pub(crate) fn api_keys(config: &Config) -> Vec<(String, String)> {
-    TranscriptionBackend::ALL
-        .iter()
-        .filter_map(|backend| backend.key_var())
-        .chain(["ANTHROPIC_API_KEY"])
-        .chain(server::key_var(&config.transcription.server_key_env))
-        .chain(server::key_var(&config.llm.server_key_env))
-        .filter_map(|var| keys::api_key(var).map(|key| (var.to_string(), key)))
+    keys::variables(config)
+        .into_iter()
+        .filter_map(|var| keys::api_key(&var).map(|key| (var, key)))
         .collect()
 }
 
@@ -400,7 +396,7 @@ fn refuse_keys(text: &str, keys: &[(String, String)]) -> Result<()> {
         if key.len() >= MIN_KEY_LEN && text.contains(key) {
             bail!(
                 "The settings or the vocabulary contain the value of {}. Remove the key from \
-                 them, and keep it in the environment or a .env file.",
+                 them, and keep it in the keyring, the environment, or a .env file.",
                 var
             );
         }
