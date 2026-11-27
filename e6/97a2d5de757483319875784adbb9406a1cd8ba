@@ -1,0 +1,35 @@
+src/gui/pages/text.rs
+  s_5332262e639a7a::t_7d4eff75be5401 93-101,148,150,165-167,182-184
+docs/commands.md
+  s_5332262e639a7a::t_21d45dc7782925 22
+src/text_processing/llm.rs
+  s_5332262e639a7a::t_b1c5db686b0b72 632-677,833-844
+  s_5332262e639a7a::t_104aaac4be35b9 819-832
+  s_5332262e639a7a::t_0717f1d7128bfe 845
+src/gui/pages/setup.rs
+  s_5332262e639a7a::t_adc6116e0ad97b 6-7,14,16,29,33-44,57,160,311-368,372-420
+  s_5332262e639a7a::t_a963a8b3d39a27 369-371
+  s_5332262e639a7a::t_21d45dc7782925 85
+  s_5332262e639a7a::t_cfc959be4249ff 421
+src/setup.rs
+  s_5332262e639a7a::t_21d45dc7782925 264,266,367
+  s_5332262e639a7a::t_adc6116e0ad97b 352-356
+  s_5332262e639a7a::t_f824f686aa5fcf 24,30,36,48,141-143,158,164-166,168-174,335-351,357-359
+  s_5332262e639a7a::t_657315450e39e3 360-361
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e697a2d5de757483319875784adbb9406a1cd8ba",
+  "prompts": {},
+  "sessions": {
+    "s_5332262e639a7a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cafc310-b19c-4b54-8739-6ec8a3669200",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
