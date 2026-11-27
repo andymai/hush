@@ -151,34 +151,6 @@ pub const SETTINGS: &[Setting] = &[
         "hotkey vocabulary word spelling",
     ),
     row(
-        "hotkeys.backend",
-        "Read keys through",
-        Page::Hotkeys,
-        "More keys",
-        "evdev x11 input devices wayland backend",
-    ),
-    row(
-        "hotkeys.tap_ms",
-        "Tap is shorter than",
-        Page::Hotkeys,
-        "More keys",
-        "tap hold milliseconds ms double-tap",
-    ),
-    row(
-        "hotkeys.exclusive",
-        "Keep the key from other applications",
-        Page::Hotkeys,
-        "More keys",
-        "grab exclusive mouse button back browser",
-    ),
-    row(
-        "hotkeys.mask_menu",
-        "Keep menus closed",
-        Page::Hotkeys,
-        "More keys",
-        "alt super menu launcher ctrl tap",
-    ),
-    row(
         "hotkeys.languages.new",
         "Add a language key",
         Page::Hotkeys,
@@ -205,6 +177,34 @@ pub const SETTINGS: &[Setting] = &[
         Page::Hotkeys,
         "Rewrite keys",
         "hotkey chord selection style",
+    ),
+    row(
+        "hotkeys.backend",
+        "Read keys through",
+        Page::Hotkeys,
+        "Advanced",
+        "evdev x11 input devices wayland backend",
+    ),
+    row(
+        "hotkeys.tap_ms",
+        "Tap is shorter than",
+        Page::Hotkeys,
+        "Advanced",
+        "tap hold milliseconds ms double-tap",
+    ),
+    row(
+        "hotkeys.exclusive",
+        "Keep the key from other applications",
+        Page::Hotkeys,
+        "Advanced",
+        "grab exclusive mouse button back browser",
+    ),
+    row(
+        "hotkeys.mask_menu",
+        "Keep menus closed",
+        Page::Hotkeys,
+        "Advanced",
+        "alt super menu launcher ctrl tap",
     ),
     row(
         "speech.backend",
@@ -286,6 +286,14 @@ pub const SETTINGS: &[Setting] = &[
     )
     .when(model_list),
     row(
+        "speech.gpu",
+        "Use the GPU",
+        Page::Speech,
+        "Model",
+        "cuda vulkan graphics cpu acceleration",
+    )
+    .when(on_this_machine),
+    row(
         "speech.tune",
         "Hardware tune",
         Page::Speech,
@@ -309,14 +317,6 @@ pub const SETTINGS: &[Setting] = &[
     )
     .when(detecting),
     row(
-        "speech.gpu",
-        "Use the GPU",
-        Page::Speech,
-        "Listening",
-        "cuda vulkan graphics cpu acceleration",
-    )
-    .when(on_this_machine),
-    row(
         "speech.vad",
         "Trim silence",
         Page::Speech,
@@ -332,32 +332,32 @@ pub const SETTINGS: &[Setting] = &[
         "window title vocabulary prompt",
     ),
     row(
-        "speech.max_recording",
-        "Stop recording after",
-        Page::Speech,
-        "Listening",
-        "cap limit minutes hands-free maximum",
-    ),
-    row(
-        "speech.silence_stop",
-        "Stop after a pause",
-        Page::Speech,
-        "Listening",
-        "silence seconds hands-free quiet",
-    ),
-    row(
         "speech.microphone",
         "Input device",
         Page::Speech,
-        "Microphone",
+        "Recording",
         "microphone mic audio device input source",
     ),
     row(
         "speech.level",
         "Level",
         Page::Speech,
-        "Microphone",
+        "Recording",
         "meter volume microphone test loudness",
+    ),
+    row(
+        "speech.max_recording",
+        "Stop recording after",
+        Page::Speech,
+        "Recording",
+        "cap limit minutes hands-free maximum",
+    ),
+    row(
+        "speech.silence_stop",
+        "Stop after a pause",
+        Page::Speech,
+        "Recording",
+        "silence seconds hands-free quiet",
     ),
     row(
         "text.profiles",
@@ -368,16 +368,16 @@ pub const SETTINGS: &[Setting] = &[
     ),
     row(
         "text.llm_provider",
-        "Polish with",
+        "Language model provider",
         Page::Text,
-        "Polish",
-        "llm provider ollama anthropic claude openai-compatible model ai",
+        "Language model",
+        "llm provider ollama anthropic claude openai-compatible model ai polish tidy",
     ),
     row(
         "text.ollama_url",
         "Ollama server",
         Page::Text,
-        "Polish",
+        "Language model",
         "llm url address local",
     )
     .when(ollama_shown),
@@ -385,7 +385,7 @@ pub const SETTINGS: &[Setting] = &[
         "text.ollama_model",
         "Ollama model",
         Page::Text,
-        "Polish",
+        "Language model",
         "llm llama",
     )
     .when(ollama_shown),
@@ -393,7 +393,7 @@ pub const SETTINGS: &[Setting] = &[
         "text.anthropic_key",
         "Anthropic API key",
         Page::Text,
-        "Polish",
+        "Language model",
         "llm claude key token keyring secret save remove",
     )
     .when(anthropic_shown),
@@ -401,31 +401,31 @@ pub const SETTINGS: &[Setting] = &[
         "text.anthropic_model",
         "Anthropic model",
         Page::Text,
-        "Polish",
+        "Language model",
         "llm claude haiku",
     )
     .when(anthropic_shown),
     row(
         "text.server_url",
-        "Polish server address",
+        "Language model server address",
         Page::Text,
-        "Polish",
+        "Language model",
         "llm url address openai-compatible",
     )
     .when(llm_server_shown),
     row(
         "text.server_model",
-        "Polish server model",
+        "Language model server model",
         Page::Text,
-        "Polish",
+        "Language model",
         "llm openai-compatible",
     )
     .when(llm_server_shown),
     row(
         "text.server_key",
-        "Polish server key",
+        "Language model server key",
         Page::Text,
-        "Polish",
+        "Language model",
         "llm api key token keyring secret save remove openai-compatible",
     )
     .when(llm_server_key),
@@ -433,7 +433,7 @@ pub const SETTINGS: &[Setting] = &[
         "text.polish",
         "Tidy up every transcript",
         Page::Text,
-        "Polish",
+        "Language model",
         "polish llm cleanup grammar rewrite",
     ),
     row(
@@ -452,7 +452,7 @@ pub const SETTINGS: &[Setting] = &[
     ),
     row(
         "text.style_form.polish",
-        "Style polish",
+        "Tidy up in this style",
         Page::Text,
         "Add a style",
         "writing styles llm",
@@ -551,7 +551,7 @@ pub const SETTINGS: &[Setting] = &[
     ),
     row(
         "desktop.appearance",
-        "Theme",
+        "Window theme",
         Page::Desktop,
         "Appearance",
         "dark light system appearance colours colors mode",
@@ -731,7 +731,7 @@ impl Action {
             Action::StartHush | Action::RestartHush | Action::StopHush => "Status",
             Action::GrantAccess => "Keyboard access",
             Action::Download | Action::Tune => "Model",
-            Action::FindMicrophones | Action::KeepMicAwake | Action::LetMicSleep => "Microphone",
+            Action::FindMicrophones | Action::KeepMicAwake | Action::LetMicSleep => "Recording",
             Action::OpenConfigFile | Action::Reset => "Configuration file",
             Action::ImportWords | Action::ExportWords => "Vocabulary",
             Action::ClearHistory => "Transcripts",
@@ -1739,8 +1739,12 @@ mod tests {
             "Spell names from context",
             "word starts"
         );
-        assert_eq!(titles("dark")[0], "Theme", "a word of the description");
-        assert_eq!(titles("thme")[0], "Theme", "letters in order");
+        assert_eq!(
+            titles("dark")[0],
+            "Window theme",
+            "a word of the description"
+        );
+        assert_eq!(titles("thme")[0], "Window theme", "letters in order");
         assert_eq!(titles("keep audio")[0], "Keep the audio", "every word");
         assert_eq!(titles("HOTKEYS")[0], "Hotkeys", "in any case");
         assert_eq!(titles("level")[0], "Level", "a whole word first");

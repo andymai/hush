@@ -76,8 +76,8 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         });
 
     section(ui, "Appearance");
-    row("desktop.appearance", "Theme")
-        .describe("System follows the light or dark preference of your desktop.")
+    row("desktop.appearance", "Window theme")
+        .describe("The theme of this window. System follows the light or dark preference of your desktop.")
         .reserve(190.0)
         .show(ui, |ui| {
             let options = Appearance::ALL.map(|appearance| (appearance, appearance.name()));

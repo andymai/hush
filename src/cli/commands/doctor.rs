@@ -799,12 +799,14 @@ async fn llm_check(config: &Config, env_file: &Path) -> Check {
     use crate::text_processing::LlmProvider;
     let provider = crate::text_processing::llm::resolve_provider(&config.llm, env_file).await;
     match provider {
-        LlmProvider::Ollama { model, .. } => Check::ok("Polishing", format!("Ollama {}", model)),
+        LlmProvider::Ollama { model, .. } => {
+            Check::ok("Language model", format!("Ollama {}", model))
+        },
         LlmProvider::Anthropic { model, .. } => {
-            Check::ok("Polishing", format!("Anthropic {}", model))
+            Check::ok("Language model", format!("Anthropic {}", model))
         },
         LlmProvider::OpenAiCompatible { url, model, .. } => Check::ok(
-            "Polishing",
+            "Language model",
             format!(
                 "OpenAI-compatible {}",
                 server::describe(&model, &url, Sends::Text)
@@ -813,14 +815,14 @@ async fn llm_check(config: &Config, env_file: &Path) -> Check {
         LlmProvider::None if config.llm.provider == LlmSetting::OpenAiCompatible => {
             if let Err(e) = config.llm.validate_server() {
                 return Check::warn(
-                    "Polishing",
+                    "Language model",
                     e.to_string(),
                     "set server_url and server_model under [llm]",
                 );
             }
             let var = config.llm.server_key_var().unwrap_or_default();
             Check::warn(
-                "Polishing",
+                "Language model",
                 format!("the server needs {}; Command Mode is off", var),
                 format!(
                     "put {} in ~/.config/hush/.env, or set server_key_env = \"\" under [llm]",
@@ -829,7 +831,7 @@ async fn llm_check(config: &Config, env_file: &Path) -> Check {
             )
         },
         LlmProvider::None => Check::warn(
-            "Polishing",
+            "Language model",
             "rule-based only; Command Mode is off",
             "run Ollama, or put ANTHROPIC_API_KEY in ~/.config/hush/.env",
         ),

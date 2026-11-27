@@ -82,7 +82,7 @@ impl Page {
             Page::Overview => "status setup start ready access model try",
             Page::Hotkeys => "keys shortcuts keyboard chords languages styles rewrite",
             Page::Speech => "transcription whisper model language microphone recording",
-            Page::Text => "tone polish llm styles vocabulary words",
+            Page::Text => "tone tidy polish llm language model styles vocabulary words",
             Page::Output => "typing paste insertion applications",
             Page::Desktop => "tray panel sounds media updates theme configuration reset",
             Page::History => "transcripts audio recordings search",
