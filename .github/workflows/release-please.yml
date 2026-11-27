@@ -51,13 +51,15 @@ jobs:
       # release-please edits the version line in Cargo.toml and Cargo.lock's
       # entry for this package, but never runs cargo. Regenerate the lock on
       # the release PR branch so anything cargo would also touch lands with the
-      # bump, and CI on the PR re-runs against the refreshed lock.
+      # bump, and CI on the PR re-runs against the refreshed lock. The
+      # metainfo's releases come from the PR's CHANGELOG.md, so the metainfo
+      # at each tag lists the release that the tag marks.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.release.outputs.pr && env.HAS_APP == 'true'
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Refresh Cargo.lock on the release PR
+      - name: Refresh Cargo.lock and the metainfo on the release PR
         if: steps.release.outputs.pr && env.HAS_APP == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -72,14 +74,16 @@ jobs:
           git fetch "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$pr_branch:$pr_branch"
           git checkout "$pr_branch"
           cargo update --workspace
-          if git diff --quiet Cargo.lock; then
-            echo "::notice::Cargo.lock is already in sync."
+          metainfo=packaging/io.github.andymai.hush.metainfo.xml
+          python3 packaging/flatpak/metainfo-releases.py CHANGELOG.md "$metainfo"
+          if git diff --quiet -- Cargo.lock "$metainfo"; then
+            echo "::notice::Cargo.lock and the metainfo are already in sync."
             exit 0
           fi
           git config user.name "release-kun[bot]"
           git config user.email "release-kun[bot]@users.noreply.github.com"
-          git add Cargo.lock
-          git commit -m "chore: refresh Cargo.lock for release"
+          git add -- Cargo.lock "$metainfo"
+          git commit -m "chore: refresh Cargo.lock and the metainfo for release"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:${pr_branch}"
 
       # Approval uses GITHUB_TOKEN (github-actions[bot]), a different actor from

@@ -91,84 +91,84 @@
   </screenshots>
 
   <releases>
-    <release version="0.30.2" date="2026-11-10" type="stable">
+    <release version="1.19.0" date="2026-11-27" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>A Get a key button, and settings copy that talks to you</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.18.0" date="2026-11-27" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>A language model step finds Ollama, takes a key, and tests the choice</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.17.0" date="2026-11-27" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>Hush settings saves API keys in the keyring, or in the sandbox's .env</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.16.0" date="2026-11-27" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>A new install opens the setup by itself, and the daemon offers it once</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.15.0" date="2026-11-27" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>Hush setup opens a first run that goes one step at a time</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.14.0" date="2026-11-27" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>Screen readers reach the settings window through AccessKit</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.13.0" date="2026-11-27" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>Add and change translate keys on the Hotkeys page</li>
+          <li>The settings window uses the desktop's interface font and accent color</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.12.0" date="2026-11-27" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>Translate keys and --translate type the speech in English</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.11.1" date="2026-11-27" type="stable">
       <description>
         <p>Bug Fixes</p>
         <ul>
-          <li>Type the right case with Caps Lock on</li>
+          <li>Start no new overlay while the daemon stops</li>
         </ul>
       </description>
     </release>
-    <release version="0.30.1" date="2026-11-10" type="stable">
-      <description>
-        <p>Bug Fixes</p>
-        <ul>
-          <li>Write the GPU failure record atomically, and check more CPU modules for AVX-512</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.30.0" date="2026-11-10" type="stable">
+    <release version="1.11.0" date="2026-11-26" type="stable">
       <description>
         <p>Features</p>
         <ul>
-          <li>Load the ggml backends at run time from one package</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.29.0" date="2026-11-10" type="stable">
-      <description>
-        <p>Features</p>
-        <ul>
-          <li>Add a Ctrl+K command palette to the settings window</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.28.0" date="2026-11-10" type="stable">
-      <description>
-        <p>Features</p>
-        <ul>
-          <li>Save each settings change at once</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.27.0" date="2026-11-10" type="stable">
-      <description>
-        <p>Features</p>
-        <ul>
-          <li>Add Parakeet TDT 0.6B v3 as an opt-in model</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.26.0" date="2026-11-10" type="stable">
-      <description>
-        <p>Features</p>
-        <ul>
-          <li>Restyle the settings window with light and dark themes</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.25.0" date="2026-11-10" type="stable">
-      <description>
-        <p>Features</p>
-        <ul>
-          <li>Make modifier names in hotkey chords follow the keymap</li>
-          <li>Run Whisper through transcribe.cpp</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.24.2" date="2026-11-10" type="stable">
-      <description>
-        <p>Bug Fixes</p>
-        <ul>
-          <li>Stop a bare Alt or Super hotkey from opening app menus</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.24.1" date="2026-11-10" type="stable">
-      <description>
-        <p>Bug Fixes</p>
-        <ul>
-          <li>Scroll the vocabulary with the page, and filter long lists</li>
+          <li>Pill colors that follow the desktop, presets, a theme file, and reduced motion</li>
         </ul>
       </description>
     </release>
