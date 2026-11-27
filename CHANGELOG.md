@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.20.1](https://github.com/andymai/hush/compare/v1.20.0...v1.20.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **portal:** hold Shift for second-level keys, and read the seat keymap in the sandbox ([#407](https://github.com/andymai/hush/issues/407)) ([94c4f91](https://github.com/andymai/hush/commit/94c4f91a5fc70359848be806f913ea36c905bfc7))
+* **portal:** say that the desktop holds the keys in portal mode ([#408](https://github.com/andymai/hush/issues/408)) ([318f97e](https://github.com/andymai/hush/commit/318f97e2063e80caf52b219505aa46159b39b711))
+
 ## [1.20.0](https://github.com/andymai/hush/compare/v1.19.0...v1.20.0) (2026-11-27)
 
 

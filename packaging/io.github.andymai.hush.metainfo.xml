@@ -91,6 +91,15 @@
   </screenshots>
 
   <releases>
+    <release version="1.20.1" date="2026-11-27" type="stable">
+      <description>
+        <p>Bug Fixes</p>
+        <ul>
+          <li>Hold Shift for second-level keys, and read the seat keymap in the sandbox</li>
+          <li>Say that the desktop holds the keys in portal mode</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.20.0" date="2026-11-27" type="stable">
       <description>
         <p>Features</p>
@@ -161,14 +170,6 @@
         <p>Features</p>
         <ul>
           <li>Translate keys and --translate type the speech in English</li>
-        </ul>
-      </description>
-    </release>
-    <release version="1.11.1" date="2026-11-27" type="stable">
-      <description>
-        <p>Bug Fixes</p>
-        <ul>
-          <li>Start no new overlay while the daemon stops</li>
         </ul>
       </description>
     </release>
