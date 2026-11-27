@@ -89,7 +89,7 @@ fn tone(gui: &mut Gui, ui: &mut egui::Ui) {
 }
 
 fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
-    section(ui, "Polish");
+    section(ui, "Language model");
     polish_rows(gui, ui);
 }
 
@@ -118,10 +118,10 @@ pub(crate) fn polish_rows(gui: &mut Gui, ui: &mut egui::Ui) {
             .map(|reason| format!("Not switched yet: set the server below. {}", reason))
     });
     let mut shown = shown_before;
-    row("text.llm_provider", "Polish with")
+    row("text.llm_provider", "Provider")
         .describe(
-            "Only the text is ever sent, never the audio. Auto uses Ollama when it \
-             answers, or else Anthropic with a saved key.",
+            "The model tidies up transcripts and carries out Command Mode. It gets \
+             only the text, never the audio.",
         )
         .problem(waiting.as_deref())
         .show(ui, |ui| {
@@ -246,7 +246,9 @@ fn writing_styles(gui: &mut Gui, ui: &mut egui::Ui) {
             icons::PEN_LINE,
             styles::VERBATIM.as_str(),
         )
-        .detail("Built in. No polish for the recording. The rule-based cleanup still runs.")
+        .detail(
+            "Built in. The model leaves the recording alone. The rule-based cleanup still runs.",
+        )
         .show(ui, 0.0, |_| {});
         for name in &names {
             let about = style_summary(&gui.config.styles[name]);
@@ -305,7 +307,7 @@ fn style_form(gui: &mut Gui, ui: &mut egui::Ui) {
             value_field(ui, &mut gui.style_draft.name, "casual");
         });
     row("text.style_form.prompt", "Prompt")
-        .describe("One line that Hush adds to the polish prompt.")
+        .describe("One line that Hush adds to the prompt of the model.")
         .reserve(PROMPT_WIDTH)
         .show(ui, |ui| {
             text_area(
@@ -319,8 +321,8 @@ fn style_form(gui: &mut Gui, ui: &mut egui::Ui) {
     switch_row(
         ui,
         "text.style_form.polish",
-        "Polish",
-        "The model polishes recordings in this style, whatever Tidy up every transcript says.",
+        "Tidy up",
+        "The model tidies up recordings in this style, whatever Tidy up every transcript says.",
         &mut gui.style_draft.polish,
     );
     let ready = !gui.style_draft.name.trim().is_empty();
@@ -358,14 +360,14 @@ fn style_form(gui: &mut Gui, ui: &mut egui::Ui) {
 fn style_summary(style: &StyleConfig) -> String {
     let prompt = style.prompt.trim();
     match (style.polish, prompt.is_empty()) {
-        (false, _) => "No polish.".to_string(),
-        (true, true) => "Polish, with no prompt.".to_string(),
+        (false, _) => "No tidy-up.".to_string(),
+        (true, true) => "Tidy up, with no prompt.".to_string(),
         (true, false) => {
             let mut shown: String = prompt.chars().take(80).collect();
             if prompt.chars().count() > 80 {
                 shown.push('…');
             }
-            format!("Polish: {}", shown)
+            format!("Tidy up: {}", shown)
         },
     }
 }
@@ -405,7 +407,7 @@ pub fn save_style(config: &mut Config, draft: &StyleDraft) -> Result<(), String>
         .unwrap_or_default();
     if let (false, Some(chord)) = (style.can_rewrite(), rewrite_keys.first()) {
         return Err(format!(
-            "The rewrite key {} uses this style, so it needs polish on and a prompt.",
+            "The rewrite key {} uses this style, so it needs Tidy up on and a prompt.",
             chord
         ));
     }
@@ -942,9 +944,9 @@ mod tests {
             prompt: prompt.to_string(),
             polish,
         };
-        assert_eq!(style_summary(&style("Brief.", false)), "No polish.");
-        assert_eq!(style_summary(&style(" ", true)), "Polish, with no prompt.");
-        assert_eq!(style_summary(&style("Brief.", true)), "Polish: Brief.");
+        assert_eq!(style_summary(&style("Brief.", false)), "No tidy-up.");
+        assert_eq!(style_summary(&style(" ", true)), "Tidy up, with no prompt.");
+        assert_eq!(style_summary(&style("Brief.", true)), "Tidy up: Brief.");
         assert!(style_summary(&style(&"x".repeat(100), true)).ends_with('…'));
     }
 

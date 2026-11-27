@@ -242,6 +242,19 @@ fn backend_label(backend: TranscriptionBackend) -> &'static str {
 fn models(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Model");
     model_rows(gui, ui);
+    let gpu = GpuAvailability::detect();
+    let gpu_text = if gpu.available {
+        format!("{} via {}.", gpu.device_name, gpu.gpu_type)
+    } else {
+        "No GPU found, so transcription runs on the CPU.".to_string()
+    };
+    switch_row(
+        ui,
+        "speech.gpu",
+        "Use the GPU",
+        &gpu_text,
+        &mut gui.config.transcription.use_gpu,
+    );
 }
 
 /// The model to use, and the progress of its download.
@@ -374,23 +387,7 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
             );
         });
     detection(gui, ui);
-
     let backend = gui.config.transcription.backend;
-    if !backend.is_cloud() {
-        let gpu = GpuAvailability::detect();
-        let gpu_text = if gpu.available {
-            format!("{} via {}.", gpu.device_name, gpu.gpu_type)
-        } else {
-            "No GPU found, so transcription runs on the CPU.".to_string()
-        };
-        switch_row(
-            ui,
-            "speech.gpu",
-            "Use the GPU",
-            &gpu_text,
-            &mut gui.config.transcription.use_gpu,
-        );
-    }
     if !backend.is_cloud() {
         switch_row(
             ui,
@@ -419,26 +416,6 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
         &context_text,
         &mut gui.config.transcription.context_prompt,
     );
-
-    let mut minutes = (gui.config.audio.max_recording_secs / 60).min(MAX_MINUTES);
-    row("speech.max_recording", "Stop recording after")
-        .describe("A warning sounds a minute before a hands-free recording stops.")
-        .reserve(130.0)
-        .show(ui, |ui| {
-            if stepper(ui, &mut minutes, 0..=MAX_MINUTES, |n| never_or(n, "min")).changed() {
-                gui.config.audio.max_recording_secs = minutes * 60;
-            }
-        });
-
-    let mut pause = gui.config.audio.silence_stop_secs.min(MAX_PAUSE);
-    row("speech.silence_stop", "Stop after a pause")
-        .describe("Ends a hands-free recording when you stop talking for this long.")
-        .reserve(130.0)
-        .show(ui, |ui| {
-            if stepper(ui, &mut pause, 0..=MAX_PAUSE, |n| never_or(n, "s")).changed() {
-                gui.config.audio.silence_stop_secs = pause;
-            }
-        });
 }
 
 /// The longest cap the stepper sets, in minutes, and the longest pause, in
@@ -538,7 +515,7 @@ pub fn language_picker(
 }
 
 fn microphone(gui: &mut Gui, ui: &mut egui::Ui) {
-    section(ui, "Microphone");
+    section(ui, "Recording");
     if !gui.screenshot_mode() {
         ensure_meter(gui);
         refresh_wake(gui, ui.ctx());
@@ -585,6 +562,30 @@ fn microphone(gui: &mut Gui, ui: &mut egui::Ui) {
             let level = gui.meter.as_ref().map(Meter::level).unwrap_or(0.0);
             gui.level_shown = level.max(gui.level_shown * 0.85);
             level_meter(ui, gui.level_shown, FIELD_WIDTH);
+        });
+    limits(gui, ui);
+}
+
+/// How long a hands-free recording may run.
+fn limits(gui: &mut Gui, ui: &mut egui::Ui) {
+    let mut minutes = (gui.config.audio.max_recording_secs / 60).min(MAX_MINUTES);
+    row("speech.max_recording", "Stop recording after")
+        .describe("A warning sounds a minute before a hands-free recording stops.")
+        .reserve(130.0)
+        .show(ui, |ui| {
+            if stepper(ui, &mut minutes, 0..=MAX_MINUTES, |n| never_or(n, "min")).changed() {
+                gui.config.audio.max_recording_secs = minutes * 60;
+            }
+        });
+
+    let mut pause = gui.config.audio.silence_stop_secs.min(MAX_PAUSE);
+    row("speech.silence_stop", "Stop after a pause")
+        .describe("Ends a hands-free recording when you stop talking for this long.")
+        .reserve(130.0)
+        .show(ui, |ui| {
+            if stepper(ui, &mut pause, 0..=MAX_PAUSE, |n| never_or(n, "s")).changed() {
+                gui.config.audio.silence_stop_secs = pause;
+            }
         });
 }
 

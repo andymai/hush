@@ -419,6 +419,37 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         Role::Learn,
         "Adds the selected word to the vocabulary with its exact spelling.",
     );
+    chord_keys(
+        gui,
+        ui,
+        ChordMap::Languages,
+        "Each key dictates in its own language, with the same hold, double-tap, and \
+         cancel as the dictation key. The tray menu sets the language of the dictation key.",
+    );
+    chord_keys(
+        gui,
+        ui,
+        ChordMap::Translate,
+        "Each key dictates in its language and types the words in English, with the same \
+         hold, double-tap, and cancel as the dictation key. large-v3-turbo and parakeet-v3 \
+         cannot translate.",
+    );
+    chord_keys(
+        gui,
+        ui,
+        ChordMap::Styles,
+        "Each key dictates in its own writing style, with the same hold, double-tap, and \
+         cancel as the dictation key. Verbatim skips the model. Add styles on the Text page.",
+    );
+    chord_keys(
+        gui,
+        ui,
+        ChordMap::Rewrite,
+        "Each key rewrites the selected text with the prompt of a style, with no speech. \
+         A style needs Tidy up on and a prompt to rewrite.",
+    );
+
+    section(ui, "Advanced");
     row("hotkeys.backend", "Read keys through")
         .describe("The input devices work on Wayland and X11 alike. X11 is the fallback.")
         .reserve(280.0)
@@ -457,35 +488,6 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
          Applications then open no menu, and the desktop opens no launcher. On Sway, \
          Hush cannot read the keyboard options and sends no tap.",
         &mut gui.config.hotkey.mask_menu,
-    );
-    chord_keys(
-        gui,
-        ui,
-        ChordMap::Languages,
-        "Each key dictates in its own language, with the same hold, double-tap, and \
-         cancel as the dictation key. The tray menu sets the language of the dictation key.",
-    );
-    chord_keys(
-        gui,
-        ui,
-        ChordMap::Translate,
-        "Each key dictates in its language and types the words in English, with the same \
-         hold, double-tap, and cancel as the dictation key. large-v3-turbo and parakeet-v3 \
-         cannot translate.",
-    );
-    chord_keys(
-        gui,
-        ui,
-        ChordMap::Styles,
-        "Each key dictates in its own writing style, with the same hold, double-tap, and \
-         cancel as the dictation key. Verbatim turns polish off. Add styles on the Text page.",
-    );
-    chord_keys(
-        gui,
-        ui,
-        ChordMap::Rewrite,
-        "Each key rewrites the selected text with the prompt of a style, with no speech. \
-         A style needs polish on and a prompt to rewrite.",
     );
 }
 
