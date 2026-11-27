@@ -79,6 +79,8 @@ The prebuilt packages are for x86-64 Linux. They need only your usual graphics d
 
 ## Setup
 
+`hush setup` opens a window that sets Hush up one step at a time, from keyboard access and a model to a first dictation and privacy. The first `hush settings` on a new install opens the same steps, and so does the notification that the daemon sends once. In a terminal:
+
 ```bash
 hush setup permissions        # one polkit prompt: keyboard and uinput access, no logout
 hush models download base     # ~147 MB speech model

@@ -79,6 +79,52 @@ fn build(kind: NoticeKind, summary: &str, body: &str, replaces: Option<u32>) -> 
     notification
 }
 
+/// A notification with one button. `on_action` runs when the user picks the
+/// button or the notification. A server without buttons gets
+/// `without_button` as the body.
+pub fn notify_with_action(
+    kind: NoticeKind,
+    summary: &str,
+    body: &str,
+    label: &str,
+    without_button: &str,
+    on_action: impl FnOnce() + Send + 'static,
+) {
+    let summary = summary.to_string();
+    let body = body.to_string();
+    let label = label.to_string();
+    let without_button = without_button.to_string();
+    std::thread::spawn(move || {
+        let buttons = notify_rust::get_capabilities()
+            .is_ok_and(|capabilities| capabilities.iter().any(|c| c == "actions"));
+        let text = if buttons { &body } else { &without_button };
+        let mut notification = build(kind, &summary, text, None);
+        notification.timeout(Timeout::Default);
+        if buttons {
+            notification
+                .action("default", &label)
+                .action("open", &label);
+        }
+        let handle = match notification.show() {
+            Ok(handle) => handle,
+            Err(e) => {
+                debug!("Notification '{}' not shown: {}", summary, e);
+                return;
+            },
+        };
+        if buttons {
+            let mut on_action = Some(on_action);
+            handle.wait_for_action(|action| {
+                if matches!(action, "default" | "open") {
+                    if let Some(run) = on_action.take() {
+                        run();
+                    }
+                }
+            });
+        }
+    });
+}
+
 pub fn notify(kind: NoticeKind, summary: &str, body: &str) {
     let summary = summary.to_string();
     let body = body.to_string();

@@ -135,6 +135,8 @@ esac
 
 say ""
 say "Hush $version is installed. Next:"
+say "  hush setup                  # a window that sets Hush up, one step at a time"
+say "Or in a terminal:"
 say "  hush setup permissions      # one polkit prompt for keyboard and uinput access"
 say "  hush models download base   # or: hush setup init"
 say "  hush daemon start           # then hold Right Alt in any window; double-tap to keep recording"

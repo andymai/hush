@@ -19,7 +19,7 @@ Everyday dictation:
 | `hush transcribe <file>` | Print the text of a WAV or FLAC file, with the daemon's model when the daemon runs |
 | `hush recover [--all] [--list] [--type]` | Transcribe the newest take that failed (or `--all` of them), print or type the text, and delete its audio. `--list` only lists them |
 | `hush settings` | Open the setup and settings window |
-| `hush setup` / `hush settings --first-run` | Open the window on Get started: seven steps from keyboard access to privacy, and each one can be skipped. `$XDG_STATE_HOME/hush/setup.toml` keeps the progress, so the next run resumes there. While the window is open, a second `hush setup` opens nothing |
+| `hush setup` / `hush settings --first-run` | Open the window on Get started: seven steps from keyboard access to privacy, and each one can be skipped. `$XDG_STATE_HOME/hush/setup.toml` keeps the progress, so the next run resumes there. While the window is open, a second `hush setup` opens nothing. A plain `hush settings` opens on Get started on a new install, and while a setup has steps to do |
 | `hush doctor` | Check every component and print the fix for each problem |
 | `hush report [--output <file>]` | Write one file for a bug report: the version, the checks, `hush status --full`, the settings, the last 500 log lines at INFO and above, and the last crash. It replaces home paths, the host name, the user name, and API keys, removes style prompts, hook commands, and server addresses, and uploads nothing |
 
