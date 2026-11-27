@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/andymai/hush/compare/v1.11.0...v1.11.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **overlay:** start no new overlay while the daemon stops ([#377](https://github.com/andymai/hush/issues/377)) ([e148729](https://github.com/andymai/hush/commit/e1487295d259189062c38562fdaa9f1ab53f76ce))
+
 ## [1.11.0](https://github.com/andymai/hush/compare/v1.10.0...v1.11.0) (2026-11-26)
 
 
