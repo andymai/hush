@@ -64,14 +64,14 @@ fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
     let waiting = gui.pending.backend.and_then(|backend| {
         checked_change(&gui.config, |config| config.transcription.backend = backend)
             .err()
-            .map(|reason| format!("Not switched yet: set the server below. {}", reason))
+            .map(|reason| format!("Fill in the server below to switch. {}", reason))
     });
     let mut shown = shown_before;
     row("speech.backend", "Transcribe on")
         .describe(
-            "This machine keeps the audio here. Groq and OpenAI can be faster on a slow \
-             computer, and they receive the audio of every dictation. An OpenAI-compatible \
-             server receives the audio at the address you set.",
+            "On this computer, your audio never leaves it. Groq and OpenAI can be faster \
+             on an older machine, but they hear everything you dictate. Your own server \
+             gets it at the address you set.",
         )
         .problem(waiting.as_deref())
         .show(ui, |ui| {
@@ -98,22 +98,22 @@ fn backend(gui: &mut Gui, ui: &mut egui::Ui) {
     let service = backend.name();
     let has_key = gui.machine.has_key(&gui.config.transcription);
     let sent = if gui.config.transcription.context_prompt {
-        "the audio of each dictation and the focused window's title"
+        "your audio and the window title"
     } else {
-        "the audio of each dictation"
+        "your audio"
     };
     let status = api_keys::status(gui, var);
     let (title, description) = if has_key {
         (
-            format!("Audio leaves this machine for {}", service),
-            format!("Hush sends {} to {}. {}", sent, service, status),
+            format!("Your audio goes to {}", service),
+            format!("Each dictation sends {} to {}. {}", sent, service, status),
         )
     } else {
         (
             format!("{} needs an API key", service),
             format!(
-                "{} Until then dictation fails, and Hush never falls back to another \
-                 service.",
+                "{} Until you add one, dictation won't work. Hush never switches to \
+                 another service on its own.",
                 status
             ),
         )
@@ -156,7 +156,7 @@ fn server_settings(gui: &mut Gui, ui: &mut egui::Ui) {
         gui,
         ui,
         row("speech.server_url", "Server address")
-            .describe("Hush adds /v1/audio/transcriptions when the address does not end with it."),
+            .describe("You can leave off /v1/audio/transcriptions. Hush adds it."),
         "http://localhost:8080/v1",
         |config| &mut config.transcription.server_url,
     );
@@ -200,32 +200,32 @@ pub fn server_status(gui: &Gui) -> (bool, String, String) {
             false,
             format!("The server needs {}", var),
             format!(
-                "Save {} on the Speech page. Until then dictation fails, and Hush never \
-                 falls back to another backend.",
+                "Save {} on the Speech page. Until then, dictation won't work, and Hush \
+                 won't switch to another service.",
                 var
             ),
         );
     }
     let host = server::host_label(&transcription.server_url);
     let sent = if transcription.context_prompt {
-        "the audio of each dictation and the focused window's title"
+        "your audio and the window title"
     } else {
-        "the audio of each dictation"
+        "your audio"
     };
     if server::is_local(&transcription.server_url) {
         (
             true,
-            "A local server transcribes the audio".to_string(),
+            "Your own server turns speech into text".to_string(),
             format!(
-                "Hush sends {} to {}, on this machine or your local network.",
+                "Each dictation sends {} to {}, on this computer or your network.",
                 sent, host
             ),
         )
     } else {
         (
             true,
-            format!("Audio leaves this machine for {}", host),
-            format!("Hush sends {} to {}.", sent, host),
+            format!("Your audio goes to {}", host),
+            format!("Each dictation sends {} to {}.", sent, host),
         )
     }
 }
@@ -246,7 +246,7 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
     let gpu_text = if gpu.available {
         format!("{} via {}.", gpu.device_name, gpu.gpu_type)
     } else {
-        "No GPU found, so transcription runs on the CPU.".to_string()
+        "No GPU found, so Hush uses the CPU.".to_string()
     };
     switch_row(
         ui,
@@ -260,7 +260,7 @@ fn models(gui: &mut Gui, ui: &mut egui::Ui) {
 /// The model to use, and the progress of its download.
 pub(crate) fn model_rows(gui: &mut Gui, ui: &mut egui::Ui) {
     if gui.catalogue.is_empty() {
-        row("speech.models_dir", "The models directory is not readable")
+        row("speech.models_dir", "Hush can't read the models folder")
             .status(false)
             .reserve(0.0)
             .show(ui, |_| {});
@@ -336,7 +336,7 @@ pub(crate) fn model_rows(gui: &mut Gui, ui: &mut egui::Ui) {
     }
     if let Some(size) = selected {
         if !gui.machine.installed_models.contains(&size) {
-            let title = format!("{} is not downloaded yet", size_key(size));
+            let title = format!("{} isn't downloaded yet", size_key(size));
             let description = format!("{} from Hugging Face, once.", size_of(size));
             row("speech.download", &title)
                 .status(false)
@@ -351,7 +351,7 @@ pub(crate) fn model_rows(gui: &mut Gui, ui: &mut egui::Ui) {
                     }
                 });
         } else if gui.config.transcription.vad && !gui.machine.vad_installed {
-            row("speech.download", "Voice detection is not downloaded yet")
+            row("speech.download", "Voice detection isn't downloaded yet")
                 .status(false)
                 .describe(&format!(
                     "{} from Hugging Face, once. Until then, Whisper gets the silence in each take too.",
@@ -374,7 +374,8 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Listening");
     row("speech.language", "Language")
         .describe(
-            "Detecting the language costs a little accuracy, so name it when you mostly speak one.",
+            "If you mostly speak one language, pick it. That's a little more accurate \
+             than detecting it.",
         )
         .show(ui, |ui| {
             language_picker(
@@ -393,7 +394,7 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
             ui,
             "speech.vad",
             "Trim silence",
-            "Sends Whisper only the speech in each take, so silence does not turn into invented text.",
+            "Cuts out the quiet parts, so Whisper doesn't invent words for silence.",
             &mut gui.config.transcription.vad,
         );
     }
@@ -403,11 +404,11 @@ fn listening(gui: &mut Gui, ui: &mut egui::Ui) {
             hosted => hosted.name(),
         };
         format!(
-            "Sends the focused window's title and your vocabulary to {} with the audio.",
+            "Also sends {} the window title and your vocabulary, so names come out right.",
             receiver
         )
     } else {
-        "Primes Whisper with the focused window's title and your vocabulary.".to_string()
+        "Uses the window title and your vocabulary as hints, so names come out right.".to_string()
     };
     switch_row(
         ui,
@@ -440,11 +441,12 @@ fn detection(gui: &mut Gui, ui: &mut egui::Ui) {
         return;
     }
     let description = if transcription.backend.is_cloud() {
-        "Only Whisper on this machine uses this list. The service detects the language on its own."
+        "This list only applies on this computer. Cloud services detect the language \
+         themselves."
     } else {
-        "With Detect it, a language-ID model picks the most likely of these languages, and \
-         Whisper writes in it. The daemon downloads the model (27 MB) when it needs it. With \
-         none, Whisper picks from every language."
+        "Hush picks the most likely language from this list, with a small model it \
+         downloads the first time (27 MB). Leave it empty to let Whisper choose from \
+         every language."
     };
     let mut added = String::new();
     row("speech.detect_languages", "Detect only")
@@ -524,7 +526,7 @@ fn microphone(gui: &mut Gui, ui: &mut egui::Ui) {
         .filter(|finding| finding.warn)
         .map(|finding| format!("{}.", finding.detail));
     row("speech.microphone", "Input device")
-        .describe("The system default follows whatever your desktop picks.")
+        .describe("System default uses whichever microphone your desktop picks.")
         .caution(problem.as_deref())
         .reserve(FIELD_WIDTH + 32.0)
         .show(ui, |ui| {
@@ -554,7 +556,7 @@ fn microphone(gui: &mut Gui, ui: &mut egui::Ui) {
     wake_row(gui, ui);
     let level_text = match &gui.meter_error {
         Some(error) => error.clone(),
-        None => "Say something: the bar moves when Hush hears you.".to_string(),
+        None => "Say something. The bar moves when Hush hears you.".to_string(),
     };
     row("speech.level", "Level")
         .describe(&level_text)
@@ -570,7 +572,10 @@ fn microphone(gui: &mut Gui, ui: &mut egui::Ui) {
 fn limits(gui: &mut Gui, ui: &mut egui::Ui) {
     let mut minutes = (gui.config.audio.max_recording_secs / 60).min(MAX_MINUTES);
     row("speech.max_recording", "Stop recording after")
-        .describe("A warning sounds a minute before a hands-free recording stops.")
+        .describe(
+            "For hands-free recording. You'll hear a warning a minute before it \
+                   stops.",
+        )
         .reserve(130.0)
         .show(ui, |ui| {
             if stepper(ui, &mut minutes, 0..=MAX_MINUTES, |n| never_or(n, "min")).changed() {
@@ -580,7 +585,7 @@ fn limits(gui: &mut Gui, ui: &mut egui::Ui) {
 
     let mut pause = gui.config.audio.silence_stop_secs.min(MAX_PAUSE);
     row("speech.silence_stop", "Stop after a pause")
-        .describe("Ends a hands-free recording when you stop talking for this long.")
+        .describe("Ends hands-free recording once you've been quiet this long.")
         .reserve(130.0)
         .show(ui, |ui| {
             if stepper(ui, &mut pause, 0..=MAX_PAUSE, |n| never_or(n, "s")).changed() {
@@ -593,7 +598,7 @@ fn limits(gui: &mut Gui, ui: &mut egui::Ui) {
 const WAKE_REFRESH: Duration = Duration::from_secs(15);
 
 const RESTART_CAUTION: &str =
-    "WirePlumber restarts to read the change, so all sound stops for about a second.";
+    "WirePlumber restarts to apply this, so all sound cuts out for about a second.";
 
 /// Whether the microphone sleeps between takes, read in the background, and
 /// the action of the wake row.
@@ -713,10 +718,10 @@ fn run_wake(gui: &mut Gui, action: WakeAction, ctx: &egui::Context) {
         let message = match action {
             WakeAction::Keep => keep_awake(device.as_deref())
                 .await
-                .unwrap_or_else(|e| format!("Could not keep it awake: {:#}", e)),
+                .unwrap_or_else(|e| format!("Couldn't keep it awake: {:#}", e)),
             WakeAction::Release => let_sleep(device.as_deref())
                 .await
-                .unwrap_or_else(|e| format!("Could not remove the rule: {:#}", e)),
+                .unwrap_or_else(|e| format!("Couldn't remove the rule: {:#}", e)),
         };
         {
             let mut state = shared.lock();
@@ -743,19 +748,19 @@ async fn let_sleep(device: Option<&str>) -> anyhow::Result<String> {
     let dir = wake::config_dir()?;
     let probe = wake::look(device).await;
     Ok(match wake::undo(&wake::Host, &dir, probe).await? {
-        Undone::Nothing => "Hush has no rule to remove.".to_string(),
+        Undone::Nothing => "There's no Hush rule to remove.".to_string(),
         Undone::Removed {
             source: Some(source),
             ..
         } if source.suspend() == Sleep::Never => format!(
-            "The rule of Hush is gone. Another WirePlumber rule keeps {} awake.",
+            "Removed the Hush rule. Another WirePlumber rule still keeps {} awake.",
             source.label
         ),
         Undone::Removed {
             source: Some(source),
             ..
         } => format!("{} sleeps between takes again.", source.label),
-        Undone::Removed { source: None, .. } => "The rule of Hush is gone.".to_string(),
+        Undone::Removed { source: None, .. } => "Removed the Hush rule.".to_string(),
     })
 }
 
@@ -784,7 +789,7 @@ pub fn finish_wake(gui: &mut Gui) {
 fn wake_row(gui: &mut Gui, ui: &mut egui::Ui) {
     if gui.wake.shared.lock().running.is_some() {
         row("speech.wake", "WirePlumber restarts")
-            .describe("All sound stops for about a second.")
+            .describe("All sound cuts out for about a second.")
             .reserve(140.0)
             .show(ui, |ui| busy(ui, "Please wait"));
         return;
@@ -796,17 +801,17 @@ fn wake_row(gui: &mut Gui, ui: &mut egui::Ui) {
     let (title, description, ok, label, icon, stay) = match action {
         WakeAction::Keep => (
             "Keep the microphone awake",
-            "A WirePlumber rule stops this microphone from sleeping between takes, so a take \
-             keeps its first word. No app records while it is awake.",
+            "Some microphones go to sleep between recordings and cut off your first word. \
+             This keeps yours awake. Nothing records while it's awake.",
             false,
             "Keep it awake",
             icons::MIC,
             "Not now",
         ),
         WakeAction::Release => (
-            "Hush keeps a microphone awake",
-            "A WirePlumber rule of Hush stops the microphone from sleeping between takes. \
-             Remove the rule to let it sleep again.",
+            "Your microphone stays awake",
+            "A Hush rule keeps it from sleeping between recordings, so your first word \
+             isn't lost.",
             true,
             "Let it sleep again",
             icons::ROTATE_CCW,
@@ -958,7 +963,7 @@ pub(crate) fn tune(gui: &mut Gui, ui: &mut egui::Ui) {
 }
 
 pub fn start_tune(gui: &mut Gui) {
-    gui.run_hush(&["tune"], "Timing the models on this machine…");
+    gui.run_hush(&["tune"], "Timing the models on this computer…");
 }
 
 /// The title and the line of the tune row: the last result, or what a
@@ -968,8 +973,8 @@ fn tune_summary(tune: Option<&crate::transcription::tune::TuneResult>) -> (&'sta
     let Some(tune) = tune else {
         return (
             "Hardware tune",
-            "Times base on this machine's GPU and CPU, and recommends the most accurate model \
-             that keeps up."
+            "Measures this computer and suggests the most accurate model that still keeps \
+             up with you."
                 .to_string(),
         );
     };
@@ -1041,16 +1046,14 @@ pub fn model_downloaded(transcription: &mut TranscriptionConfig, fetched: Option
 /// for the credit.
 fn model_description(selected: Option<ModelSize>, recommended: ModelSize) -> String {
     if selected.is_some_and(|size| size.is_parakeet()) {
-        return "NVIDIA Parakeet TDT 0.6B v3 (CC BY 4.0), converted to GGUF and quantized to \
-                Q8_0. It knows 25 European languages and picks among them on its own, so the \
-                language setting does not apply. It reads no prompt: the window title, learned \
-                terms, and the text before a part do not prime it."
+        return "NVIDIA's Parakeet (CC BY 4.0). Fast and accurate in 25 European \
+                languages. It detects the language itself, so the language setting \
+                doesn't apply, and it ignores the window title and your vocabulary."
             .to_string();
     }
     format!(
-        "Runs on your machine. Larger Whisper models are more accurate and slower; {} suits \
-         this machine. parakeet-v3 is NVIDIA's Parakeet: fast and accurate in 25 European \
-         languages, without priming.",
+        "Bigger models are more accurate but slower. {} is the best fit for this \
+         computer. parakeet-v3 is fast and accurate in 25 European languages.",
         size_key(recommended)
     )
 }
@@ -1223,13 +1226,13 @@ mod tests {
         for words in [
             "NVIDIA",
             "CC BY 4.0",
-            "converted to GGUF and quantized to Q8_0",
-            "no prompt",
+            "language setting doesn't apply",
+            "ignores the window title",
         ] {
             assert!(parakeet.contains(words), "{words}: {parakeet}");
         }
         let whisper = model_description(Some(ModelSize::Base), ModelSize::Small);
-        assert!(whisper.contains("small suits this machine"), "{whisper}");
+        assert!(whisper.contains("small is the best fit"), "{whisper}");
     }
 
     #[test]
@@ -1270,7 +1273,7 @@ mod tests {
         use crate::transcription::tune::{DeviceKind, Measured, Pick, Preference, TuneResult};
         let (title, text) = tune_summary(None);
         assert_eq!(title, "Hardware tune");
-        assert!(text.starts_with("Times base"));
+        assert!(text.starts_with("Measures this computer"));
         let tune = TuneResult {
             gpu: None,
             preference: Preference::Balanced,

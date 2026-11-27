@@ -82,8 +82,8 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Set up Hush");
     intro(
         ui,
-        "Eight steps get Hush ready. You can skip any of them: each one also has its \
-         place in the settings.",
+        "A few quick steps to get Hush ready. Skip any you like. Everything here is also \
+         in the settings.",
     );
     for step in Step::ALL {
         if current == Some(step) {
@@ -189,8 +189,8 @@ fn open_step(gui: &mut Gui, ui: &mut egui::Ui, step: Step) {
 fn access(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
     intro(
         ui,
-        "Hush reads its keys from the keyboard and types the text through a virtual \
-         keyboard, so it works in every application.",
+        "Hush needs to read your hotkey and type for you. That's what lets it work in \
+         every app.",
     );
     overview::access_row(gui, ui);
     gui.machine.can_type()
@@ -214,8 +214,8 @@ fn model_ready(gui: &Gui) -> bool {
 fn model(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
     intro(
         ui,
-        "Hush transcribes on this machine with a Whisper model. base downloads now, and \
-         the hardware tune can pick a more accurate one later.",
+        "Hush turns your speech into text right on this computer. It starts with the base \
+         model, and a later step can find a more accurate one.",
     );
     let start = gui.setup.as_ref().is_some_and(|setup| !setup.downloading);
     if start && !model_ready(gui) && gui.download.lock().size.is_none() {
@@ -234,16 +234,15 @@ fn hotkey(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
     if InputMode::detect(gui.config.input.backend).is_portal() {
         intro(
             ui,
-            "The desktop asks which key starts a dictation the first time you dictate. \
-             Change it later on the Hotkeys page.",
+            "Your desktop will ask which key to use the first time you dictate. You can \
+             change it later on the Hotkeys page.",
         );
         return true;
     }
     intro(
         ui,
-        "Hold the key and speak, then let go: the words appear where you type. \
-         Double-tap it to keep recording without holding, and press Escape to throw a \
-         take away.",
+        "Hold the key, talk, and let go. Your words appear wherever you're typing. \
+         Double-tap to go hands-free, and press Escape to throw a recording away.",
     );
     hotkeys::key_row(
         gui,
@@ -281,7 +280,7 @@ fn tune(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
     if gui.config.transcription.backend.is_cloud() {
         intro(
             ui,
-            "A service transcribes for you, so this machine needs no tune.",
+            "A cloud service does the transcribing, so there's nothing to measure here.",
         );
         return true;
     }
@@ -291,7 +290,7 @@ fn tune(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
     {
         let title = format!("Use {}", speech::size_key(pick));
         row("setup.use_pick", &title)
-            .describe("Downloads the model when it is not here yet, then uses it.")
+            .describe("Downloads it if needed, then switches to it.")
             .reserve(120.0)
             .show(ui, |ui| {
                 if ui
@@ -314,8 +313,8 @@ fn llm(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
     };
     intro(
         ui,
-        "A language model tidies each transcript and carries out Command Mode. It gets \
-         the text only, never the audio. Ollama runs one on this machine.",
+        "A language model cleans up what you say and handles Command Mode. It only sees \
+         the text, never your audio. Ollama runs one right on this computer.",
     );
     let url = gui.config.llm.ollama_url.clone();
     let stale = {
@@ -342,26 +341,26 @@ fn llm(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
     let (title, description, command) = match found.map(|(_, models)| models) {
         None => ("Looking for Ollama", String::new(), None),
         Some(Some(models)) if !models.is_empty() => (
-            "Ollama runs here",
+            "Ollama is running",
             format!("Its models: {}.", models.join(", ")),
             None,
         ),
         Some(Some(_)) => (
-            "Ollama runs here, with no model",
-            "Pull one, then name it below.".to_string(),
+            "Ollama is running, but has no models",
+            "Pull one, then enter its name below.".to_string(),
             Some("ollama pull llama3.2"),
         ),
         Some(None) => (
-            "Ollama does not answer",
+            "Ollama isn't running",
             format!(
-                "Nothing answers at {}. Install Ollama from ollama.com, then pull a model.",
+                "Nothing answered at {}. Install Ollama from ollama.com, then pull a model.",
                 gui.config.llm.ollama_url
             ),
             Some("curl -fsSL https://ollama.com/install.sh | sh\nollama pull llama3.2"),
         ),
     };
     let mut ollama = row("setup.ollama", title).describe(&description);
-    if title == "Ollama runs here" {
+    if title == "Ollama is running" {
         ollama = ollama.status(true);
     }
     ollama.control_below().show(ui, |ui| {
@@ -378,7 +377,7 @@ fn llm(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
             (check.testing, check.test.clone())
         };
         let description = match &answer {
-            None => "Sends one short request with these settings.".to_string(),
+            None => "Sends a quick test to make sure it works.".to_string(),
             Some(Ok(provider)) => format!("{} answered.", provider),
             Some(Err(reason)) => reason.clone(),
         };
@@ -412,14 +411,15 @@ fn llm(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
 fn privacy(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
     intro(
         ui,
-        "Your voice stays on this machine unless you pick a cloud service on the Speech \
-         page. These keep less, or check for more.",
+        "Your voice stays on this computer unless you pick a cloud service on the Speech \
+         page. You decide what else Hush keeps and checks.",
     );
     switch_row(
         ui,
         "setup.history",
         "Keep a history of transcripts",
-        "The History page searches them and types one again. Only you can read the file.",
+        "Search past transcripts and type them again from the History page. Only you can \
+         read them.",
         &mut gui.config.history.enabled,
     );
     if crate::updates::InstallKind::current().checks() {
@@ -427,8 +427,8 @@ fn privacy(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
             ui,
             "setup.updates",
             "Check for new releases",
-            "Once a day, ask GitHub for the newest release. The request sends only the Hush \
-             version.",
+            "Checks GitHub once a day for a new version. It only sends which version you \
+             have.",
             &mut gui.config.updates.check,
         );
     }
@@ -438,7 +438,7 @@ fn privacy(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
 fn finished(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Done");
     let description = format!(
-        "Hold {} anywhere and speak. The pages in the sidebar hold every setting.",
+        "Hold {} anywhere and talk. Everything else is in the sidebar.",
         gui.saved.hotkey.combination
     );
     row("setup.done", "Hush is set up")

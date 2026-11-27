@@ -35,7 +35,7 @@ pub(crate) fn daemon_row(gui: &mut Gui, ui: &mut egui::Ui) {
     let (title, description) = match (running, &safe_mode) {
         (true, Some(_)) => ("Hush runs in safe mode", "Listening for the hotkey."),
         (true, None) => ("Hush is running", "Listening for the hotkey."),
-        (false, _) => ("Hush is not running", "Start it to dictate."),
+        (false, _) => ("Hush isn't running", "Start it to dictate."),
     };
     row("overview.daemon", title)
         .status(running && safe_mode.is_none())
@@ -76,7 +76,7 @@ pub(crate) fn autostart_row(gui: &mut Gui, ui: &mut egui::Ui) {
         let line = compositor.startup_line();
         row("overview.autostart", "Start Hush when I log in")
             .describe(&format!(
-                "{} runs no autostart entries on its own. Add this line to its config.",
+                "{} doesn't run autostart entries. Add this line to its config instead.",
                 compositor.name()
             ))
             .show(ui, |ui| {
@@ -85,14 +85,22 @@ pub(crate) fn autostart_row(gui: &mut Gui, ui: &mut egui::Ui) {
         return;
     }
     row("overview.autostart", "Start Hush when I log in")
-        .describe("Adds Hush to your desktop session's autostart.")
+        .describe("Hush starts in the background, ready for your hotkey.")
         .reserve(36.0)
         .show(ui, |ui| {
             if switch(ui, &mut autostart).changed() {
                 if autostart {
-                    gui.run_hush(&["install", "--autostart"], "Added to your login.");
+                    gui.run_hush(
+                        &["install", "--autostart"],
+                        "Hush will start when you \
+                                                               log in.",
+                    );
                 } else {
-                    gui.run_hush(&["uninstall", "--autostart"], "Removed from your login.");
+                    gui.run_hush(
+                        &["uninstall", "--autostart"],
+                        "Hush won't start when \
+                                                                 you log in.",
+                    );
                 }
             }
         });
@@ -101,8 +109,8 @@ pub(crate) fn autostart_row(gui: &mut Gui, ui: &mut egui::Ui) {
 /// What safe mode means in the window, with its reason.
 pub fn safe_mode_text(reason: &str) -> String {
     format!(
-        "Hush writes and deletes nothing in the history and the kept audio, because {}. \
-         It restarts on its own once the file loads.",
+        "Hush isn't touching your history or saved audio right now, because {}. It picks \
+         up again once the file loads.",
         reason
     )
 }
@@ -116,11 +124,11 @@ fn access(gui: &mut Gui, ui: &mut egui::Ui) {
 /// grants it.
 pub(crate) fn access_row(gui: &mut Gui, ui: &mut egui::Ui) {
     if gui.machine.portal {
-        row("overview.access", "The desktop types for Hush")
+        row("overview.access", "Your desktop types for Hush")
             .status(true)
             .describe(
-                "Hush types and reads its shortcuts through the desktop portals. The \
-                 desktop asks once for keyboard access, at the first dictation.",
+                "Hush types and uses shortcuts through your desktop. It asks for keyboard \
+                 access once, the first time you dictate.",
             )
             .show(ui, |_| {});
         return;
@@ -129,23 +137,26 @@ pub(crate) fn access_row(gui: &mut Gui, ui: &mut egui::Ui) {
     let ready = status.ready();
     let description = if ready {
         format!(
-            "Reads the keyboard ({} of {} devices) and types into other windows.",
+            "Hush sees your hotkey on {} of {} input devices and can type into any window.",
             status.readable_event_nodes, status.event_nodes
         )
     } else {
         let mut text = String::from(
-            "One rule gives Hush the keyboard and the virtual keyboard it types with. \
-             You will be asked for your password, and may need to log out once.",
+            "Hush needs permission to read your hotkey and type for you. You'll be asked \
+             for your password, and you may need to log out once.",
         );
         if status.in_container {
-            text.push_str(" This is a container: install the rule on the host, then restart Hush.");
+            text.push_str(
+                "You're in a container, so install the rule on the host, then \
+                           restart Hush.",
+            );
         }
         text
     };
     let title = if ready {
-        "Hush can read and type"
+        "Hush can use the keyboard"
     } else {
-        "Hush cannot read the keyboard yet"
+        "Hush can't use the keyboard yet"
     };
     row("overview.access", title)
         .status(ready)
@@ -182,8 +193,11 @@ fn model(gui: &mut Gui, ui: &mut egui::Ui) {
         let has_key = gui.machine.has_key(&gui.config.transcription);
         let (title, description) = if has_key {
             (
-                format!("{} transcribes your speech", backend.name()),
-                format!("The audio of each dictation goes to {}.", backend.name()),
+                format!("{} turns your speech into text", backend.name()),
+                format!(
+                    "Your audio goes to {} each time you dictate.",
+                    backend.name()
+                ),
             )
         } else {
             (
@@ -209,11 +223,14 @@ fn model(gui: &mut Gui, ui: &mut egui::Ui) {
     } else if gui.machine.installed_models.is_empty() {
         "No model downloaded yet".to_string()
     } else {
-        format!("{} is not downloaded", gui.config.transcription.model_size)
+        format!(
+            "{} isn't downloaded yet",
+            gui.config.transcription.model_size
+        )
     };
     row("overview.model", &title)
         .status(installed)
-        .describe("Runs on your machine. Larger models are more accurate and slower.")
+        .describe("Runs on this computer. Bigger models are more accurate but slower.")
         .reserve(140.0)
         .show(ui, |ui| {
             if widgets::button(ui, "Choose a model").clicked() {
@@ -232,7 +249,7 @@ pub(crate) fn try_box(gui: &mut Gui, ui: &mut egui::Ui) {
     intro(
         ui,
         &format!(
-            "Click in the box, hold {}, and speak. The words land here.",
+            "Click in the box, hold {}, and talk. Your words show up here.",
             gui.saved.hotkey.combination
         ),
     );
@@ -264,7 +281,7 @@ pub(crate) fn try_box(gui: &mut Gui, ui: &mut egui::Ui) {
                             ui,
                             icons::CIRCLE_ALERT,
                             colours.warn,
-                            "Grant keyboard access first.",
+                            "Turn on keyboard access first.",
                         );
                     }
                 },

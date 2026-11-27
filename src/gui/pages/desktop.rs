@@ -15,21 +15,24 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         ui,
         "desktop.tray",
         "Show the panel icon",
-        "Click it to start or stop dictation. GNOME needs the AppIndicator extension.",
+        "Click it to start or stop dictating. On GNOME, you'll need the AppIndicator \
+         extension.",
         &mut gui.config.tray.enabled,
     );
     switch_row(
         ui,
         "desktop.sounds",
         "Play a sound when recording starts and stops",
-        "A short tone on start, stop, cancel, and the warning before a cap.",
+        "A short tone when you start, stop, or cancel, and before a long recording times \
+         out.",
         &mut gui.config.feedback.audio_enabled,
     );
     switch_row(
         ui,
         "desktop.pause_media",
         "Pause music and video while you record",
-        "Pauses the players that play, then resumes them when the recording stops. The players must support MPRIS, as most do.",
+        "Pauses whatever's playing and picks it back up when you're done. Works with most \
+         players.",
         &mut gui.config.audio.pause_media,
     );
     let title = "Check for new releases";
@@ -38,7 +41,8 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
             ui,
             "desktop.updates",
             title,
-            "Once a day, ask GitHub for the newest release and show a notification when it is newer. The request sends only the Hush version.",
+            "Checks GitHub once a day and lets you know when there's a new version. It \
+             only sends which version you have.",
             &mut gui.config.updates.check,
         );
     } else {
@@ -59,7 +63,8 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         ui,
         "desktop.overlay",
         "Show the recording pill",
-        "The pill at the bottom of the screen shows the level and the time while you record. Click it to stop, or right-click to discard.",
+        "A small pill at the bottom of the screen shows that you're recording. Click it \
+         to stop, or right-click to throw the recording away.",
         &mut gui.config.overlay.enabled,
     );
     let theme = gui.config.overlay.theme;
@@ -77,7 +82,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
 
     section(ui, "Appearance");
     row("desktop.appearance", "Window theme")
-        .describe("The theme of this window. System follows the light or dark preference of your desktop.")
+        .describe("For this window. System matches your desktop's light or dark setting.")
         .reserve(190.0)
         .show(ui, |ui| {
             let options = Appearance::ALL.map(|appearance| (appearance, appearance.name()));
@@ -87,7 +92,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Configuration file");
     let path = crate::config::paths::config_path();
     let shown = home_relative(&path, dirs::home_dir().as_deref());
-    row("desktop.config_file", "Every page writes to this file")
+    row("desktop.config_file", "All your settings live in this file")
         .value(&shown)
         .reserve(150.0)
         .show(ui, |ui| {
@@ -100,14 +105,11 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         });
     let confirming = gui.confirm_reset;
     row("desktop.reset", "Reset everything")
-        .describe(
-            "Puts the built-in defaults back on every page, except the history settings and \
-             your writing styles.",
-        )
+        .describe("Puts every setting back to its default. Your history and writing styles stay.")
         .caution(confirming.then_some(
-            "Resets the hotkeys and the speech, text, output, and desktop settings at once. \
-             The history settings, the writing styles, the vocabulary, the transcripts, and \
-             the kept audio stay as they are.",
+            "This resets your hotkeys and every speech, text, output, and desktop \
+             setting. Your history settings, writing styles, vocabulary, transcripts, and \
+             saved audio stay as they are.",
         ))
         .reserve(if confirming { 230.0 } else { 100.0 })
         .show(ui, |ui| {
@@ -129,9 +131,9 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                     Ok(defaults) => {
                         gui.config = defaults;
                         gui.pending = Pending::default();
-                        gui.say("The settings are back to their defaults.");
+                        gui.say("Your settings are back to their defaults.");
                     },
-                    Err(e) => gui.say(format!("Could not reset: {}", e)),
+                    Err(e) => gui.say(format!("Couldn't reset: {}", e)),
                 }
             }
             if ui.add(Button::new("Keep them").focus_on_jump()).clicked() {
@@ -148,7 +150,7 @@ pub fn open_config_file(gui: &mut Gui) {
         let _ = gui.config.save_to_file(&path);
     }
     if let Err(e) = std::process::Command::new("xdg-open").arg(&path).spawn() {
-        gui.say(format!("Could not open it: {}", e));
+        gui.say(format!("Couldn't open it: {}", e));
     }
 }
 
@@ -157,12 +159,14 @@ pub fn open_config_file(gui: &mut Gui) {
 fn overlay_theme_note(theme: OverlayTheme) -> &'static str {
     match theme {
         OverlayTheme::System => {
-            "System follows the light or dark preference of your desktop, its accent color, and its contrast setting."
+            "System matches your desktop's light or dark setting, accent color, and \
+             contrast."
         },
         OverlayTheme::File => {
-            "Reads overlay-theme.toml next to the configuration file, and again after each change."
+            "Uses overlay-theme.toml next to your config file, and picks up your changes \
+             as you save."
         },
-        _ => "When your desktop asks for less motion, the level shows as one still bar.",
+        _ => "If you've turned on reduced motion, the level shows as one still bar.",
     }
 }
 

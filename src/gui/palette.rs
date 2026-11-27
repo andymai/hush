@@ -271,7 +271,7 @@ pub const SETTINGS: &[Setting] = &[
     .when(server_key),
     row(
         "speech.models_dir",
-        "The models directory is not readable",
+        "Hush can't read the models folder",
         Page::Speech,
         "Model",
         "folder error",

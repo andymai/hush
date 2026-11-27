@@ -40,18 +40,23 @@ pub fn status(gui: &Gui, var: &str) -> String {
 
 fn describe(var: &str, source: Option<Source>, sandboxed: bool) -> String {
     match source {
-        None if sandboxed => format!("{} is not set. Save puts it in the .env file of Hush.", var),
-        None => format!("{} is not set. Save puts it in the keyring.", var),
+        None if sandboxed => format!(
+            "{} isn't set. Saving puts it in Hush's private .env \
+                                      file.",
+            var
+        ),
+        None => format!("{} isn't set. Saving puts it in your keyring.", var),
         Some(Source::Environment) => format!(
-            "{} comes from the environment, which wins over a saved key.",
+            "{} comes from your environment, which overrides a saved key.",
             var
         ),
-        Some(Source::Keyring) => format!("{} is in the keyring.", var),
+        Some(Source::Keyring) => format!("{} is saved in your keyring.", var),
         Some(Source::Locked) => format!(
-            "{} is in the keyring, which is locked. Save the key again to unlock it.",
+            "{} is in your keyring, but the keyring is locked. Save the key again to \
+             unlock it.",
             var
         ),
-        Some(Source::EnvFile) => format!("{} is in a .env file.", var),
+        Some(Source::EnvFile) => format!("{} is saved in a .env file.", var),
     }
 }
 
@@ -89,7 +94,7 @@ pub fn key_row(gui: &mut Gui, ui: &mut egui::Ui, row: Row<'_>, var: &str) {
     });
     if let (true, Some(page)) = (get, page) {
         if let Err(e) = std::process::Command::new("xdg-open").arg(page).spawn() {
-            gui.say(format!("Could not open {}: {}", page, e));
+            gui.say(format!("Couldn't open {}: {}", page, e));
         }
     }
     if save {
@@ -175,21 +180,21 @@ mod tests {
     fn the_status_says_where_the_key_is_and_never_its_value() {
         assert_eq!(
             describe("GROQ_API_KEY", None, false),
-            "GROQ_API_KEY is not set. Save puts it in the keyring."
+            "GROQ_API_KEY isn't set. Saving puts it in your keyring."
         );
         assert_eq!(
             describe("GROQ_API_KEY", None, true),
-            "GROQ_API_KEY is not set. Save puts it in the .env file of Hush."
+            "GROQ_API_KEY isn't set. Saving puts it in Hush's private .env file."
         );
         assert!(describe("GROQ_API_KEY", Some(Source::Locked), false).contains("locked"));
         assert!(describe("GROQ_API_KEY", Some(Source::Environment), false).contains("environment"));
         assert_eq!(
             describe("GROQ_API_KEY", Some(Source::Keyring), false),
-            "GROQ_API_KEY is in the keyring."
+            "GROQ_API_KEY is saved in your keyring."
         );
         assert_eq!(
             describe("GROQ_API_KEY", Some(Source::EnvFile), true),
-            "GROQ_API_KEY is in a .env file."
+            "GROQ_API_KEY is saved in a .env file."
         );
     }
 

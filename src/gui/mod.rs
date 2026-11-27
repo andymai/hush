@@ -541,12 +541,15 @@ impl Gui {
                 let days = self.config.history.keep_audio_days;
                 if config.history.keep_audio_days < days {
                     config.history.keep_audio_days = days;
-                    self.say("Undo kept the audio days. Lower them on the History page.");
+                    self.say(
+                        "Undo didn't shorten how long audio is kept, so nothing was \
+                              deleted. Change it on the History page.",
+                    );
                 }
                 self.config = config;
                 self.vocabulary = vocabulary;
             },
-            Err(e) => self.say(format!("Could not undo: {:#}", e)),
+            Err(e) => self.say(format!("Couldn't undo: {:#}", e)),
         }
     }
 
@@ -592,8 +595,8 @@ impl Gui {
             }
         } else if self.files.config_error.is_some() {
             self.config_feedback = Some(Feedback::Failed(
-                "Not saved: the configuration file does not load. Replace it at the top of \
-                 the page, or fix the file and open the window again."
+                "Not saved, because the config file has an error. Replace it at the top \
+                 of the page, or fix the file and reopen this window."
                     .to_string(),
             ));
         } else if self.rejected.as_ref() != Some(&self.config) {
@@ -606,8 +609,8 @@ impl Gui {
             }
         } else if self.files.vocabulary_error.is_some() {
             self.vocabulary_feedback = Some(Feedback::Failed(
-                "Not saved: the vocabulary file does not load. Replace it at the top of \
-                 the page, or fix the file and open the window again."
+                "Not saved, because the vocabulary file has an error. Replace it at the \
+                 top of the page, or fix the file and reopen this window."
                     .to_string(),
             ));
         } else if self.rejected_vocabulary.as_ref() != Some(&self.vocabulary) {
@@ -690,10 +693,10 @@ impl Gui {
                 self.config_feedback = Some(Feedback::Saved(Instant::now()));
                 match backup {
                     Some(backup) => self.say(format!("Kept the old file as {}.", backup.display())),
-                    None => self.say("Wrote the configuration."),
+                    None => self.say("Saved the new config file."),
                 }
             },
-            Err(e) => self.say(format!("Could not replace the file: {:#}", e)),
+            Err(e) => self.say(format!("Couldn't replace the file: {:#}", e)),
         }
     }
 
@@ -706,19 +709,19 @@ impl Gui {
                 self.vocabulary_feedback = Some(Feedback::Saved(Instant::now()));
                 match backup {
                     Some(backup) => self.say(format!("Kept the old file as {}.", backup.display())),
-                    None => self.say("Wrote the vocabulary."),
+                    None => self.say("Saved the new vocabulary file."),
                 }
             },
-            Err(e) => self.say(format!("Could not replace the file: {:#}", e)),
+            Err(e) => self.say(format!("Couldn't replace the file: {:#}", e)),
         }
     }
 
     /// What a close would lose, when anything.
     fn unsaved(&self) -> Option<&'static str> {
         if self.config != self.saved || self.vocabulary != self.saved_vocabulary {
-            Some("Some settings did not save")
+            Some("Some settings didn't save")
         } else if self.pending.backend.is_some() || self.pending.provider.is_some() {
-            Some("A choice waits for other settings")
+            Some("A change is waiting on another setting")
         } else {
             None
         }
@@ -751,7 +754,7 @@ impl Gui {
             CloseStep::Warn => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.close.warned = true;
-                let reason = self.unsaved().unwrap_or("Something did not save");
+                let reason = self.unsaved().unwrap_or("Something didn't save");
                 self.say(format!("{}. Close again to discard it.", reason));
             },
             CloseStep::WaitForRestart => {
@@ -783,7 +786,7 @@ impl Gui {
         if rejected {
             self.close.closing = false;
             self.close.warned = true;
-            self.say("A field did not save. Close again to discard it.");
+            self.say("A field didn't save. Close again to discard it.");
         } else if !self.close.warned {
             if let Some(reason) = self.unsaved() {
                 self.close.closing = false;
@@ -824,7 +827,7 @@ impl Gui {
                     self.hold_restart(now);
                 },
                 Attempt::NotRunning => self.held_tries = 0,
-                Attempt::Failed(e) => self.say(format!("Could not restart Hush: {}", e)),
+                Attempt::Failed(e) => self.say(format!("Couldn't restart Hush: {}", e)),
             }
         }
         if self.close.closing
@@ -992,7 +995,7 @@ impl Gui {
             self.say("Applied.");
         } else if restart.since.elapsed() > RESTART_TIMEOUT {
             self.restart = None;
-            self.say("Saved, but Hush did not come back. Run hush doctor.");
+            self.say("Saved, but Hush didn't restart. Run hush doctor to see why.");
         }
     }
 
@@ -1010,7 +1013,7 @@ impl Gui {
                     self.saved = config;
                     self.rejected = None;
                     self.config_feedback = None;
-                    self.say("The configuration file loads again.");
+                    self.say("The config file works again.");
                 },
                 Err(e) => warn!("Could not read the configuration again: {:#}", e),
             }
@@ -1043,7 +1046,7 @@ impl Gui {
         let mut command = std::process::Command::new(binary);
         match keys::without_env_files(&mut command).args(&owned).spawn() {
             Ok(_) => self.say(done),
-            Err(e) => self.say(format!("Could not run hush {}: {}", owned.join(" "), e)),
+            Err(e) => self.say(format!("Couldn't run hush {}: {}", owned.join(" "), e)),
         }
     }
 
@@ -1334,7 +1337,7 @@ pub fn run(first_run: bool) -> Result<()> {
     let saved = crate::setup::SetupState::load(&crate::setup::path());
     if first_run {
         let Some(lock) = crate::setup::lock()? else {
-            println!("The setup window is open already.");
+            println!("The setup window is already open.");
             return Ok(());
         };
         app.setup = Some(pages::setup::Setup::open(&facts, lock));
@@ -1369,7 +1372,7 @@ pub fn run(first_run: bool) -> Result<()> {
             Ok(Box::new(app))
         }),
     )
-    .map_err(|e| anyhow::anyhow!("Could not open the Hush window: {}", e))
+    .map_err(|e| anyhow::anyhow!("Couldn't open the Hush window: {}", e))
 }
 
 /// Bytes as a short human-readable string.

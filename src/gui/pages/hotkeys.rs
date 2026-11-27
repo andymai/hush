@@ -179,7 +179,7 @@ const CHORD_COLUMN: f32 = CHORD_KEY_WIDTH + PICKER_WIDTH + 40.0;
 /// Red text under a hotkey field that does not parse.
 pub fn combination_error(text: &str, required: bool) -> Option<String> {
     if text.trim().is_empty() {
-        return required.then(|| "Hush needs a key to dictate with.".to_string());
+        return required.then(|| "Pick a key to dictate with.".to_string());
     }
     KeyCombination::parse(text).err().map(|e| e.to_string())
 }
@@ -248,8 +248,8 @@ fn map_caution(hotkey: &HotkeyConfig, map: ChordMap, chord: &str) -> Option<Stri
 
 fn reaches_the_app(chord: &KeyCombination) -> String {
     format!(
-        "{} also reaches the focused app. To hide it, turn on Keep the key from \
-         other applications.",
+        "{} also reaches the app you're typing in. To stop that, turn on Keep the key \
+         from other applications.",
         chord
     )
 }
@@ -274,8 +274,8 @@ fn portal_show(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Dictation");
     intro(
         ui,
-        "The desktop owns these keys. Hush asks it for one shortcut for each action, \
-         and you set or change the keys in the shortcut settings of the desktop.",
+        "Your desktop manages these shortcuts. Set or change them in your desktop's \
+         shortcut settings.",
     );
     match portal_shortcuts(gui) {
         Ok(shortcuts) => {
@@ -293,14 +293,14 @@ fn portal_show(gui: &mut Gui, ui: &mut egui::Ui) {
     // Portal mode only, so the command palette, which lists the rows of
     // both modes, has no entry for it.
     row("portal-configure", "Change the keys")
-        .describe("Opens the shortcut settings of the desktop.")
+        .describe("Opens your desktop's shortcut settings.")
         .show(ui, |ui| {
             if ui.button("Open").clicked() {
                 configure_shortcuts(gui);
             }
         });
     row("hotkeys.mode", "Mode")
-        .describe("Hold to talk, or tap to start and tap to stop.")
+        .describe("Hold the key while you talk, or tap once to start and again to stop.")
         .reserve(250.0)
         .show(ui, |ui| {
             let options =
@@ -320,10 +320,9 @@ fn ask_daemon(gui: &Gui, configure: bool) -> Result<Vec<PortalShortcut>, String>
     match reply {
         Ok(Ok(reply)) if reply.ok => Ok(reply.shortcuts.unwrap_or_default()),
         Ok(Ok(reply)) => Err(reply.error.unwrap_or_default()),
-        Ok(Err(_)) | Err(_) => Err(
-            "Start Hush (hush daemon start), and it asks the desktop for its shortcuts."
-                .to_string(),
-        ),
+        Ok(Err(_)) | Err(_) => {
+            Err("Start Hush, and it'll ask your desktop for its shortcuts.".to_string())
+        },
     }
 }
 
@@ -346,7 +345,7 @@ fn configure_shortcuts(gui: &mut Gui) {
     match ask_daemon(gui, true) {
         Ok(shortcuts) => {
             gui.portal_shortcuts = Some((Instant::now(), Ok(shortcuts)));
-            gui.say("The desktop opened its shortcut settings.");
+            gui.say("Opened your desktop's shortcut settings.");
         },
         Err(why) => gui.say(why),
     }
@@ -360,8 +359,8 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Dictation");
     intro(
         ui,
-        "Click a key, then press the one you want. A modifier on its own, such as \
-         RightAlt, types no character in other applications.",
+        "Click a key, then press the one you want. A key like RightAlt works well because \
+         it doesn't type anything on its own.",
     );
     if let Some(altgr) = warnings::altgr(
         gui.config.hotkey.bound(),
@@ -379,13 +378,13 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         Role::Dictate,
         match gui.config.hotkey.mode {
             HotkeyMode::Hold => {
-                "Hold to talk. Double-tap to keep recording hands-free until you tap again."
+                "Hold to talk. Double-tap to go hands-free, then tap again to stop."
             },
             HotkeyMode::Toggle => "Tap to start, tap again to stop.",
         },
     );
     row("hotkeys.mode", "Mode")
-        .describe("Hold to talk, or tap to start and tap to stop.")
+        .describe("Hold the key while you talk, or tap once to start and again to stop.")
         .reserve(250.0)
         .show(ui, |ui| {
             let options =
@@ -396,62 +395,57 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         gui,
         ui,
         Role::Cancel,
-        "Discards the recording in progress. Clear it for none.",
+        "Throws away the recording you're making. Clear it if you don't want one.",
     );
     key_row(
         gui,
         ui,
         Role::Command,
-        "Hold, say what to change, release. Rewrites the text you selected, or the \
-         last thing Hush typed.",
+        "Hold it and say what to change, like \"make this shorter\". Hush rewrites your \
+         selection, or the last thing it typed.",
     );
 
     section(ui, "More keys");
-    key_row(
-        gui,
-        ui,
-        Role::PasteLast,
-        "Types the last transcript once more.",
-    );
+    key_row(gui, ui, Role::PasteLast, "Types your last dictation again.");
     key_row(
         gui,
         ui,
         Role::Learn,
-        "Adds the selected word to the vocabulary with its exact spelling.",
+        "Select a word Hush keeps getting wrong and press this. From then on, Hush spells \
+         it your way.",
     );
     chord_keys(
         gui,
         ui,
         ChordMap::Languages,
-        "Each key dictates in its own language, with the same hold, double-tap, and \
-         cancel as the dictation key. The tray menu sets the language of the dictation key.",
+        "Give another language its own key. These keys work just like your dictation key. \
+         To change your main language, use the tray menu.",
     );
     chord_keys(
         gui,
         ui,
         ChordMap::Translate,
-        "Each key dictates in its language and types the words in English, with the same \
-         hold, double-tap, and cancel as the dictation key. large-v3-turbo and parakeet-v3 \
-         cannot translate.",
+        "Speak another language and Hush types it in English. These keys work just like \
+         your dictation key. large-v3-turbo and parakeet-v3 can't translate.",
     );
     chord_keys(
         gui,
         ui,
         ChordMap::Styles,
-        "Each key dictates in its own writing style, with the same hold, double-tap, and \
-         cancel as the dictation key. Verbatim skips the model. Add styles on the Text page.",
+        "Give a writing style its own key. Verbatim types exactly what you said. Add \
+         styles on the Text page.",
     );
     chord_keys(
         gui,
         ui,
         ChordMap::Rewrite,
-        "Each key rewrites the selected text with the prompt of a style, with no speech. \
-         A style needs Tidy up on and a prompt to rewrite.",
+        "Select some text and press a rewrite key to rewrite it in that style, no talking \
+         needed. The style needs Tidy up on and a prompt.",
     );
 
     section(ui, "Advanced");
     row("hotkeys.backend", "Read keys through")
-        .describe("The input devices work on Wayland and X11 alike. X11 is the fallback.")
+        .describe("Input devices work on both Wayland and X11. X11 is the backup.")
         .reserve(280.0)
         .show(ui, |ui| {
             let options = [
@@ -466,7 +460,10 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         gui,
         ui,
         row("hotkeys.tap_ms", "Tap is shorter than")
-            .describe("A shorter press is a tap: taps lock and unlock, holds record.")
+            .describe(
+                "A quicker press is a tap, which starts or stops hands-free \
+                       recording. A longer one records while you hold it.",
+            )
             .reserve(110.0),
         0..=MAX_TAP_MS,
         "ms",
@@ -476,17 +473,16 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
         ui,
         "hotkeys.exclusive",
         "Keep the key from other applications",
-        "Grabs the device the key belongs to. Needed for mouse buttons, which \
-         browsers otherwise treat as Back.",
+        "Stops other apps from seeing the key. You'll want this for mouse buttons, which \
+         browsers treat as Back.",
         &mut gui.config.hotkey.exclusive,
     );
     switch_row(
         ui,
         "hotkeys.mask_menu",
         "Keep menus closed",
-        "With an Alt or Super key on its own, Hush taps Ctrl when the key goes down. \
-         Applications then open no menu, and the desktop opens no launcher. On Sway, \
-         Hush cannot read the keyboard options and sends no tap.",
+        "Pressing Alt or Super on its own can open an app's menu or your launcher. Hush \
+         sends a quick Ctrl tap to stop that. This doesn't work on Sway.",
         &mut gui.config.hotkey.mask_menu,
     );
 }
@@ -603,22 +599,22 @@ fn new_chord_row(gui: &mut Gui, ui: &mut egui::Ui, map: ChordMap) {
     let (title, about, placeholder) = match map {
         ChordMap::Languages => (
             "Add a language key",
-            "Pick a language, then click the button and press the key.",
+            "Pick a language, then click and press a key.",
             "Language",
         ),
         ChordMap::Translate => (
             "Add a translate key",
-            "Pick the language you speak, then click the button and press the key.",
+            "Pick the language you'll speak, then click and press a key.",
             "Language",
         ),
         ChordMap::Styles => (
             "Add a style key",
-            "Pick a style, then click the button and press the key.",
+            "Pick a style, then click and press a key.",
             "Style",
         ),
         ChordMap::Rewrite => (
             "Add a rewrite key",
-            "Pick a style, then click the button and press the key.",
+            "Pick a style, then click and press a key.",
             "Style",
         ),
     };
@@ -654,7 +650,10 @@ fn toggle_capture(gui: &mut Gui, target: KeyTarget) {
         return;
     }
     if gui.machine.permissions.readable_event_nodes == 0 {
-        gui.say("Grant keyboard access on Overview, or add the key under [hotkey] in config.toml.");
+        gui.say(
+            "Turn on keyboard access on the Overview page, or add the key under \
+                 [hotkey] in config.toml.",
+        );
         return;
     }
     match Capture::start() {
@@ -662,7 +661,7 @@ fn toggle_capture(gui: &mut Gui, target: KeyTarget) {
             stop_typing(gui);
             gui.capture = Some((target, capture));
         },
-        Err(e) => gui.say(format!("Could not read the keyboard: {}", e)),
+        Err(e) => gui.say(format!("Couldn't read the keyboard: {}", e)),
     }
 }
 
@@ -787,7 +786,7 @@ fn set_typed(gui: &mut Gui, role: Role, typed: &str) -> Result<(), String> {
 
 fn start_capture(gui: &mut Gui, role: Role) {
     if gui.machine.permissions.readable_event_nodes == 0 {
-        gui.say("Grant keyboard access on Overview, or type the key's name.");
+        gui.say("Turn on keyboard access on the Overview page, or type the key's name.");
         start_typing(gui, role);
         return;
     }
@@ -797,7 +796,7 @@ fn start_capture(gui: &mut Gui, role: Role) {
             gui.capture = Some((KeyTarget::Action(role), capture));
         },
         Err(e) => {
-            gui.say(format!("Could not read the keyboard: {}", e));
+            gui.say(format!("Couldn't read the keyboard: {}", e));
             start_typing(gui, role);
         },
     }

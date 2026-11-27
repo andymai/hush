@@ -133,7 +133,7 @@ pub fn rebase<T: Serialize + DeserializeOwned>(base: &T, ours: &T, theirs: &T) -
     let ours = serde_json::to_value(ours).context("Failed to read the window's settings")?;
     let mut theirs = serde_json::to_value(theirs).context("Failed to read the file")?;
     merge(&base, &ours, &mut theirs);
-    serde_json::from_value(theirs).context("The changes do not fit the file")
+    serde_json::from_value(theirs).context("Your changes don't fit the file")
 }
 
 /// The dotted keys whose values differ between `before` and `after`, such
@@ -295,7 +295,7 @@ impl Files {
         let read_from = stamp(&path);
         let (base, next, outside) = if path.exists() && read_from != self.config_stamp {
             let theirs = Config::load_from_file(&path)
-                .context("The file changed on disk and does not load")?;
+                .context("The file changed outside Hush and has an error")?;
             let merged = rebase(saved, ours, &theirs)?;
             let outside = changed_keys(saved, &theirs);
             (theirs, merged, outside)
@@ -307,8 +307,8 @@ impl Files {
             Err(e) if !outside.is_empty() => {
                 return Err(e).with_context(|| {
                     format!(
-                        "The file changed outside the window ({}), and the window's change \
-                         does not fit it",
+                        "The file changed outside Hush ({}), and your change no longer \
+                         fits it",
                         outside.join(", ")
                     )
                 })
@@ -330,7 +330,7 @@ impl Files {
         let path = self.vocabulary_path.clone();
         let next = if path.exists() && stamp(&path) != self.vocabulary_stamp {
             let theirs = DomainVocabulary::load_from_file(&path)
-                .context("The file changed on disk and does not load")?;
+                .context("The file changed outside Hush and has an error")?;
             rebase(saved, ours, &theirs)?
         } else {
             ours.clone()
@@ -1034,7 +1034,7 @@ mod tests {
         ours.validate().unwrap();
         let err = format!("{:#}", files.write_config(&saved, &ours).unwrap_err());
         assert!(err.contains("llm.provider"), "{err}");
-        assert!(err.contains("changed outside the window"), "{err}");
+        assert!(err.contains("changed outside Hush"), "{err}");
         let on_disk = Config::load_from_file(files.config_path()).unwrap();
         assert_eq!(on_disk, outside, "nothing written");
     }

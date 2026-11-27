@@ -97,19 +97,19 @@ struct AudioCut {
 impl AudioCut {
     fn warning(&self) -> String {
         let takes = if self.deletes.files == 1 {
-            "1 take".to_string()
+            "1 recording".to_string()
         } else {
-            format!("{} takes", self.deletes.files)
+            format!("{} recordings", self.deletes.files)
         };
         let size = crate::gui::megabytes(self.deletes.bytes);
         if self.days == 0 {
             format!(
-                "Turning this off deletes {} ({}) of kept audio.",
+                "Turning this off deletes {} ({}) of saved audio.",
                 takes, size
             )
         } else {
             format!(
-                "Lowering to {} days deletes {} ({}) of kept audio.",
+                "Lowering to {} days deletes {} ({}) of saved audio.",
                 self.days, takes, size
             )
         }
@@ -158,7 +158,7 @@ impl HistoryView {
                 self.entries = entries;
                 self.error = None;
             },
-            Err(e) => self.error = Some(format!("Could not read the history: {}", e)),
+            Err(e) => self.error = Some(format!("Couldn't read the history: {}", e)),
         }
         self.audio = store::list(&store::takes_dir())
             .unwrap_or_default()
@@ -256,11 +256,11 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     }
     let description = if gui.config.history.enabled {
         format!(
-            "Hush keeps the last {} transcripts on this computer, in a file only you can read.",
+            "Keeps your last {} transcripts on this computer, private to you.",
             gui.config.history.max_entries
         )
     } else {
-        "Hush keeps no new transcripts. The ones below stay until you delete them.".to_string()
+        "New transcripts aren't saved. The ones below stay until you delete them.".to_string()
     };
     section(ui, "Storage");
     switch_row(
@@ -289,7 +289,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     let mut action: Option<Action> = None;
     let summary = if view.confirm_clear {
         format!(
-            "Delete all {} transcripts and their audio? You cannot get them back.",
+            "Delete all {} transcripts and their audio? You can't undo this.",
             total
         )
     } else if total == 1 {
@@ -335,7 +335,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     let shown = view.shown.max(PAGE);
     let matches = matching(&view.entries, &view.filter);
     if matches.is_empty() {
-        empty(ui, "No transcript matches.");
+        empty(ui, "Nothing matches.");
     }
     for entry in matches.iter().take(shown) {
         let when = entry
@@ -372,7 +372,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                 if icon_button(
                     ui,
                     icons::PENCIL,
-                    "Fix: correct the text and learn the new words in it",
+                    "Fix the text, and teach Hush any new words",
                 )
                 .clicked()
                 {
@@ -426,8 +426,8 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
     widgets::divider(ui);
     intro(
         ui,
-        "Each entry names the window class of its application. Use that name \
-         for the rules by application on the Output page.",
+        "Each entry shows the app's window class. Use it for the per-app rules on the \
+         Output page.",
     );
 
     match action {
@@ -441,12 +441,12 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                     gui.history.playback = None;
                 }
                 if let Err(e) = store::delete_take(&store::takes_dir(), name) {
-                    gui.say(format!("Could not delete the audio: {}", e));
+                    gui.say(format!("Couldn't delete the audio: {}", e));
                 }
             }
             match transcripts::delete(&transcripts::default_path(), &entry) {
                 Ok(_) => gui.history.entries.retain(|kept| *kept != entry),
-                Err(e) => gui.say(format!("Could not delete: {}", e)),
+                Err(e) => gui.say(format!("Couldn't delete: {}", e)),
             }
             gui.history.forget(&entry);
             gui.history.reload();
@@ -460,7 +460,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
                 .and_then(|()| store::clear(&store::takes_dir()))
             {
                 Ok(()) => gui.history.entries.clear(),
-                Err(e) => gui.say(format!("Could not clear the history: {}", e)),
+                Err(e) => gui.say(format!("Couldn't clear the history: {}", e)),
             }
             gui.history.confirm_clear = false;
             gui.history.reload();
@@ -469,7 +469,7 @@ pub fn show(gui: &mut Gui, ui: &mut egui::Ui) {
             gui.history.playback = None;
             match play(&name) {
                 Ok(playback) => gui.history.playback = Some(playback),
-                Err(e) => gui.say(format!("Could not play the audio: {:#}", e)),
+                Err(e) => gui.say(format!("Couldn't play the audio: {:#}", e)),
             }
         },
         Some(Action::StopPlaying) => gui.history.playback = None,
@@ -523,8 +523,7 @@ fn show_fix(ui: &mut egui::Ui, fix: &mut Fix, meta: &str) -> Option<Action> {
     });
     intro(
         ui,
-        "The entry keeps its time, app, and audio. Hush then suggests \
-         the new words for the vocabulary.",
+        "The time, app, and audio stay the same. Hush then offers to learn any new words.",
     );
     choice
 }
@@ -544,9 +543,7 @@ fn show_proposals(ui: &mut egui::Ui, terms: &[String]) -> Option<Action> {
         for term in terms {
             chip(ui, |ui| {
                 widgets::text(ui, term, theme::medium(theme::BODY), colours.ink);
-                if icon_button(ui, icons::PLUS, "Add to the vocabulary, as hush learn does")
-                    .clicked()
-                {
+                if icon_button(ui, icons::PLUS, "Add to your vocabulary").clicked() {
                     choice = Some(Action::Learn(term.clone()));
                 }
                 if icon_button(ui, icons::X, "Skip").clicked() {
@@ -582,18 +579,18 @@ fn save_fix(gui: &mut Gui) {
             }
             gui.history.forget(&fix.entry);
             if terms.is_empty() {
-                gui.say("Saved the fix. It has no new words to learn.");
+                gui.say("Saved. No new words to learn.");
             } else {
-                gui.say("Saved the fix.");
+                gui.say("Saved.");
                 gui.history.proposals = Some(Proposals {
                     entry: fixed,
                     terms,
                 });
             }
         },
-        Ok(None) => gui.say("Could not save the fix: the history no longer has this entry."),
+        Ok(None) => gui.say("Couldn't save: this entry is gone from the history."),
         Err(e) => {
-            gui.say(format!("Could not save the fix: {:#}", e));
+            gui.say(format!("Couldn't save the fix: {:#}", e));
             gui.history.fix = Some(fix);
         },
     }
@@ -608,7 +605,7 @@ fn learn_term(gui: &mut Gui, term: &str) {
     let term = match learn::learn_at(&DomainVocabulary::default_path(), term) {
         Ok(term) => term,
         Err(e) => {
-            gui.say(format!("Could not add the word: {:#}", e));
+            gui.say(format!("Couldn't add the word: {:#}", e));
             return;
         },
     };
@@ -634,15 +631,15 @@ fn retention_row(gui: &mut Gui, ui: &mut egui::Ui) {
     }
     let description = if days > 0 {
         format!(
-            "Hush keeps the audio of each take for {} days, in files only you can read. \
-             Play it or transcribe it again below. A smaller number deletes the older \
-             audio at once.",
+            "Keeps the audio of each dictation for {} days, private to you, so you can \
+             play it back or transcribe it again. Lowering the number deletes older audio \
+             right away.",
             days
         )
     } else {
         format!(
-            "Hush keeps no audio. The audio of a take that Hush could not transcribe \
-             stays for {} days for `hush recover`.",
+            "No audio is kept, except when a dictation fails. Then it stays for {} days, \
+             so `hush recover` can try again.",
             store::RECOVERY_DAYS
         )
     };
@@ -741,7 +738,7 @@ fn show_again(ui: &mut egui::Ui, again: &Again) -> Option<String> {
             ui,
             icons::INFO,
             colours.muted,
-            "Hush heard no speech in the audio.",
+            "Hush didn't hear any speech.",
         ),
         Some(Ok(text)) => {
             ui.horizontal(|ui| {
@@ -765,7 +762,7 @@ fn show_again(ui: &mut egui::Ui, again: &Again) -> Option<String> {
             ui,
             icons::CIRCLE_X,
             colours.bad,
-            &format!("Could not transcribe again: {}", error),
+            &format!("Couldn't transcribe again: {}", error),
         ),
     }
     ui.add_space(12.0);
@@ -913,11 +910,11 @@ mod tests {
         };
         assert_eq!(
             cut(0, 3, 4_200_000).warning(),
-            "Turning this off deletes 3 takes (4 MB) of kept audio."
+            "Turning this off deletes 3 recordings (4 MB) of saved audio."
         );
         assert_eq!(
             cut(7, 1, 900_000).warning(),
-            "Lowering to 7 days deletes 1 take (1 MB) of kept audio."
+            "Lowering to 7 days deletes 1 recording (1 MB) of saved audio."
         );
     }
 
