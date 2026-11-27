@@ -1,0 +1,46 @@
+src/gui/mod.rs
+  s_5332262e639a7a::t_5bd5854c0fa7ab 247-248,408,486-501,1326-1328,1330-1338
+src/gui/pages/overview.rs
+  s_5332262e639a7a::t_5bd5854c0fa7ab 22-27,70-73,112-117,227-231
+src/ipc/client.rs
+  s_5332262e639a7a::t_5bd5854c0fa7ab 103-117
+src/gui/pages/mod.rs
+  s_5332262e639a7a::t_5bd5854c0fa7ab 8,21-22,54,67,81,96
+src/cli/dispatcher.rs
+  s_5332262e639a7a::t_5bd5854c0fa7ab 42,159-161,200-205
+src/lib.rs
+  s_5332262e639a7a::t_5bd5854c0fa7ab 55
+docs/commands.md
+  s_5332262e639a7a::t_3f24e159b795fb 22
+CLAUDE.md
+  s_5332262e639a7a::t_3f24e159b795fb 65
+src/cli_main.rs
+  s_5332262e639a7a::t_5bd5854c0fa7ab 155-159,248,251
+src/gui/pages/hotkeys.rs
+  s_5332262e639a7a::t_5bd5854c0fa7ab 684
+src/gui/chrome.rs
+  s_5332262e639a7a::t_5bd5854c0fa7ab 274-280
+src/gui/pages/setup.rs
+  s_5332262e639a7a::t_9c1324ce88e1b9 62,81-102
+  s_5332262e639a7a::t_5bd5854c0fa7ab 1-61,63-80,103-335
+src/gui/pages/speech.rs
+  s_5332262e639a7a::t_5bd5854c0fa7ab 229-233,925
+src/setup.rs
+  s_5332262e639a7a::t_5bd5854c0fa7ab 1-233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5fe06eb3d159f65fa2ba8f8687910f71762a3b36",
+  "prompts": {},
+  "sessions": {
+    "s_5332262e639a7a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5cafc310-b19c-4b54-8739-6ec8a3669200",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andy Aragon <hi@andymai.com>"
+    }
+  }
+}
