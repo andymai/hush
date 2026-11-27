@@ -237,6 +237,7 @@ async fn run_worker(
 ) -> Result<WorkerReport> {
     let exe = std::env::current_exe().context("Failed to find the hush binary")?;
     let mut command = tokio::process::Command::new(exe);
+    crate::config::keys::without_env_files(command.as_std_mut());
     command
         .arg("tune-worker")
         .arg("--model")

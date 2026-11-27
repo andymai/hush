@@ -291,7 +291,7 @@ impl Staged {
 // Dotfile managers often link config.toml into a repository. A rename onto
 // the link would put a plain file in its place, so write the file it names.
 // A link whose file does not exist yet names where to create it.
-fn link_target(path: &Path) -> PathBuf {
+pub(crate) fn link_target(path: &Path) -> PathBuf {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => fs::canonicalize(path)
             .or_else(|_| {

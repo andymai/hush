@@ -722,18 +722,18 @@ pub async fn resolve_provider(config: &LlmConfig, env_file: &Path) -> LlmProvide
         LlmSetting::Auto | LlmSetting::Ollama => ollama_reachable(&config.ollama_url).await,
         _ => false,
     };
-    let key_in = |var: &str| {
-        keys::source_in(env_file, var)
-            .is_some()
-            .then(|| ApiKey::var(var, env_file))
-    };
-    let key = match config.provider {
-        LlmSetting::Auto | LlmSetting::Anthropic => key_in("ANTHROPIC_API_KEY"),
+    let wanted = match config.provider {
+        LlmSetting::Auto | LlmSetting::Anthropic => Some("ANTHROPIC_API_KEY"),
+        LlmSetting::OpenAiCompatible => config.server_key_var(),
         _ => None,
     };
-    let server_key = match config.provider {
-        LlmSetting::OpenAiCompatible => config.server_key_var().and_then(key_in),
+    let found = match wanted {
+        Some(var) if keys::present_in(env_file, var).await => Some(ApiKey::var(var, env_file)),
         _ => None,
+    };
+    let (key, server_key) = match config.provider {
+        LlmSetting::OpenAiCompatible => (None, found),
+        _ => (found, None),
     };
     choose_provider(config, ollama_ok, key, server_key)
 }

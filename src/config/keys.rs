@@ -33,6 +33,11 @@ static LOADED: Mutex<BTreeSet<OsString>> = Mutex::new(BTreeSet::new());
 /// keyring, before it goes without.
 const FILL_WAIT: Duration = Duration::from_secs(2);
 
+/// How long a miss waits after the last read before it reads the keyring
+/// again, while that read failed, found no Secret Service, or found a
+/// locked item. At login, Hush can start before the keyring does.
+const RETRY_AFTER: Duration = Duration::from_secs(5);
+
 /// The attributes of each item that Hush keeps in the Secret Service.
 pub(crate) const APPLICATION: (&str, &str) = ("application", "hush");
 pub(crate) const VARIABLE: &str = "variable";
@@ -70,17 +75,30 @@ pub(crate) enum Found {
 
 /// The values of the unlocked items of Hush, by variable, and whether a
 /// locked item exists.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub(crate) struct Unlocked {
     pub values: HashMap<String, String>,
     pub locked: bool,
 }
 
+/// Shows the variables, never their values.
+impl fmt::Debug for Unlocked {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut variables: Vec<&String> = self.values.keys().collect();
+        variables.sort();
+        f.debug_struct("Unlocked")
+            .field("variables", &variables)
+            .field("locked", &self.locked)
+            .finish()
+    }
+}
+
 /// The Secret Service, behind a trait so that the tests use a double.
 pub(crate) trait SecretStore: Send + Sync {
     fn find(&self, var: &str) -> Result<Found>;
-    /// Never unlocks: a locked item only sets [`Unlocked::locked`].
-    fn read_unlocked(&self) -> Result<Unlocked>;
+    /// `None` when no Secret Service runs. Never unlocks: a locked item
+    /// only sets [`Unlocked::locked`].
+    fn read_unlocked(&self) -> Result<Option<Unlocked>>;
     /// Create or replace the item of `var`. This may unlock the keyring.
     fn store(&self, var: &str, value: &str) -> Result<()>;
     /// Delete each item of `var`. This may unlock the keyring.
@@ -97,8 +115,8 @@ impl SecretStore for NoKeyring {
         Ok(Found::Absent)
     }
 
-    fn read_unlocked(&self) -> Result<Unlocked> {
-        Ok(Unlocked::default())
+    fn read_unlocked(&self) -> Result<Option<Unlocked>> {
+        Ok(Some(Unlocked::default()))
     }
 
     fn store(&self, _var: &str, _value: &str) -> Result<()> {
@@ -110,11 +128,14 @@ impl SecretStore for NoKeyring {
     }
 }
 
-/// The keys of the unlocked items, read once on a thread of their own. A
-/// caller that comes before the read ends waits at most [`FILL_WAIT`].
+/// The keys of the unlocked items. The first read runs on a thread of its
+/// own, and a caller that comes before it ends waits at most
+/// [`FILL_WAIT`]. A read that fails or finds no Secret Service keeps the
+/// values that Hush has, and marks the cache stale.
 pub(crate) struct KeyCache {
     store: Arc<dyn SecretStore>,
     notice: Box<dyn Fn() + Send + Sync>,
+    retry: Duration,
     state: Mutex<CacheState>,
     filled: Condvar,
 }
@@ -123,16 +144,30 @@ pub(crate) struct KeyCache {
 struct CacheState {
     started: bool,
     filled: bool,
+    reading: bool,
+    /// When the last read ended
+    read_at: Option<Instant>,
     values: HashMap<String, String>,
     locked: bool,
+    /// The last read failed, or found no Secret Service
+    stale: bool,
     noticed: bool,
 }
 
 impl KeyCache {
     pub(crate) fn new(store: Arc<dyn SecretStore>, notice: Box<dyn Fn() + Send + Sync>) -> Self {
+        Self::with_retry(store, notice, RETRY_AFTER)
+    }
+
+    fn with_retry(
+        store: Arc<dyn SecretStore>,
+        notice: Box<dyn Fn() + Send + Sync>,
+        retry: Duration,
+    ) -> Self {
         Self {
             store,
             notice,
+            retry,
             state: Mutex::new(CacheState::default()),
             filled: Condvar::new(),
         }
@@ -146,31 +181,46 @@ impl KeyCache {
                 return;
             }
             state.started = true;
+            state.reading = true;
         }
         let cache = Arc::clone(self);
         let spawned = std::thread::Builder::new()
             .name("hush-keys".into())
             .spawn(move || cache.read());
         if let Err(e) = spawned {
-            debug!("Could not read the keyring: {}", e);
-            self.take(Unlocked::default());
+            self.take(Err(e).context("Could not start the keyring read"));
         }
     }
 
     fn read(&self) {
-        let unlocked = self.store.read_unlocked().unwrap_or_else(|e| {
-            debug!("No keys from the keyring: {:#}", e);
-            Unlocked::default()
-        });
-        self.take(unlocked);
+        self.take(self.store.read_unlocked());
     }
 
-    fn take(&self, unlocked: Unlocked) {
+    fn take(&self, read: Result<Option<Unlocked>>) {
         let notice = {
             let mut state = self.state.lock();
-            state.values = unlocked.values;
-            state.locked = unlocked.locked;
+            match read {
+                // An item that is locked now can hold a key that an earlier
+                // read got, so a read that finds one adds and drops nothing.
+                Ok(Some(unlocked)) if unlocked.locked => {
+                    state.values.extend(unlocked.values);
+                    state.locked = true;
+                    state.stale = false;
+                },
+                Ok(Some(unlocked)) => {
+                    state.values = unlocked.values;
+                    state.locked = false;
+                    state.stale = false;
+                },
+                Ok(None) => state.stale = true,
+                Err(e) => {
+                    debug!("No keys from the keyring: {:#}", e);
+                    state.stale = true;
+                },
+            }
             state.filled = true;
+            state.reading = false;
+            state.read_at = Some(Instant::now());
             let notice = state.locked && !state.noticed;
             state.noticed |= notice;
             notice
@@ -181,9 +231,10 @@ impl KeyCache {
         }
     }
 
-    /// The key of `var` from the unlocked items. While a locked item
-    /// exists, each miss reads the keyring again, so a key comes back
-    /// after the unlock.
+    /// The key of `var` from the unlocked items. While the cache is stale
+    /// or a locked item exists, a miss reads the keyring again, at most
+    /// once in each `retry`, so a key comes after the keyring starts or
+    /// unlocks.
     pub(crate) fn get(self: &Arc<Self>, var: &str) -> Option<String> {
         self.fill();
         let deadline = Instant::now() + FILL_WAIT;
@@ -196,9 +247,13 @@ impl KeyCache {
         if let Some(value) = state.values.get(var) {
             return Some(value.clone());
         }
-        if !state.locked {
+        let due = (state.locked || state.stale)
+            && !state.reading
+            && state.read_at.is_none_or(|at| at.elapsed() >= self.retry);
+        if !due {
             return None;
         }
+        state.reading = true;
         drop(state);
         self.read();
         self.state.lock().values.get(var).cloned()
@@ -283,6 +338,16 @@ pub fn loaded_from_env_files() -> Vec<OsString> {
     LOADED.lock().iter().cloned().collect()
 }
 
+/// Leave each variable that [`load_env_files`] loaded out of `command`. A
+/// child Hush would count such a variable as one of the session, which wins
+/// over the keyring, and a child program never needs the keys.
+pub fn without_env_files(command: &mut std::process::Command) -> &mut std::process::Command {
+    for name in loaded_from_env_files() {
+        command.env_remove(name);
+    }
+    command
+}
+
 // dotenvy never overrides a set variable, so each name that is new after the
 // load came from a file and not from the user's session.
 pub(crate) fn load_with(load: impl FnOnce()) {
@@ -314,6 +379,15 @@ pub fn present(var: &str) -> bool {
 /// Where the key in `var` comes from.
 pub fn source(var: &str) -> Option<Source> {
     source_in(&env_file(), var)
+}
+
+/// Whether [`source_in`] finds a key, with the keyring search off the async
+/// threads, for the daemon's startup.
+pub async fn present_in(env_file: &Path, var: &str) -> bool {
+    let (env_file, var) = (env_file.to_path_buf(), var.to_string());
+    tokio::task::spawn_blocking(move || source_in(&env_file, &var).is_some())
+        .await
+        .unwrap_or(false)
 }
 
 /// [`source`] with `env_file` in place of `~/.config/hush/.env`.
@@ -414,7 +488,9 @@ fn check_name(var: &str) -> Result<()> {
 /// reaches the requests after the unlock.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApiKey {
-    /// A value that the caller gave
+    /// A value that the caller gave. It never serializes: a write of a
+    /// config or a status that holds one fails instead of leaking the key.
+    #[serde(skip_serializing)]
     Value(String),
     /// The variable that [`api_key_in`] reads, with this `.env` file
     Var { var: String, env_file: PathBuf },
@@ -512,9 +588,11 @@ fn from_file(path: &Path, var: &str) -> Option<String> {
 
 /// Set `var` to `value` in the `.env` file at `path`, or drop its line with
 /// `None`. Each other line stays as it is. The new text goes to a temporary
-/// file in the same folder with mode 0600, which then replaces the file.
-/// Returns whether the file changed.
+/// file with mode 0600 in the folder of the file, which it then replaces.
+/// When `path` is a symbolic link, the file it names changes, and the link
+/// stays. Returns whether the file changed.
 pub(crate) fn write_env_line(path: &Path, var: &str, value: Option<&str>) -> Result<bool> {
+    let path = &super::transfer::link_target(path);
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -544,17 +622,27 @@ pub(crate) fn write_env_line(path: &Path, var: &str, value: Option<&str>) -> Res
         out.push('\n');
     }
     if out == text {
+        if value.is_some() {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("Failed to make {} private", path.display()))?;
+        }
         return Ok(false);
     }
     write_private(path, out.as_bytes())?;
     Ok(true)
 }
 
-/// Single quotes, because dotenvy expands `$` in other values.
+/// Single quotes, because dotenvy expands `$` in other values. dotenvy
+/// reads a backslash as an escape even inside single quotes, so a value
+/// that ends in one would join the next line.
 fn env_line(var: &str, value: &str) -> Result<String> {
-    if value.chars().any(|c| c.is_control() || c == '\'') {
+    if value
+        .chars()
+        .any(|c| c.is_control() || c == '\'' || c == '\\')
+    {
         bail!(
-            "The key for {} has a quote mark or a line break, so it cannot go in a .env file",
+            "The key for {} has a quote mark, a backslash, or a line break, so it cannot go \
+             in a .env file",
             var
         );
     }
@@ -594,7 +682,7 @@ fn write_private(path: &Path, contents: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc;
 
     #[test]
@@ -651,6 +739,10 @@ mod tests {
         reads: AtomicUsize,
         /// A read waits for a message on this channel
         gate: Mutex<Option<mpsc::Receiver<()>>>,
+        /// A read finds no Secret Service
+        no_owner: AtomicBool,
+        /// A read fails
+        failing: AtomicBool,
         stored: Mutex<Vec<(String, String)>>,
         removed: Mutex<Vec<String>>,
     }
@@ -679,12 +771,18 @@ mod tests {
             Ok(self.found.lock().get(var).copied().unwrap_or(Found::Absent))
         }
 
-        fn read_unlocked(&self) -> Result<Unlocked> {
+        fn read_unlocked(&self) -> Result<Option<Unlocked>> {
             if let Some(gate) = self.gate.lock().as_ref() {
                 let _ = gate.recv();
             }
             self.reads.fetch_add(1, Ordering::SeqCst);
-            Ok(self.unlocked.lock().clone())
+            if self.failing.load(Ordering::SeqCst) {
+                bail!("The keyring did not answer");
+            }
+            if self.no_owner.load(Ordering::SeqCst) {
+                return Ok(None);
+            }
+            Ok(Some(self.unlocked.lock().clone()))
         }
 
         fn store(&self, var: &str, value: &str) -> Result<()> {
@@ -707,6 +805,24 @@ mod tests {
                 notices.fetch_add(1, Ordering::SeqCst);
             }),
         ))
+    }
+
+    const QUICK_RETRY: Duration = Duration::from_millis(150);
+
+    /// A cache that reads again after [`QUICK_RETRY`], for the tests that
+    /// wait for a retry.
+    fn quick_cache(fake: Arc<FakeKeyring>, notices: Arc<AtomicUsize>) -> Arc<KeyCache> {
+        Arc::new(KeyCache::with_retry(
+            fake,
+            Box::new(move || {
+                notices.fetch_add(1, Ordering::SeqCst);
+            }),
+            QUICK_RETRY,
+        ))
+    }
+
+    fn after_the_retry() {
+        std::thread::sleep(QUICK_RETRY + Duration::from_millis(50));
     }
 
     #[test]
@@ -795,15 +911,18 @@ mod tests {
             Some(Source::Locked)
         );
         let notices = Arc::new(AtomicUsize::new(0));
-        let cache = cache_over(Arc::clone(&fake), Arc::clone(&notices));
+        let cache = quick_cache(Arc::clone(&fake), Arc::clone(&notices));
         assert_eq!(api_key_with(Some(&cache), &env_file, var), None);
         assert_eq!(api_key_with(Some(&cache), &env_file, var), None);
-        assert_eq!(notices.load(Ordering::SeqCst), 1, "one notice");
         assert_eq!(
             fake.reads.load(Ordering::SeqCst),
-            3,
-            "the fill, then one read again for each miss"
+            1,
+            "a miss right after a read reads nothing"
         );
+        after_the_retry();
+        assert_eq!(api_key_with(Some(&cache), &env_file, var), None);
+        assert_eq!(fake.reads.load(Ordering::SeqCst), 2, "a later miss reads");
+        assert_eq!(notices.load(Ordering::SeqCst), 1, "one notice");
 
         std::fs::write(&env_file, format!("{}=test-key-file\n", var)).unwrap();
         assert_eq!(
@@ -820,6 +939,7 @@ mod tests {
                 .values
                 .insert(var.to_string(), "test-key-1".to_string());
         }
+        after_the_retry();
         assert_eq!(
             api_key_with(Some(&cache), &env_file, var).as_deref(),
             Some("test-key-1"),
@@ -829,6 +949,94 @@ mod tests {
         let reads = fake.reads.load(Ordering::SeqCst);
         assert_eq!(cache.get(var).as_deref(), Some("test-key-1"));
         assert_eq!(fake.reads.load(Ordering::SeqCst), reads, "from the cache");
+    }
+
+    #[test]
+    fn a_keyring_that_starts_after_hush_gives_the_key_on_a_later_miss() {
+        let var = "HUSH_TEST_KEYS_LATE_OWNER";
+        let fake = Arc::new(FakeKeyring::holding(var, "test-key-1"));
+        fake.no_owner.store(true, Ordering::SeqCst);
+        let notices = Arc::new(AtomicUsize::new(0));
+        let cache = cache_over(Arc::clone(&fake), Arc::clone(&notices));
+        assert_eq!(cache.get(var), None, "no Secret Service yet");
+        fake.no_owner.store(false, Ordering::SeqCst);
+        assert_eq!(cache.get(var), None, "the miss comes before the retry");
+        assert_eq!(fake.reads.load(Ordering::SeqCst), 1);
+
+        std::thread::sleep(RETRY_AFTER + Duration::from_millis(100));
+        assert_eq!(cache.get(var).as_deref(), Some("test-key-1"));
+        assert_eq!(fake.reads.load(Ordering::SeqCst), 2, "one read again");
+        assert_eq!(notices.load(Ordering::SeqCst), 0, "nothing was locked");
+        assert_eq!(cache.get(var).as_deref(), Some("test-key-1"));
+        assert_eq!(fake.reads.load(Ordering::SeqCst), 2, "from the cache");
+    }
+
+    #[test]
+    fn a_failed_read_keeps_the_keys_of_an_earlier_read() {
+        let var = "HUSH_TEST_KEYS_KEPT";
+        let other = "HUSH_TEST_KEYS_OTHER";
+        let fake = Arc::new(FakeKeyring::holding(var, "test-key-1"));
+        fake.unlocked.lock().locked = true;
+        let cache = quick_cache(Arc::clone(&fake), Arc::default());
+        assert_eq!(cache.get(var).as_deref(), Some("test-key-1"));
+
+        fake.failing.store(true, Ordering::SeqCst);
+        after_the_retry();
+        assert_eq!(cache.get(other), None);
+        assert_eq!(fake.reads.load(Ordering::SeqCst), 2, "the miss read again");
+        assert_eq!(
+            cache.get(var).as_deref(),
+            Some("test-key-1"),
+            "the error drops nothing"
+        );
+
+        fake.failing.store(false, Ordering::SeqCst);
+        fake.unlocked.lock().values.clear();
+        after_the_retry();
+        assert_eq!(cache.get(other), None);
+        assert_eq!(fake.reads.load(Ordering::SeqCst), 3);
+        assert_eq!(
+            cache.get(var).as_deref(),
+            Some("test-key-1"),
+            "a read that finds a locked item drops nothing"
+        );
+
+        fake.unlocked.lock().locked = false;
+        after_the_retry();
+        assert_eq!(cache.get(other), None);
+        assert_eq!(fake.reads.load(Ordering::SeqCst), 4);
+        assert_eq!(
+            cache.get(var),
+            None,
+            "a read with nothing locked shows that the key is gone"
+        );
+    }
+
+    #[test]
+    fn a_debug_line_of_the_keyring_read_shows_no_value() {
+        let mut unlocked = Unlocked::default();
+        unlocked
+            .values
+            .insert("GROQ_API_KEY".to_string(), "test-key-1".to_string());
+        let line = format!("{:?}", unlocked);
+        assert_eq!(
+            line,
+            "Unlocked { variables: [\"GROQ_API_KEY\"], locked: false }"
+        );
+    }
+
+    #[test]
+    fn a_child_command_goes_without_the_variables_of_the_env_files() {
+        std::env::set_var("HUSH_TEST_KEYS_CHILD_SESSION", "from-session");
+        load_with(|| std::env::set_var("HUSH_TEST_KEYS_CHILD_FILE", "test-key-1"));
+        let mut command = std::process::Command::new("env");
+        let output = without_env_files(&mut command).output().unwrap();
+        let seen = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            seen.contains("HUSH_TEST_KEYS_CHILD_SESSION=from-session"),
+            "{seen}"
+        );
+        assert!(!seen.contains("HUSH_TEST_KEYS_CHILD_FILE"), "{seen}");
     }
 
     #[test]
@@ -924,7 +1132,7 @@ mod tests {
             "GROQ_API_KEY='test-key-1'\n"
         );
         assert_eq!(mode(&path), 0o600);
-        for bad in ["test'key", "test\nkey"] {
+        for bad in ["test'key", "test\nkey", "test-key\\"] {
             let err = write_env_line(&path, "GROQ_API_KEY", Some(bad))
                 .unwrap_err()
                 .to_string();
@@ -934,6 +1142,60 @@ mod tests {
         assert_eq!(
             from_file(&path, "GROQ_API_KEY").as_deref(),
             Some("test-key-1")
+        );
+    }
+
+    #[test]
+    fn the_env_writer_changes_the_file_that_a_link_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::write(real.join("hush.env"), "A=1\n").unwrap();
+        let link = dir.path().join(".env");
+        std::os::unix::fs::symlink("dotfiles/hush.env", &link).unwrap();
+
+        assert!(write_env_line(&link, "GROQ_API_KEY", Some("test-key-1")).unwrap());
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            std::fs::read_to_string(real.join("hush.env")).unwrap(),
+            "A=1\nGROQ_API_KEY='test-key-1'\n"
+        );
+        assert_eq!(mode(&real.join("hush.env")), 0o600);
+
+        assert!(write_env_line(&link, "GROQ_API_KEY", None).unwrap());
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            std::fs::read_to_string(real.join("hush.env")).unwrap(),
+            "A=1\n",
+            "the removal reaches the file that the link names"
+        );
+        for folder in [dir.path(), real.as_path()] {
+            let names: Vec<_> = std::fs::read_dir(folder)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .filter(|name| name.to_string_lossy().starts_with(".hush-"))
+                .collect();
+            assert!(names.is_empty(), "no temporary file: {names:?}");
+        }
+    }
+
+    #[test]
+    fn a_save_of_the_same_key_still_makes_the_file_private() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".env");
+        std::fs::write(&path, "GROQ_API_KEY='test-key-1'\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!write_env_line(&path, "GROQ_API_KEY", Some("test-key-1")).unwrap());
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "GROQ_API_KEY='test-key-1'\n"
         );
     }
 

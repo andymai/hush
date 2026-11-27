@@ -128,9 +128,7 @@ impl TranscriptHook {
 
     pub async fn run(&self, text: &str, env: &HookEnv<'_>) -> Outcome {
         let mut command = Command::new("sh");
-        for name in crate::config::keys::loaded_from_env_files() {
-            command.env_remove(name);
-        }
+        crate::config::keys::without_env_files(command.as_std_mut());
         let spawned = command
             .arg("-c")
             .arg(&self.command)

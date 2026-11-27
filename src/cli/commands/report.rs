@@ -79,7 +79,8 @@ fn run_hush(args: &[&str]) -> String {
         Ok(exe) => exe,
         Err(e) => return format!("(could not find the hush binary: {})", e),
     };
-    match Command::new(exe)
+    let mut command = Command::new(exe);
+    match crate::config::keys::without_env_files(&mut command)
         .arg("--no-notifications")
         .args(args)
         .output()

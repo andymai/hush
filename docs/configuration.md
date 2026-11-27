@@ -69,7 +69,7 @@ API keys never go in `config.toml`. Hush reads each key from the first of these 
 2. The keyring: the Secret Service, such as GNOME Keyring or KWallet. The key fields on the Speech and Text pages of `hush settings` save a key there. Each item has the attributes `application = hush` and `variable = <NAME>`, and the label `Hush: <NAME>`.
 3. `~/.config/hush/.env`, with one `NAME=value` line for each key. A key that you saved there before stays in use.
 
-The daemon never unlocks the keyring. It reads only the unlocked items. When the keyring is locked, Hush sends one notice and works without those keys until you unlock the keyring. `hush settings` unlocks it when you save or remove a key, and a daemon that uses the key then restarts. Hush starts no keyring: without a Secret Service on the session bus, Hush reads only the environment and the `.env` file.
+The daemon never unlocks the keyring. It reads only the unlocked items. When the keyring is locked, Hush sends one notice and works without those keys until you unlock the keyring. When the daemon starts before the keyring, or a read fails, Hush keeps the keys that it has and reads the keyring again when a request needs a key, at most once in 5 seconds. `hush settings` unlocks it when you save or remove a key, and a daemon that uses the key then restarts. Hush starts no keyring: without a Secret Service on the session bus, Hush reads only the environment and the `.env` file.
 
 `hush doctor` shows where each key comes from: the environment, the keyring, the locked keyring, or a `.env` file. It never shows a key. In the Flatpak, Hush keeps a key in its own `.env` file in place of the keyring. See [Flatpak and desktop portals](portals.md).
 

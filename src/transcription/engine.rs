@@ -48,7 +48,7 @@ impl SpeechToText {
         let drop_phrases = guard::drop_list(config.drop_phrases.as_deref());
         if config.backend.is_cloud() {
             return Ok(Self {
-                backend: Backend::Cloud(CloudTranscriber::from_config(config, env_file)?),
+                backend: Backend::Cloud(CloudTranscriber::from_config(config, env_file).await?),
                 drop_phrases,
             });
         }

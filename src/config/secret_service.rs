@@ -34,7 +34,7 @@ impl SecretStore for SecretService {
         on_own_runtime(find(var))
     }
 
-    fn read_unlocked(&self) -> Result<Unlocked> {
+    fn read_unlocked(&self) -> Result<Option<Unlocked>> {
         on_own_runtime(read_unlocked())
     }
 
@@ -124,9 +124,9 @@ async fn find(var: &str) -> Result<Found> {
     })
 }
 
-async fn read_unlocked() -> Result<Unlocked> {
+async fn read_unlocked() -> Result<Option<Unlocked>> {
     let Some(connection) = connect().await? else {
-        return Ok(Unlocked::default());
+        return Ok(None);
     };
     let wanted = attributes(None);
     let (unlocked, locked) = search(&connection, &wanted).await?;
@@ -148,10 +148,10 @@ async fn read_unlocked() -> Result<Unlocked> {
             }
         }
     }
-    Ok(Unlocked {
+    Ok(Some(Unlocked {
         values,
         locked: !locked.is_empty(),
-    })
+    }))
 }
 
 /// The variable and the key of an unlocked item that holds text.
@@ -368,7 +368,10 @@ mod tests {
             Found::Locked,
             "a search finds the locked item and unlocks nothing"
         );
-        let unlocked = keyring.read_unlocked().unwrap();
+        let unlocked = keyring
+            .read_unlocked()
+            .unwrap()
+            .expect("a Secret Service runs");
         assert!(unlocked.values.is_empty() && unlocked.locked);
 
         let daemon = counting_cache(&notices);
@@ -393,7 +396,7 @@ mod tests {
 
         let keyring = SecretService;
         assert_eq!(keyring.find(VAR).unwrap(), Found::Absent);
-        assert_eq!(keyring.read_unlocked().unwrap(), Unlocked::default());
+        assert_eq!(keyring.read_unlocked().unwrap(), None, "no Secret Service");
         assert!(!keyring.remove(VAR).unwrap());
         let err = keyring.store(VAR, "test-key-live-4").unwrap_err();
         assert!(format!("{err:#}").contains("No Secret Service"), "{err:#}");

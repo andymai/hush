@@ -896,7 +896,8 @@ impl Gui {
                 },
                 Probe::State(DaemonState::Idle) => {
                     let binary = std::env::current_exe().unwrap_or_else(|_| "hush".into());
-                    match std::process::Command::new(binary)
+                    let mut command = std::process::Command::new(binary);
+                    match keys::without_env_files(&mut command)
                         .args(["daemon", "restart"])
                         .spawn()
                     {
@@ -1039,7 +1040,8 @@ impl Gui {
     pub fn run_hush(&mut self, args: &[&str], done: &str) {
         let binary = std::env::current_exe().unwrap_or_else(|_| "hush".into());
         let owned: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-        match std::process::Command::new(binary).args(&owned).spawn() {
+        let mut command = std::process::Command::new(binary);
+        match keys::without_env_files(&mut command).args(&owned).spawn() {
             Ok(_) => self.say(done),
             Err(e) => self.say(format!("Could not run hush {}: {}", owned.join(" "), e)),
         }
