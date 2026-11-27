@@ -1524,6 +1524,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let _ = hotkey_thread.join();
     let _ = result_thread.join();
 
+    // Before the runtime ends, so the overlay supervisor starts no new overlay.
+    shared.set_stopping();
     info!("Listen mode ended");
     Ok(())
 }

@@ -126,10 +126,18 @@ fn supervise(
                 Ended::Failed
             },
         };
+        // A daemon that quits closes the overlay's socket, so the overlay
+        // ends cleanly; a new one would find a runtime that serves nothing.
+        if shared.stopping() {
+            return;
+        }
         match policy.after(ended, started.elapsed(), Instant::now()) {
             Next::Restart(delay) => {
                 info!(?ended, "The overlay starts again in {} s", delay.as_secs());
                 std::thread::sleep(delay);
+                if shared.stopping() {
+                    return;
+                }
             },
             Next::Stop(status) => {
                 match status {

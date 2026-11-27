@@ -355,6 +355,11 @@ impl SharedState {
         self.set(Phase::Stopping);
     }
 
+    /// The daemon quits.
+    pub fn stopping(&self) -> bool {
+        matches!(*self.phase.lock(), Phase::Stopping)
+    }
+
     /// A take is in progress, whether or not its first frame arrived.
     pub fn in_take(&self) -> bool {
         matches!(
@@ -873,6 +878,14 @@ mod tests {
             serde_json::to_string(&DaemonCommand::Shortcuts { configure: false }).unwrap(),
             r#"{"command":"shortcuts"}"#
         );
+    }
+
+    #[test]
+    fn a_quitting_daemon_reports_stopping() {
+        let shared = SharedState::new();
+        assert!(!shared.stopping());
+        shared.set_stopping();
+        assert!(shared.stopping());
     }
 
     #[test]
