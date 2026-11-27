@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0](https://github.com/andymai/hush/compare/v1.18.0...v1.19.0) (2026-11-27)
+
+
+### Features
+
+* **gui:** a Get a key button, and settings copy that talks to you ([#398](https://github.com/andymai/hush/issues/398)) ([affbdcc](https://github.com/andymai/hush/commit/affbdcc8b31afbae0ddd5dcb0011390e8d8affff))
+
 ## [1.18.0](https://github.com/andymai/hush/compare/v1.17.0...v1.18.0) (2026-11-27)
 
 
