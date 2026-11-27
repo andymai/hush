@@ -1,11 +1,11 @@
 # Advisories that OSV reports for crates hush cannot drop yet. Each entry
 # names the change that removes the crate; delete the entry with that change.
 
-# ttf-parser: ab_glyph reads the fonts with it, in egui's text and in the
-# overlay. ab_glyph has no release without it.
+# ttf-parser: ab_glyph reads the overlay's fonts with it. ab_glyph has no
+# release without it.
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0192"
-reason = "unmaintained ttf-parser via ab_glyph (egui and the overlay); no ab_glyph release drops it"
+reason = "unmaintained ttf-parser via ab_glyph (the overlay); no ab_glyph release drops it"
 
 # number_prefix: pulled by indicatif 0.17 through hf-hub. paste: pulled by
 # gemm through candle. Both leave with the candle removal (#85).

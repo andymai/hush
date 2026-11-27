@@ -11,7 +11,7 @@ ignore = [
 ]
 
 [licenses]
-# OFL-1.1 and LicenseRef-UFL-1.0 cover the fonts bundled by epaint_default_fonts.
+# OFL-1.1 and Ubuntu-font-1.0 cover the fonts bundled by epaint_default_fonts.
 # MPL-2.0 enters via rodio's symphonia decoders and dirs' option-ext.
 # Unicode-3.0 covers the icu crates under url; Zlib the bytemuck and GL crates.
 allow = [
@@ -27,7 +27,7 @@ allow = [
   "0BSD",
   "MPL-2.0",
   "OFL-1.1",
-  "LicenseRef-UFL-1.0",
+  "Ubuntu-font-1.0",
   "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8

@@ -492,7 +492,7 @@ fn detection(gui: &mut Gui, ui: &mut egui::Ui) {
 /// shows `placeholder`.
 pub fn language_picker(
     ui: &mut egui::Ui,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl egui::AsIdSalt,
     value: &mut String,
     with_auto: bool,
     width: f32,
@@ -1098,9 +1098,10 @@ mod tests {
         let ctx = egui::Context::default();
         crate::gui::theme::install(&ctx);
         let draw = |gui: &mut Gui| {
-            let _ = ctx.run(egui::RawInput::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| wake_row(gui, ui));
-            });
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| wake_row(gui, ui));
+            })
+            .drop_without_applying_deltas();
         };
         for confirm in [None, Some(WakeAction::Keep)] {
             gui.wake.confirm = confirm;

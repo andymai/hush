@@ -30,15 +30,15 @@ struct Jump {
 struct Candidates(Vec<(Id, Rect)>);
 
 fn jump_id() -> Id {
-    Id::new("hush-jump")
+    Id::unique("hush-jump")
 }
 
 fn collecting_id() -> Id {
-    Id::new("hush-jump-collecting")
+    Id::unique("hush-jump-collecting")
 }
 
 fn candidates_id() -> Id {
-    Id::new("hush-jump-candidates")
+    Id::unique("hush-jump-candidates")
 }
 
 /// Jump to the row `key` when it next draws.
@@ -109,7 +109,7 @@ pub fn arrive(ui: &Ui, key: &str) -> Option<Landing> {
 /// A control that can take the focus offers itself to a row that a jump
 /// targets.
 pub fn offer(ui: &Ui, response: &Response) {
-    if !response.sense.focusable || !response.enabled() {
+    if !response.sense.is_focusable() || !response.enabled() {
         return;
     }
     let collecting = ui.data(|data| data.get_temp::<bool>(collecting_id()).unwrap_or(false));
@@ -239,8 +239,8 @@ mod tests {
                 ..Default::default()
             };
             let ctx = self.ctx.clone();
-            let _ = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let shown = egui::ScrollArea::vertical().show(ui, |ui| {
                         for index in 0..ROWS {
                             let key = format!("test.{index}");
@@ -263,7 +263,8 @@ mod tests {
                     });
                     self.viewport = shown.inner_rect;
                 });
-            });
+            })
+            .drop_without_applying_deltas();
         }
     }
 
@@ -356,7 +357,11 @@ mod tests {
     #[test]
     fn the_first_control_is_the_one_farthest_left() {
         let at = |x: f32, y: f32| Rect::from_min_size(egui::pos2(x, y), egui::vec2(20.0, 20.0));
-        let (field, clear, below) = (Id::new("field"), Id::new("clear"), Id::new("below"));
+        let (field, clear, below) = (
+            Id::unique("field"),
+            Id::unique("clear"),
+            Id::unique("below"),
+        );
         assert_eq!(
             first_control(&[(clear, at(300.0, 0.0)), (field, at(100.0, 0.0))]),
             Some(field)

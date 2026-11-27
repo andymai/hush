@@ -119,7 +119,6 @@ Transcribed text flows through: filler word removal → vocabulary expansion →
 ## Pinned Dependencies
 
 These constraints hold:
-- egui and eframe 0.29 (the settings window's code targets 0.29; Dependabot ignores their minor and major updates until the upgrade)
 - `SequentialSlice` comes from rubato's `audioadapter_buffers` re-export, not a
   direct dependency, so its `Adapter`/`AdapterMut` impls always match rubato's
 - rodio needs the `playback` feature explicitly, since it uses

@@ -9,9 +9,11 @@
 use crate::config::settings::Appearance;
 use egui::epaint::Shadow;
 use egui::{
-    Color32, Context, FontData, FontDefinitions, FontFamily, FontId, Rounding, Stroke, TextStyle,
-    Theme,
+    Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke,
+    TextStyle, Theme,
 };
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 /// The colours of one scheme.
 #[derive(Debug, PartialEq, Eq)]
@@ -130,15 +132,15 @@ pub fn dialog_shadows(ctx: &Context) -> [Shadow; 2] {
     };
     [
         Shadow {
-            offset: egui::vec2(0.0, 2.0),
-            blur: 4.0,
-            spread: 0.0,
+            offset: [0, 2],
+            blur: 4,
+            spread: 0,
             color: near,
         },
         Shadow {
-            offset: egui::vec2(0.0, 24.0),
-            blur: 48.0,
-            spread: 0.0,
+            offset: [0, 24],
+            blur: 48,
+            spread: 0,
             color: far,
         },
     ]
@@ -210,28 +212,58 @@ pub const SEMIBOLD: &str = "geist-semibold";
 pub const MONO_MEDIUM: &str = "geist-mono-medium";
 pub const ICONS: &str = "lucide";
 
+/// The line of each face, from its ascent to its descent, in em.
+const GEIST_LINE: f32 = 1.3;
+const LUCIDE_LINE: f32 = 1.0;
+
+/// The scale of the window, in pixels per point, as the bits of an `f32`.
+static PIXELS_PER_POINT: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
+
+/// Size the type for the scale of `ctx`, and restyle the window when the
+/// scale changes.
+pub fn follow_scale(ctx: &Context) {
+    let bits = ctx.pixels_per_point().to_bits();
+    if PIXELS_PER_POINT.swap(bits, Ordering::Relaxed) != bits {
+        install_styles(ctx);
+        ctx.request_repaint();
+    }
+}
+
+fn snap(size: f32, line: f32) -> f32 {
+    let pixels_per_point = f32::from_bits(PIXELS_PER_POINT.load(Ordering::Relaxed));
+    snap_at(size, line, pixels_per_point)
+}
+
+/// The size nearest `size` at which a line of the face, `line` em tall, is
+/// a whole number of pixels. Text at these sizes has the widths and the line
+/// breaks that the layout of the window expects.
+fn snap_at(size: f32, line: f32, pixels_per_point: f32) -> f32 {
+    let pixels = line * pixels_per_point;
+    (size * pixels).round() / pixels
+}
+
 pub fn sans(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Proportional)
+    FontId::new(snap(size, GEIST_LINE), FontFamily::Proportional)
 }
 
 pub fn medium(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name(MEDIUM.into()))
+    FontId::new(snap(size, GEIST_LINE), FontFamily::Name(MEDIUM.into()))
 }
 
 pub fn semibold(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name(SEMIBOLD.into()))
+    FontId::new(snap(size, GEIST_LINE), FontFamily::Name(SEMIBOLD.into()))
 }
 
 pub fn mono(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Monospace)
+    FontId::new(snap(size, GEIST_LINE), FontFamily::Monospace)
 }
 
 pub fn mono_medium(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name(MONO_MEDIUM.into()))
+    FontId::new(snap(size, GEIST_LINE), FontFamily::Name(MONO_MEDIUM.into()))
 }
 
 pub fn icon_font(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name(ICONS.into()))
+    FontId::new(snap(size, LUCIDE_LINE), FontFamily::Name(ICONS.into()))
 }
 
 /// Geist for text, Geist Mono for values, and Lucide for icons, with egui's
@@ -249,7 +281,7 @@ pub fn fonts() -> FontDefinitions {
     for (name, bytes) in embedded {
         fonts
             .font_data
-            .insert(name.to_string(), FontData::from_static(bytes));
+            .insert(name.to_string(), Arc::new(FontData::from_static(bytes)));
     }
     let fallbacks = fonts
         .families
@@ -281,6 +313,16 @@ pub fn fonts() -> FontDefinitions {
 /// Install the fonts and both schemes' styles.
 pub fn install(ctx: &Context) {
     ctx.set_fonts(fonts());
+    // Shapes keep their exact place: the bars of the mark and the window's
+    // edge fall between pixels.
+    ctx.tessellation_options_mut(|options| {
+        options.round_rects_to_pixels = false;
+        options.round_line_segments_to_pixels = false;
+    });
+    install_styles(ctx);
+}
+
+fn install_styles(ctx: &Context) {
     ctx.set_style_of(Theme::Light, style(&LIGHT, false));
     ctx.set_style_of(Theme::Dark, style(&DARK, true));
 }
@@ -307,7 +349,9 @@ fn style(palette: &Palette, dark: bool) -> egui::Style {
     spacing.icon_width = 16.0;
     spacing.icon_width_inner = 10.0;
     spacing.icon_spacing = 8.0;
-    spacing.menu_margin = egui::Margin::same(4.0);
+    // A menu's 1-point edge is part of its frame, so its items sit 4 points
+    // inside the outer edge.
+    spacing.menu_margin = egui::Margin::same(3);
     spacing.indent = 0.0;
     spacing.tooltip_width = 320.0;
     spacing.scroll = egui::style::ScrollStyle {
@@ -315,6 +359,14 @@ fn style(palette: &Palette, dark: bool) -> egui::Style {
         floating_width: 4.0,
         bar_inner_margin: 2.0,
         bar_outer_margin: EDGE_CLEARANCE,
+        fade: egui::style::ScrollFadeStyle {
+            strength: 0.0,
+            ..Default::default()
+        },
+        kinetic: egui::style::KineticScrollStyle {
+            rubber_band: false,
+            ..Default::default()
+        },
         ..egui::style::ScrollStyle::floating()
     };
 
@@ -324,6 +376,12 @@ fn style(palette: &Palette, dark: bool) -> egui::Style {
     } else {
         egui::Visuals::light()
     };
+    // Unhinted glyphs on whole pixels, with alpha = coverage^0.55 in both
+    // schemes: the weight and the shapes of type that the design uses.
+    visuals.text_options.font_hinting = false;
+    visuals.text_options.subpixel_binning = false;
+    visuals.text_options.color_transfer_function =
+        egui::epaint::FontColorTransferFunction::Gamma(0.55);
     visuals.panel_fill = palette.surface;
     visuals.window_fill = palette.raised;
     visuals.window_stroke = Stroke::new(1.0_f32, palette.line);
@@ -331,13 +389,16 @@ fn style(palette: &Palette, dark: bool) -> egui::Style {
     visuals.faint_bg_color = palette.hover;
     visuals.code_bg_color = palette.sunken;
     visuals.hyperlink_color = palette.accent;
+    // A text field paints its placeholder in this colour, not in the colour
+    // of the placeholder's own text.
+    visuals.weak_text_color = Some(palette.muted);
     visuals.warn_fg_color = palette.warn;
     visuals.error_fg_color = palette.bad;
     visuals.selection.bg_fill = palette.accent.gamma_multiply(0.3);
     visuals.selection.stroke = Stroke::new(2.0_f32, palette.accent);
     visuals.text_cursor.stroke = Stroke::new(1.5_f32, palette.ink);
-    visuals.window_rounding = Rounding::same(RADIUS_MD);
-    visuals.menu_rounding = Rounding::same(RADIUS_MD);
+    visuals.window_corner_radius = CornerRadius::from(RADIUS_MD);
+    visuals.menu_corner_radius = CornerRadius::from(RADIUS_MD);
     visuals.window_highlight_topmost = false;
     visuals.indent_has_left_vline = false;
     visuals.striped = false;
@@ -347,21 +408,25 @@ fn style(palette: &Palette, dark: bool) -> egui::Style {
         Color32::from_rgba_unmultiplied(20, 24, 33, 31)
     };
     visuals.popup_shadow = Shadow {
-        offset: egui::vec2(0.0, 8.0),
-        blur: 24.0,
-        spread: 0.0,
+        offset: [0, 8],
+        blur: 24,
+        spread: 0,
         color: shadow,
     };
     visuals.window_shadow = visuals.popup_shadow;
 
-    let rounding = Rounding::same(RADIUS_SM);
-    let state = |fill: Color32, edge: Color32| egui::style::WidgetVisuals {
+    // egui's own buttons and drop-downs paint their edge one point outside
+    // their rect, as the window's own controls do, so the outer radius is one
+    // point more.
+    let edge = 1.0;
+    let corner_radius = CornerRadius::from(RADIUS_SM + edge);
+    let state = |fill: Color32, colour: Color32| egui::style::WidgetVisuals {
         bg_fill: fill,
         weak_bg_fill: fill,
-        bg_stroke: Stroke::new(1.0_f32, edge),
-        rounding,
+        bg_stroke: Stroke::new(edge, colour),
+        corner_radius,
         fg_stroke: Stroke::new(1.0_f32, palette.ink),
-        expansion: 0.0,
+        expansion: edge,
     };
     let widgets = &mut visuals.widgets;
     widgets.noninteractive = state(palette.surface, palette.line);
@@ -499,6 +564,20 @@ mod tests {
         );
         assert_eq!(split(MIN_TEXT + ROW_GAP + 99.0, 100.0), Split::Stacked);
         assert_eq!(split(300.0, 420.0), Split::Stacked);
+    }
+
+    #[test]
+    fn type_sizes_snap_to_lines_of_whole_pixels_at_each_scale() {
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        assert!(close(snap_at(BODY, GEIST_LINE, 1.0), 18.0 / 1.3));
+        assert!(close(snap_at(SMALL, GEIST_LINE, 1.0), 16.0 / 1.3));
+        assert!(
+            close(snap_at(20.0 / 1.3, GEIST_LINE, 1.0), 20.0 / 1.3),
+            "a size on whole pixels stays"
+        );
+        assert!(close(snap_at(BODY, GEIST_LINE, 2.0), 35.0 / 2.6));
+        assert_eq!(snap_at(ICON, LUCIDE_LINE, 1.0), ICON);
+        assert!(close(snap_at(13.0, LUCIDE_LINE, 1.5), 20.0 / 1.5));
     }
 
     #[test]

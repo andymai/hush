@@ -1156,7 +1156,10 @@ impl Gui {
 }
 
 impl eframe::App for Gui {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    /// eframe calls this before each `ui`, and alone while the window is
+    /// hidden. Thus a close from the taskbar asks first.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        theme::follow_scale(ctx);
         let theme = self.theme();
         if ctx.theme() != theme {
             ctx.set_theme(theme);
@@ -1169,7 +1172,16 @@ impl eframe::App for Gui {
         self.finish_download(ctx);
         pages::speech::finish_wake(self);
         self.finish_capture();
-        self.palette.keys(ctx, self.capture.is_some());
+        self.intercept_close(ctx);
+        // `ui` drives the restart and the close, so it runs while they wait.
+        if self.debounce.pending() || self.close.closing {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        self.palette.keys(&ctx, self.capture.is_some());
         if self.palette.is_open() {
             self.capture = None;
         }
@@ -1188,52 +1200,69 @@ impl eframe::App for Gui {
             self.last_page = self.page;
             self.disarm();
         }
-        self.intercept_close(ctx);
 
-        let colours = theme::palette(ctx);
-        egui::SidePanel::left("nav")
+        let colours = theme::palette(&ctx);
+        // Each panel's divider goes on its own last column or row, over its
+        // fill. egui's divider would take a point of the panel's room.
+        let divider = egui::Stroke::new(1.0_f32, colours.line);
+        let nav = egui::Panel::left("nav")
             .resizable(false)
-            .exact_width(theme::SIDEBAR_WIDTH)
-            .frame(egui::Frame::none().fill(colours.bg))
-            .show(ctx, |ui| chrome::sidebar(self, ui));
-        egui::TopBottomPanel::top("title")
-            .exact_height(theme::BAR_HEIGHT)
+            .show_separator_line(false)
+            .exact_size(theme::SIDEBAR_WIDTH)
+            .frame(egui::Frame::NONE.fill(colours.bg))
+            .show(ui, |ui| chrome::sidebar(self, ui))
+            .response
+            .rect;
+        ui.painter()
+            .vline(nav.right() - 0.5, nav.y_range(), divider);
+        let title = egui::Panel::top("title")
+            .show_separator_line(false)
+            .exact_size(theme::BAR_HEIGHT)
             .frame(
-                egui::Frame::none()
+                egui::Frame::NONE
                     .fill(colours.surface)
                     .inner_margin(egui::Margin {
-                        left: 16.0,
-                        right: 8.0,
-                        top: 0.0,
-                        bottom: 0.0,
+                        left: 16,
+                        right: 8,
+                        top: 0,
+                        bottom: 0,
                     }),
             )
-            .show(ctx, |ui| chrome::title_bar(ui, self.page.title()));
-        egui::TopBottomPanel::bottom("footer")
-            .exact_height(theme::FOOTER_HEIGHT)
+            .show(ui, |ui| chrome::title_bar(ui, self.page.title()))
+            .response
+            .rect;
+        ui.painter()
+            .hline(title.x_range(), title.bottom() - 0.5, divider);
+        let footer = egui::Panel::bottom("footer")
+            .show_separator_line(false)
+            .exact_size(theme::FOOTER_HEIGHT)
             .frame(
-                egui::Frame::none()
+                egui::Frame::NONE
                     .fill(colours.surface)
-                    .inner_margin(egui::Margin::symmetric(16.0, 0.0)),
+                    .inner_margin(egui::Margin::symmetric(16, 0)),
             )
-            .show(ctx, |ui| chrome::footer(self, ui));
+            .show(ui, |ui| chrome::footer(self, ui))
+            .response
+            .rect;
+        ui.painter()
+            .hline(footer.x_range(), footer.top() + 0.5, divider);
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(colours.surface))
-            .show(ctx, |ui| self.page(ui));
-        chrome::resize_edges(ctx);
-        chrome::window_border(ctx);
+            .frame(egui::Frame::NONE.fill(colours.surface))
+            .show(ui, |ui| self.page(ui));
+        chrome::resize_edges(&ctx);
+        chrome::window_border(&ctx);
         if self.palette.is_open() {
             self.history.refresh();
         }
         let mut commands = std::mem::take(&mut self.palette);
-        let pick = commands.show(ctx, self);
+        let pick = commands.show(&ctx, self);
         self.palette = commands;
         if let Some(pick) = pick {
-            palette::run(self, ctx, pick);
+            palette::run(self, &ctx, pick);
         }
-        jump::expire(ctx);
+        jump::expire(&ctx);
         let now = Instant::now();
-        let rejected = widgets::take_rejections(ctx) > 0;
+        let rejected = widgets::take_rejections(&ctx) > 0;
         let before = (
             self.config_feedback.clone(),
             self.vocabulary_feedback.clone(),
@@ -1247,10 +1276,10 @@ impl eframe::App for Gui {
             ctx.request_repaint();
         }
         self.closing_after_pages(rejected);
-        self.drive_restart(ctx, now);
+        self.drive_restart(&ctx, now);
 
         if let Some(screenshot) = self.screenshot.as_mut() {
-            screenshot.step(ctx);
+            screenshot.step(&ctx);
             return;
         }
         let repaint = if self.download.lock().size.is_some() {
@@ -1514,13 +1543,14 @@ mod tests {
                 )),
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| {
-                egui::SidePanel::left("nav")
+            ctx.run_ui(input, |ui| {
+                egui::Panel::left("nav")
                     .resizable(false)
-                    .exact_width(theme::SIDEBAR_WIDTH)
-                    .frame(egui::Frame::none())
-                    .show(ctx, |ui| chrome::sidebar(&mut gui, ui));
-            });
+                    .exact_size(theme::SIDEBAR_WIDTH)
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| chrome::sidebar(&mut gui, ui));
+            })
+            .drop_without_applying_deltas();
         }
         assert!(gui.palette.is_open());
         assert!(gui.capture.is_none());

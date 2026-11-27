@@ -21,8 +21,8 @@ use super::Gui;
 use crate::config::settings::TranscriptionBackend;
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
-    Align, Context, Event, Id, Key, Layout, Modifiers, Order, Pos2, Rect, Response, Sense, Stroke,
-    Ui, UiBuilder, Vec2,
+    Align, Align2, Context, Event, Id, Key, Layout, Modifiers, Order, Pos2, Rect, Response, Role,
+    Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2,
 };
 use std::sync::Arc;
 
@@ -1111,7 +1111,7 @@ pub fn shortcut(open: bool, capturing: bool, focus: Focus) -> Shortcut {
 }
 
 pub fn field_id() -> Id {
-    Id::new("hush-palette-field")
+    Id::unique("hush-palette-field")
 }
 
 fn focus(ctx: &Context) -> Focus {
@@ -1174,10 +1174,8 @@ impl Palette {
         self.restore = ctx
             .memory(|memory| memory.focused())
             .filter(|id| *id != field_id());
-        ctx.memory_mut(|memory| {
-            memory.close_popup();
-            memory.request_focus(field_id());
-        });
+        egui::Popup::close_all(ctx);
+        ctx.memory_mut(|memory| memory.request_focus(field_id()));
         ctx.request_repaint();
     }
 
@@ -1266,7 +1264,7 @@ impl Palette {
         if ctx.memory(|memory| memory.focused()) != Some(field_id()) {
             ctx.memory_mut(|memory| memory.request_focus(field_id()));
         }
-        let screen = ctx.screen_rect();
+        let screen = ctx.viewport_rect();
         let width = (screen.width() - 2.0 * SIDE).min(WIDTH);
         let corner = Pos2::new(
             screen.center().x - width / 2.0,
@@ -1275,7 +1273,7 @@ impl Palette {
         let list_height = (screen.height() * LIST_SHARE).min(LIST_MAX);
         let mut pick = None;
         let mut dismiss = false;
-        let area = egui::Area::new(Id::new("hush-palette"))
+        let area = egui::Area::new(Id::unique("hush-palette"))
             .order(Order::Foreground)
             .fixed_pos(screen.min)
             .show(ctx, |ui| {
@@ -1319,6 +1317,7 @@ impl Palette {
                         theme::RADIUS_LG,
                         colours.raised,
                         Stroke::new(1.0_f32, colours.line),
+                        StrokeKind::Outside,
                     ),
                 );
                 let outside = ui
@@ -1377,9 +1376,8 @@ impl Palette {
                 .font(theme::sans(theme::BODY))
                 .text_color(colours.ink)
                 .hint_text(hint)
-                .frame(false)
-                .margin(egui::Margin::ZERO)
-                .vertical_align(Align::Center)
+                .frame(egui::Frame::NONE)
+                .align(Align2::LEFT_CENTER)
                 .min_size(field.size())
                 .desired_width(field.width())
                 .lock_focus(true),
@@ -1414,8 +1412,8 @@ impl Palette {
         let follow = std::mem::take(&mut self.follow);
         let mut picked = None;
         area.show(ui, |ui| {
-            egui::Frame::none()
-                .inner_margin(egui::Margin::same(8.0))
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::same(8))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing = Vec2::ZERO;
                     if entries.is_empty() {
@@ -1482,7 +1480,7 @@ fn line(
 ) -> Arc<egui::Galley> {
     let mut job = LayoutJob::simple_singleline(text.to_owned(), font, colour);
     job.wrap = TextWrapping::truncate_at_width(width.max(1.0));
-    ui.fonts(|fonts| fonts.layout_job(job))
+    ui.painter().layout_job(job)
 }
 
 /// One entry: its icon, its title, and where it is, at the right.
@@ -1490,14 +1488,7 @@ fn item(ui: &mut Ui, entry: &Entry, selected: bool) -> Response {
     let colours = palette(ui.ctx());
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, ITEM), Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
-            true,
-            selected,
-            &entry.title,
-        )
-    });
+    response.widget_info(|| egui::WidgetInfo::selected(Role::Button, true, selected, &entry.title));
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -1761,19 +1752,21 @@ mod tests {
                 ..Default::default()
             };
             let ctx = self.ctx.clone();
-            let _ = ctx.run(input, |ctx| {
-                self.palette.keys(ctx, capturing);
-                egui::CentralPanel::default().show(ctx, |ui| {
+            ctx.run_ui(input, |ui| {
+                let ctx = ui.ctx().clone();
+                self.palette.keys(&ctx, capturing);
+                egui::CentralPanel::default().show(ui, |ui| {
                     let response = ui.add(Field::new(&mut self.text, ""));
                     if focus_field {
                         response.request_focus();
                     }
                     self.field = Some(response.id);
                 });
-                if let Some(pick) = self.palette.draw(ctx, |query| filter(sample(), query)) {
+                if let Some(pick) = self.palette.draw(&ctx, |query| filter(sample(), query)) {
                     self.picked = Some(pick);
                 }
-            });
+            })
+            .drop_without_applying_deltas();
         }
 
         /// Frames that give the page's field the focus.
