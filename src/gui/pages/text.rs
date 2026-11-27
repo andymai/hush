@@ -90,7 +90,28 @@ fn tone(gui: &mut Gui, ui: &mut egui::Ui) {
 
 fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
     section(ui, "Polish");
-    let shown_before = gui.pending.provider.unwrap_or(gui.config.llm.provider);
+    polish_rows(gui, ui);
+}
+
+/// The provider that the dropdown shows: a switch that waits for its
+/// server, or the saved provider.
+pub(crate) fn shown_provider(gui: &Gui) -> LlmSetting {
+    gui.pending.provider.unwrap_or(gui.config.llm.provider)
+}
+
+/// Auto tries Ollama first, then Anthropic.
+pub(crate) fn uses_ollama(provider: LlmSetting) -> bool {
+    matches!(provider, LlmSetting::Auto | LlmSetting::Ollama)
+}
+
+pub(crate) fn uses_anthropic(provider: LlmSetting) -> bool {
+    matches!(provider, LlmSetting::Auto | LlmSetting::Anthropic)
+}
+
+/// The provider that polishes, the settings it uses, and whether it tidies
+/// every transcript.
+pub(crate) fn polish_rows(gui: &mut Gui, ui: &mut egui::Ui) {
+    let shown_before = shown_provider(gui);
     let waiting = gui.pending.provider.and_then(|provider| {
         checked_change(&gui.config, |config| config.llm.provider = provider)
             .err()
@@ -99,9 +120,8 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
     let mut shown = shown_before;
     row("text.llm_provider", "Polish with")
         .describe(
-            "Only the text is ever sent, never the audio. Anthropic needs an API key, \
-             which you can save under Language models. An OpenAI-compatible server \
-             receives the text at the address you set.",
+            "Only the text is ever sent, never the audio. Auto uses Ollama when it \
+             answers, or else Anthropic with a saved key.",
         )
         .problem(waiting.as_deref())
         .show(ui, |ui| {
@@ -128,6 +148,16 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
             config.llm.provider = provider
         });
     }
+    let shown = shown_provider(gui);
+    if uses_ollama(shown) {
+        ollama_rows(gui, ui);
+    }
+    if uses_anthropic(shown) {
+        anthropic_rows(gui, ui);
+    }
+    if shown == LlmSetting::OpenAiCompatible {
+        server_rows(gui, ui);
+    }
     row("text.polish", "Tidy up every transcript")
         .describe("Otherwise the model only handles spoken commands.")
         .reserve(36.0)
@@ -136,8 +166,9 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
                 switch(ui, &mut gui.config.llm.polish);
             });
         });
+}
 
-    section(ui, "Language models");
+fn ollama_rows(gui: &mut Gui, ui: &mut egui::Ui) {
     text_setting(
         gui,
         ui,
@@ -152,13 +183,9 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
         "llama3.2",
         |config| &mut config.llm.ollama_model,
     );
-    text_setting(
-        gui,
-        ui,
-        row("text.anthropic_model", "Anthropic model"),
-        "claude-haiku-4-5",
-        |config| &mut config.llm.anthropic_model,
-    );
+}
+
+fn anthropic_rows(gui: &mut Gui, ui: &mut egui::Ui) {
     let status = api_keys::status(gui, "ANTHROPIC_API_KEY");
     api_keys::key_row(
         gui,
@@ -166,18 +193,28 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
         row("text.anthropic_key", "Anthropic API key").describe(&status),
         "ANTHROPIC_API_KEY",
     );
+    text_setting(
+        gui,
+        ui,
+        row("text.anthropic_model", "Anthropic model"),
+        "claude-haiku-4-5",
+        |config| &mut config.llm.anthropic_model,
+    );
+}
+
+fn server_rows(gui: &mut Gui, ui: &mut egui::Ui) {
     let reach = server_reach(&gui.config.llm.server_url);
     text_setting(
         gui,
         ui,
-        row("text.server_url", "OpenAI-compatible server").describe(&reach),
+        row("text.server_url", "Server address").describe(&reach),
         "http://localhost:8080/v1",
         |config| &mut config.llm.server_url,
     );
     text_setting(
         gui,
         ui,
-        row("text.server_model", "OpenAI-compatible model"),
+        row("text.server_model", "Server model"),
         "llama3.2",
         |config| &mut config.llm.server_model,
     );
@@ -186,7 +223,7 @@ fn polish(gui: &mut Gui, ui: &mut egui::Ui) {
         api_keys::key_row(
             gui,
             ui,
-            row("text.server_key", "OpenAI-compatible server key").describe(&status),
+            row("text.server_key", "Server key").describe(&status),
             &var,
         );
     }
