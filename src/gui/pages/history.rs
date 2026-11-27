@@ -630,11 +630,15 @@ fn retention_row(gui: &mut Gui, ui: &mut egui::Ui) {
         gui.history.days = days;
     }
     let description = if days > 0 {
+        let span = if days == 1 {
+            "1 day".to_string()
+        } else {
+            format!("{} days", days)
+        };
         format!(
-            "Keeps the audio of each dictation for {} days, private to you, so you can \
-             play it back or transcribe it again. Lowering the number deletes older audio \
-             right away.",
-            days
+            "Keeps the audio of each dictation for {}, private to you, so you can play it \
+             back or transcribe it again. Lowering the number deletes older audio right away.",
+            span
         )
     } else {
         format!(
@@ -667,7 +671,9 @@ fn retention_row(gui: &mut Gui, ui: &mut egui::Ui) {
                         gui.history.confirm_audio = None;
                         gui.config.history.keep_audio_days = cut.days;
                     }
-                    let keep = if days > 0 {
+                    let keep = if days == 1 {
+                        "Keep 1 day".to_string()
+                    } else if days > 0 {
                         format!("Keep {} days", days)
                     } else {
                         "Keep the audio".to_string()
