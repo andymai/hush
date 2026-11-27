@@ -15,6 +15,7 @@ pub mod keyboard;
 pub mod keysym;
 pub mod mode;
 pub mod probe;
+pub mod seat_keymap;
 pub mod shortcuts;
 pub mod token;
 

@@ -49,7 +49,7 @@ The packages type through the kernel's input layer, so they work in terminals, b
 ### Every language and layout
 
 - **Any language that Whisper knows.** Detect what you speak, or limit the detection to the languages that you use. Give each language its own key.
-- **Every keyboard layout.** The packages type key by key through the XKB keymap of the active layout, with accents and Caps Lock. When a take has a character that no key types, such as an emoji, Hush pastes the take. The Flatpak cannot read the keymap, so it types letters, digits, and basic punctuation, and pastes accents, quotes, and emoji.
+- **Every keyboard layout.** The packages type key by key through the XKB keymap of the active layout, with accents and Caps Lock. When a take has a character that no key types, such as an emoji, Hush pastes the take. The Flatpak types the characters on the first two levels of a keymap with one layout, and pastes accents through dead keys, AltGr characters, and emoji.
 
 ### Nothing lost
 
@@ -112,7 +112,7 @@ Hush deliberately does not:
 Some limits come from where Hush runs:
 
 - **wlroots desktops need a package.** Sway, Hyprland, and other wlroots desktops have no RemoteDesktop portal, so the Flatpak cannot type there.
-- **The Flatpak pastes some characters.** It cannot read your keyboard layout, so it pastes accents, quotes, and emoji instead of typing them.
+- **The Flatpak pastes some characters.** It pastes accents through dead keys, AltGr characters, and emoji instead of typing them. With two or more layouts, it cannot tell which one is active, so it also pastes quotes and accents, and on KDE Plasma also digits and punctuation.
 - **x86-64 only, for now.** The prebuilt packages and the Flatpak are x86-64. Other CPUs might build from source, but nobody has tested that.
 - **A model download first.** The base model is about 147 MB, and the larger models are more.
 

@@ -8,8 +8,11 @@ A Flatpak sandbox gives Hush no access to `/dev/uinput` or `/dev/input`. In a sa
 
 Hold to talk, the double-tap lock, and toggle mode work as with evdev. The compositor drops a character that the active layout does not have, so Hush types only the characters that the layout surely has, and pastes other text:
 
-- In a sandbox, Hush cannot read the keymap. It types letters, digits, spaces, and `. , ; : ! ? - ( )`, and pastes other text, such as quotes, accents, and emoji.
-- Outside a sandbox, Hush reads the keymap and types the characters on the first two levels of the active layout, with no dead key.
+- In a sandbox, Hush reads the keymap that the compositor sends to each Wayland app. If the keymap has one layout, Hush types the characters on the first two levels of that layout, with no dead key.
+- If the keymap in a sandbox has two or more layouts, Hush cannot tell which layout is active. Hush also cannot read a keymap on an X11 session. Then it types letters, digits, spaces, and `. , ; : ! ? - ( )`, and pastes other text, such as quotes, accents, and emoji. On KDE Plasma, it types only letters and spaces, and pastes a take with a digit or a punctuation mark.
+- Outside a sandbox, Hush reads the layout settings and types the characters on the first two levels of the active layout, with no dead key.
+
+For a character on the second level of its key, such as a capital letter, Hush holds Shift itself. KWin does not add Shift correctly for such a character, so the character comes out without Shift, and Shift stays down after it.
 
 The paste chord is Shift+Insert, because Shift and Insert have the same place on every layout. Each take opens a RemoteDesktop session and closes it after the text, so GNOME shows its sharing indicator only during the take. In a sandbox, Hush has no update check, because Flatpak updates it.
 

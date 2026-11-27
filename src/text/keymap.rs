@@ -140,6 +140,9 @@ pub struct KeyTable {
     chars: HashMap<char, Vec<Tap>>,
     shift: Key,
     locks: TableLocks,
+    /// The keysym on the first level of a key, with no lock, for the
+    /// RemoteDesktop portal, which takes keysyms.
+    first_level: HashMap<Key, u32>,
 }
 
 /// What a lock does to the keys outside the table: a line break and the
@@ -264,7 +267,12 @@ static US_TABLE: Lazy<KeyTable> = Lazy::new(|| {
             (ch, vec![tap])
         })
         .collect();
-    KeyTable::new(chars, Key::LeftShift)
+    let first_level = US
+        .iter()
+        .filter(|&&(_, _, shift)| !shift)
+        .map(|&(ch, key, _)| (key, xkeysym::Keysym::from_char(ch).raw()))
+        .collect();
+    KeyTable::new(chars, Key::LeftShift).with_first_level(first_level)
 });
 
 impl KeyTable {
@@ -274,6 +282,7 @@ impl KeyTable {
             chars,
             shift,
             locks: TableLocks::default(),
+            first_level: HashMap::new(),
         }
     }
 
@@ -283,6 +292,20 @@ impl KeyTable {
 
     pub fn locks(&self) -> TableLocks {
         self.locks
+    }
+
+    pub fn with_first_level(self, first_level: HashMap<Key, u32>) -> Self {
+        Self {
+            first_level,
+            ..self
+        }
+    }
+
+    /// The keysym on the first level of `key` with no lock. `None` when the
+    /// table does not know it, such as for a dead key, or when another key
+    /// has the keysym too, so the compositor can choose that key.
+    pub fn first_level_sym(&self, key: Key) -> Option<u32> {
+        self.first_level.get(&key).copied()
     }
 
     /// The plain US layout, for when libxkbcommon is not available.
@@ -327,10 +350,18 @@ impl KeyTable {
         } else {
             Key::LeftShift
         };
-        KeyTable::new(chars, shift).with_locks(TableLocks {
-            shift_locked: self.locks.shift_locked || other.locks.shift_locked,
-            no_shift: self.locks.no_shift || other.locks.no_shift,
-        })
+        let first_level = self
+            .first_level
+            .iter()
+            .filter(|(key, sym)| other.first_level.get(key) == Some(sym))
+            .map(|(&key, &sym)| (key, sym))
+            .collect();
+        KeyTable::new(chars, shift)
+            .with_locks(TableLocks {
+                shift_locked: self.locks.shift_locked || other.locks.shift_locked,
+                no_shift: self.locks.no_shift || other.locks.no_shift,
+            })
+            .with_first_level(first_level)
     }
 
     pub fn dead_key_chars(&self) -> usize {
@@ -507,6 +538,45 @@ mod tests {
         assert_eq!(common.taps('<'), None, "only one table has it");
         assert_eq!(common.taps('z'), None, "only the other table has it");
         assert_eq!(common.taps('é'), None, "the dead keys differ");
+        assert_eq!(common, other.common(&one));
+    }
+
+    #[test]
+    fn the_us_table_knows_the_first_level_of_each_key() {
+        let us = KeyTable::us();
+        assert_eq!(us.first_level_sym(Key::A), Some(0x61));
+        assert_eq!(us.first_level_sym(Key::Num1), Some(0x31));
+        assert_eq!(us.first_level_sym(Key::Slash), Some(0x2f));
+        assert_eq!(us.first_level_sym(Key::Grave), Some(0x60));
+        assert_eq!(us.first_level_sym(Key::Space), Some(0x20));
+        assert_eq!(us.first_level_sym(Key::NonUsBackslashAndPipe), None);
+        let from_chars = KeyTable::new(
+            HashMap::from([('a', vec![Tap::plain(Key::A)])]),
+            Key::LeftShift,
+        );
+        assert_eq!(
+            from_chars.first_level_sym(Key::A),
+            None,
+            "a table from characters alone knows no keysyms"
+        );
+    }
+
+    #[test]
+    fn two_tables_share_only_the_same_first_levels() {
+        let first = |syms: &[(Key, u32)]| {
+            KeyTable::new(HashMap::new(), Key::LeftShift)
+                .with_first_level(syms.iter().copied().collect())
+        };
+        let one = first(&[(Key::A, 0x61), (Key::Q, 0x71), (Key::Z, 0x7a)]);
+        let other = first(&[(Key::A, 0x61), (Key::Q, 0x61)]);
+        let common = one.common(&other);
+        assert_eq!(common.first_level_sym(Key::A), Some(0x61));
+        assert_eq!(common.first_level_sym(Key::Q), None, "the keysyms differ");
+        assert_eq!(
+            common.first_level_sym(Key::Z),
+            None,
+            "only one table has it"
+        );
         assert_eq!(common, other.common(&one));
     }
 
