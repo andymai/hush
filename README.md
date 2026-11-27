@@ -83,7 +83,7 @@ The prebuilt packages are for x86-64 Linux. They need only your usual graphics d
 
 `hush setup` opens a window that sets Hush up one step at a time, from keyboard access and a model to a first dictation and privacy. The first `hush settings` on a new install opens the same steps, and so does the notification that the daemon sends once.
 
-With the Flatpak, open Hush from your app menu, and the window takes you through the steps. Your desktop asks for keyboard access at the first dictation. In a terminal, run each command as `flatpak run io.github.andymai.hush <command>`, for example `flatpak run io.github.andymai.hush doctor`.
+With the Flatpak, open Hush from your app menu, and the window takes you through the steps. Your desktop asks for keyboard access at the first dictation. Hush proposes a key only for dictation, so set the Cancel and Command keys in your desktop's shortcut settings. In a terminal, run each command as `flatpak run io.github.andymai.hush <command>`, for example `flatpak run io.github.andymai.hush doctor`.
 
 With a package, in a terminal:
 

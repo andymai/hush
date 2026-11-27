@@ -2,7 +2,7 @@
 
 A Flatpak sandbox gives Hush no access to `/dev/uinput` or `/dev/input`. In a sandbox, Hush uses the desktop portals:
 
-- The RemoteDesktop portal types the text. At the first dictation, the desktop asks you to allow keyboard access. Hush keeps the answer in `remote-desktop-token` in its data folder, a file that only you can read, so the desktop does not ask again.
+- The RemoteDesktop portal types the text. At the first dictation, the desktop asks you to allow keyboard access. Hush keeps the answer in `remote-desktop-token` in its data folder, a file that only you can read, so the desktop does not ask again. On GNOME, the dialog's Allow Remote Interaction switch starts off: switch it on, then press Share.
 - The GlobalShortcuts portal reads the hotkeys. Hush asks for one shortcut for each action and proposes Meta+Space for dictation. You set the other keys in the shortcut settings of the desktop. `hush shortcuts` shows the keys, and `hush shortcuts --configure` opens the shortcut settings.
 - The Background portal starts Hush at login. Run `hush install --autostart`, or turn on the switch in `hush settings`.
 

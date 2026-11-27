@@ -261,10 +261,10 @@ pub fn notify_at_start(config: &Config) {
     notify_with_action(
         NoticeKind::Status,
         "Set up Hush",
-        "Eight short steps: keyboard access, a model, your key, and a first dictation.",
+        "A few quick steps get you dictating: keyboard access, a model, your key, and a first try.",
         "Set up Hush",
-        "Eight short steps: keyboard access, a model, your key, and a first dictation. \
-         Run hush setup to start.",
+        "A few quick steps get you dictating: keyboard access, a model, your key, and a first \
+         try. Run hush setup to start.",
         launch,
     );
 }
