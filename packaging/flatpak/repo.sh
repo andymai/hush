@@ -21,7 +21,7 @@ published_key=${PUBLISHED_KEY:-$(dirname "$0")/hush-repo.asc}
 app=io.github.andymai.hush
 ref=app/$app/x86_64/master
 title=Hush
-comment="Dictate into any app, locally"
+comment="Type with your voice"
 homepage=https://github.com/andymai/hush
 parents=2
 

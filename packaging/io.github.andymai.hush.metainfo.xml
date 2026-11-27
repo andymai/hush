@@ -6,25 +6,31 @@
   <project_license>MIT</project_license>
 
   <name>Hush</name>
-  <summary>Dictate into any app, locally</summary>
+  <summary>Type with your voice</summary>
   <developer id="io.github.andymai">
     <name>Andy Aragon</name>
   </developer>
 
   <description>
     <p>
-      Hush turns speech into text on the Linux desktop. Hold a key, speak, and
-      let go: the words appear at the cursor. Hush runs OpenAI's Whisper models
-      or NVIDIA's Parakeet on your computer, on the GPU through Vulkan when one
-      is present, so your audio stays on your computer.
+      Hush turns your speech into text on the Linux desktop. Hold a key, talk,
+      and let go, and your words appear wherever you're typing. Hush runs
+      OpenAI's Whisper models or NVIDIA's Parakeet on your own computer, on the
+      GPU when you have one, so your audio stays with you.
+    </p>
+    <p>
+      The Flatpak works on KDE Plasma 6 and GNOME 48 or later. Your desktop
+      sets the hotkeys and asks once for keyboard access. On Sway, Hyprland,
+      and other wlroots desktops, install a package from the project page
+      instead.
     </p>
     <ul>
       <li>Hold to talk, or tap twice for hands-free recording that transcribes in parts while you speak</li>
       <li>Any language that Whisper knows, with an optional key for each language</li>
       <li>Text that fits the application: casual in chat, full sentences in mail, no line breaks in a terminal</li>
       <li>Your own words: teach Hush a name once, and it spells the name your way</li>
-      <li>Optional polish of the text by a local or cloud language model, which gets text and never audio</li>
-      <li>A history of your transcripts that only you can read, and recovery of a failed take</li>
+      <li>An optional tidy-up by a local or cloud language model, which sees only the text, never your audio</li>
+      <li>A history of your transcripts that only you can read, and recovery of a failed recording</li>
       <li>A settings window and a panel icon</li>
     </ul>
   </description>
