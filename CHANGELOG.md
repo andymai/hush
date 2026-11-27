@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/andymai/hush/compare/v1.11.1...v1.12.0) (2026-11-27)
+
+
+### Features
+
+* **hotkey:** translate keys and --translate type the speech in English ([#379](https://github.com/andymai/hush/issues/379)) ([34f8846](https://github.com/andymai/hush/commit/34f8846ffb87ea006414b03bc43e500d4eb79479))
+
 ## [1.11.1](https://github.com/andymai/hush/compare/v1.11.0...v1.11.1) (2026-11-27)
 
 
