@@ -156,7 +156,7 @@ egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
 
 # The recording overlay: a separate process that draws on the CPU and shows
 # the image on a Wayland layer-shell surface or an X11 window
-tiny-skia = { version = "0.11", default-features = false, features = [
+tiny-skia = { version = "0.12", default-features = false, features = [
   "std",
   "simd",
 ] }
