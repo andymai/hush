@@ -1,10 +1,11 @@
 //! A [`KeyTable`] for the session's XKB keymap, built with libxkbcommon.
 //!
-//! Hush compiles the keymap from its RMLVO names, holds the modifiers in an
-//! XKB state as a compositor would, and reads which character each key
-//! types in the active layout. A character that no key types can come from
-//! a dead key and a base key, but only when the compose table for the
-//! locale turns that pair into the character.
+//! Hush compiles the keymap from its RMLVO names, or from the keymap text
+//! that a Wayland compositor sends, holds the modifiers in an XKB state as
+//! a compositor would, and reads which character each key types in the
+//! active layout. A character that no key types can come from a dead key
+//! and a base key, but only when the compose table for the locale turns
+//! that pair into the character.
 //!
 //! With a locked modifier, such as Caps Lock, the state holds the lock
 //! too, so the keymap's own key types decide when a letter needs Shift.
@@ -103,37 +104,106 @@ pub fn build(request: &Request) -> Result<KeyTable> {
             layouts
         );
     }
-    let free = |key: Key| !request.reserved.contains(&key.code());
     let base = Base {
         group: request.group,
         locked: locked_mask(&keymap, request.locked),
     };
-    let shift = find_modifier(&keymap, base, free, Modifier::Shift)?;
-    let level3 = if request.level3 {
-        find_modifier(&keymap, base, free, Modifier::Level3)?
+    table(&keymap, base, request.level3, &request.reserved, || {
+        Compose::new(&context, &request.locale)
+    })
+}
+
+/// A table for a keymap in the XKB text format, such as the keymap that a
+/// Wayland compositor gives each client. Only a keymap with one layout
+/// gives a table, because a client without the keyboard focus does not
+/// learn the active layout. The table has no dead-key sequences, because
+/// the RemoteDesktop portal does not type them.
+pub fn build_from_text(text: &str) -> Result<KeyTable> {
+    let lib =
+        xkbcommon_dl::xkbcommon_option().ok_or_else(|| anyhow!("libxkbcommon is not installed"))?;
+    let context = Context::new(lib)?;
+    let keymap = Keymap::from_text(&context, text)?;
+    let layouts = keymap.layouts();
+    if layouts != 1 {
+        bail!(
+            "the keymap has {} layouts, and Hush cannot tell which one is active",
+            layouts
+        );
+    }
+    let base = Base {
+        group: 0,
+        locked: 0,
+    };
+    table(&keymap, base, true, &[], || None)
+}
+
+fn table(
+    keymap: &Keymap,
+    base: Base,
+    level3: bool,
+    reserved: &[u16],
+    compose: impl FnOnce() -> Option<Compose>,
+) -> Result<KeyTable> {
+    let free = |key: Key| !reserved.contains(&key.code());
+    let shift = find_modifier(keymap, base, free, Modifier::Shift)?;
+    let level3 = if level3 {
+        find_modifier(keymap, base, free, Modifier::Level3)?
     } else {
         None
     };
-    let found = scan(&keymap, base, shift, level3, free)?;
+    let found = scan(keymap, base, shift, level3, free)?;
     let mut chars: HashMap<char, Vec<Tap>> = found
         .direct
         .iter()
         .map(|&(ch, tap, _)| (ch, vec![tap]))
         .collect();
     if !found.dead.is_empty() {
-        if let Some(compose) = Compose::new(&context, &request.locale) {
+        if let Some(compose) = compose() {
             let sequences =
                 dead_key_sequences(&found, &chars, |dead, base| compose.compose(dead, base));
             chars.extend(sequences);
         }
     }
     let shift_mask = keymap.mod_mask(XKB_MOD_NAME_SHIFT);
-    Ok(
-        KeyTable::new(chars, shift.unwrap_or(Key::LeftShift)).with_locks(TableLocks {
+    Ok(KeyTable::new(chars, shift.unwrap_or(Key::LeftShift))
+        .with_locks(TableLocks {
             shift_locked: base.locked & shift_mask != 0,
             no_shift: shift.is_none() && base.locked != 0,
-        }),
-    )
+        })
+        .with_first_level(first_levels(keymap, base.group)))
+}
+
+/// The keysym on the first level of each key that types characters, with
+/// no lock. A compositor finds the key for a keysym in its keymap, so a
+/// keysym that another key of the layout also has, on any level, can go to
+/// that other key. Such a key gets no entry, and neither does a dead key or
+/// a key whose keysym types no character.
+fn first_levels(keymap: &Keymap, group: u32) -> HashMap<Key, xkb_keysym_t> {
+    let mut keys_of: HashMap<xkb_keysym_t, Vec<u32>> = HashMap::new();
+    for keycode in keymap.keycodes() {
+        for level in 0..keymap.levels(keycode, group) {
+            for sym in keymap.syms(keycode, group, level) {
+                let keys = keys_of.entry(sym).or_default();
+                if !keys.contains(&keycode) {
+                    keys.push(keycode);
+                }
+            }
+        }
+    }
+    MAIN_KEYS
+        .iter()
+        .chain(&EXTRA_KEYS)
+        .filter_map(|&key| match keymap.syms(code(key), group, 0)[..] {
+            [sym]
+                if !is_dead(sym)
+                    && keymap.char_for(sym).is_some()
+                    && keys_of.get(&sym).is_some_and(|keys| keys.len() == 1) =>
+            {
+                Some((key, sym))
+            },
+            _ => None,
+        })
+        .collect()
 }
 
 /// The keys that can hold Control or Shift, in the order Hush tries them.
@@ -611,6 +681,58 @@ impl Keymap {
         })
     }
 
+    fn from_text(context: &Context, text: &str) -> Result<Self> {
+        let text = CString::new(text).map_err(|_| anyhow!("the keymap text holds a NUL byte"))?;
+        // SAFETY: the context is live, and the text outlives the call.
+        let ptr = unsafe {
+            (context.lib.xkb_keymap_new_from_string)(
+                context.ptr,
+                text.as_ptr(),
+                xkb_keymap_format::XKB_KEYMAP_FORMAT_TEXT_V1,
+                xkb_keymap_compile_flags::XKB_KEYMAP_COMPILE_NO_FLAGS,
+            )
+        };
+        if ptr.is_null() {
+            bail!("the XKB keymap text did not compile");
+        }
+        Ok(Self {
+            lib: context.lib,
+            ptr,
+        })
+    }
+
+    fn keycodes(&self) -> std::ops::RangeInclusive<u32> {
+        // SAFETY: ptr is a live keymap.
+        unsafe {
+            (self.lib.xkb_keymap_min_keycode)(self.ptr)
+                ..=(self.lib.xkb_keymap_max_keycode)(self.ptr)
+        }
+    }
+
+    fn levels(&self, keycode: u32, group: u32) -> u32 {
+        // SAFETY: ptr is a live keymap; an unknown key code has no levels,
+        // and a group past the key's layouts wraps as in a state.
+        unsafe { (self.lib.xkb_keymap_num_levels_for_key)(self.ptr, keycode, group) }
+    }
+
+    /// The keysyms of a key on one level of a layout.
+    fn syms(&self, keycode: u32, group: u32, level: u32) -> Vec<xkb_keysym_t> {
+        let mut syms: *const xkb_keysym_t = std::ptr::null();
+        // SAFETY: ptr is a live keymap. The call points `syms` at `count`
+        // keysyms that the keymap owns, and they are copied while it lives.
+        unsafe {
+            let count = (self.lib.xkb_keymap_key_get_syms_by_level)(
+                self.ptr, keycode, group, level, &mut syms,
+            );
+            match usize::try_from(count) {
+                Ok(count) if count > 0 && !syms.is_null() => {
+                    std::slice::from_raw_parts(syms, count).to_vec()
+                },
+                _ => Vec::new(),
+            }
+        }
+    }
+
     fn layouts(&self) -> u32 {
         // SAFETY: ptr is a live keymap.
         unsafe { (self.lib.xkb_keymap_num_layouts)(self.ptr) }
@@ -660,7 +782,7 @@ impl Keymap {
 
 impl Drop for Keymap {
     fn drop(&mut self) {
-        // SAFETY: ptr came from xkb_keymap_new_from_names and is released once.
+        // SAFETY: ptr came from a keymap constructor and is released once.
         unsafe { (self.lib.xkb_keymap_unref)(self.ptr) }
     }
 }
@@ -915,7 +1037,20 @@ pub(crate) mod tests {
         let built_in = KeyTable::us();
         for ch in (' '..='~').filter(|ch| !ch.is_control()) {
             assert_eq!(us.taps(ch), built_in.taps(ch), "{ch:?}");
+            if let Some(&[tap]) = built_in.taps(ch) {
+                assert_eq!(
+                    us.first_level_sym(tap.key),
+                    built_in.first_level_sym(tap.key),
+                    "{ch:?}"
+                );
+            }
         }
+        assert_eq!(us.first_level_sym(Key::Slash), Some(u32::from('/')));
+        assert_eq!(
+            us.first_level_sym(Key::NonUsBackslashAndPipe),
+            None,
+            "the ISO key types <, which is also on the comma key"
+        );
         assert_eq!(us.taps('é'), None, "plain US has no dead keys");
         assert!(!us.covers("café"));
         assert!(!us.covers("👍"));
@@ -949,6 +1084,16 @@ pub(crate) mod tests {
             taps(&de, '^'),
             Some(vec![Tap::plain(Key::Grave), Tap::plain(Key::Space)]),
             "the dead circumflex, then Space"
+        );
+        assert_eq!(
+            de.first_level_sym(Key::NonUsBackslashAndPipe),
+            Some(u32::from('<'))
+        );
+        assert_eq!(de.first_level_sym(Key::Y), Some(u32::from('z')));
+        assert_eq!(
+            de.first_level_sym(Key::Grave),
+            None,
+            "the first level is a dead circumflex"
         );
         assert!(de.covers("Größe: 3 € @ café ^_^"));
         assert!(!de.covers("señor"), "German has no dead tilde");
@@ -1373,6 +1518,138 @@ pub(crate) mod tests {
         );
         assert_eq!(caps_indicator(&text("\t\tmodifiers= none;\n")), None);
         assert_eq!(caps_indicator("xkb_compat { };"), None);
+    }
+
+    /// A keymap text with five keys and Left Shift, which compiles with no
+    /// xkeyboard-config data. `<LSGT>` is the ISO key.
+    pub(crate) fn small_keymap(symbols: &str) -> String {
+        format!(
+            "xkb_keymap {{
+            xkb_keycodes \"small\" {{
+                minimum = 8;
+                maximum = 255;
+                <AE01> = 10;
+                <AC01> = 38;
+                <LFSH> = 50;
+                <AB08> = 59;
+                <SPCE> = 65;
+                <LSGT> = 94;
+            }};
+            xkb_types \"small\" {{
+                type \"ONE_LEVEL\" {{
+                    modifiers = none;
+                    level_name[Level1] = \"Any\";
+                }};
+                type \"TWO_LEVEL\" {{
+                    modifiers = Shift;
+                    map[Shift] = Level2;
+                    level_name[Level1] = \"Base\";
+                    level_name[Level2] = \"Shift\";
+                }};
+                type \"ALPHABETIC\" {{
+                    modifiers = Shift+Lock;
+                    map[Shift] = Level2;
+                    map[Lock] = Level2;
+                    level_name[Level1] = \"Base\";
+                    level_name[Level2] = \"Caps\";
+                }};
+            }};
+            xkb_compat \"small\" {{
+                interpret Shift_L {{
+                    action = SetMods(modifiers = Shift);
+                }};
+            }};
+            xkb_symbols \"small\" {{
+                key <LFSH> {{ [ Shift_L ] }};
+                modifier_map Shift {{ <LFSH> }};
+                {symbols}
+            }};
+        }};"
+        )
+    }
+
+    /// A small US keymap. `<` is on the comma key and on the ISO key, as in
+    /// the full US keymap.
+    pub(crate) const SMALL_US: &str = "
+        key <AE01> { [ 1, exclam ] };
+        key <AC01> { [ a, A ] };
+        key <AB08> { [ comma, less ] };
+        key <SPCE> { [ space ] };
+        key <LSGT> { [ less, greater ] };";
+
+    pub(crate) const SMALL_TWO_LAYOUTS: &str =
+        "key <AC01> { symbols[Group1] = [ a, A ], symbols[Group2] = [ q, Q ] };";
+
+    #[test]
+    fn a_keymap_text_gives_its_keys_and_first_levels() {
+        if !available() {
+            eprintln!("Skipping the keymap text test: libxkbcommon does not load");
+            return;
+        }
+        let table = build_from_text(&small_keymap(SMALL_US)).expect("the keymap compiles");
+        assert_eq!(taps(&table, 'a'), Some(plain(Key::A)));
+        assert_eq!(taps(&table, 'A'), Some(shifted(Key::A)));
+        assert_eq!(taps(&table, '1'), Some(plain(Key::Num1)));
+        assert_eq!(taps(&table, '!'), Some(shifted(Key::Num1)));
+        assert_eq!(
+            taps(&table, '<'),
+            Some(shifted(Key::Comma)),
+            "a main key comes before the ISO key"
+        );
+        assert_eq!(taps(&table, '>'), Some(shifted(Key::NonUsBackslashAndPipe)));
+        assert_eq!(taps(&table, ' '), Some(plain(Key::Space)));
+        assert_eq!(taps(&table, 'b'), None);
+        assert_eq!(table.first_level_sym(Key::A), Some(0x61));
+        assert_eq!(table.first_level_sym(Key::Num1), Some(0x31));
+        assert_eq!(table.first_level_sym(Key::Comma), Some(0x2c));
+        assert_eq!(table.first_level_sym(Key::Space), Some(0x20));
+        assert_eq!(
+            table.first_level_sym(Key::NonUsBackslashAndPipe),
+            None,
+            "the comma key has < too, so the compositor can choose it"
+        );
+        assert_eq!(table.first_level_sym(Key::B), None, "no such key");
+        assert_eq!(table.locks(), TableLocks::default());
+    }
+
+    #[test]
+    fn a_keymap_text_with_two_layouts_gives_no_table() {
+        if !available() {
+            eprintln!("Skipping the keymap text test: libxkbcommon does not load");
+            return;
+        }
+        let error = build_from_text(&small_keymap(SMALL_TWO_LAYOUTS))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("2 layouts"), "{error}");
+        let one = small_keymap("key <AC01> { symbols[Group1] = [ a, A ] };");
+        assert!(build_from_text(&one).is_ok());
+        assert!(build_from_text("xkb_keymap { no").is_err());
+        assert!(
+            build_from_text("a\0b").is_err(),
+            "a NUL byte inside the text"
+        );
+    }
+
+    #[test]
+    fn the_session_keymap_as_text_gives_the_same_table() {
+        if !xkb_ready() {
+            return;
+        }
+        let lib = xkbcommon_dl::xkbcommon_option().expect("libxkbcommon loads");
+        let context = Context::new(lib).expect("a context");
+        let text = |layout: &str| {
+            Keymap::compile(&context, &names(layout, ""))
+                .expect("the keymap compiles")
+                .as_text()
+                .expect("the keymap has a text")
+        };
+        assert_eq!(build_from_text(&text("us")).unwrap(), table("us", ""));
+        let de = build_from_text(&text("de")).unwrap();
+        assert_eq!(taps(&de, 'z'), Some(plain(Key::Y)));
+        assert_eq!(taps(&de, 'é'), None, "no dead-key sequences");
+        let error = build_from_text(&text("us,de")).unwrap_err().to_string();
+        assert!(error.contains("2 layouts"), "{error}");
     }
 
     #[test]

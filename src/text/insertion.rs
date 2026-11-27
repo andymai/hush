@@ -26,6 +26,7 @@ use super::{class_matches, InsertionMethod, PasteChord};
 use crate::config::settings::InsertionConfig;
 use crate::portal::keyboard::PortalKeyboard;
 use crate::portal::keysym::{self, Typeable};
+use crate::portal::seat_keymap::SeatKeymap;
 use crate::portal::{ConsentRefused, InputMode};
 use crate::text_processing::{AppKind, ProcessingContext, ProfilesConfig};
 use crate::Result;
@@ -127,33 +128,43 @@ pub fn choose_portal_method(
 }
 
 /// What portal mode types on the active layout, with a summary for the
-/// log. A sandbox cannot read the keymap, and neither can Hush on a layout
-/// with no key table, so both type only what every Latin layout has.
-fn portal_typing(typing: &mut Resolver) -> (Typeable, String) {
-    let conservative = || {
-        (
-            Typeable::Conservative,
-            "types letters, digits, and plain punctuation through the RemoteDesktop portal \
-             and pastes the rest"
-                .to_string(),
-        )
+/// log. A sandbox cannot read the layout settings, so it takes the keymap
+/// that the compositor gives each Wayland client. Without a keymap, Hush
+/// types only what every Latin layout has.
+fn portal_typing(typing: &mut Resolver, seat: &mut SeatKeymap) -> (Typeable, String) {
+    let conservative = |why: &str| {
+        let typeable = Typeable::conservative();
+        let what = match &typeable {
+            Typeable::Conservative {
+                compositor_shifts: false,
+            } => "letters and spaces",
+            _ => "letters, digits, and plain punctuation",
+        };
+        let summary = format!(
+            "types {} through the RemoteDesktop portal and pastes the rest ({})",
+            what, why
+        );
+        (typeable, summary)
     };
-    if crate::portal::sandboxed() {
-        return conservative();
-    }
-    let (table, layout) = match typing.resolve(&mut NoLeds) {
-        Typing::Keys { table, layout } => (table, layout),
-        Typing::UsTable { layout, .. } => (Arc::new(KeyTable::us().clone()), layout),
-        Typing::Paste { .. } => return conservative(),
-    };
-    (
-        Typeable::Keymap(table),
-        format!(
+    let keymap = |table: Arc<KeyTable>, layout: &str| {
+        let summary = format!(
             "types the first two levels of {} through the RemoteDesktop portal and pastes \
              the rest",
             layout
-        ),
-    )
+        );
+        (Typeable::Keymap(table), summary)
+    };
+    if crate::portal::sandboxed() {
+        return match seat.table() {
+            Ok(table) => keymap(table, "the compositor's keymap"),
+            Err(why) => conservative(&why),
+        };
+    }
+    match typing.resolve(&mut NoLeds) {
+        Typing::Keys { table, layout } => keymap(table, &layout),
+        Typing::UsTable { layout, .. } => keymap(Arc::new(KeyTable::us().clone()), &layout),
+        Typing::Paste { why, .. } => conservative(&why),
+    }
 }
 
 /// `table` is the keys for the active layout, or `None` when Hush cannot
@@ -315,6 +326,7 @@ pub struct TextInserter {
     config: InsertionConfig,
     profiles: ProfilesConfig,
     typing: Resolver,
+    seat_keymap: SeatKeymap,
     /// What the last take found, to log a change once.
     last_typing: String,
 }
@@ -330,6 +342,7 @@ impl TextInserter {
     pub fn with_mode(mode: InputMode) -> Result<Self> {
         info!("Initializing text insertion");
         let mut typing = Resolver::new();
+        let mut seat_keymap = SeatKeymap::new();
         let (keys, last_typing) = match mode {
             InputMode::Native => {
                 let mut uinput = UinputKeyboard::new()?;
@@ -343,7 +356,7 @@ impl TextInserter {
             },
             InputMode::Portal => (
                 Keys::Portal(PortalKeyboard::new()?),
-                portal_typing(&mut typing).1,
+                portal_typing(&mut typing, &mut seat_keymap).1,
             ),
         };
         let clipboard = clipboard::open();
@@ -363,6 +376,7 @@ impl TextInserter {
             config: InsertionConfig::default(),
             profiles: ProfilesConfig::defaults(),
             typing,
+            seat_keymap,
             last_typing,
         })
     }
@@ -527,13 +541,15 @@ impl TextInserter {
         submit_app: bool,
         method: InsertionMethod,
     ) -> Result<String> {
-        let (typeable, summary) = portal_typing(&mut self.typing);
+        let (typeable, summary) = portal_typing(&mut self.typing, &mut self.seat_keymap);
         if summary != self.last_typing {
             info!("Keyboard state changed: Hush now {}", summary);
             self.last_typing = summary;
         }
         match choose_portal_method(method, &text, &typeable) {
-            Chosen::Uinput => self.type_with_portal(&text, line_break, origin, submit_app)?,
+            Chosen::Uinput => {
+                self.type_with_portal(&text, &typeable, line_break, origin, submit_app)?
+            },
             Chosen::Clipboard => {
                 let target = PasteTarget {
                     window,
@@ -545,7 +561,7 @@ impl TextInserter {
                         return Err(e);
                     }
                     warn!("Paste failed ({}); typing what the portal can", e);
-                    self.type_with_portal(&text, line_break, origin, false)?;
+                    self.type_with_portal(&text, &typeable, line_break, origin, false)?;
                 }
             },
         }
@@ -555,6 +571,7 @@ impl TextInserter {
     fn type_with_portal(
         &mut self,
         text: &str,
+        typeable: &Typeable,
         line_break: LineBreak,
         origin: Origin,
         submit_app: bool,
@@ -563,7 +580,7 @@ impl TextInserter {
             return Err(anyhow::anyhow!("the portal is off in native mode"));
         };
         let delay = Duration::from_millis(self.config.typing_delay_ms);
-        let mut steps = keysym::text_steps(text, line_break, delay);
+        let mut steps = keysym::text_steps(text, typeable, line_break, delay);
         if presses_enter(origin, submit_app, text, &Ok(())) {
             steps.extend(keysym::enter_steps(TYPED_SUBMIT_DELAY));
         }
@@ -825,7 +842,9 @@ mod tests {
 
     #[test]
     fn portal_mode_types_what_the_layout_surely_has_and_pastes_the_rest() {
-        let sandbox = Typeable::Conservative;
+        let sandbox = Typeable::Conservative {
+            compositor_shifts: true,
+        };
         assert_eq!(
             choose_portal_method(InsertionMethod::Auto, "hello, world!\n", &sandbox),
             Chosen::Uinput
@@ -856,6 +875,32 @@ mod tests {
         assert_eq!(
             choose_portal_method(InsertionMethod::Clipboard, "abc", &sandbox),
             Chosen::Clipboard
+        );
+    }
+
+    #[test]
+    fn on_kde_without_the_keymap_punctuation_pastes() {
+        let kde = Typeable::Conservative {
+            compositor_shifts: false,
+        };
+        assert_eq!(
+            choose_portal_method(InsertionMethod::Auto, "And so my fellow Americans\n", &kde),
+            Chosen::Uinput
+        );
+        assert_eq!(
+            choose_portal_method(InsertionMethod::Auto, "Americans, ask not.", &kde),
+            Chosen::Clipboard,
+            "KWin types a shifted keysym wrong, and Hush cannot tell which marks need Shift"
+        );
+        assert_eq!(
+            choose_portal_method(InsertionMethod::Auto, "route 66", &kde),
+            Chosen::Clipboard
+        );
+        let keymap = Typeable::Keymap(Arc::new(KeyTable::us().clone()));
+        assert_eq!(
+            choose_portal_method(InsertionMethod::Auto, "Americans, ask not!", &keymap),
+            Chosen::Uinput,
+            "the keymap shows which keys need Shift"
         );
     }
 
