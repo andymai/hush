@@ -197,6 +197,17 @@ impl CloudTranscriber {
         &self.endpoint
     }
 
+    /// The model for a translation. Groq translates only with
+    /// whisper-large-v3, and OpenAI only with whisper-1. A server at
+    /// `transcription.server_url` gets the model it has.
+    fn translation_model(&self) -> &str {
+        match self.backend {
+            TranscriptionBackend::Groq if self.model != GROQ_TRANSLATES => GROQ_TRANSLATES,
+            TranscriptionBackend::OpenAi => OPENAI_TRANSLATES,
+            _ => &self.model,
+        }
+    }
+
     fn key_hint(&self) -> String {
         match self.backend.key_var() {
             Some(var) => format!(" (check {} in ~/.config/hush/.env)", var),
@@ -206,14 +217,25 @@ impl CloudTranscriber {
 
     /// The text fields of the request; the audio goes in a `file` part.
     /// `language` is `auto` or a code; `auto` sends none, and the service
-    /// detects the language.
-    fn fields(&self, prompt: Option<&str>, language: &str) -> Vec<(&'static str, String)> {
+    /// detects the language. A translation sends none either: the
+    /// translation endpoints take no source language.
+    fn fields(
+        &self,
+        prompt: Option<&str>,
+        language: &str,
+        translate: bool,
+    ) -> Vec<(&'static str, String)> {
+        let model = if translate {
+            self.translation_model()
+        } else {
+            &self.model
+        };
         let mut fields = vec![
-            ("model", self.model.clone()),
+            ("model", model.to_string()),
             ("response_format", "json".to_string()),
         ];
         let language = language.trim();
-        if !language.is_empty() && language != "auto" {
+        if !translate && !language.is_empty() && language != "auto" {
             fields.push(("language", language.to_string()));
         }
         if let Some(prompt) = prompt.map(str::trim).filter(|p| !p.is_empty()) {
@@ -228,17 +250,20 @@ impl CloudTranscriber {
         sample_rate: u32,
         prompt: Option<&str>,
     ) -> Result<TranscriptionResult> {
-        self.transcribe_in(audio, sample_rate, prompt, None).await
+        self.transcribe_in(audio, sample_rate, prompt, None, false)
+            .await
     }
 
     /// [`Self::transcribe_with_prompt`] in `language`, a code or `auto`;
-    /// `None` is the language this transcriber was made with.
+    /// `None` is the language this transcriber was made with. With
+    /// `translate`, the service's translation endpoint gives English text.
     pub async fn transcribe_in(
         &self,
         audio: &[f32],
         sample_rate: u32,
         prompt: Option<&str>,
         language: Option<&str>,
+        translate: bool,
     ) -> Result<TranscriptionResult> {
         let start = Instant::now();
         let language = language.unwrap_or(&self.language);
@@ -248,6 +273,7 @@ impl CloudTranscriber {
                 confidence: 0.0,
                 processing_time: start.elapsed(),
                 detected: None,
+                translated: false,
             });
         }
 
@@ -276,7 +302,7 @@ impl CloudTranscriber {
         );
 
         let mut form = Form::new();
-        for (name, value) in self.fields(prompt, language) {
+        for (name, value) in self.fields(prompt, language, translate) {
             form = form.text(name, value);
         }
         let file = Part::bytes(wav)
@@ -285,7 +311,12 @@ impl CloudTranscriber {
             .context("audio part")?;
         form = form.part("file", file);
 
-        let mut request = self.client.post(self.endpoint()).multipart(form);
+        let endpoint = if translate {
+            translations(self.endpoint())
+        } else {
+            self.endpoint().to_string()
+        };
+        let mut request = self.client.post(endpoint).multipart(form);
         if let Some(key) = &self.api_key {
             request = request.bearer_auth(key);
         }
@@ -319,6 +350,7 @@ impl CloudTranscriber {
             text,
             processing_time,
             detected: None,
+            translated: translate,
         })
     }
 }
@@ -347,6 +379,17 @@ pub fn encode_wav(samples: &[f32]) -> Result<Vec<u8>> {
 fn parse_text(body: &str) -> Result<String> {
     let transcription: Transcription = serde_json::from_str(body)?;
     Ok(strip_non_speech(&transcription.text))
+}
+
+const GROQ_TRANSLATES: &str = "whisper-large-v3";
+const OPENAI_TRANSLATES: &str = "whisper-1";
+
+/// The translation endpoint beside a transcription endpoint.
+fn translations(endpoint: &str) -> String {
+    match endpoint.strip_suffix(server::TRANSCRIPTIONS) {
+        Some(base) => format!("{}{}", base, server::TRANSLATIONS),
+        None => endpoint.to_string(),
+    }
 }
 
 fn hosted_endpoint(backend: TranscriptionBackend) -> Option<&'static str> {
@@ -425,7 +468,7 @@ mod tests {
     #[test]
     fn the_request_names_the_language_and_carries_the_prompt() {
         let groq = groq("de");
-        let fields = groq.fields(Some("  Hush, whisper.cpp. "), &groq.language);
+        let fields = groq.fields(Some("  Hush, whisper.cpp. "), &groq.language, false);
         assert!(fields.contains(&("model", "whisper-large-v3-turbo".to_string())));
         assert!(fields.contains(&("response_format", "json".to_string())));
         assert!(fields.contains(&("language", "de".to_string())));
@@ -436,21 +479,21 @@ mod tests {
     fn detection_and_an_empty_prompt_leave_their_fields_out() {
         for language in ["auto", "", "  "] {
             let groq = groq(language);
-            let fields = groq.fields(Some("   "), &groq.language);
+            let fields = groq.fields(Some("   "), &groq.language, false);
             let names: Vec<&str> = fields.iter().map(|(name, _)| *name).collect();
             assert_eq!(names, ["model", "response_format"], "language {language:?}");
         }
-        assert_eq!(groq("en").fields(None, "en").len(), 3);
+        assert_eq!(groq("en").fields(None, "en", false).len(), 3);
     }
 
     #[test]
     fn a_take_language_replaces_the_configured_one() {
         let english = groq("en");
         assert!(english
-            .fields(None, "de")
+            .fields(None, "de", false)
             .contains(&("language", "de".to_string())));
         let names: Vec<&str> = english
-            .fields(None, "auto")
+            .fields(None, "auto", false)
             .iter()
             .map(|(name, _)| *name)
             .collect();
@@ -629,6 +672,58 @@ mod tests {
             assert!(request.contains(&field), "{name}: {request}");
         }
         assert!(request.contains("name=\"file\"; filename=\"dictation.wav\""));
+    }
+
+    #[tokio::test]
+    async fn a_translation_goes_to_the_translation_endpoint_without_a_language() {
+        let (url, request) = server::fake_server(r#"{"text":" Good morning. "}"#.into()).await;
+        let transcriber = CloudTranscriber::for_server(&url, "my-whisper", "de", None).unwrap();
+        let result = transcriber
+            .transcribe_in(&[0.1; 1600], 16_000, None, Some("de"), true)
+            .await
+            .unwrap();
+        assert_eq!(result.text, "Good morning.");
+        assert!(result.translated);
+
+        let request = String::from_utf8_lossy(&request.await.unwrap()).into_owned();
+        assert!(
+            request.starts_with("POST /v1/audio/translations HTTP/1.1\r\n"),
+            "{request}"
+        );
+        assert!(
+            request.contains("name=\"model\"\r\n\r\nmy-whisper\r\n"),
+            "{request}"
+        );
+        assert!(!request.contains("name=\"language\""), "{request}");
+    }
+
+    #[test]
+    fn a_translation_asks_for_the_model_that_translates() {
+        let names = |fields: Vec<(&str, String)>| -> Vec<String> {
+            fields
+                .into_iter()
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect()
+        };
+        assert_eq!(
+            names(groq("de").fields(None, "de", true)),
+            ["model=whisper-large-v3", "response_format=json"]
+        );
+        let openai = CloudTranscriber::new(
+            TranscriptionBackend::OpenAi,
+            "gpt-4o-mini-transcribe",
+            "de",
+            Some("sk_test".to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            names(openai.fields(None, "de", true)),
+            ["model=whisper-1", "response_format=json"]
+        );
+        assert_eq!(
+            translations("https://api.groq.com/openai/v1/audio/transcriptions"),
+            "https://api.groq.com/openai/v1/audio/translations"
+        );
     }
 
     #[tokio::test]

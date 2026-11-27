@@ -12,7 +12,7 @@ use crate::transcription::cloud::CloudTranscriber;
 use crate::transcription::device;
 use crate::transcription::guard::{self, EchoChoice};
 use crate::transcription::langid;
-use crate::transcription::language::Language;
+use crate::transcription::language::{Language, Spoken};
 use crate::transcription::models::{self, ModelManager, ModelSize};
 use crate::transcription::whisper::{Family, TranscriptionResult, WhisperTranscriber};
 use crate::Result;
@@ -144,16 +144,16 @@ impl SpeechToText {
         self.transcribe_in(audio, sample_rate, prompt, None).await
     }
 
-    /// [`Self::transcribe_with_prompt`] in `language`; `None` is
-    /// `transcription.language`.
+    /// [`Self::transcribe_with_prompt`] as `spoken` says; `None` is
+    /// `transcription.language`, as spoken.
     pub async fn transcribe_in(
         &self,
         audio: &[f32],
         sample_rate: u32,
         prompt: Option<&str>,
-        language: Option<Language>,
+        spoken: Option<Spoken>,
     ) -> Result<TranscriptionResult> {
-        self.transcribe_part(audio, sample_rate, prompt, prompt, language)
+        self.transcribe_part(audio, sample_rate, prompt, prompt, spoken)
             .await
     }
 
@@ -169,7 +169,7 @@ impl SpeechToText {
         sample_rate: u32,
         prompt: Option<&str>,
         terms: Option<&str>,
-        language: Option<Language>,
+        spoken: Option<Spoken>,
     ) -> Result<TranscriptionResult> {
         let takes_prompt = self.takes_prompt();
         let prompt = prompt
@@ -179,14 +179,21 @@ impl SpeechToText {
             .map(str::trim)
             .filter(|t| takes_prompt && !t.is_empty());
         let mut result = self
-            .transcribe_once(audio, sample_rate, prompt, language)
+            .transcribe_once(audio, sample_rate, prompt, spoken)
             .await?;
 
         if let Some(echo) = guard::echo_in(&result.text, prompt, terms) {
             info!("The transcript looks like an echo of the prompt, transcribing again without it");
-            let detected = result.detected.and_then(Language::parse);
+            let translate = spoken.is_some_and(|spoken| spoken.translate);
+            let detected = result
+                .detected
+                .and_then(Language::parse)
+                .map(|language| Spoken {
+                    language,
+                    translate,
+                });
             let retry = self
-                .transcribe_once(audio, sample_rate, None, detected.or(language))
+                .transcribe_once(audio, sample_rate, None, detected.or(spoken))
                 .await?;
             result.processing_time += retry.processing_time;
             match echo.choose(&result.text, &retry.text) {
@@ -229,18 +236,19 @@ impl SpeechToText {
         audio: &[f32],
         sample_rate: u32,
         prompt: Option<&str>,
-        language: Option<Language>,
+        spoken: Option<Spoken>,
     ) -> Result<TranscriptionResult> {
-        let language = language.map(Language::code);
+        let language = spoken.map(|spoken| spoken.language.code());
+        let translate = spoken.is_some_and(|spoken| spoken.translate);
         match &self.backend {
             Backend::Local(whisper) => {
                 whisper
-                    .transcribe_in(audio, sample_rate, prompt, language)
+                    .transcribe_in(audio, sample_rate, prompt, language, translate)
                     .await
             },
             Backend::Cloud(cloud) => {
                 cloud
-                    .transcribe_in(audio, sample_rate, prompt, language)
+                    .transcribe_in(audio, sample_rate, prompt, language, translate)
                     .await
             },
         }

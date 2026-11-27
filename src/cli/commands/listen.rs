@@ -26,7 +26,7 @@ use crate::hotkey::{
     HotkeyMode, Stamped,
 };
 use crate::ipc::protocol::{DaemonState, ModelState, NO_TAKE};
-use crate::ipc::{SessionCommand, TakeResult, TakeWaiter};
+use crate::ipc::{Once, SessionCommand, TakeResult, TakeWaiter};
 use crate::notify::{notify, NoticeKind};
 use crate::portal::{ConsentRefused, InputMode};
 use crate::text::WindowInfo;
@@ -39,7 +39,7 @@ use crate::text_processing::{
     CommandExecutor, CommandParser, DomainVocabulary, EditingMode, HookEnv, InsertionHistory,
     LlmProvider, ProcessingConfig, TextProcessor, TranscriptHook, Trigger,
 };
-use crate::transcription::language::{self, Language};
+use crate::transcription::language::{self, Language, Spoken};
 use crate::transcription::parts::{settle as settle_parts, PartFiles, PromptContext, TakeParts};
 use crate::transcription::{IdleTimer, ModelSlot, SlotState, SpeechToText, WHISPER_SAMPLE_RATE};
 use crate::tray::{self, TrayLanguages};
@@ -170,6 +170,13 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     for (language, chord) in config.hotkey.language_keys() {
         println!("{} dictates in {}", chord, language.name());
     }
+    for (language, chord) in config.hotkey.translate_keys() {
+        println!(
+            "{} dictates {}",
+            chord,
+            Spoken::into_english(language).name()
+        );
+    }
     for (style, chord) in config.hotkey.style_keys() {
         println!("{} dictates in the {} style", chord, style);
     }
@@ -230,6 +237,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     // A take kept for the tune lives only as long as the daemon that kept it.
     store::remove_tune_take();
     let config_language = Language::parse(&config.transcription.language).unwrap_or(Language::AUTO);
+    let cannot_translate = config.transcription.cannot_translate();
     shared.set_config_language(config_language);
     let chosen_language =
         language::load_choice(&language::choice_path()).filter(|chosen| *chosen != config_language);
@@ -270,8 +278,8 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
             .with_action(HotkeyAction::PasteLast, &config.hotkey.paste_last)?
             .with_action(HotkeyAction::Learn, &config.hotkey.learn)?
             .with_command(&config.hotkey.command)?;
-        for (language, chord) in config.hotkey.language_keys() {
-            bindings = bindings.with_language(language, chord)?;
+        for (spoken, chord) in config.hotkey.spoken_keys() {
+            bindings = bindings.with_language(spoken, chord)?;
         }
         for (style, chord) in config.hotkey.style_keys() {
             bindings = bindings.with_style(style, chord)?;
@@ -504,11 +512,17 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 },
             };
             let command = match action {
-                Some(GestureAction::Start) => Some(SessionCommand::StartRecording(
-                    Trigger::Hotkey,
-                    gesture.language(),
-                    gesture.style(),
-                )),
+                Some(GestureAction::Start) => {
+                    let spoken = gesture.language();
+                    Some(SessionCommand::StartRecording(
+                        Trigger::Hotkey,
+                        Once {
+                            language: spoken.map(|spoken| spoken.language),
+                            translate: spoken.is_some_and(|spoken| spoken.translate),
+                            style: gesture.style(),
+                        },
+                    ))
+                },
                 Some(GestureAction::Stop) => Some(SessionCommand::StopRecording),
                 Some(GestureAction::Cancel) => Some(SessionCommand::CancelRecording),
                 None => None,
@@ -831,7 +845,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
     let sweep_days = storage.sweep_days;
     let mut current_window: Option<WindowInfo> = None;
     let mut current_trigger = Trigger::Hotkey;
-    let mut current_language = config_language;
+    let mut current_spoken = Spoken::from(config_language);
     let mut current_style: Option<StyleName> = None;
     let mut command_target: Option<CommandTarget> = None;
     let mut media = MediaPause::new(config.audio.pause_media);
@@ -929,7 +943,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                         store::parts_dir(),
                         store::stem(Utc::now()),
                         context,
-                        current_language,
+                        current_spoken,
                     ));
                 }
                 if let Some(parts) = take_parts.as_mut() {
@@ -1159,9 +1173,9 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                 if take.is_some() {
                     continue;
                 }
-                let (trigger, once, once_style) = match command {
-                    SessionCommand::StartRecording(trigger, once, style) => (trigger, once, style),
-                    _ => (Trigger::Command, None, None),
+                let (trigger, once) = match command {
+                    SessionCommand::StartRecording(trigger, once) => (trigger, once),
+                    _ => (Trigger::Command, Once::default()),
                 };
                 let is_command = trigger == Trigger::Command;
                 // Reset stop signal for new recording
@@ -1191,14 +1205,34 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                     let can_be_tap = trigger == Trigger::Hotkey && hotkey_mode == HotkeyMode::Hold;
                     media.started(stream_started, can_be_tap.then_some(tap_window));
                     current_trigger = trigger;
-                    current_language =
-                        language::for_take(once, shared.chosen_language(), config_language);
-                    if current_language != config_language {
-                        info!("The take is in {}", current_language.name());
+                    current_spoken = Spoken {
+                        language: language::for_take(
+                            once.language,
+                            shared.chosen_language(),
+                            config_language,
+                        ),
+                        // Command Mode needs the words as spoken.
+                        translate: once.translate && !is_command,
+                    };
+                    if current_spoken != Spoken::from(config_language) {
+                        info!("The take is in {}", current_spoken.name());
                     }
-                    shared.set_take_language(current_language);
-                    current_style = once_style;
-                    shared.set_starting(is_command, once_style);
+                    if let Some(size) = cannot_translate.filter(|_| current_spoken.translate) {
+                        current_spoken.translate = false;
+                        warn!("{} cannot translate, so the take comes out as spoken", size);
+                        notify(
+                            NoticeKind::Problem,
+                            "This model cannot translate",
+                            &format!(
+                                "{} types the words as spoken. Pick another model, such as \
+                                 large-v3, for the translate keys.",
+                                size
+                            ),
+                        );
+                    }
+                    shared.set_take_language(current_spoken.language);
+                    current_style = once.style;
+                    shared.set_starting(is_command, once.style);
                     if model.begin_load() {
                         publish_model(&model);
                     }
@@ -1440,7 +1474,7 @@ pub async fn handle_listen(options: SessionOptions) -> Result<()> {
                                     &audio_data,
                                     WHISPER_SAMPLE_RATE,
                                     initial_prompt.as_deref(),
-                                    Some(current_language),
+                                    Some(current_spoken),
                                 )
                                 .await
                         },

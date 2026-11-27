@@ -26,12 +26,21 @@ use tokio::sync::{broadcast, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
+/// What one take asks for beyond the settings, from `--lang`, `--translate`,
+/// and `--style` or from a chord. It applies to that take only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Once {
+    pub language: Option<Language>,
+    /// The take comes out in English
+    pub translate: bool,
+    pub style: Option<StyleName>,
+}
+
 /// What the session loop consumes, from the hotkey thread and from IPC alike.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionCommand {
-    /// Start a take. The language and the style, when set, come from
-    /// `--lang` and `--style` or from a chord, and apply to this take only
-    StartRecording(Trigger, Option<Language>, Option<StyleName>),
+    /// Start a take
+    StartRecording(Trigger, Once),
     /// Record a spoken instruction for Command Mode
     StartCommand,
     StopRecording,
@@ -769,7 +778,7 @@ pub fn respond(
     };
     // The reply names the take's language and style, so a client can tell
     // this daemon from an older one that ignores `language` or `style`.
-    let start = |language: Option<String>, style: Option<String>| {
+    let start = |language: Option<String>, translate: bool, style: Option<String>| {
         let once = match language.as_deref().map(Language::from_code).transpose() {
             Ok(once) => once,
             Err(e) => return DaemonResponse::error(e.to_string()),
@@ -782,7 +791,14 @@ pub fn respond(
             Err(e) => return DaemonResponse::error(e.to_string()),
         };
         let reply = forward(
-            SessionCommand::StartRecording(Trigger::Ipc, once, style),
+            SessionCommand::StartRecording(
+                Trigger::Ipc,
+                Once {
+                    language: once,
+                    translate,
+                    style,
+                },
+            ),
             DaemonState::Starting,
         );
         if !reply.ok {
@@ -792,6 +808,7 @@ pub fn respond(
         reply
             .with_language(language.map(|l| l.code().to_string()))
             .with_style(style.map(|name| name.to_string()))
+            .with_translate(translate)
     };
     // A stop before the first audio frame discards the take.
     let after_stop = match shared.snapshot() {
@@ -801,14 +818,22 @@ pub fn respond(
     };
     match command {
         DaemonCommand::Status | DaemonCommand::Watch { .. } => shared.status(),
-        DaemonCommand::Toggle { language, style } => {
+        DaemonCommand::Toggle {
+            language,
+            translate,
+            style,
+        } => {
             if shared.in_take() {
                 forward(SessionCommand::StopRecording, after_stop)
             } else {
-                start(language, style)
+                start(language, translate, style)
             }
         },
-        DaemonCommand::Start { language, style } => start(language, style),
+        DaemonCommand::Start {
+            language,
+            translate,
+            style,
+        } => start(language, translate, style),
         DaemonCommand::Stop { .. } => forward(SessionCommand::StopRecording, after_stop),
         DaemonCommand::Cancel => forward(SessionCommand::CancelRecording, DaemonState::Idle),
         DaemonCommand::KeepNext => match shared.request_keep_next(Instant::now()) {
@@ -894,6 +919,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let toggle = || DaemonCommand::Toggle {
             language: None,
+            translate: false,
             style: None,
         };
         assert_eq!(
@@ -902,7 +928,10 @@ mod tests {
         );
         assert_eq!(
             rx.try_recv(),
-            Ok(SessionCommand::StartRecording(Trigger::Ipc, None, None))
+            Ok(SessionCommand::StartRecording(
+                Trigger::Ipc,
+                Once::default()
+            ))
         );
 
         shared.set_starting(false, None);
@@ -993,6 +1022,7 @@ mod tests {
         let response = respond(
             DaemonCommand::Start {
                 language: None,
+                translate: false,
                 style: None,
             },
             &shared,
@@ -1013,6 +1043,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let start = |code: &str| DaemonCommand::Start {
             language: Some(code.to_string()),
+            translate: false,
             style: None,
         };
 
@@ -1023,14 +1054,17 @@ mod tests {
             rx.try_recv(),
             Ok(SessionCommand::StartRecording(
                 Trigger::Ipc,
-                Some(lang("de")),
-                None
+                Once {
+                    language: Some(lang("de")),
+                    ..Once::default()
+                }
             ))
         );
 
         let reply = respond(
             DaemonCommand::Start {
                 language: None,
+                translate: false,
                 style: None,
             },
             &shared,
@@ -1041,6 +1075,7 @@ mod tests {
         let reply = respond(
             DaemonCommand::Toggle {
                 language: None,
+                translate: false,
                 style: None,
             },
             &shared,
@@ -1058,6 +1093,7 @@ mod tests {
         let reply = respond(
             DaemonCommand::Toggle {
                 language: Some("de".to_string()),
+                translate: false,
                 style: None,
             },
             &shared,
@@ -1075,6 +1111,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let start = |style: &str| DaemonCommand::Start {
             language: None,
+            translate: false,
             style: Some(style.to_string()),
         };
         let verbatim = styles::VERBATIM;
@@ -1087,8 +1124,10 @@ mod tests {
             rx.try_recv(),
             Ok(SessionCommand::StartRecording(
                 Trigger::Ipc,
-                None,
-                Some(verbatim)
+                Once {
+                    style: Some(verbatim),
+                    ..Once::default()
+                }
             ))
         );
 
@@ -1104,6 +1143,7 @@ mod tests {
         let reply = respond(
             DaemonCommand::Toggle {
                 language: Some("de".to_string()),
+                translate: false,
                 style: Some("casual".to_string()),
             },
             &shared,
@@ -1115,14 +1155,18 @@ mod tests {
             rx.try_recv(),
             Ok(SessionCommand::StartRecording(
                 Trigger::Ipc,
-                Some(lang("de")),
-                Some(casual)
+                Once {
+                    language: Some(lang("de")),
+                    translate: false,
+                    style: Some(casual),
+                }
             ))
         );
 
         let reply = respond(
             DaemonCommand::Start {
                 language: None,
+                translate: false,
                 style: None,
             },
             &shared,
@@ -1495,6 +1539,7 @@ mod tests {
             &path,
             DaemonCommand::Start {
                 language: None,
+                translate: false,
                 style: None,
             },
         )
@@ -1503,7 +1548,7 @@ mod tests {
         assert_eq!(started.state, Some(DaemonState::Starting));
         assert_eq!(
             rx.recv().unwrap(),
-            SessionCommand::StartRecording(Trigger::Ipc, None, None)
+            SessionCommand::StartRecording(Trigger::Ipc, Once::default())
         );
 
         drop(guard);

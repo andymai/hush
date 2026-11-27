@@ -12,7 +12,7 @@
 
 use super::{HotkeyEvent, HotkeyMode};
 use crate::text_processing::StyleName;
-use crate::transcription::Language;
+use crate::transcription::Spoken;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +26,7 @@ pub enum GestureAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Key {
     Hotkey,
-    Language(Language),
+    Language(Spoken),
     Style(StyleName),
 }
 
@@ -69,7 +69,7 @@ impl GestureDetector {
 
     /// The language of the chord that started the gesture, or `None` for
     /// another key and when no gesture is in progress.
-    pub fn language(&self) -> Option<Language> {
+    pub fn language(&self) -> Option<Spoken> {
         match self.key() {
             Some(Key::Language(language)) => Some(language),
             _ => None,
@@ -300,8 +300,8 @@ mod tests {
         );
     }
 
-    fn german() -> Language {
-        Language::parse("de").unwrap()
+    fn german() -> Spoken {
+        crate::transcription::Language::parse("de").unwrap().into()
     }
 
     #[test]

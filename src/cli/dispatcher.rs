@@ -140,12 +140,16 @@ impl CommandDispatcher {
                 },
                 DaemonCommands::Status => handle_daemon_status().await,
             },
-            Commands::Toggle { lang, style } => {
-                handle_start(true, lang.as_deref(), style.as_deref()).await
-            },
-            Commands::Start { lang, style } => {
-                handle_start(false, lang.as_deref(), style.as_deref()).await
-            },
+            Commands::Toggle {
+                lang,
+                translate,
+                style,
+            } => handle_start(true, lang.as_deref(), translate, style.as_deref()).await,
+            Commands::Start {
+                lang,
+                translate,
+                style,
+            } => handle_start(false, lang.as_deref(), translate, style.as_deref()).await,
             Commands::Stop { print, json } => handle_stop(print, json).await,
             Commands::Cancel => handle_client_command(DaemonCommand::Cancel).await,
             Commands::Doctor => handle_doctor().await,

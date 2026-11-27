@@ -7,7 +7,7 @@ use super::keymap::{KeymapWatch, ModifierKeys};
 use super::menu_mask::MenuMask;
 use super::{HotkeyAction, HotkeyBindings, HotkeyEvent, Stamped};
 use crate::text_processing::StyleName;
-use crate::transcription::Language;
+use crate::transcription::Spoken;
 use anyhow::{anyhow, Result};
 use evdev::uinput::VirtualDevice;
 use evdev::{AttributeSetRef, BusType, Device, EventSummary, InputEvent, InputId, KeyCode};
@@ -132,7 +132,7 @@ impl HotkeyMatcher {
 /// The dictation hotkey plus the cancel key, fed from every reader thread.
 pub struct Matchers {
     primary: HotkeyMatcher,
-    languages: Vec<(Language, HotkeyMatcher)>,
+    languages: Vec<(Spoken, HotkeyMatcher)>,
     styles: Vec<(StyleName, HotkeyMatcher)>,
     cancel: Option<HotkeyMatcher>,
     actions: Vec<(HotkeyAction, HotkeyMatcher)>,
@@ -724,6 +724,7 @@ fn wait_readable(fd: i32, timeout_ms: i32) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcription::Language;
 
     fn matcher(text: &str) -> HotkeyMatcher {
         HotkeyMatcher::new(KeyCombination::parse(text).unwrap())
@@ -977,14 +978,20 @@ mod tests {
         let mut m = Matchers::new(&bindings, false);
         m.process(KeyCode::KEY_LEFTSHIFT, 1);
         let press = m.process(KeyCode::KEY_RIGHTALT, 1);
-        assert_eq!(press.event, Some(HotkeyEvent::Language(german, true)));
+        assert_eq!(
+            press.event,
+            Some(HotkeyEvent::Language(german.into(), true))
+        );
         assert!(
             press.swallow,
             "an exclusive reader hides it like the hotkey"
         );
         assert!(m.process(KeyCode::KEY_RIGHTALT, 2).swallow);
         let release = m.process(KeyCode::KEY_RIGHTALT, 0);
-        assert_eq!(release.event, Some(HotkeyEvent::Language(german, false)));
+        assert_eq!(
+            release.event,
+            Some(HotkeyEvent::Language(german.into(), false))
+        );
         assert!(release.swallow);
         m.process(KeyCode::KEY_LEFTSHIFT, 0);
 
@@ -1002,7 +1009,7 @@ mod tests {
         m.process(KeyCode::KEY_RIGHTALT, 1);
         assert_eq!(
             m.process(KeyCode::KEY_LEFTSHIFT, 0).event,
-            Some(HotkeyEvent::Language(german, false)),
+            Some(HotkeyEvent::Language(german.into(), false)),
             "letting go of the modifier ends the hold"
         );
     }

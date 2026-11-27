@@ -7,6 +7,7 @@ use reqwest::Url;
 use std::net::{IpAddr, Ipv4Addr};
 
 pub const TRANSCRIPTIONS: &str = "/audio/transcriptions";
+pub const TRANSLATIONS: &str = "/audio/translations";
 pub const CHAT_COMPLETIONS: &str = "/chat/completions";
 
 /// What Hush sends to the server.

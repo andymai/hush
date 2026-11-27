@@ -174,6 +174,43 @@ impl fmt::Display for Language {
     }
 }
 
+/// The language a take is spoken in, and whether its text comes out in
+/// English: Whisper's translate task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Spoken {
+    pub language: Language,
+    pub translate: bool,
+}
+
+impl Spoken {
+    /// Speech in `language`, typed in English.
+    pub fn into_english(language: Language) -> Self {
+        Self {
+            language,
+            translate: true,
+        }
+    }
+
+    /// What the settings window, the logs, and the portal show, such as
+    /// `German` or `German into English`.
+    pub fn name(self) -> String {
+        match (self.translate, self.language.is_auto()) {
+            (false, _) => self.language.name().to_string(),
+            (true, true) => "any language into English".to_string(),
+            (true, false) => format!("{} into English", self.language.name()),
+        }
+    }
+}
+
+impl From<Language> for Spoken {
+    fn from(language: Language) -> Self {
+        Self {
+            language,
+            translate: false,
+        }
+    }
+}
+
 /// The language of one take: `once` (from `--lang` or a language chord),
 /// else the tray choice, else the config language.
 pub fn for_take(once: Option<Language>, chosen: Option<Language>, config: Language) -> Language {
@@ -218,6 +255,17 @@ mod tests {
 
     fn lang(code: &str) -> Language {
         Language::parse(code).unwrap()
+    }
+
+    #[test]
+    fn a_spoken_language_names_its_translation() {
+        let german = Language::parse("de").unwrap();
+        assert_eq!(Spoken::from(german).name(), "German");
+        assert_eq!(Spoken::into_english(german).name(), "German into English");
+        assert_eq!(
+            Spoken::into_english(Language::AUTO).name(),
+            "any language into English"
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@
 
 pub mod icon;
 
-use crate::ipc::{DaemonState, SessionCommand, SharedState};
+use crate::ipc::{DaemonState, Once, SessionCommand, SharedState};
 use crate::text_processing::Trigger;
 use crate::transcription::Language;
 use icon::IconState;
@@ -151,7 +151,10 @@ impl Tray for HushTray {
         if self.in_take() {
             self.send(SessionCommand::StopRecording);
         } else {
-            self.send(SessionCommand::StartRecording(Trigger::Tray, None, None));
+            self.send(SessionCommand::StartRecording(
+                Trigger::Tray,
+                Once::default(),
+            ));
         }
     }
 
@@ -466,7 +469,10 @@ mod tests {
         idle.activate(0, 0);
         assert_eq!(
             rx.try_recv(),
-            Ok(SessionCommand::StartRecording(Trigger::Tray, None, None))
+            Ok(SessionCommand::StartRecording(
+                Trigger::Tray,
+                Once::default()
+            ))
         );
 
         let (mut recording, rx) = tray(DaemonState::recording(0));
