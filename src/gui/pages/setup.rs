@@ -372,16 +372,6 @@ fn llm(gui: &mut Gui, ui: &mut egui::Ui) -> bool {
         }
     });
     text::polish_rows(gui, ui);
-    match gui.config.llm.provider {
-        LlmSetting::Auto => {
-            text::ollama_rows(gui, ui);
-            text::anthropic_rows(gui, ui);
-        },
-        LlmSetting::Ollama => text::ollama_rows(gui, ui),
-        LlmSetting::Anthropic => text::anthropic_rows(gui, ui),
-        LlmSetting::OpenAiCompatible => text::server_rows(gui, ui),
-        LlmSetting::None => {},
-    }
     if gui.config.llm.provider != LlmSetting::None {
         let (testing, answer) = {
             let check = check.lock();

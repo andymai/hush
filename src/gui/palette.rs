@@ -19,7 +19,7 @@ use super::theme::{self, palette};
 use super::widgets::{self, text_focus_id, TextFocus};
 use super::Gui;
 use crate::config::server;
-use crate::config::settings::TranscriptionBackend;
+use crate::config::settings::{LlmSetting, TranscriptionBackend};
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
     Align, Align2, Context, Event, Id, Key, Layout, Modifiers, Order, Pos2, Rect, Response, Role,
@@ -374,62 +374,68 @@ pub const SETTINGS: &[Setting] = &[
         "llm provider ollama anthropic claude openai-compatible model ai",
     ),
     row(
+        "text.ollama_url",
+        "Ollama server",
+        Page::Text,
+        "Polish",
+        "llm url address local",
+    )
+    .when(ollama_shown),
+    row(
+        "text.ollama_model",
+        "Ollama model",
+        Page::Text,
+        "Polish",
+        "llm llama",
+    )
+    .when(ollama_shown),
+    row(
+        "text.anthropic_key",
+        "Anthropic API key",
+        Page::Text,
+        "Polish",
+        "llm claude key token keyring secret save remove",
+    )
+    .when(anthropic_shown),
+    row(
+        "text.anthropic_model",
+        "Anthropic model",
+        Page::Text,
+        "Polish",
+        "llm claude haiku",
+    )
+    .when(anthropic_shown),
+    row(
+        "text.server_url",
+        "Polish server address",
+        Page::Text,
+        "Polish",
+        "llm url address openai-compatible",
+    )
+    .when(llm_server_shown),
+    row(
+        "text.server_model",
+        "Polish server model",
+        Page::Text,
+        "Polish",
+        "llm openai-compatible",
+    )
+    .when(llm_server_shown),
+    row(
+        "text.server_key",
+        "Polish server key",
+        Page::Text,
+        "Polish",
+        "llm api key token keyring secret save remove openai-compatible",
+    )
+    .when(llm_server_key),
+    row(
         "text.polish",
         "Tidy up every transcript",
         Page::Text,
         "Polish",
         "polish llm cleanup grammar rewrite",
     ),
-    row(
-        "text.ollama_url",
-        "Ollama server",
-        Page::Text,
-        "Language models",
-        "llm url address local",
-    ),
-    row(
-        "text.ollama_model",
-        "Ollama model",
-        Page::Text,
-        "Language models",
-        "llm llama",
-    ),
-    row(
-        "text.anthropic_model",
-        "Anthropic model",
-        Page::Text,
-        "Language models",
-        "llm claude haiku",
-    ),
-    row(
-        "text.anthropic_key",
-        "Anthropic API key",
-        Page::Text,
-        "Language models",
-        "llm claude key token keyring secret save remove",
-    ),
-    row(
-        "text.server_url",
-        "OpenAI-compatible server",
-        Page::Text,
-        "Language models",
-        "llm url address",
-    ),
-    row(
-        "text.server_model",
-        "OpenAI-compatible model",
-        Page::Text,
-        "Language models",
-        "llm",
-    ),
-    row(
-        "text.server_key",
-        "OpenAI-compatible server key",
-        Page::Text,
-        "Language models",
-        "llm api key token keyring secret save remove",
-    )
-    .when(llm_server_key),
     row(
         "text.style_form.name",
         "Style name",
@@ -615,8 +621,20 @@ fn server_key(gui: &Gui) -> bool {
     server(gui) && server::key_var(&gui.config.transcription.server_key_env).is_some()
 }
 
+fn ollama_shown(gui: &Gui) -> bool {
+    text::uses_ollama(text::shown_provider(gui))
+}
+
+fn anthropic_shown(gui: &Gui) -> bool {
+    text::uses_anthropic(text::shown_provider(gui))
+}
+
+fn llm_server_shown(gui: &Gui) -> bool {
+    text::shown_provider(gui) == LlmSetting::OpenAiCompatible
+}
+
 fn llm_server_key(gui: &Gui) -> bool {
-    gui.config.llm.server_key_var().is_some()
+    llm_server_shown(gui) && gui.config.llm.server_key_var().is_some()
 }
 
 fn on_this_machine(gui: &Gui) -> bool {
