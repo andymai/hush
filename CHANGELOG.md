@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/andymai/hush/compare/v1.13.0...v1.14.0) (2026-11-27)
+
+
+### Features
+
+* **gui:** screen readers reach the settings window through AccessKit ([#389](https://github.com/andymai/hush/issues/389)) ([2f121c5](https://github.com/andymai/hush/commit/2f121c5fb5e5dbee2122db251285c3ce5f9bbc71))
+
 ## [1.13.0](https://github.com/andymai/hush/compare/v1.12.0...v1.13.0) (2026-11-27)
 
 
