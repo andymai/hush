@@ -59,7 +59,11 @@ impl From<Failure> for Exit {
 }
 
 fn show_until_closed() -> Result<(), Exit> {
-    let mut link = link::Link::open().map_err(|e| Exit::Presenter(Failure::Broken(e)))?;
+    let Some(mut link) = link::Link::open().map_err(|e| Exit::Presenter(Failure::Broken(e)))?
+    else {
+        info!("The daemon closed the overlay's socket before the overlay started");
+        return Ok(());
+    };
     let mut presenter = present::open().ok_or(Exit::NoSurface)?;
     info!(presenter = presenter.name(), "The overlay runs");
     // A daemon restart follows each settings change, and restarts the overlay.

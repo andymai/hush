@@ -18,8 +18,9 @@ pub struct Link {
 }
 
 impl Link {
-    /// Take fd 3 and ask for the watch.
-    pub fn open() -> Result<Self> {
+    /// Take fd 3 and ask for the watch. `None` when the daemon closed its
+    /// end first, as it does when it stops.
+    pub fn open() -> Result<Option<Self>> {
         if !is_socket(FD) {
             return Err(anyhow!(
                 "hush overlay runs only as the daemon's child, which passes it a socket as fd {}",
@@ -32,21 +33,25 @@ impl Link {
         Self::over(UnixStream::from(fd))
     }
 
-    pub fn over(mut stream: UnixStream) -> Result<Self> {
+    pub fn over(mut stream: UnixStream) -> Result<Option<Self>> {
         let mut request = serde_json::to_string(&DaemonCommand::Watch {
             meter: true,
             events: true,
         })?;
         request.push('\n');
-        stream
-            .write_all(request.as_bytes())
-            .context("Failed to ask the daemon for its state")?;
+        match stream.write_all(request.as_bytes()) {
+            Ok(()) => {},
+            Err(e) if matches!(e.kind(), ErrorKind::BrokenPipe | ErrorKind::ConnectionReset) => {
+                return Ok(None)
+            },
+            Err(e) => return Err(e).context("Failed to ask the daemon for its state"),
+        }
         stream.set_nonblocking(true)?;
-        Ok(Self {
+        Ok(Some(Self {
             stream,
             buffer: Vec::new(),
             closed: false,
-        })
+        }))
     }
 
     pub fn fd(&self) -> BorrowedFd<'_> {
@@ -121,9 +126,16 @@ mod tests {
     use std::io::{BufRead, BufReader};
 
     #[test]
+    fn a_daemon_that_closed_its_end_first_ends_the_overlay_quietly() {
+        let (ours, daemon) = UnixStream::pair().unwrap();
+        drop(daemon);
+        assert!(Link::over(ours).unwrap().is_none());
+    }
+
+    #[test]
     fn the_link_asks_for_a_full_watch_and_reads_whole_lines() {
         let (ours, mut daemon) = UnixStream::pair().unwrap();
-        let mut link = Link::over(ours).unwrap();
+        let mut link = Link::over(ours).unwrap().unwrap();
         let mut request = String::new();
         BufReader::new(daemon.try_clone().unwrap())
             .read_line(&mut request)
