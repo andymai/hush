@@ -15,22 +15,35 @@ body:
       label: Steps to reproduce
     validations:
       required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - Flatpak
+        - .deb
+        - .rpm
+        - AppImage
+        - Tarball or install.sh
+        - COPR
+        - Nix
+        - Built from source
+    validations:
+      required: true
   - type: textarea
     id: environment
     attributes:
       label: Environment
-      description: Paste the output of `hush status --full`, or fill in the fields
+      description: Your distribution, desktop with its version, and GPU
       placeholder: |
-        Distro: Fedora 42 / Ubuntu 24.04 / Arch
-        Desktop and compositor: KDE Plasma 6 Wayland / GNOME 48 / Hyprland / X11
+        Distro: Fedora 45 / Ubuntu 26.04 / Arch
+        Desktop: KDE Plasma 6.5 Wayland / GNOME 51 / Hyprland / X11
         GPU and driver: RTX 4080 (nvidia 580) / RX 7800 (mesa) / none
-        Install method: .deb / .rpm / AppImage / tarball or install.sh / COPR / Nix / source
-        Hush version: output of `hush --version`
     validations:
       required: true
   - type: textarea
-    id: logs
+    id: report
     attributes:
-      label: Logs
-      description: Output of `hush -vv daemon start --foreground` around the failure, if relevant
-      render: shell
+      label: Report file
+      description: |
+        Run `hush report` (in the Flatpak, `flatpak run io.github.andymai.hush report`) and attach the file it writes, or paste it here. It holds the version, the checks, the settings, and the recent log, with your paths, names, and API keys removed.

@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for testing Hush. Each report fills one cell of the test matrix for 1.0: KDE Wayland, GNOME Wayland, Hyprland, and X11, with NVIDIA, AMD, and Intel GPUs, and layouts other than US. A report that says "it all works" is as useful as one that finds a bug.
+        Thank you for testing Hush. Each report shows how Hush runs on one mix of desktop, GPU, install method, and keyboard layout. A report that says "it all works" is as useful as one that finds a bug.
   - type: dropdown
     id: desktop
     attributes:
@@ -20,6 +20,11 @@ body:
         - Other (say which below)
     validations:
       required: true
+  - type: input
+    id: desktop_version
+    attributes:
+      label: Desktop version
+      placeholder: Plasma 6.5, GNOME 51
   - type: dropdown
     id: gpu
     attributes:
@@ -44,11 +49,13 @@ body:
     attributes:
       label: Install method
       options:
+        - Flatpak from andymai.github.io/hush
         - .deb
         - .rpm
         - AppImage
         - Tarball or install.sh
         - COPR
+        - Nix
         - Built from source
     validations:
       required: true
@@ -62,7 +69,7 @@ body:
         - label: Double-tap the hotkey to lock hands-free, then tap to stop
         - label: Escape cancels a recording
         - label: "`hush toggle` starts and stops a recording"
-        - label: Characters of your layout (such as é, ü, ñ, or ß) come out right
+        - label: Characters of your layout (such as é, ü, ñ, or ß) come out right, typed by a package or pasted by the Flatpak
         - label: The tray icon shows and its menu works
         - label: The settings window opens and saves
         - label: "`hush doctor` names your GPU on its GPU line"
@@ -70,7 +77,7 @@ body:
     id: doctor
     attributes:
       label: hush doctor
-      description: Paste the output of `hush --version` and `hush doctor`
+      description: Paste the output of `hush --version` and `hush doctor`. In the Flatpak, run them as `flatpak run io.github.andymai.hush doctor`.
       render: shell
     validations:
       required: true
@@ -78,4 +85,4 @@ body:
     id: problems
     attributes:
       label: What went wrong
-      description: Anything that did not work or felt wrong. For a crash, add the output of `hush -vv daemon start --foreground`.
+      description: Anything that did not work or felt wrong. For a crash, attach the file that `hush report` writes.
