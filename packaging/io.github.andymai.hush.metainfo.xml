@@ -91,6 +91,14 @@
   </screenshots>
 
   <releases>
+    <release version="1.20.0" date="2026-11-27" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>A landing page at andymai.github.io/hush</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.19.0" date="2026-11-27" type="stable">
       <description>
         <p>Features</p>
@@ -161,14 +169,6 @@
         <p>Bug Fixes</p>
         <ul>
           <li>Start no new overlay while the daemon stops</li>
-        </ul>
-      </description>
-    </release>
-    <release version="1.11.0" date="2026-11-26" type="stable">
-      <description>
-        <p>Features</p>
-        <ul>
-          <li>Pill colors that follow the desktop, presets, a theme file, and reduced motion</li>
         </ul>
       </description>
     </release>
