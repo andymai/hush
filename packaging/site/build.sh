@@ -4,8 +4,8 @@
 #
 #   packaging/site/build.sh SITE
 #
-# The images come from docs/, so the page shows the same lockup and
-# screenshots as the README.
+# The images and the demo come from docs/, so the page shows the same lockup
+# and demo as the README.
 set -euo pipefail
 
 site=${1:?usage: build.sh SITE}
@@ -17,8 +17,8 @@ install -m644 "$root/packaging/io.github.andymai.hush.svg" "$site/icon.svg"
 install -m644 "$root/docs/brand/hush-lockup-light.svg" "$site/lockup-light.svg"
 install -m644 "$root/docs/brand/hush-lockup-dark.svg" "$site/lockup-dark.svg"
 install -m644 "$root/docs/brand/hush-social-preview.png" "$site/social-preview.png"
-install -m644 "$root/docs/screenshots/settings/overview.png" "$site/overview.png"
-install -m644 "$root/docs/screenshots/settings/overview-light.png" "$site/overview-light.png"
+install -m644 "$root/docs/demo/hush-demo.webm" "$site/demo.webm"
+install -m644 "$root/docs/demo/hush-demo.mp4" "$site/demo.mp4"
 
 # Each local file that the page names must be in the folder.
 missing=0
