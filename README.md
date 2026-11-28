@@ -18,10 +18,7 @@ Hold a key, talk, and your words appear wherever you're typing.
 
 <br>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/settings/overview.png">
-  <img src="docs/screenshots/settings/overview-light.png" alt="The Overview page of the Hush settings window" width="720">
-</picture>
+<img src="docs/demo/hush-demo.gif" alt="Hush types a commit message in a terminal, a review comment in a browser, and a chat message, each spoken while one key is held" width="720">
 
 </div>
 
@@ -61,6 +58,11 @@ The packages type through the kernel's input layer, so they work in terminals, b
 - **A settings window.** `Ctrl+K` searches every setting, page, and action, and each change saves at once.
 - **A panel icon.** It shows whether Hush is idle, recording, or working, and its menu has the actions of the hotkeys.
 - **A doctor.** `hush doctor` checks each part of the setup and prints the one command that fixes each problem.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/settings/overview.png">
+  <img src="docs/screenshots/settings/overview-light.png" alt="The Overview page of the Hush settings window" width="720">
+</picture>
 
 The [feature guide](https://github.com/andymai/hush/blob/main/docs/features.md) has the details of each feature.
 
