@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.5](https://github.com/andymai/hush/compare/v1.20.4...v1.20.5) (2026-11-28)
+
+
+### Bug Fixes
+
+* **portal:** the daemon exits on hush daemon stop in portal mode ([#419](https://github.com/andymai/hush/issues/419)) ([b9a775e](https://github.com/andymai/hush/commit/b9a775e5acc99038ffcd1f63d811b7270954d09d))
+
 ## [1.20.4](https://github.com/andymai/hush/compare/v1.20.3...v1.20.4) (2026-11-28)
 
 
