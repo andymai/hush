@@ -355,7 +355,10 @@ impl HotkeyManager {
             Backend::Evdev(hotkey) => hotkey.stop_listening(),
             Backend::X11(hotkey) => hotkey.stop_listening(),
             #[cfg(target_os = "linux")]
-            Backend::Portal(_) => Ok(()),
+            Backend::Portal(handle) => {
+                handle.stop();
+                Ok(())
+            },
         }
     }
 
@@ -375,6 +378,18 @@ impl HotkeyManager {
     /// The keys, as evdev codes, that Hush's typing must not press.
     pub fn grabbed_keys(&self) -> Vec<u16> {
         grabbed_keys(matches!(self.backend, Backend::X11(_)), &self.combination)
+    }
+}
+
+/// The evdev and X11 backends stop in their own `Drop`. The portal handle is
+/// shared with IPC, so dropping it does not end the portal thread, and the
+/// hotkey thread waits for that thread to drop its event sender.
+#[cfg(target_os = "linux")]
+impl Drop for HotkeyManager {
+    fn drop(&mut self) {
+        if let Backend::Portal(handle) = &self.backend {
+            handle.stop();
+        }
     }
 }
 

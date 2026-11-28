@@ -307,6 +307,7 @@ pub trait ShortcutsPortal: Send {
 /// A request from the daemon to the portal thread.
 pub enum Request {
     Configure(oneshot::Sender<Result<(), PortalError>>),
+    Stop,
 }
 
 /// The part of the portal thread that IPC and the daemon hold.
@@ -341,10 +342,16 @@ impl ShortcutsHandle {
             .await
             .map_err(|_| PortalError::Failed("the shortcut thread stopped".into()))?
     }
+
+    /// Closes the session and ends the portal thread, which drops the event
+    /// sender. Other clones of the handle can live on in the daemon's state.
+    pub fn stop(&self) {
+        let _ = self.requests.send(Request::Stop);
+    }
 }
 
 /// Feeds the portal's signals to `events` and answers requests, until the
-/// portal goes or the daemon drops its handle.
+/// portal goes, the daemon stops it, or every handle drops.
 pub async fn serve<P: ShortcutsPortal>(
     mut portal: P,
     specs: Vec<ShortcutSpec>,
@@ -373,7 +380,7 @@ pub async fn serve<P: ShortcutsPortal>(
                 },
             },
             request = requests.recv() => match request {
-                None => break,
+                None | Some(Request::Stop) => break,
                 Some(Request::Configure(reply)) => {
                     let _ = reply.send(portal.configure().await);
                 },
@@ -950,6 +957,34 @@ mod tests {
             thread::sleep(ms(10));
         }
         assert!(*closed.lock(), "dropping the handle closes the session");
+    }
+
+    #[test]
+    fn a_stop_ends_the_portal_thread_while_other_handles_live() {
+        let closed = Arc::new(Mutex::new(false));
+        let portal = ScriptedPortal {
+            bound: Vec::new(),
+            signals: Default::default(),
+            configured: Arc::default(),
+            closed: Arc::clone(&closed),
+        };
+        let (handle, events) = start(move || async move { Ok((portal, 2)) }, Vec::new()).unwrap();
+        let kept = handle.clone();
+        handle.stop();
+        assert!(
+            matches!(
+                events.recv_timeout(Duration::from_secs(5)),
+                Err(mpsc::RecvTimeoutError::Disconnected)
+            ),
+            "the event sender drops, so the hotkey thread can end"
+        );
+        assert!(*closed.lock(), "the stop closes the session");
+        assert!(
+            crate::portal::block_on(async move { kept.configure().await })
+                .unwrap()
+                .is_err(),
+            "the kept handle finds the thread gone"
+        );
     }
 
     #[test]
