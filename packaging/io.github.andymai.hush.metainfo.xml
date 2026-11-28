@@ -91,6 +91,14 @@
   </screenshots>
 
   <releases>
+    <release version="1.21.0" date="2026-11-28" type="stable">
+      <description>
+        <p>Features</p>
+        <ul>
+          <li>A 30-second demo on the landing page and in the README</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.20.5" date="2026-11-28" type="stable">
       <description>
         <p>Bug Fixes</p>
@@ -161,14 +169,6 @@
         <p>Features</p>
         <ul>
           <li>Hush settings saves API keys in the keyring, or in the sandbox's .env</li>
-        </ul>
-      </description>
-    </release>
-    <release version="1.16.0" date="2026-11-27" type="stable">
-      <description>
-        <p>Features</p>
-        <ul>
-          <li>A new install opens the setup by itself, and the daemon offers it once</li>
         </ul>
       </description>
     </release>
