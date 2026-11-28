@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/andymai/hush/compare/v1.20.5...v1.21.0) (2026-11-28)
+
+
+### Features
+
+* **site:** a 30-second demo on the landing page and in the README ([#421](https://github.com/andymai/hush/issues/421)) ([60a79e7](https://github.com/andymai/hush/commit/60a79e7a122b4fc9a5fcb00fd23e097e3d9c0fe0))
+
 ## [1.20.5](https://github.com/andymai/hush/compare/v1.20.4...v1.20.5) (2026-11-28)
 
 
