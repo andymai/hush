@@ -91,6 +91,14 @@
   </screenshots>
 
   <releases>
+    <release version="1.20.4" date="2026-11-28" type="stable">
+      <description>
+        <p>Bug Fixes</p>
+        <ul>
+          <li>Store screenshots show portal mode and the current window</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.20.3" date="2026-11-27" type="stable">
       <description>
         <p>Bug Fixes</p>
@@ -161,14 +169,6 @@
         <p>Features</p>
         <ul>
           <li>Hush setup opens a first run that goes one step at a time</li>
-        </ul>
-      </description>
-    </release>
-    <release version="1.14.0" date="2026-11-27" type="stable">
-      <description>
-        <p>Features</p>
-        <ul>
-          <li>Screen readers reach the settings window through AccessKit</li>
         </ul>
       </description>
     </release>

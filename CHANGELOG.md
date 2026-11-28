@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.4](https://github.com/andymai/hush/compare/v1.20.3...v1.20.4) (2026-11-28)
+
+
+### Bug Fixes
+
+* **metainfo:** store screenshots show portal mode and the current window ([#416](https://github.com/andymai/hush/issues/416)) ([f78113d](https://github.com/andymai/hush/commit/f78113da117298b31cb9254767676adf9ff465f0))
+
 ## [1.20.3](https://github.com/andymai/hush/compare/v1.20.2...v1.20.3) (2026-11-27)
 
 
