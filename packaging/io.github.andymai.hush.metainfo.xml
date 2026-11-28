@@ -69,24 +69,24 @@
 
   <screenshots>
     <screenshot type="default">
-      <caption>The overview of what is set up</caption>
-      <image>https://raw.githubusercontent.com/andymai/hush/0acc2bbee1eeebaebba5926e6bab1f0222b4bed9/docs/screenshots/settings/overview-light.png</image>
+      <caption>Everything Hush needs, at a glance</caption>
+      <image>https://raw.githubusercontent.com/andymai/hush/0579954f7a268dd7581e134e54c720d6bf7b5a7e/docs/screenshots/store/overview-light.png</image>
     </screenshot>
     <screenshot>
-      <caption>The speech model, the languages, and the microphone</caption>
-      <image>https://raw.githubusercontent.com/andymai/hush/0acc2bbee1eeebaebba5926e6bab1f0222b4bed9/docs/screenshots/settings/speech-light.png</image>
+      <caption>Pick a speech model, a language, and a microphone</caption>
+      <image>https://raw.githubusercontent.com/andymai/hush/0579954f7a268dd7581e134e54c720d6bf7b5a7e/docs/screenshots/settings/speech-light.png</image>
     </screenshot>
     <screenshot>
-      <caption>The hotkeys for dictation, languages, and styles</caption>
-      <image>https://raw.githubusercontent.com/andymai/hush/0acc2bbee1eeebaebba5926e6bab1f0222b4bed9/docs/screenshots/settings/hotkeys-light.png</image>
+      <caption>Your desktop holds the keys</caption>
+      <image>https://raw.githubusercontent.com/andymai/hush/0579954f7a268dd7581e134e54c720d6bf7b5a7e/docs/screenshots/store/hotkeys-light.png</image>
     </screenshot>
     <screenshot>
-      <caption>The history of transcripts</caption>
-      <image>https://raw.githubusercontent.com/andymai/hush/0acc2bbee1eeebaebba5926e6bab1f0222b4bed9/docs/screenshots/settings/history.png</image>
+      <caption>Search, copy, and fix past transcripts</caption>
+      <image>https://raw.githubusercontent.com/andymai/hush/0579954f7a268dd7581e134e54c720d6bf7b5a7e/docs/screenshots/settings/history.png</image>
     </screenshot>
     <screenshot>
-      <caption>The command palette</caption>
-      <image>https://raw.githubusercontent.com/andymai/hush/0acc2bbee1eeebaebba5926e6bab1f0222b4bed9/docs/screenshots/settings/palette.png</image>
+      <caption>Find any setting with Ctrl+K</caption>
+      <image>https://raw.githubusercontent.com/andymai/hush/0579954f7a268dd7581e134e54c720d6bf7b5a7e/docs/screenshots/settings/palette.png</image>
     </screenshot>
   </screenshots>
 
